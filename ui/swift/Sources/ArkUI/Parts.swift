@@ -15,7 +15,7 @@ import Charts
 #endif
 
 /// A card's corners, as an inset grouped list rounds its sections.
-public let CardCorner: CGFloat = 20
+public let CardCorner = CGFloat(LayoutTokens.cardCorner)
 
 @available(iOS 26.0, *)
 /// The header of a page that is about one thing: its `cover`, what kind of

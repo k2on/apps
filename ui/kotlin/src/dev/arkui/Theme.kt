@@ -17,17 +17,26 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
-/** The spacings, so that every screen has the same rhythm. */
+/** The spacings, so that every screen has the same rhythm: ui/theme.toml's `[layout]` steps, the iPhone's to the point. */
 public object Space {
-    public val xs: Dp = 4.dp
-    public val s: Dp = 8.dp
-    public val m: Dp = 12.dp
-    public val l: Dp = 16.dp
-    public val xl: Dp = 24.dp
-    public val xxl: Dp = 32.dp
+    public val xs: Dp = LayoutTokens.SPACE_XS.dp
+    public val s: Dp = LayoutTokens.SPACE_S.dp
+    public val m: Dp = LayoutTokens.SPACE_M.dp
+    public val l: Dp = LayoutTokens.SPACE_L.dp
+    public val xl: Dp = LayoutTokens.SPACE_XL.dp
+    public val xxl: Dp = LayoutTokens.SPACE_XXL.dp
 
     /** Where a page's content starts from its edges. */
-    public val page: Dp = 16.dp
+    public val page: Dp = LayoutTokens.PAGE_MARGIN.dp
+
+    /** The least a card's row is tall. */
+    public val row: Dp = LayoutTokens.ROW_HEIGHT.dp
+
+    /** Above a section's heading, from the card before it. */
+    public val section: Dp = LayoutTokens.SECTION_GAP.dp
+
+    /** A wide button's height. */
+    public val button: Dp = LayoutTokens.WIDE_BUTTON_HEIGHT.dp
 
     /** A cover on a shelf, and a card in a grid at its narrowest. */
     public val shelf: Dp = 148.dp
@@ -39,7 +48,7 @@ public object Space {
     public val header: Dp = 200.dp
 
     /** Corners: a cover, a card, a sheet's row. */
-    public val corner: Dp = 8.dp
+    public val corner: Dp = LayoutTokens.CORNER.dp
 }
 
 /**

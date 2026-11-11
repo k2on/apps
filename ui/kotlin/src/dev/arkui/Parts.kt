@@ -70,7 +70,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
 /** A card's corners, as the iPhone's grouped lists round theirs. */
-public val CardCorner: Dp = 20.dp
+public val CardCorner: Dp = LayoutTokens.CARD_CORNER.dp
 
 /**
  * The header of a page that is about one thing: its [cover], what kind of thing it is, its name,
@@ -117,9 +117,9 @@ public fun PageHeader(
  * as a heading, and what it adds up to — or an action — at its end ([trailing]).
  */
 @Composable
-public fun SectionHeader(title: String, modifier: Modifier = Modifier, trailing: @Composable RowScope.() -> Unit = {}) {
+public fun SectionHeader(title: String, modifier: Modifier = Modifier, top: Dp = Space.xl, trailing: @Composable RowScope.() -> Unit = {}) {
     Row(
-        modifier.fillMaxWidth().padding(start = Space.l, end = Space.l, top = Space.xl, bottom = Space.s),
+        modifier.fillMaxWidth().padding(start = Space.l, end = Space.l, top = top, bottom = Space.s),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(

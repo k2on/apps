@@ -45,6 +45,21 @@ LAYOUT = {
     "mark-column-width": "A table's column of one mark: a row's cleared mark, a receipt's.",
     "progress-width": "The bar under a row's name that fills toward its goal, beside columns.",
     "line-height": "A line of text as tall as this many times its size (the desktop's: iced's).",
+    "space-xs": "The least gap: a figure from its label.",
+    "space-s": "A small gap: a glyph from its words, chips from each other.",
+    "space-m": "A row's inset above and below its words, and a picture from them.",
+    "space-l": "A card's inset: from its edges to its rows' words.",
+    "space-xl": "A large gap: inside a header card, a sheet's sides.",
+    "space-xxl": "The largest gap: a first-run page's mark from its words.",
+    "page-margin": "From a page's edges to its cards (the iPhone's inset grouped list).",
+    "card-corner": "A card's corners.",
+    "corner": "A cover's corners, a sheet's row's.",
+    "row-height": "The least a card's row is tall.",
+    "large-title-height": "A page's large title's line, under its toolbar's buttons.",
+    "title-below": "From a large title's foot to the page's first card.",
+    "section-gap": "Above a section's heading, from the card before it.",
+    "wide-button-height": "A wide button's height: Continue, Sign In, a form's confirm.",
+    "sheet-bar-height": "A sheet's bar: its close, its title, its confirm.",
 }
 
 # The motion tokens, in the order they are written, and each one's sentence.

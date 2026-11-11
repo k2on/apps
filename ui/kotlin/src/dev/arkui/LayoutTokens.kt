@@ -27,4 +27,34 @@ public object LayoutTokens {
     public const val PROGRESS_WIDTH: Float = 220.0f
     /** A line of text as tall as this many times its size (the desktop's: iced's). */
     public const val LINE_HEIGHT: Float = 1.3f
+    /** The least gap: a figure from its label. */
+    public const val SPACE_XS: Float = 4.0f
+    /** A small gap: a glyph from its words, chips from each other. */
+    public const val SPACE_S: Float = 8.0f
+    /** A row's inset above and below its words, and a picture from them. */
+    public const val SPACE_M: Float = 12.0f
+    /** A card's inset: from its edges to its rows' words. */
+    public const val SPACE_L: Float = 16.0f
+    /** A large gap: inside a header card, a sheet's sides. */
+    public const val SPACE_XL: Float = 24.0f
+    /** The largest gap: a first-run page's mark from its words. */
+    public const val SPACE_XXL: Float = 32.0f
+    /** From a page's edges to its cards (the iPhone's inset grouped list). */
+    public const val PAGE_MARGIN: Float = 16.0f
+    /** A card's corners. */
+    public const val CARD_CORNER: Float = 20.0f
+    /** A cover's corners, a sheet's row's. */
+    public const val CORNER: Float = 8.0f
+    /** The least a card's row is tall. */
+    public const val ROW_HEIGHT: Float = 44.0f
+    /** A page's large title's line, under its toolbar's buttons. */
+    public const val LARGE_TITLE_HEIGHT: Float = 52.0f
+    /** From a large title's foot to the page's first card. */
+    public const val TITLE_BELOW: Float = 8.0f
+    /** Above a section's heading, from the card before it. */
+    public const val SECTION_GAP: Float = 24.0f
+    /** A wide button's height: Continue, Sign In, a form's confirm. */
+    public const val WIDE_BUTTON_HEIGHT: Float = 50.0f
+    /** A sheet's bar: its close, its title, its confirm. */
+    public const val SHEET_BAR_HEIGHT: Float = 56.0f
 }

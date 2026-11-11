@@ -253,7 +253,7 @@ public fun Sparkline(points: List<Long>) {
 public fun SummaryCard(label: String, cents: Long, first: String, firstCents: Long, second: String, secondCents: Long, trend: List<Long>) {
     val a = LocalAmounts.current
     Column(
-        Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(MaterialTheme.colorScheme.surfaceContainerLow).padding(Space.l),
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(CardCorner)).background(MaterialTheme.colorScheme.surfaceContainerLow).padding(Space.l),
         verticalArrangement = Arrangement.spacedBy(Space.xs),
     ) {
         Text(label, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)

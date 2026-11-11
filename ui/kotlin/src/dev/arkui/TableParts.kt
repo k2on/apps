@@ -39,6 +39,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.contentDescription
@@ -100,7 +101,7 @@ public fun DataTable(columns: List<DataColumn>, content: @Composable () -> Unit)
     BoxWithConstraints(Modifier.fillMaxWidth()) {
         val compact = sizeClassOf(maxWidth) == SizeClass.Compact
         CompositionLocalProvider(LocalTable provides TableFrame(columns, compact)) {
-            GroupCard(Modifier.padding(vertical = Space.s)) {
+            GroupCard {
                 if (!compact) {
                     Row(Modifier.fillMaxWidth().padding(horizontal = Space.l, vertical = Space.s), verticalAlignment = Alignment.CenterVertically) {
                         Spacer(Modifier.width(GUTTER + Space.m))
@@ -193,8 +194,20 @@ public fun DataTableRow(
             },
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(Modifier.size(GUTTER).clip(CircleShape).background(if (marked) MaterialTheme.colorScheme.primary else Color.Transparent))
-        Spacer(Modifier.width(Space.m))
+        val dot = Modifier.size(GUTTER).clip(CircleShape).background(if (marked) MaterialTheme.colorScheme.primary else Color.Transparent)
+        if (frame.compact) {
+            // A list's row: the words at the card's inset, as every other row's; the dot in the
+            // inset before them.
+            Box(
+                Modifier.layout { m, c ->
+                    val p = m.measure(c)
+                    layout(0, p.height) { p.place(-(GUTTER + Space.xs).roundToPx(), 0) }
+                }.then(dot)
+            )
+        } else {
+            Box(dot)
+            Spacer(Modifier.width(Space.m))
+        }
         if (frame.compact) {
             Column(Modifier.weight(1f)) {
                 for (i in slotted(ColumnSlot.Title)) at(i, marked)

@@ -49,16 +49,23 @@ extension NSColor {
 }
 #endif
 
-/// The spacings, so every screen has the same rhythm: Android's `Space`.
+/// The spacings, so every screen has the same rhythm: ui/theme.toml's
+/// `[layout]` steps (`LayoutTokens`), Android's `Space`.
 public enum Space {
-    public static let xs: CGFloat = 4
-    public static let s: CGFloat = 8
-    public static let m: CGFloat = 12
-    public static let l: CGFloat = 16
-    public static let xl: CGFloat = 24
-    public static let xxl: CGFloat = 32
+    public static let xs = CGFloat(LayoutTokens.spaceXs)
+    public static let s = CGFloat(LayoutTokens.spaceS)
+    public static let m = CGFloat(LayoutTokens.spaceM)
+    public static let l = CGFloat(LayoutTokens.spaceL)
+    public static let xl = CGFloat(LayoutTokens.spaceXl)
+    public static let xxl = CGFloat(LayoutTokens.spaceXxl)
     /// Where a page's content starts from its edges.
-    public static let page: CGFloat = 16
+    public static let page = CGFloat(LayoutTokens.pageMargin)
+    /// The least a card's row is tall.
+    public static let row = CGFloat(LayoutTokens.rowHeight)
+    /// Above a section's heading, from the card before it.
+    public static let section = CGFloat(LayoutTokens.sectionGap)
+    /// A wide button's height.
+    public static let button = CGFloat(LayoutTokens.wideButtonHeight)
     /// A picture on a shelf.
     public static let shelf: CGFloat = 148
     /// A picture beside a row.
@@ -66,7 +73,7 @@ public enum Space {
     /// A page's header picture.
     public static let header: CGFloat = 200
     /// Corners: a picture, a card.
-    public static let corner: CGFloat = 8
+    public static let corner = CGFloat(LayoutTokens.corner)
 }
 
 /// The springs everything moves by, made of arkui's motion tokens

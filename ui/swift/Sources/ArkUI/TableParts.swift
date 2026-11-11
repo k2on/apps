@@ -194,8 +194,10 @@ public struct DataTableRow: View {
 
     @ViewBuilder private var line: some View {
         if compact {
-            HStack(spacing: Space.m) {
-                dot
+            // A list's row: the words at the row's inset, as every other
+            // row's; the dot in the inset before them (Android's too).
+            HStack(spacing: Space.xs) {
+                dot.padding(.leading, -(DataCell.gutter + Space.xs))
                 VStack(alignment: .leading, spacing: 2) {
                     ForEach(slotted(.title), id: \.self) { i in at(i).font(.body.weight(marked ? .semibold : .regular)) }
                     HStack(spacing: Space.xs) {

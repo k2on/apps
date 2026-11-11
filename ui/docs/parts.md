@@ -14,7 +14,17 @@ such a component has a generic piece in it, it is made of the ArkUI part.
 
 Every colour is the theme's (`ui/theme.toml`), every move one of the
 shared springs (`ui/docs/motion.md`), every press `pressable` / `.press` /
-`.pressRow`. The desktop keeps the desktop's measures — a pointer is
+`.pressRow`. Every gap and inset on a phone and a tablet is one of `ui/theme.toml`'s
+`[layout]` steps (`space-xs` … `space-xxl`, `page-margin`, `card-corner`,
+`row-height`, `large-title-height`, `title-below`, `section-gap`,
+`wide-button-height`, `sheet-bar-height`), generated into `LayoutTokens`
+and read through `Space`, so the iPhone and Android lay a page out alike:
+a tab's large title under its row of buttons, its first card `title-below`
+under it, a `section-gap` between one part and the next (a section — its
+heading, its card, its note — is one part, and no part keeps a margin of
+its own), rows' words at the card's inset whether or not a picture is
+before them, and a sheet's bar the iPhone's (✕, the title centred, ✓).
+The desktop keeps the desktop's measures — a pointer is
 precise and a window wide — so a card is rounded by 8 there and by 20 on a
 phone: what is the same is the part and what it is handed.
 

@@ -3,6 +3,9 @@
 // over the onboarding's own page (Onboarding.kt's `OnboardingPage`). Every colour is the theme's.
 package dev.arkui
 
+import androidx.compose.foundation.layout.height
+import androidx.compose.material3.ProvideTextStyle
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -17,7 +20,6 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -68,7 +70,7 @@ public fun AddressField(
     )
 }
 
-/** A button the width of its page: filled in the primary, or outlined; while busy, a spinner before its title and no press. */
+/** A button the width of its page: filled in the primary, or quietly; while busy, a spinner before its title and no press. */
 @Composable
 public fun WideButton(title: String, prominent: Boolean, enabled: Boolean, busy: Boolean, onTap: () -> Unit) {
     val label: @Composable () -> Unit = {
@@ -80,10 +82,13 @@ public fun WideButton(title: String, prominent: Boolean, enabled: Boolean, busy:
             Text(title)
         }
     }
+    // The iPhone's wide button: as tall (`wide-button-height`), its title the body's size, the
+    // other one filled quietly as its glass is, not outlined.
+    val wide = Modifier.fillMaxWidth().height(Space.button)
     if (prominent) {
-        Button(onClick = onTap, enabled = enabled && !busy, modifier = Modifier.fillMaxWidth()) { label() }
+        Button(onClick = onTap, enabled = enabled && !busy, modifier = wide) { ProvideTextStyle(MaterialTheme.typography.bodyLarge) { label() } }
     } else {
-        OutlinedButton(onClick = onTap, enabled = enabled && !busy, modifier = Modifier.fillMaxWidth()) { label() }
+        FilledTonalButton(onClick = onTap, enabled = enabled && !busy, modifier = wide) { ProvideTextStyle(MaterialTheme.typography.bodyLarge) { label() } }
     }
 }
 

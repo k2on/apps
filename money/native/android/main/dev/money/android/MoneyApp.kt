@@ -438,7 +438,9 @@ fun Page(
     // actions — a pushed page's too, whose bar replaces its section's — so the page draws none.
     val hosted = dev.arkui.LocalUnderToolbar.current
     Scaffold(
-        modifier = modifier.nestedScroll(bar.nestedScrollConnection),
+        // Under the shell's bar the bar's own behaviour moves the title: this one, laid out
+        // nowhere, has no limit, and would take every scroll up for itself.
+        modifier = if (hosted) modifier else modifier.nestedScroll(bar.nestedScrollConnection),
         // The navigation bar below keeps the bottom clear; a pushed page has none, and keeps it itself.
         // Under the shell's top bar the bar has taken the status bar's inset: the page
         // takes none again (an account's register drew an empty band over its title).

@@ -8,6 +8,8 @@
 package dev.arkui
 
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -22,6 +24,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
@@ -41,6 +44,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.text.input.ImeAction
@@ -243,8 +247,9 @@ private fun Busy(what: String) {
 }
 
 /**
- * One onboarding page: the `mark` in the theme's primary, a title, a sentence, and what to do —
- * centred in a column no wider than a phone held upright, scrolling when the keyboard is up.
+ * One onboarding page, as the iPhone's (`WelcomePage`): the `mark` in the theme's primary on a tile
+ * washed in it, a large title, a sentence, and what to do — from near the top, in a column no wider
+ * than a phone held upright, scrolling when the keyboard is up.
  */
 @Composable
 public fun OnboardingPage(
@@ -253,29 +258,40 @@ public fun OnboardingPage(
     sentence: String,
     body: @Composable ColumnScope.() -> Unit
 ) {
+    val tile = 88.dp
     Surface(color = MaterialTheme.colorScheme.background, modifier = Modifier.fillMaxSize()) {
         Box(
             Modifier.fillMaxSize().safeDrawingPadding().imePadding(),
-            contentAlignment = Alignment.Center) {
+            contentAlignment = Alignment.TopCenter) {
                 Column(
-                    Modifier.fillMaxWidth()
+                    Modifier.widthIn(max = 420.dp)
+                        .fillMaxWidth()
                         .verticalScroll(rememberTransientScrollState())
-                        .padding(horizontal = 32.dp, vertical = 24.dp)) {
-                        Image(
-                            mark,
-                            contentDescription = null,
-                            colorFilter = ColorFilter.tint(MaterialTheme.colorScheme.primary),
-                            modifier = Modifier.size(72.dp).align(Alignment.CenterHorizontally),
-                        )
-                        Spacer(Modifier.height(24.dp))
+                        .padding(horizontal = Space.xxl)
+                        .padding(top = 60.dp + Space.xl, bottom = Space.xl),
+                    horizontalAlignment = Alignment.CenterHorizontally) {
+                        Box(
+                            Modifier.size(tile)
+                                .clip(RoundedCornerShape(tile * 3 / 11))
+                                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Image(
+                                mark,
+                                contentDescription = null,
+                                colorFilter = ColorFilter.tint(MaterialTheme.colorScheme.primary),
+                                modifier = Modifier.size(tile / 2),
+                            )
+                        }
+                        Spacer(Modifier.height(Space.l + Space.s))
                         Text(
                             title,
-                            style = MaterialTheme.typography.headlineMedium,
+                            style = MaterialTheme.typography.headlineLarge.merge(LargeTitle),
                             color = MaterialTheme.colorScheme.onBackground,
                             textAlign = TextAlign.Center,
                             modifier = Modifier.fillMaxWidth(),
                         )
-                        Spacer(Modifier.height(8.dp))
+                        Spacer(Modifier.height(Space.s))
                         Text(
                             sentence,
                             style = MaterialTheme.typography.bodyLarge,
@@ -283,7 +299,7 @@ public fun OnboardingPage(
                             textAlign = TextAlign.Center,
                             modifier = Modifier.fillMaxWidth(),
                         )
-                        Spacer(Modifier.height(32.dp))
+                        Spacer(Modifier.height(Space.xxl + Space.s))
                         body()
                     }
             }

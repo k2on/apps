@@ -27,4 +27,34 @@ public enum LayoutTokens {
     public static let progressWidth: Double = 220.0
     /// A line of text as tall as this many times its size (the desktop's: iced's).
     public static let lineHeight: Double = 1.3
+    /// The least gap: a figure from its label.
+    public static let spaceXs: Double = 4.0
+    /// A small gap: a glyph from its words, chips from each other.
+    public static let spaceS: Double = 8.0
+    /// A row's inset above and below its words, and a picture from them.
+    public static let spaceM: Double = 12.0
+    /// A card's inset: from its edges to its rows' words.
+    public static let spaceL: Double = 16.0
+    /// A large gap: inside a header card, a sheet's sides.
+    public static let spaceXl: Double = 24.0
+    /// The largest gap: a first-run page's mark from its words.
+    public static let spaceXxl: Double = 32.0
+    /// From a page's edges to its cards (the iPhone's inset grouped list).
+    public static let pageMargin: Double = 16.0
+    /// A card's corners.
+    public static let cardCorner: Double = 20.0
+    /// A cover's corners, a sheet's row's.
+    public static let corner: Double = 8.0
+    /// The least a card's row is tall.
+    public static let rowHeight: Double = 44.0
+    /// A page's large title's line, under its toolbar's buttons.
+    public static let largeTitleHeight: Double = 52.0
+    /// From a large title's foot to the page's first card.
+    public static let titleBelow: Double = 8.0
+    /// Above a section's heading, from the card before it.
+    public static let sectionGap: Double = 24.0
+    /// A wide button's height: Continue, Sign In, a form's confirm.
+    public static let wideButtonHeight: Double = 50.0
+    /// A sheet's bar: its close, its title, its confirm.
+    public static let sheetBarHeight: Double = 56.0
 }

@@ -34,6 +34,8 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilledTonalIconButton
+import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
@@ -84,11 +86,21 @@ private fun glyph(name: String): ImageVector = LocalGlyphs.current(name) ?: ArkG
 
 // * The page
 
-/** A tab's page in the app's frame: `top` under the title, then `content`, scrolling. */
+/**
+ * A tab's page in the app's frame: `top` under the title, then `content`, scrolling, as the iPhone's
+ * inset grouped list lays one out — the first card `title-below` under the large title, the page's
+ * margin at its sides, and one `section-gap` between each part and the next (a section is one part:
+ * its heading, its card and its note), so no part keeps a margin of its own.
+ */
 @Composable
 public fun TabPage(title: String, onRefresh: (() -> Unit)? = null, top: @Composable () -> Unit = {}, content: @Composable () -> Unit) {
     LocalTabFrame.current(title, onRefresh) {
-        Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = Space.page).padding(bottom = 96.dp)) {
+        Column(
+            Modifier.fillMaxWidth().verticalScroll(rememberScrollState())
+                .padding(horizontal = Space.page)
+                .padding(top = LayoutTokens.TITLE_BELOW.dp, bottom = 96.dp),
+            verticalArrangement = Arrangement.spacedBy(Space.section),
+        ) {
             top()
             content()
         }
@@ -145,7 +157,7 @@ public fun CardSection(
     onToggle: (() -> Unit)? = null,
     menu: List<MenuAction> = emptyList(),
     content: @Composable () -> Unit,
-) {
+) = Column {
     if (title != null) {
         var held by remember { mutableStateOf(false) }
         val offered = menu.filter { it.shown }
@@ -156,7 +168,7 @@ public fun CardSection(
         }
         val columns = currentSizeClass() != SizeClass.Compact && first != null && second != null
         Box(press) {
-            SectionHeader(if (onToggle != null) (if (open) "▾ " else "▸ ") + title else title) {
+            SectionHeader(if (onToggle != null) (if (open) "▾ " else "▸ ") + title else title, top = 0.dp) {
                 if (columns) {
                     FigureColumn(title = firstTitle) { AmountText(first!!, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
                     FigureColumn(title = secondTitle) { AmountText(second!!, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
@@ -167,8 +179,6 @@ public fun CardSection(
             }
             MenuOf(offered, held) { held = false }
         }
-    } else {
-        Spacer(Modifier.height(Space.xl))
     }
     if (open) GroupCard { content() }
     if (footer != null) {
@@ -295,8 +305,8 @@ public fun MeterRow(
 /** A view's headline (`ark_app::view::headline`): its tint by name, its one action a prominent capsule at its end. */
 @Composable
 public fun Headline(label: String, figure: String, tint: String, caption: String, actionTitle: String? = null, actionGlyph: String? = null, onAction: (() -> Unit)? = null) {
-    GroupCard(Modifier.padding(horizontal = Space.l, vertical = Space.s)) {
-        Box(Modifier.padding(horizontal = Space.l)) {
+    GroupCard {
+        Box(Modifier.padding(horizontal = Space.l, vertical = Space.m)) {
             Headline(label, figure, tintNamed(tint), caption) {
                 if (onAction != null) {
                     Button(onClick = onAction) {
@@ -363,7 +373,8 @@ public fun ListRow(
             mark != null -> LocalRowMark.current(mark)
             glyph != null -> Icon(glyph(glyph), contentDescription = null, tint = MaterialTheme.colorScheme.primary)
         }
-        Spacer(Modifier.width(Space.m))
+        // The words at the card's inset where nothing is before them, as every card's are.
+        if (tile != null || mark != null || glyph != null) Spacer(Modifier.width(Space.m))
         Column(Modifier.weight(1f)) {
             Text(
                 title,
@@ -417,8 +428,34 @@ public fun ListRow(
 // * What rises over a page
 
 /**
- * A sheet with a form, up for as long as it is composed; put away by the person, `onDismiss`. With a
- * `confirm`, the form ends in its button, the sheet's width, enabled while `canConfirm`.
+ * A sheet's bar, as the iPhone's: ✕ at its start (`onClose`), the title centred, and, with a
+ * `confirm`, ✓ at its end, filled in the primary, enabled while `canConfirm`.
+ */
+@Composable
+public fun SheetBar(title: String, onClose: () -> Unit, confirm: String? = null, canConfirm: Boolean = true, onConfirm: (() -> Unit)? = null) {
+    Box(Modifier.fillMaxWidth().height(LayoutTokens.SHEET_BAR_HEIGHT.dp).padding(horizontal = Space.s)) {
+        FilledTonalIconButton(onClick = onClose, modifier = Modifier.align(Alignment.CenterStart)) {
+            Icon(ArkGlyphs.named("x") ?: ArkGlyphs.Chevron, contentDescription = "Cancel")
+        }
+        Text(
+            title,
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.align(Alignment.Center).padding(horizontal = 56.dp).semantics { heading() },
+        )
+        if (confirm != null && onConfirm != null) {
+            FilledIconButton(onClick = onConfirm, enabled = canConfirm, modifier = Modifier.align(Alignment.CenterEnd)) {
+                Icon(ArkGlyphs.named("check") ?: ArkGlyphs.Chevron, contentDescription = confirm)
+            }
+        }
+    }
+}
+
+/**
+ * A sheet with a form, up for as long as it is composed; put away by the person, `onDismiss`. Its
+ * bar is the iPhone's ([SheetBar]): ✕ puts it away, ✓ confirms, enabled while `canConfirm`.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -431,13 +468,12 @@ public fun FormSheet(
     content: @Composable () -> Unit,
 ) {
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
-        Column(Modifier.padding(horizontal = Space.xl).navigationBarsPadding().imePadding(), verticalArrangement = Arrangement.spacedBy(Space.s)) {
-            Text(title, style = MaterialTheme.typography.titleLarge, modifier = Modifier.semantics { heading() })
+        SheetBar(title, onClose = onDismiss, confirm = confirm, canConfirm = canConfirm, onConfirm = onConfirm)
+        Column(
+            Modifier.padding(horizontal = Space.page).navigationBarsPadding().imePadding().padding(top = Space.s, bottom = Space.xl),
+            verticalArrangement = Arrangement.spacedBy(Space.section),
+        ) {
             content()
-            if (confirm != null && onConfirm != null) {
-                Button(onClick = onConfirm, enabled = canConfirm, modifier = Modifier.fillMaxWidth()) { Text(confirm) }
-            }
-            Spacer(Modifier.height(Space.xl))
         }
     }
 }
@@ -569,12 +605,15 @@ public fun tintNamed(name: String): Tint = when (name) {
     else -> Tint.Neutral
 }
 
-/** An inspector's or a detail's page: its cards one under another, scrolling. */
+/**
+ * An inspector's or a detail's page: its cards one under another, scrolling, at the page's margin
+ * and a section's gap apart, as a tab's are ([TabPage]).
+ */
 @Composable
 public fun DetailPage(content: @Composable () -> Unit) {
     Column(
-        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(vertical = Space.m),
-        verticalArrangement = Arrangement.spacedBy(Space.l),
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = Space.page, vertical = Space.m),
+        verticalArrangement = Arrangement.spacedBy(Space.section),
     ) { content() }
 }
 
@@ -595,9 +634,9 @@ public fun HeaderCard(
     actions: @Composable () -> Unit = {},
 ) {
     val t = tintNamed(tint)
-    GroupCard(Modifier.padding(horizontal = Space.l)) {
+    GroupCard {
         Column(
-            Modifier.fillMaxWidth().padding(Space.l),
+            Modifier.fillMaxWidth().padding(Space.xl),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(Space.xs),
         ) {

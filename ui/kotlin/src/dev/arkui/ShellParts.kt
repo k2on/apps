@@ -20,11 +20,17 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.consumeWindowInsets
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
@@ -51,6 +57,7 @@ import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -63,6 +70,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.layout.layout
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.unit.Constraints
+import kotlin.math.roundToInt
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
@@ -175,13 +190,17 @@ public fun AdaptiveTabs(selection: String, onSelect: (String) -> Unit, footer: @
         }
         CompositionLocalProvider(LocalSizeClass provides size, LocalShellFooter provides if (drawer) null else footer) {
             when {
-                size == SizeClass.Compact -> Scaffold(bottomBar = {
+                // The bar at the foot keeps the navigation bar clear itself; the top is the
+                // section's toolbar's, which keeps the status bar clear: this one asks for no
+                // inset (it padded the status bar's, and the toolbar under it again), and what it
+                // gives the foot is taken, so a section's own scaffold keeps no second one.
+                size == SizeClass.Compact -> Scaffold(contentWindowInsets = WindowInsets(0), bottomBar = {
                     NavigationBar {
                         sections.forEach { t ->
                             NavigationBarItem(selected = t.tag == shown.tag, onClick = { onSelect(t.tag) }, icon = { icon(t) }, label = { Text(t.title) })
                         }
                     }
-                }) { pad -> Box(Modifier.padding(pad)) { shown.content() } }
+                }) { pad -> Box(Modifier.padding(pad).consumeWindowInsets(pad)) { shown.content() } }
                 !drawer -> Row(Modifier.fillMaxSize()) {
                     NavigationRail {
                         sections.forEach { t ->
@@ -303,16 +322,19 @@ public fun ToolbarScope.BarButton(title: String, glyph: String, placement: BarPl
 }
 
 /**
- * A section's top app bar over its content: the navigation item at its
- * start, the title (or the principal items), the primary items as its
- * actions, the secondary ones in its overflow menu.
- */
-/**
  * Whether a screen is under the shell's top bar (`WithToolbar`): its own large title, its month
  * pager and its add button are the bar's there, and it draws none of them.
  */
 public val LocalUnderToolbar = compositionLocalOf { false }
 
+/**
+ * A section's bar over its content, as the iPhone draws one: a row of its buttons (the navigation
+ * item and a pushed page's back at its start, the principal items, the primary ones and the
+ * overflow menu of the secondary at its end), and under it the title large ([LargeTitle], on its
+ * `large-title-height` line at the page's margin), which goes up under the row as the content
+ * scrolls and comes back once the content is back at its top; gone, the title is the row's own,
+ * small, fading in as the large one goes.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 public fun WithToolbar(title: String, items: ToolbarScope.() -> Unit, content: @Composable () -> Unit) {
@@ -332,48 +354,79 @@ public fun WithToolbar(title: String, items: ToolbarScope.() -> Unit, content: @
         }
     }
     val host = remember { BarHost() }
+    val bar = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
     val button: @Composable (BarItem) -> Unit = { b ->
         IconButton(onClick = b.onTap, enabled = b.enabled) { Icon(shellGlyph(b.glyph, lookup), contentDescription = b.title) }
     }
-    Scaffold(topBar = {
-        if (host.inner == 0) TopAppBar(
-            title = {
-                val principal = all.filter { it.placement == BarPlacement.Principal }
-                if (principal.isEmpty()) {
-                    Text(title, fontWeight = FontWeight.SemiBold)
-                } else {
-                    Row { principal.forEach { button(it) } }
-                }
-            },
-            // Side by side: the slot is a box, where two would lie one over the other.
-            navigationIcon = {
-                Row {
-                    back?.let { IconButton(onClick = it) { Icon(ArkGlyphs.Back, contentDescription = "Back") } }
-                    all.filter { it.placement == BarPlacement.Navigation }.forEach { button(it) }
-                }
-            },
-            actions = {
-                all.filter { it.placement == BarPlacement.Primary }.forEach { button(it) }
-                LocalInspectorToggle.current?.let { t ->
-                    IconButton(onClick = t.second) { Icon(ArkGlyphs.PanelRight, contentDescription = t.first) }
-                }
-                LocalShellFooter.current?.invoke()
-                val secondary = all.filter { it.placement == BarPlacement.Secondary }
-                if (secondary.isNotEmpty()) {
-                    IconButton(onClick = { overflow = true }) { Icon(ArkGlyphs.named("ellipsis-vertical") ?: ArkGlyphs.Chevron, contentDescription = "More") }
-                    DropdownMenu(expanded = overflow, onDismissRequest = { overflow = false }) {
-                        secondary.forEach { b ->
-                            DropdownMenuItem(text = { Text(b.title) }, enabled = b.enabled, onClick = {
-                                overflow = false
-                                b.onTap()
-                            })
+    val principal = all.filter { it.placement == BarPlacement.Principal }
+    Scaffold(modifier = Modifier.nestedScroll(bar.nestedScrollConnection), topBar = {
+        if (host.inner == 0) Column(Modifier.windowInsetsPadding(WindowInsets.statusBars)) {
+            // How far the large title has gone up under the row: the small one comes as it goes.
+            val gone = bar.state.collapsedFraction
+            TopAppBar(
+                title = {
+                    if (principal.isEmpty()) {
+                        Text(title, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.alpha(gone))
+                    } else {
+                        Row { principal.forEach { button(it) } }
+                    }
+                },
+                // Side by side: the slot is a box, where two would lie one over the other.
+                navigationIcon = {
+                    Row {
+                        back?.let { IconButton(onClick = it) { Icon(ArkGlyphs.Back, contentDescription = "Back") } }
+                        all.filter { it.placement == BarPlacement.Navigation }.forEach { button(it) }
+                    }
+                },
+                actions = {
+                    all.filter { it.placement == BarPlacement.Primary }.forEach { button(it) }
+                    LocalInspectorToggle.current?.let { t ->
+                        IconButton(onClick = t.second) { Icon(ArkGlyphs.PanelRight, contentDescription = t.first) }
+                    }
+                    LocalShellFooter.current?.invoke()
+                    val secondary = all.filter { it.placement == BarPlacement.Secondary }
+                    if (secondary.isNotEmpty()) {
+                        IconButton(onClick = { overflow = true }) { Icon(ArkGlyphs.named("ellipsis-vertical") ?: ArkGlyphs.Chevron, contentDescription = "More") }
+                        DropdownMenu(expanded = overflow, onDismissRequest = { overflow = false }) {
+                            secondary.forEach { b ->
+                                DropdownMenuItem(text = { Text(b.title) }, enabled = b.enabled, onClick = {
+                                    overflow = false
+                                    b.onTap()
+                                })
+                            }
                         }
                     }
+                },
+                // The status bar's inset is the column's, kept while the large title goes.
+                windowInsets = WindowInsets(0),
+            )
+            // The large title, going up under the row by the scroll behaviour's offset, read as
+            // it is laid out, not composed.
+            Box(
+                Modifier.clipToBounds().layout { m, c ->
+                    val p = m.measure(c.copy(minHeight = 0, maxHeight = Constraints.Infinity))
+                    val limit = -p.height.toFloat()
+                    if (bar.state.heightOffsetLimit != limit) bar.state.heightOffsetLimit = limit
+                    val off = bar.state.heightOffset.roundToInt().coerceIn(-p.height, 0)
+                    layout(p.width, p.height + off) { p.place(0, off) }
                 }
-            },
-        )
+            ) {
+                Text(
+                    title,
+                    style = MaterialTheme.typography.headlineLarge.merge(LargeTitle),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(LayoutTokens.LARGE_TITLE_HEIGHT.dp)
+                        .padding(horizontal = Space.page)
+                        .wrapContentHeight(Alignment.CenterVertically)
+                        .semantics { heading() },
+                )
+            }
+        }
     }) { pad ->
-        Box(Modifier.padding(pad)) {
+        Box(Modifier.padding(pad).consumeWindowInsets(pad)) {
             CompositionLocalProvider(LocalUnderToolbar provides true, LocalBarHost provides host, LocalPushedBack provides null) { content() }
         }
     }
@@ -427,7 +480,8 @@ public fun WithInspector(title: String, isShown: Boolean, onToggle: (Boolean) ->
             content()
             if (isShown) {
                 ModalBottomSheet(onDismissRequest = { onToggle(false) }) {
-                    Text(title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(horizontal = 16.dp))
+                    // The iPhone's sheet: its bar's ✕ and its title centred, over the page.
+                    SheetBar(title, onClose = { onToggle(false) })
                     inspector()
                 }
             }

@@ -26,3 +26,33 @@ pub const MARK_COLUMN_WIDTH: f32 = 28.0;
 pub const PROGRESS_WIDTH: f32 = 220.0;
 /// A line of text as tall as this many times its size (the desktop's: iced's).
 pub const LINE_HEIGHT: f32 = 1.3;
+/// The least gap: a figure from its label.
+pub const SPACE_XS: f32 = 4.0;
+/// A small gap: a glyph from its words, chips from each other.
+pub const SPACE_S: f32 = 8.0;
+/// A row's inset above and below its words, and a picture from them.
+pub const SPACE_M: f32 = 12.0;
+/// A card's inset: from its edges to its rows' words.
+pub const SPACE_L: f32 = 16.0;
+/// A large gap: inside a header card, a sheet's sides.
+pub const SPACE_XL: f32 = 24.0;
+/// The largest gap: a first-run page's mark from its words.
+pub const SPACE_XXL: f32 = 32.0;
+/// From a page's edges to its cards (the iPhone's inset grouped list).
+pub const PAGE_MARGIN: f32 = 16.0;
+/// A card's corners.
+pub const CARD_CORNER: f32 = 20.0;
+/// A cover's corners, a sheet's row's.
+pub const CORNER: f32 = 8.0;
+/// The least a card's row is tall.
+pub const ROW_HEIGHT: f32 = 44.0;
+/// A page's large title's line, under its toolbar's buttons.
+pub const LARGE_TITLE_HEIGHT: f32 = 52.0;
+/// From a large title's foot to the page's first card.
+pub const TITLE_BELOW: f32 = 8.0;
+/// Above a section's heading, from the card before it.
+pub const SECTION_GAP: f32 = 24.0;
+/// A wide button's height: Continue, Sign In, a form's confirm.
+pub const WIDE_BUTTON_HEIGHT: f32 = 50.0;
+/// A sheet's bar: its close, its title, its confirm.
+pub const SHEET_BAR_HEIGHT: f32 = 56.0;
