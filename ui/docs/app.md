@@ -268,7 +268,14 @@ and registers the platform's class. A module is a device capability any
 app could use, never one app's: what an app makes of it stays in the app.
 One app's own native capability that no other would share is a local
 module, `<app>/modules/<name>/` in the same shape, which ui/prebuild.py
-compiles in as it does the shared ones.
+compiles in as it does the shared ones, listed or not: its `kotlin/`, its
+`swift/`, its `res/` (each resource named for it, as a shared module's), and
+what its `module.toml`'s `[android]` asks (permissions, dependencies,
+services, receivers, meta-data), when it has one. What the app's own native
+code needs of the manifest and is no module's (its worker's boot receiver,
+its push service) is app.toml's `[android]` `services` and `receivers`,
+whose resources are the app's `native/android/res`. `checks.prebuild` holds
+each to a name and each receiver's meta-data to a resource that is there.
 
 ### The First Run: `ark_app::welcome`
 
@@ -583,6 +590,8 @@ features = [{ name = "android.hardware.camera", required = false }]
 hosts = ["auth", "join"]       # the scheme's hosts
 dependencies = []              # Maven coordinates its own Kotlin needs
 launcher = true                # false: no icon in the launcher (a device owner's, ark-dpc)
+services = [{ name = ".Push", actions = ["org.unifiedpush.android.connector.PUSH_EVENT"] }]  # the app's own, beside its modules'
+receivers = [{ name = ".Kick", exported = true, actions = ["android.intent.action.BOOT_COMPLETED"] }]
 
 [ffi]
 crate = "money-bridge"         # the phones' bridge: the UniFFI twins and the exports

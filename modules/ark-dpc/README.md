@@ -2,8 +2,10 @@
 
 `ark-dpc` (`modules/ark-dpc`): a device module, one package with its crate
 and its Kotlin (ui/docs/app.md, The Device). An app opts in by listing
-`ark-dpc` in its app.toml and depending on `ark-dpc` (its bridge with the
-`ffi` feature).
+`ark-dpc` in its app.toml; its update asks through the runtime's port
+(`ark_app::modules::dpc`), and its bridge depends on `ark-dpc` with the
+`ffi` feature and registers what the phone gives
+(`ark_dpc::phone::port(PhoneDpc(context))`).
 
 A DPC is Android's *device policy controller*: the one app a phone's owner
 makes its device owner, and the only one `DevicePolicyManager` lets hold
@@ -17,12 +19,15 @@ is applied are the app's (In the Background, below).
 ## API
 
 ```rust
-ark_dpc::apply(Change::AlwaysOnVpn { app: Some("com.tailscale.ipn".into()), lockdown: true }) // -> Apply, output ()
-ark_dpc::read(asked)                       // -> Read, output State: owner, the VPN, restrictions, … sdk, security_patch
-ark_dpc::plan(&policy, &state) -> Vec<Change>
-ark_dpc::asked(&policy) -> Asked           // what a read must look at for the plan
-trait Dpc { fn apply(&self, change, reply: Arc<ApplyReply>); fn read(&self, asked, reply: Arc<ReadReply>); }
-ark_dpc::Fake                              // a phone's state, .state(), .changes(); Fake::not_owner()
+// The port: ark_module::dpc (ark_app::modules::dpc), re-exported here.
+dpc::apply(Change::AlwaysOnVpn { app: Some("com.tailscale.ipn".into()), lockdown: true }) // -> Apply, output ()
+dpc::read(asked)                       // -> Read, output State: owner, the VPN, restrictions, … sdk, security_patch
+dpc::plan(&policy, &state) -> Vec<Change>
+dpc::asked(&policy) -> Asked           // what a read must look at for the plan
+trait Dpc { fn apply(&self, change: Change) -> Answer<()>; fn read(&self, asked: Asked) -> Answer<State>; }
+// The module's own:
+ark_dpc::Fake                          // a phone's state, .state(), .changes(); Fake::not_owner()
+ark_dpc::phone::{Dpc, DpcError, port}  // (ffi) the foreign trait Kotlin implements, and it as the port
 ```
 
 A `Policy` says only what it names. Its maps are `true` (on, blocked,

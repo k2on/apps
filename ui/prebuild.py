@@ -8,6 +8,7 @@
 #                             platform (Info.plist keys, entitlements,
 #                             background modes; permissions, services,
 #                             receivers, Maven dependencies) and its res/
+#   <app>/modules/<name>/     its own modules, the same, listed or not
 #   <app>/icon.svg            its icon
 #   ui/theme.toml             its accent's colours
 #   the generated views       ark-ui-gen's SwiftUI and Compose of its #[view]s
@@ -70,6 +71,23 @@ def module(root, name):
 
 def modules_of(root, a):
     return [(n, module(root, n)) for n in a.get("modules", [])]
+
+
+def local_modules(root, a):
+    """The app's own modules (`<app>/modules/<name>/`, ui/docs/app.md, How
+    an App Opts In): each compiled in whether or not app.toml lists it, and
+    what its module.toml asks of Android, when it has one, taken in as a
+    shared module's is."""
+    found = glob.glob(os.path.join(root, a["dir"], "modules", "*", "module.toml"))
+    return [(os.path.basename(os.path.dirname(p)), load(p)) for p in sorted(found)]
+
+
+def android_asks(root, a):
+    """What each piece of the app asks of Android's manifest, in order: the
+    listed modules', the app's own modules', and app.toml's `[android]`
+    itself (its services, receivers and meta-data: an app's own worker,
+    boot receiver or push service)."""
+    return [m.get("android", {}) for _, m in modules_of(root, a) + local_modules(root, a)] + [a.get("android", {})]
 
 
 def has(a, platform):
@@ -428,7 +446,7 @@ def android_gradle(root, a, ffi_lib_name):
     # An Ark app's are ArkUI's and the kernel's; an app of Kotlin alone
     # says each of its own.
     deps = list(ANDROID_DEPENDENCIES) if ark else []
-    for _, m in modules_of(root, a):
+    for _, m in modules_of(root, a) + local_modules(root, a):
         deps += [d for d in m.get("android", {}).get("dependencies", []) if d not in deps]
     deps += [d for d in andr.get("dependencies", []) if d not in deps]
 
@@ -457,6 +475,8 @@ def android_gradle(root, a, ffi_lib_name):
     for name, _ in modules_of(root, a):
         if os.path.isdir(os.path.join(root, "modules", name, "res")):
             srcs += f'\n            res.srcDir(rootProject.file("{TO_REPO}/modules/{name}/res"))'
+    for d in sorted(glob.glob(os.path.join(root, app, "modules", "*", "res"))):
+        srcs += f'\n            res.srcDir(rootProject.file("{TO_APP}/modules/{os.path.basename(os.path.dirname(d))}/res"))'
     if os.path.isdir(native_dir(root, a, "res")):
         srcs += f'\n            res.srcDir(rootProject.file("{TO_APP}/native/android/res"))'
     if os.path.isdir(native_dir(root, a, "assets")):
@@ -638,8 +658,7 @@ def android_manifest(root, a):
     services = []
     receivers = []
     meta = []
-    for _, m in modules_of(root, a):
-        ma = m.get("android", {})
+    for ma in android_asks(root, a):
         perms += [p for p in ma.get("permissions", []) if p not in perms]
         services += ma.get("services", [])
         receivers += ma.get("receivers", [])
@@ -910,6 +929,31 @@ def fdroid_yml(a):
 STORE_KEYS = ("summary", "description", "categories", "license", "website", "source", "issues")
 
 
+def android_problems(root, where, andr, res, prefix):
+    """What is wrong with what one piece asks of Android's manifest: a
+    service or receiver with no name, a receiver's meta-data naming a
+    resource `res` (relative to `root`) does not have and, for a module
+    (`prefix`, its name), a resource not named for it. A module's resources
+    are compiled into every app that lists it, beside the generated ones
+    and the other modules': ark-dpc's is `xml/ark_dpc_admin.xml`."""
+    problems = []
+    if prefix is not None:
+        p = prefix.replace("-", "_") + "_"
+        for f in sorted(glob.glob(os.path.join(root, res, "*", "*"))):
+            if not os.path.basename(f).startswith(p):
+                problems.append(f"{res}/{os.path.relpath(f, os.path.join(root, res))} is not named {p}…: a module's resources are named for it")
+    for kind in ("services", "receivers"):
+        for c in andr.get(kind, []):
+            if "name" not in c:
+                problems.append(f"{where} has one of its {kind} with no name")
+    for r in andr.get("receivers", []):
+        for d in r.get("meta-data", []):
+            found = re.fullmatch(r"@(\w+)/(\w+)", d.get("resource", ""))
+            if found and not glob.glob(os.path.join(root, res, f"{found.group(1)}*", f"{found.group(2)}.*")):
+                problems.append(f"{where}'s receiver {r.get('name')} names {d['resource']}, which {res} does not have")
+    return problems
+
+
 def check(root):
     """Every app's app.toml says what it must, every module it lists is
     one, every Rust crate of the app depends on each listed module's crate
@@ -939,22 +983,15 @@ def check(root):
         for op in re.findall(r"impl Op for (\w+)", text):
             if op not in ops:
                 problems.append(f"modules/{n}'s port implements the op {op}, which its module.toml's [ops] does not list")
-        # A module's Android resources are compiled into every app that
-        # lists it, beside the generated ones and the other modules': each
-        # is named for the module (ark-dpc's `xml/ark_dpc_admin.xml`).
-        prefix = n.replace("-", "_") + "_"
-        for f in sorted(glob.glob(os.path.join(root, "modules", n, "res", "*", "*"))):
-            if not os.path.basename(f).startswith(prefix):
-                problems.append(f"modules/{n}/res/{os.path.relpath(f, os.path.join(root, 'modules', n, 'res'))} is not named {prefix}…: a module's resources are named for it")
-        for r in m.get("android", {}).get("receivers", []):
-            if "name" not in r:
-                problems.append(f"modules/{n}/module.toml has a receiver with no name")
-            for d in r.get("meta-data", []):
-                res = re.fullmatch(r"@(\w+)/(\w+)", d.get("resource", ""))
-                if res and not glob.glob(os.path.join(root, "modules", n, "res", f"{res.group(1)}*", f"{res.group(2)}.*")):
-                    problems.append(f"modules/{n}/module.toml's receiver {r.get('name')} names {d['resource']}, which modules/{n}/res does not have")
+        problems += android_problems(root, f"modules/{n}", m.get("android", {}), f"modules/{n}/res", n)
     for app in apps(root):
         a = app_of(root, app)
+        # The app's own services and receivers (app.toml's [android]), its
+        # resources its native/android/res; each of its own modules' as a
+        # shared module's.
+        problems += android_problems(root, f"{app}/app.toml", a.get("android", {}), f"{app}/native/android/res", None)
+        for n, m in local_modules(root, a):
+            problems += android_problems(root, f"{app}/modules/{n}", m.get("android", {}), f"{app}/modules/{n}/res", n)
         for k in ("name", "id", "accent", "platforms"):
             if k not in a:
                 problems.append(f"{app}/app.toml says no `{k}`")

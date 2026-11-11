@@ -1,296 +1,135 @@
 //! The device's policy: what an app that is the phone's device owner (its
-//! device policy controller, Android's DPC) holds the phone to. An update
-//! asks with [`apply`], an [`Apply`] of one [`Change`] whose output is
-//! `()`, or with [`read`], a [`Read`] whose output is the [`State`] the
-//! phone is in.
-//!
-//! What a policy asks is a [`Policy`], and [`plan`] is the changes from the
-//! state the phone is in to it: what the policy says nothing of is left as
-//! it is, so a policy that forgets the VPN never takes it away ([`Vpn`]).
-//! An app reads ([`asked`] says what to), plans, and applies each change;
-//! read again, the plan is empty.
-//!
-//! Only Android has it: an app made the device owner (README.md) and its
-//! receiver, `dev.arkui.modules.ArkDpcAdmin`. Every other platform answers
-//! `Unavailable`.
+//! device policy controller, Android's DPC) holds the phone to. Its port —
+//! [`Change`], [`State`], the [`Dpc`] trait, [`apply`] and [`read`], a
+//! [`Policy`] and its [`plan`] — is the runtime's (`ark_module::dpc`),
+//! which an update asks through; here is what implements it: the fake, and
+//! (`ffi`) the phones' foreign trait, which Android's `PhoneDpc` implements
+//! (kotlin/) as the admin `dev.arkui.modules.ArkDpcAdmin`. Every other
+//! platform registers none and is answered `Unavailable`.
 
-use std::collections::BTreeMap;
+pub use ark_module::dpc::*;
+
 use std::sync::{Arc, Mutex};
 
-use ark_module::{Modules, Op, Reply};
+use ark_module::{Answer, ModuleError, Modules};
 
 #[cfg(feature = "ffi")]
 uniffi::setup_scaffolding!();
 
-/// The device policy controller: one change at a time, and what the phone
-/// is in.
-#[cfg_attr(feature = "ffi", uniffi::export(with_foreign))]
-pub trait Dpc: Send + Sync {
-    /// `change` made; the reply says it was, or why not.
-    fn apply(&self, change: Change, reply: Arc<ApplyReply>);
-    /// The state the phone is in, of the apps and permissions `asked` names.
-    fn read(&self, asked: Asked, reply: Arc<ReadReply>);
-}
+/// The phones' device owner, through UniFFI (`ffi`): the foreign trait
+/// Kotlin's `PhoneDpc` implements, and it registered as the port.
+#[cfg(feature = "ffi")]
+pub mod phone {
+    use std::sync::Arc;
 
-// * What changes
+    use ark_module::{Answer, ModuleError};
 
-/// One thing the device owner changes.
-#[derive(Clone, Debug, PartialEq, Eq)]
-#[cfg_attr(feature = "ffi", derive(uniffi::Enum))]
-pub enum Change {
-    /// The VPN the phone is always on, `app` its package; none is none.
-    /// With `lockdown` nothing leaves the phone but through it
-    /// (`setAlwaysOnVpnPackage`).
-    AlwaysOnVpn { app: Option<String>, lockdown: bool },
-    /// A user restriction (`UserManager`'s, `no_config_vpn`) on or off.
-    Restriction { name: String, on: bool },
-    /// Whether `app` can be uninstalled.
-    UninstallBlocked { app: String, blocked: bool },
-    /// What `app` is given of `permission`.
-    Permission { app: String, permission: String, grant: Grant },
-    /// The cameras, every app's.
-    CameraDisabled { disabled: bool },
-    /// Screenshots and the screen recorded, every app's.
-    ScreenCaptureDisabled { disabled: bool },
-}
+    use super::{Asked, Change, Grant, PermissionOf, PermissionState, State};
 
-/// What an app is given of a permission: the person's choice, or the
-/// owner's either way.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-#[cfg_attr(feature = "ffi", derive(uniffi::Enum))]
-pub enum Grant {
-    Default,
-    Granted,
-    Denied,
-}
-
-// * What the phone is in
-
-/// An app's permission, by name.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
-#[cfg_attr(feature = "ffi", derive(uniffi::Record))]
-pub struct PermissionOf {
-    pub app: String,
-    pub permission: String,
-}
-
-/// What a read looks at besides what is the device's: the apps whose
-/// uninstall it says, the permissions whose grant.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-#[cfg_attr(feature = "ffi", derive(uniffi::Record))]
-pub struct Asked {
-    pub apps: Vec<String>,
-    pub permissions: Vec<PermissionOf>,
-}
-
-/// A permission and what its app is given of it.
-#[derive(Clone, Debug, PartialEq, Eq)]
-#[cfg_attr(feature = "ffi", derive(uniffi::Record))]
-pub struct PermissionState {
-    pub app: String,
-    pub permission: String,
-    pub grant: Grant,
-}
-
-/// The state the phone is in.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-#[cfg_attr(feature = "ffi", derive(uniffi::Record))]
-pub struct State {
-    /// Whether this app is the device owner. When it is not, nothing else
-    /// here was read and every change fails.
-    pub owner: bool,
-    /// The always-on VPN's package, and whether it is locked down.
-    pub always_on_vpn: Option<String>,
-    pub lockdown: bool,
-    /// The user restrictions the owner has set.
-    pub restrictions: Vec<String>,
-    /// Of the apps asked, those that cannot be uninstalled.
-    pub uninstall_blocked: Vec<String>,
-    /// Of the permissions asked, each one's grant.
-    pub permissions: Vec<PermissionState>,
-    pub camera_disabled: bool,
-    pub screen_capture_disabled: bool,
-    /// The platform's version (`Build.VERSION.SDK_INT`) and its security
-    /// patch (`2026-11-05`), for a server to show.
-    pub sdk: i32,
-    pub security_patch: String,
-}
-
-// * Answering
-
-/// Where the phone says a change was made, once.
-#[cfg_attr(feature = "ffi", derive(uniffi::Object))]
-pub struct ApplyReply(Reply<()>);
-
-#[cfg_attr(feature = "ffi", uniffi::export)]
-impl ApplyReply {
-    /// It was made.
-    pub fn applied(&self) {
-        self.0.done(())
+    #[uniffi::remote(Enum)]
+    pub enum Change {
+        AlwaysOnVpn { app: Option<String>, lockdown: bool },
+        Restriction { name: String, on: bool },
+        UninstallBlocked { app: String, blocked: bool },
+        Permission { app: String, permission: String, grant: Grant },
+        CameraDisabled { disabled: bool },
+        ScreenCaptureDisabled { disabled: bool },
     }
 
-    /// It could not be, in the platform's words.
-    pub fn failed(&self, why: String) {
-        self.0.failed(why)
-    }
-}
-
-/// Where the phone says the state it is in, once.
-#[cfg_attr(feature = "ffi", derive(uniffi::Object))]
-pub struct ReadReply(Reply<State>);
-
-#[cfg_attr(feature = "ffi", uniffi::export)]
-impl ReadReply {
-    /// What it is in.
-    pub fn saw(&self, state: State) {
-        self.0.done(state)
+    #[uniffi::remote(Enum)]
+    pub enum Grant {
+        Default,
+        Granted,
+        Denied,
     }
 
-    /// It could not be read, in the platform's words.
-    pub fn failed(&self, why: String) {
-        self.0.failed(why)
+    #[uniffi::remote(Record)]
+    pub struct PermissionOf {
+        pub app: String,
+        pub permission: String,
     }
-}
 
-// * The operations
-
-/// One change made.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Apply(pub Change);
-
-impl Op for Apply {
-    type Module = dyn Dpc;
-    type Output = ();
-    const MODULE: &'static str = "ark-dpc";
-    fn run(&self, m: &dyn Dpc, reply: Reply<()>) {
-        m.apply(self.0.clone(), Arc::new(ApplyReply(reply)))
+    #[uniffi::remote(Record)]
+    pub struct Asked {
+        pub apps: Vec<String>,
+        pub permissions: Vec<PermissionOf>,
     }
-}
 
-/// The state the phone is in read.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Read(pub Asked);
-
-impl Op for Read {
-    type Module = dyn Dpc;
-    type Output = State;
-    const MODULE: &'static str = "ark-dpc";
-    fn run(&self, m: &dyn Dpc, reply: Reply<State>) {
-        m.read(self.0.clone(), Arc::new(ReadReply(reply)))
+    #[uniffi::remote(Record)]
+    pub struct PermissionState {
+        pub app: String,
+        pub permission: String,
+        pub grant: Grant,
     }
-}
 
-/// `change` made.
-pub fn apply(change: Change) -> Apply {
-    Apply(change)
-}
-
-/// The state the phone is in, of what `asked` names.
-pub fn read(asked: Asked) -> Read {
-    Read(asked)
-}
-
-// * A policy and its plan
-
-/// The VPN a policy asks for.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub enum Vpn {
-    /// Left as it is: a policy that says nothing of the VPN.
-    #[default]
-    Unmanaged,
-    /// Always on through `app`, locked down or not.
-    AlwaysOn { app: String, lockdown: bool },
-    /// None. Only this takes an always-on VPN away.
-    Off,
-}
-
-/// What a policy holds the phone to. Each map says only what it names:
-/// `true` on (blocked, disabled), `false` off; what it leaves out is left
-/// as it is, so undoing one is saying `false`, not deleting its line.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct Policy {
-    pub vpn: Vpn,
-    /// User restrictions by name (`no_config_vpn`).
-    pub restrictions: BTreeMap<String, bool>,
-    /// Apps by package: whether each cannot be uninstalled.
-    pub uninstall_blocked: BTreeMap<String, bool>,
-    /// Permissions and what each app is given of them.
-    pub permissions: BTreeMap<PermissionOf, Grant>,
-    pub camera_disabled: Option<bool>,
-    pub screen_capture_disabled: Option<bool>,
-}
-
-/// What a read must look at for [`plan`] to see what `policy` names.
-pub fn asked(policy: &Policy) -> Asked {
-    Asked {
-        apps: policy.uninstall_blocked.keys().cloned().collect(),
-        permissions: policy.permissions.keys().cloned().collect(),
+    #[uniffi::remote(Record)]
+    pub struct State {
+        pub owner: bool,
+        pub always_on_vpn: Option<String>,
+        pub lockdown: bool,
+        pub restrictions: Vec<String>,
+        pub uninstall_blocked: Vec<String>,
+        pub permissions: Vec<PermissionState>,
+        pub camera_disabled: bool,
+        pub screen_capture_disabled: bool,
+        pub sdk: i32,
+        pub security_patch: String,
     }
-}
 
-/// The changes from `state` to `policy`, in the order they are made: the
-/// VPN first, so that nothing after it is fetched or sent around it.
-/// Empty when the phone is already as the policy says, and when this app
-/// is not the device owner (nothing could be made).
-pub fn plan(policy: &Policy, state: &State) -> Vec<Change> {
-    if !state.owner {
-        return vec![];
+    /// Why the phone made no change, or read nothing.
+    #[derive(Debug, Clone, PartialEq, Eq, uniffi::Error)]
+    pub enum DpcError {
+        /// It failed, in the platform's words: not the device owner, a VPN
+        /// app that is not installed, a restriction the platform refuses.
+        Failed { why: String },
     }
-    let mut changes = vec![];
-    match &policy.vpn {
-        Vpn::Unmanaged => {}
-        Vpn::AlwaysOn { app, lockdown } => {
-            if state.always_on_vpn.as_deref() != Some(app.as_str()) || state.lockdown != *lockdown {
-                changes.push(Change::AlwaysOnVpn {
-                    app: Some(app.clone()),
-                    lockdown: *lockdown,
-                });
-            }
-        }
-        Vpn::Off => {
-            if state.always_on_vpn.is_some() {
-                changes.push(Change::AlwaysOnVpn { app: None, lockdown: false });
+
+    impl std::fmt::Display for DpcError {
+        fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+            match self {
+                DpcError::Failed { why } => f.write_str(why),
             }
         }
     }
-    for (name, on) in &policy.restrictions {
-        if state.restrictions.contains(name) != *on {
-            changes.push(Change::Restriction { name: name.clone(), on: *on });
+
+    impl std::error::Error for DpcError {}
+
+    impl From<uniffi::UnexpectedUniFFICallbackError> for DpcError {
+        fn from(e: uniffi::UnexpectedUniFFICallbackError) -> DpcError {
+            DpcError::Failed { why: e.reason }
         }
     }
-    for (app, blocked) in &policy.uninstall_blocked {
-        if state.uninstall_blocked.contains(app) != *blocked {
-            changes.push(Change::UninstallBlocked {
-                app: app.clone(),
-                blocked: *blocked,
-            });
+
+    impl From<DpcError> for ModuleError {
+        fn from(e: DpcError) -> ModuleError {
+            match e {
+                DpcError::Failed { why } => ModuleError::Failed { why },
+            }
         }
     }
-    for (of, grant) in &policy.permissions {
-        let now = state
-            .permissions
-            .iter()
-            .find(|p| p.app == of.app && p.permission == of.permission)
-            .map(|p| p.grant);
-        if now != Some(*grant) {
-            changes.push(Change::Permission {
-                app: of.app.clone(),
-                permission: of.permission.clone(),
-                grant: *grant,
-            });
+
+    /// The phone's device owner, as Kotlin implements it.
+    #[uniffi::export(with_foreign)]
+    pub trait Dpc: Send + Sync {
+        fn apply(&self, change: Change) -> Result<(), DpcError>;
+        fn read(&self, asked: Asked) -> Result<State, DpcError>;
+    }
+
+    struct Phone(Arc<dyn Dpc>);
+
+    impl super::Dpc for Phone {
+        fn apply(&self, change: Change) -> Answer<()> {
+            Ok(self.0.apply(change)?)
+        }
+        fn read(&self, asked: Asked) -> Answer<State> {
+            Ok(self.0.read(asked)?)
         }
     }
-    if let Some(disabled) = policy.camera_disabled {
-        if state.camera_disabled != disabled {
-            changes.push(Change::CameraDisabled { disabled });
-        }
+
+    /// The phone's device owner as the port an update asks through.
+    pub fn port(d: Arc<dyn Dpc>) -> Arc<dyn super::Dpc> {
+        Arc::new(Phone(d))
     }
-    if let Some(disabled) = policy.screen_capture_disabled {
-        if state.screen_capture_disabled != disabled {
-            changes.push(Change::ScreenCaptureDisabled { disabled });
-        }
-    }
-    changes
 }
 
 // * The fake
@@ -359,12 +198,13 @@ fn set(list: &mut Vec<String>, item: &str, on: bool) {
 }
 
 impl Dpc for Fake {
-    fn apply(&self, change: Change, reply: Arc<ApplyReply>) {
+    fn apply(&self, change: Change) -> Answer<()> {
         self.asked.lock().unwrap_or_else(|e| e.into_inner()).push(change.clone());
         let mut s = self.state.lock().unwrap_or_else(|e| e.into_inner());
         if !s.owner {
-            drop(s);
-            return reply.failed("not the device owner".into());
+            return Err(ModuleError::Failed {
+                why: "not the device owner".into(),
+            });
         }
         match change {
             Change::AlwaysOnVpn { app, lockdown } => {
@@ -380,14 +220,13 @@ impl Dpc for Fake {
             Change::CameraDisabled { disabled } => s.camera_disabled = disabled,
             Change::ScreenCaptureDisabled { disabled } => s.screen_capture_disabled = disabled,
         }
-        drop(s);
-        reply.applied()
+        Ok(())
     }
 
-    fn read(&self, asked: Asked, reply: Arc<ReadReply>) {
+    fn read(&self, asked: Asked) -> Answer<State> {
         let s = self.state();
         if !s.owner {
-            return reply.saw(State {
+            return Ok(State {
                 owner: false,
                 ..State::default()
             });
@@ -408,14 +247,14 @@ impl Dpc for Fake {
                     .map_or(Grant::Default, |p| p.grant),
             })
             .collect();
-        reply.saw(seen)
+        Ok(seen)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ark_module::{Answer, ModuleError};
+    use std::collections::BTreeMap;
 
     fn tailscale(lockdown: bool) -> Vpn {
         Vpn::AlwaysOn {
@@ -429,20 +268,19 @@ mod tests {
             vpn: tailscale(true),
             restrictions: [("no_config_vpn".to_string(), true), ("no_factory_reset".to_string(), true)].into(),
             uninstall_blocked: [("com.tailscale.ipn".to_string(), true)].into(),
-            permissions: [(
+            permissions: BTreeMap::from([(
                 PermissionOf {
                     app: "io.heckel.ntfy".into(),
                     permission: "android.permission.POST_NOTIFICATIONS".into(),
                 },
                 Grant::Granted,
-            )]
-            .into(),
+            )]),
             camera_disabled: None,
             screen_capture_disabled: Some(false),
         }
     }
 
-    /// Read, plan, apply each change through the registry, as an app does.
+    /// Read, plan, apply each change through the registry, as an update does.
     fn reconcile(m: &Modules, policy: &Policy) -> Vec<Answer<()>> {
         let state = Arc::new(Mutex::new(None));
         let s = state.clone();
@@ -516,9 +354,8 @@ mod tests {
         reconcile(&m, &base());
         let mut open = base();
         open.vpn = tailscale(false);
-        let state = fake.state();
         assert_eq!(
-            plan(&open, &state),
+            plan(&open, &fake.state()),
             vec![Change::AlwaysOnVpn {
                 app: Some("com.tailscale.ipn".into()),
                 lockdown: false
