@@ -18,7 +18,7 @@ server needs to boot seeded, with `DATA` its data directory, and refuses
 a `DATA` that already has anything in it. From `rust/`:
 
 ```sh
-cargo run -p money-seed -- /tmp/money
+cargo run -p money-seed --features cli -- /tmp/money
 MONEY_DEV_AUTH=1 MONEY_DATA=/tmp/money cargo run -p money-server -- 127.0.0.1:8788
 
 cargo run -p harken-seed -- /tmp/harken
@@ -34,7 +34,8 @@ Dev auth lets anyone in as whoever they say; money's household is
 
 harken-seed's binary is behind a `cli` feature, on by default, so its
 demos depend with `default-features = false`; money's is a crate of its
-own (money/seed: the core stays pure), so its demos ask money-core for
+own (money/seed, its binary behind `cli`: the core stays pure), so its
+demos ask money-core for
 `demo` alone. Either way a demo (money's and harken's in a browser too)
 links the data and builds no binary.
 

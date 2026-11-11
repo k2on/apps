@@ -294,7 +294,7 @@
           '';
           # Each app's demo data (docs/seed.md): `<app>-seed DATA` writes what
           # that app's server boots seeded from; money's is money/seed.
-          money-seed = crate { packageId = "money-seed"; };
+          money-seed = crate { packageId = "money-seed"; features = [ "cli" ]; };
           # Each Ark app's generated pieces (nix/ark-app.nix): its
           # generator, the SwiftUI and Compose of its #[view]s (`<app>-ui`),
           # its native projects (`<app>-native`) and its prebuild.

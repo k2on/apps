@@ -14374,7 +14374,7 @@ rec {
           {
             name = "money-seed";
             path = "src/main.rs";
-            requiredFeatures = [ ];
+            requiredFeatures = [ "cli" ];
           }
         ];
         src = lib.cleanSourceWith { filter = sourceFilter;  src = ../money/seed; };
@@ -14391,7 +14391,9 @@ rec {
             features = [ "demo" ];
           }
         ];
-
+        features = {
+        };
+        resolvedDefaultFeatures = [ "cli" ];
       };
       "money-server" = rec {
         crateName = "money-server";

@@ -10,9 +10,16 @@ description = "money's demo household (the core's `demo`) on a peer and a disk: 
 name = "money_seed"
 path = "src/lib.rs"
 
+# `money-seed DATA`: only with `cli`, so what links the library (the
+# phones' bridge, cross-built for Apple and Android; the browser's demo)
+# links no binary.
 [[bin]]
 name = "money-seed"
 path = "src/main.rs"
+required-features = ["cli"]
+
+[features]
+cli = []
 
 [dependencies]
 money-core = { path = "../core", features = ["demo"] }
