@@ -267,8 +267,27 @@ jobs:
       - name: Build what the server runs
         run: nix build --print-build-logs --no-link .#harken-server .#money-server .#arkdb .#harken-seed .#money-seed
 
-  apk:
+  # ArkUI's Kotlin (ui/kotlin), each of its libraries compiled once
+  # (flake.nix, `arkuiKotlin`) and pushed, before the APKs and their tests,
+  # which link it: compiled here, not once in each of their six jobs. A
+  # commit that leaves ui/kotlin alone fetches it from Cachix in seconds.
+  arkui-kotlin:
     needs: plan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@main
+      - if: vars.CACHIX_NAME != ''
+        uses: cachix/cachix-action@v15
+        with:
+          name: ${{ vars.CACHIX_NAME }}
+          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
+          pushFilter: "(android-sdk-for-gradle|platform-35_r01\\.zip|build-tools_r35_linux\\.zip)"
+      - name: Build ArkUI's Kotlin
+        run: nix build --print-build-logs --no-link .#arkui-kotlin-shots .#arkui-kotlin
+
+  apk:
+    needs: [plan, arkui-kotlin]
     strategy:
       fail-fast: false
       matrix:
@@ -351,7 +370,7 @@ jobs:
   # is up (for its screenshots) while they run. An APK goes to F-Droid only
   # once its tests have passed (deploy reads `tested-<app>`).
   tests:
-    needs: plan
+    needs: [plan, arkui-kotlin]
     strategy:
       fail-fast: false
       matrix:

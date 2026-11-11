@@ -601,6 +601,71 @@
               buildToolsVersions = [ "35.0.0" ];
             }).androidsdk}/libexec/android-sdk";
 
+          # What every gradle build here is run with: the store's JDK and
+          # the SDK's tools, nothing fetched.
+          androidGradleFlags = [
+            "-Dorg.gradle.java.home=${pkgs.jdk21.home}"
+            "-Porg.gradle.java.installations.auto-detect=false"
+            "-Porg.gradle.java.installations.auto-download=false"
+            "-Porg.gradle.java.installations.paths=${pkgs.jdk21.home}"
+            # AGP would fetch its own aapt2 from Maven, an unpatched binary
+            # that cannot run here; the SDK's is patched and can.
+            "-Pandroid.aapt2FromMavenOverride=${sdkRoot}/build-tools/35.0.0/aapt2"
+            # Whatever the SDK lacks is an error, not a download: an
+            # install reads Google's repository indexes, which change
+            # under any hash recorded of them (nix/android-sdk.nix).
+            "-Pandroid.builder.sdkDownload=false"
+          ];
+
+          # **ArkUI's Kotlin, compiled once** (ui/kotlin/android): each of
+          # its two libraries a derivation of its own, its classes as a jar
+          # (`<module>.jar`), which every app links (`-ParkuiLib`, a
+          # directory of jars; app/build.gradle.kts) instead of compiling
+          # ui/kotlin in each of its builds — the APK's, the tests' and the
+          # screenshots', for every app. `shots` is ui/kotlin/shots alone
+          # (every app's screenshot mode; revelation links only it);
+          # `arkui` is ui/kotlin/src, compiled against shots' jar, and
+          # carries that jar beside its own. Each one's source is its own
+          # directory and the gradle project, so an edit to the look moves
+          # `arkui` and the apps that link it, and not revelation. Release
+          # classes: the library has no BuildConfig and no resources, so
+          # the debug builds link the same. Its Maven graph is
+          # ui/kotlin/android/deps.json (`nix run .#arkui-kotlin-deps`).
+          arkuiKotlin = { module, dir, shots ? null }:
+            pkgs.stdenv.mkDerivation (final: {
+              pname = "arkui-kotlin-${module}";
+              version = "0.1.0";
+              src = only [ "ui/kotlin/android" dir ];
+              sourceRoot = "source/ui/kotlin/android";
+              postUnpack = "chmod -R u+w source";
+              nativeBuildInputs = [ pkgs.gradle pkgs.jdk21 ];
+              mitmCache = pkgs.gradle.fetchDeps {
+                pkg = final.finalPackage;
+                data = ./ui/kotlin/android/deps.json;
+              };
+              __darwinAllowLocalNetworking = true;
+              ANDROID_HOME = sdkRoot;
+              ANDROID_SDK_ROOT = sdkRoot;
+              gradleFlags = androidGradleFlags ++ lib.optional (shots != null) "-PshotsLib=${shots}";
+              preBuild = ''
+                export HOME="$TMPDIR/home" ANDROID_USER_HOME="$TMPDIR/home/.android"
+                mkdir -p "$ANDROID_USER_HOME"
+              '';
+              # The library's classes as its consumers' compiler and D8 read
+              # them: no AAR (whose bundling runs lint's annotation
+              # extraction, which the recorded graph does not hold).
+              gradleBuildTask = ":${module}:bundleLibRuntimeToJarRelease";
+              gradleUpdateTask = ":shots:bundleLibRuntimeToJarRelease :arkui:bundleLibRuntimeToJarRelease";
+              doCheck = false;
+              installPhase = ''
+                jar=$(find ${module}/build/intermediates/runtime_library_classes_jar/release -name classes.jar | head -1)
+                install -Dm644 "$jar" $out/${module}.jar
+                ${lib.optionalString (shots != null) "cp ${shots}/*.jar $out/"}
+              '';
+            });
+          arkui-kotlin-shots = arkuiKotlin { module = "shots"; dir = "ui/kotlin/shots"; };
+          arkui-kotlin = arkuiKotlin { module = "arkui"; dir = "ui/kotlin/src"; shots = arkui-kotlin-shots; };
+
           # An Android app of this tree (`<name>/android`, a gradle project
           # with one `:app`): gradle over the SDK, assembled offline from a
           # recorded Maven graph (`<name>/android/deps.json`; `nix run
@@ -620,8 +685,16 @@
           # through layoutlib) and an index.html laying them out light beside
           # dark (nix/screens-index.py). `flags` are the app's own gradle
           # properties; `title` and `note` head that page. `shared` are the
-          # directories of this tree the app compiles beside its own:
-          # `ui/kotlin`, the look every Ark app on Android shares.
+          # directories of this tree the app compiles beside its own (money's
+          # device modules); ArkUI's Kotlin is not one: it is linked
+          # prebuilt (`arkuiKotlin`, `-ParkuiLib` in `flags`).
+          #
+          # The release build and the debug one the tests and screenshots
+          # run are two variants, each compiling the app's own Kotlin: AGP
+          # compiles an application module per variant, and takes no
+          # precompiled classes of the module itself. Only Gradle's build
+          # cache could carry the debug classes from `tests` to `screens`,
+          # and a cache handed between derivations is not used here.
           #
           # An Ark app (`ark`, its nix/ark-app.nix packages) builds its
           # generated project (`<name>/.native/android`) over its own Kotlin
@@ -654,18 +727,7 @@
                 __darwinAllowLocalNetworking = true;
                 ANDROID_HOME = sdkRoot;
                 ANDROID_SDK_ROOT = sdkRoot;
-                gradleFlags = [
-                  "-Dorg.gradle.java.home=${pkgs.jdk21.home}"
-                  "-Porg.gradle.java.installations.auto-detect=false"
-                  "-Porg.gradle.java.installations.auto-download=false"
-                  "-Porg.gradle.java.installations.paths=${pkgs.jdk21.home}"
-                  # AGP would fetch its own aapt2 from Maven, an unpatched binary
-                  # that cannot run here; the SDK's is patched and can.
-                  "-Pandroid.aapt2FromMavenOverride=${sdkRoot}/build-tools/35.0.0/aapt2"
-                  # Whatever the SDK lacks is an error, not a download: an
-                  # install reads Google's repository indexes, which change
-                  # under any hash recorded of them (nix/android-sdk.nix).
-                  "-Pandroid.builder.sdkDownload=false"
+                gradleFlags = androidGradleFlags ++ [
                   # Its id: every app's is `bundlePrefix` and its name.
                   "-PapplicationId=${bundlePrefix}.${name}"
                 ] ++ flags ++ final.versionFlags;
@@ -727,8 +789,8 @@
           harken = androidApp {
             name = "harken";
             appid = "dev.harken.android";
-            flags = [ "-PharkenLib=${harken-android-lib}" ];
-            shared = [ "ui/kotlin" ];
+            # ArkUI's Kotlin linked prebuilt (`arkui-kotlin`), not compiled.
+            flags = [ "-PharkenLib=${harken-android-lib}" "-ParkuiLib=${arkui-kotlin}" ];
             title = "Harken";
             note = "Rendered on the JVM by Paparazzi from a fixed library, at a Pixel 5's size; light beside dark. Covers are the derived squares: nothing here talks to a server.";
           };
@@ -746,10 +808,12 @@
             name = "money";
             appid = arkOf.money.a.android.package;
             ark = arkOf.money;
-            flags = [ "-ParkLib=${money-android-lib}" ];
-            # arkui, and the device modules money lists (money/app.toml),
-            # whose kotlin/ its generated build.gradle.kts compiles in.
-            shared = [ "ui/kotlin" "modules" ];
+            flags = [ "-ParkLib=${money-android-lib}" "-ParkuiLib=${arkui-kotlin}" ];
+            # The device modules money lists (money/app.toml), whose kotlin/
+            # its generated build.gradle.kts compiles in: each implements an
+            # interface UniFFI writes into money's own bindings. ArkUI is
+            # linked prebuilt (`arkui-kotlin`).
+            shared = [ "modules" ];
             title = "money";
             note = "Rendered on the JVM by Paparazzi from the demo's household on 2026-10-26, at a Pixel 5's size, in money's own scheme (a screenshot has no wallpaper); light beside dark.";
           };
@@ -764,8 +828,9 @@
             name = "revelation";
             appid = arkOf.revelation.a.android.package;
             ark = arkOf.revelation;
-            # ArkUI's screenshot mode and ready signal alone (ui/kotlin/shots).
-            shared = [ "ui/kotlin/shots" ];
+            # ArkUI's screenshot mode and ready signal alone (ui/kotlin/shots),
+            # linked prebuilt.
+            flags = [ "-ParkuiLib=${arkui-kotlin-shots}" ];
             title = "Revelation";
             note = "Rendered on the JVM by Paparazzi through layoutlib; light beside dark.";
           };
@@ -1688,6 +1753,10 @@
             # money's phone, over money-android-lib (money/native/android/README.md).
             inherit money-apk money-android-tests money-android-screens;
             money-apk-deps = money.deps;
+            # ArkUI's Kotlin, each library once (`arkuiKotlin`), and
+            # `nix run .#arkui-kotlin-deps` re-recording its Maven graph.
+            inherit arkui-kotlin arkui-kotlin-shots;
+            arkui-kotlin-deps = arkui-kotlin.mitmCache.updateScript;
             # The workflow builds these first and keeps them as gc roots.
             inherit aapt2;
             android-sdk = androidSdk;

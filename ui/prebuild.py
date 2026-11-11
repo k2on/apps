@@ -439,7 +439,9 @@ def android_gradle(root, a, ffi_lib_name):
 
     # ArkUI's screenshot mode and ready signal (ui/kotlin/shots) in every app,
     # one that draws nothing of ArkUI's too.
-    kotlin_dirs = [f'"{TO_APP}/native/android/main"', f'"{TO_REPO}/ui/kotlin/shots"'] + (['"generated"', f'"{TO_REPO}/ui/kotlin/src"', '"$arkLib/kotlin"'] if ark else [])
+    # Under nix both are linked as its jars instead (`arkuiLib`, below).
+    arkui_dirs = [f'"{TO_REPO}/ui/kotlin/shots"'] + ([f'"{TO_REPO}/ui/kotlin/src"'] if ark else [])
+    kotlin_dirs = [f'"{TO_APP}/native/android/main"'] + (['"generated"', '"$arkLib/kotlin"'] if ark else [])
     for name, _ in modules_of(root, a):
         if os.path.isdir(os.path.join(root, "modules", name, "kotlin")):
             kotlin_dirs.append(f'"{TO_REPO}/modules/{name}/kotlin"')
@@ -447,7 +449,9 @@ def android_gradle(root, a, ffi_lib_name):
         kotlin_dirs.append(f'"{TO_APP}/modules/{os.path.basename(os.path.dirname(d))}/kotlin"')
     srcs = "\n".join(f"            kotlin.srcDir(rootProject.file({d}))" if not d.startswith('"$') else f"            kotlin.srcDir({d})" for d in kotlin_dirs)
     if ark:
-        srcs = '            // The kernel per ABI and the Kotlin over it; the app\'s own\n            // Kotlin and its generated screens; ArkUI; the modules\'.\n            jniLibs.srcDir("$arkLib/jniLibs")\n' + srcs
+        srcs = '            // The kernel per ABI and the Kotlin over it; the app\'s own\n            // Kotlin and its generated screens; the modules\'.\n            jniLibs.srcDir("$arkLib/jniLibs")\n' + srcs
+    srcs += ("\n            // ArkUI from its sources, where it is not linked prebuilt (`arkuiLib`).\n            if (arkuiLib == null) {\n"
+             + "\n".join(f"                kotlin.srcDir(rootProject.file({d}))" for d in arkui_dirs) + "\n            }")
     # The app's own resources and assets, beside the generated ones.
     if os.path.isdir(native_dir(root, a, "res")):
         srcs += f'\n            res.srcDir(rootProject.file("{TO_APP}/native/android/res"))'
@@ -487,6 +491,12 @@ plugins {{
 // `nix run .#{app}-prebuild` builds it into ../ffi/android.
 val arkLib: String = providers.gradleProperty("arkLib").getOrElse(rootProject.file("../ffi/android").path)
 ''' if ark else ""}
+// ArkUI's Kotlin (ui/kotlin): under nix its libraries compiled once
+// (`packages.arkui-kotlin`, ui/kotlin/android), a directory of jars passed as
+// `-ParkuiLib` and linked; a build that says none compiles ui/kotlin's
+// sources as part of the app.
+val arkuiLib: String? = providers.gradleProperty("arkuiLib").orNull
+
 android {{
     namespace = "{pkg}"
     compileSdk = {andr.get("target-sdk", 35)}
@@ -547,6 +557,8 @@ android {{
 
 dependencies {{
 {chr(10).join(dep(d) for d in deps)}
+    // ArkUI's jars (`arkuiLib`), when nix built them.
+    if (arkuiLib != null) implementation(fileTree(arkuiLib) {{ include("*.jar") }})
 
     constraints {{
         implementation("org.jetbrains.kotlin:kotlin-stdlib-jdk7:2.0.21")

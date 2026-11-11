@@ -3,17 +3,28 @@
 What every Ark app on Android shares, with nothing of any app in it: the
 Kotlin twin of `ui/rust/arkui` and of ArkUI for SwiftUI (`ui/swift`).
 Package `dev.arkui`, on Compose and Material 3 alone — no ArkDB, no
-kernel. Its sources are `src/dev/arkui/`, and each app compiles them as
-part of itself (`kotlin.srcDir` in its `app/build.gradle.kts`, and
-`shared = [ "ui/kotlin" ]` in the flake's `androidApp`):
+kernel. Its sources are `src/dev/arkui/` and `shots/` (the screenshot
+mode every app has, Android's framework alone), and its apps are:
 
 - `harken/android`, which this was drawn out of;
 - `money/android`;
+- `revelation` (`shots/` alone);
 - `showcase/android`, the docs' captures of the components.
 
-There is no Gradle library project yet: a source directory several apps
-compile is one fewer moving part than a module each depends on, while
-every app's Maven graph is the same.
+**Built once, linked by every app.** `android/` is a Gradle project of two
+Android libraries, `:shots` and `:arkui` (over `:shots`). nix builds each
+as a derivation of its own (flake.nix, `arkuiKotlin`:
+`packages.arkui-kotlin-shots`, `packages.arkui-kotlin`), its classes a jar,
+and passes the directory of jars to every app's Gradle as `-ParkuiLib`:
+the APK's, the tests' and the screenshots' builds of each app link them
+rather than compiling these sources again. Each library's source is only
+its own directory, so an edit to `shots/` rebuilds both and every app, an
+edit to `src/` rebuilds `arkui` and the apps that draw with it, not
+revelation. Its Maven graph is `android/deps.json` (`nix run
+.#arkui-kotlin-deps` records it again). A build that says no `arkuiLib` — a
+laptop's, the showcase's — still compiles the sources in as part of the
+app (`kotlin.srcDir` in its `app/build.gradle.kts`), so a change here is
+seen in Android Studio at once.
 
 ## What is here
 

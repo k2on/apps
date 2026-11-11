@@ -16,6 +16,14 @@ plugins {
  */
 val harkenLib: String = providers.gradleProperty("harkenLib").getOrElse(rootProject.file("../ffi/android").path)
 
+/**
+ * arkui, the look every Ark app on Android shares (ui/kotlin): under nix, its libraries compiled
+ * once (`packages.arkui-kotlin`, ui/kotlin/android), a directory of jars passed as `-ParkuiLib`
+ * and linked; a laptop's build, which says none, compiles ui/kotlin from its sources as part of
+ * this app.
+ */
+val arkuiLib: String? = providers.gradleProperty("arkuiLib").orNull
+
 android {
     namespace = "dev.harken.android"
     compileSdk = 35
@@ -114,10 +122,11 @@ android {
             // The kernel, per ABI, and the Kotlin over it.
             jniLibs.srcDir("$harkenLib/jniLibs")
             kotlin.srcDir("$harkenLib/kotlin")
-            // arkui, the look every Ark app on Android shares (ui/kotlin), compiled from its
-            // sources as part of this app.
-            kotlin.srcDir(rootProject.file("../../ui/kotlin/src"))
-            kotlin.srcDir(rootProject.file("../../ui/kotlin/shots"))
+            // arkui from its sources, where it is not linked prebuilt (`arkuiLib`).
+            if (arkuiLib == null) {
+                kotlin.srcDir(rootProject.file("../../ui/kotlin/src"))
+                kotlin.srcDir(rootProject.file("../../ui/kotlin/shots"))
+            }
         }
     }
 }
@@ -126,6 +135,8 @@ dependencies {
     // What UniFFI's Kotlin calls the library through, with its native part
     // for every Android ABI.
     implementation("net.java.dev.jna:jna:5.17.0@aar")
+    // arkui's jars (`arkuiLib`), when nix built them.
+    if (arkuiLib != null) implementation(fileTree(arkuiLib) { include("*.jar") })
 
     val composeBom = platform("androidx.compose:compose-bom:2024.12.01")
     implementation(composeBom)
