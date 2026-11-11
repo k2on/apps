@@ -351,7 +351,14 @@ sign_in() {
     says "$server" && break
     echo "$app: the address did not reach the field (try $try)"
   done
-  tap Continue
+  # Sent with the keyboard's Enter, as the field sends it (its IME
+  # action), as the iPhone's driver sends Go; Continue only if, a few
+  # seconds on, the page has still not moved. The tablet's and the Fold's
+  # first-run page drew its Continue with no text a dump can read (dry run
+  # 43105302139: "nothing on the screen says 'Continue'"), the phone's with.
+  adb shell input keyevent 66
+  sleep 4
+  if says "$server" && says Continue; then tap Continue 2 || true; fi
   echo "  sign-in: the address sent ($((SECONDS - t))s)"
   # The server checked, then its sign-in: an app may open the browser by
   # itself, or wait for the button.
