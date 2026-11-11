@@ -29,6 +29,9 @@ pub struct FirstRun {
     copy: WelcomeCopy,
     /// The page of what the app is that shows; past the last, none.
     intro: usize,
+    /// Its pages asked for by their route (`/welcome/`): shown over
+    /// wherever the machine stands, until they are walked or skipped.
+    asked: bool,
 }
 
 impl FirstRun {
@@ -38,7 +41,22 @@ impl FirstRun {
             machine: Onboarding::new(app),
             copy,
             intro: 0,
+            asked: false,
         }
+    }
+
+    /// The app's pages passed over: a launch that goes straight to a
+    /// route, a link or a screenshot's, as a returning person's would.
+    pub fn skip_intro(&mut self) {
+        self.intro = self.copy.pages.len();
+        self.asked = false;
+    }
+
+    /// The app's pages from the first, over wherever the machine stands:
+    /// their route (`/welcome/`).
+    pub fn show_intro(&mut self) {
+        self.intro = 0;
+        self.asked = !self.copy.pages.is_empty();
     }
 
     /// The machine, for what it remembers and where it stands.
@@ -49,11 +67,12 @@ impl FirstRun {
     /// One of the machine's events (what an effect came to, a link opened).
     pub fn event(&mut self, e: Event) -> Vec<Effect> {
         // Anything the machine was told past its first page skips the app's.
-        if !matches!(e, Event::Typed { .. }) && !matches!(self.machine.step(), Step::Server { .. }) {
+        // (Unless they were asked for by their route: then they stay.)
+        if !self.asked && !matches!(e, Event::Typed { .. }) && !matches!(self.machine.step(), Step::Server { .. }) {
             self.intro = self.copy.pages.len();
         }
         let fx = self.machine.next(e);
-        if !matches!(self.machine.step(), Step::Server { .. }) {
+        if !self.asked && !matches!(self.machine.step(), Step::Server { .. }) {
             self.intro = self.copy.pages.len();
         }
         fx
@@ -64,10 +83,11 @@ impl FirstRun {
         let event = match msg {
             WelcomeMsg::Next => {
                 self.intro = (self.intro + 1).min(self.copy.pages.len());
+                self.asked &= self.intro < self.copy.pages.len();
                 return Asked::default();
             }
             WelcomeMsg::Skip => {
-                self.intro = self.copy.pages.len();
+                self.skip_intro();
                 return Asked::default();
             }
             WelcomeMsg::ScanCode => return Asked { effects: vec![], scan: true },
@@ -98,27 +118,33 @@ impl FirstRun {
         }
     }
 
+    /// The app's page of what it is that shows.
+    fn intro_page(&self) -> WelcomePage {
+        let c = &self.copy;
+        let none = WelcomePage::none();
+        let p = &c.pages[self.intro];
+        let last = self.intro + 1 == c.pages.len();
+        WelcomePage {
+            intro: Some(IntroPage {
+                glyph: p.glyph.clone(),
+                title: p.title.clone(),
+                text: p.text.clone(),
+                place: (c.pages.len() > 1).then(|| format!("{} of {}", self.intro + 1, c.pages.len())),
+                next: if last { "Get Started" } else { "Continue" }.into(),
+                skippable: !last,
+            }),
+            ..none
+        }
+    }
+
     /// The page that shows now; none while the app itself does.
     pub fn page(&self) -> WelcomePage {
         let c = &self.copy;
         let said = self.machine.said();
         let none = WelcomePage::none();
         match self.machine.step() {
-            Step::Server { .. } if self.intro < c.pages.len() => {
-                let p = &c.pages[self.intro];
-                let last = self.intro + 1 == c.pages.len();
-                WelcomePage {
-                    intro: Some(IntroPage {
-                        glyph: p.glyph.clone(),
-                        title: p.title.clone(),
-                        text: p.text.clone(),
-                        place: (c.pages.len() > 1).then(|| format!("{} of {}", self.intro + 1, c.pages.len())),
-                        next: if last { "Get Started" } else { "Continue" }.into(),
-                        skippable: !last,
-                    }),
-                    ..none
-                }
-            }
+            _ if self.asked && self.intro < c.pages.len() => self.intro_page(),
+            Step::Server { .. } if self.intro < c.pages.len() => self.intro_page(),
             Step::Server { typed, checking, error } => WelcomePage {
                 server: Some(ServerPage {
                     glyph: c.glyph.clone(),
@@ -338,6 +364,29 @@ mod tests {
         f.scanned(Some("money://join?server=http%3A%2F%2Fmoney.example.com".into()));
         let c = f.page().confirm.unwrap();
         assert!(!c.can_join && c.title == "Can't Join" && c.sentence.contains("https"));
+    }
+
+    /// A launch that goes straight to a route or a screenshot skips the
+    /// pages; their route shows them over the app itself, and walking or
+    /// skipping them puts them away. Falsified by the pages standing in
+    /// front of the server's address after `skip_intro`.
+    #[test]
+    fn the_pages_are_skipped_by_a_launch_and_shown_by_their_route() {
+        let mut f = FirstRun::new(app(), copy(2));
+        f.skip_intro();
+        launched(&mut f, Remembered::default());
+        assert!(f.page().server.is_some(), "straight to the server's address");
+        f.send(WelcomeMsg::TryDemo);
+        assert!(!f.page().shows(), "the app itself");
+        f.show_intro();
+        assert_eq!(f.page().intro.unwrap().title, "Page 0", "over the app");
+        f.send(WelcomeMsg::Next);
+        assert_eq!(f.page().intro.unwrap().title, "Page 1");
+        f.send(WelcomeMsg::Next);
+        assert!(!f.page().shows(), "walked: the app again");
+        f.show_intro();
+        f.send(WelcomeMsg::Skip);
+        assert!(!f.page().shows());
     }
 
     #[test]

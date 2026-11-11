@@ -197,7 +197,7 @@ fun MoneyApp(book: Book, onSignOut: () -> Unit, addDevice: suspend () -> dev.ark
         }
         Navigator(nav, ::destination).handle(link, "money", ::routeFromUrl) { r ->
             when (r) {
-                is Route.Join -> true
+                is Route.Join, is Route.Welcome -> true
                 is Route.Budget -> true.also { sections.send(ShellMsg.Select(tag = "budget")) }
                 // Category Details, the shell's inspector, over the budget.
                 is Route.Category -> true.also {

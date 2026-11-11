@@ -924,6 +924,18 @@ macro_rules! first_run_app {
                 self.run().scanned(text)
             }
 
+            /// The app's pages passed over: a launch straight to a route,
+            /// a link or a screenshot's, as a returning person's would.
+            pub fn skip_intro(&self) {
+                self.run().skip_intro()
+            }
+
+            /// The app's pages from the first, over wherever it stands:
+            /// their route (`/welcome/`).
+            pub fn show_intro(&self) {
+                self.run().show_intro()
+            }
+
             pub fn step(&self) -> $crate::ark_auth::onboarding::Step {
                 self.run().machine().step()
             }

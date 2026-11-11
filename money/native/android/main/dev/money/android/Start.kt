@@ -128,7 +128,22 @@ class Start(app: Application) : AndroidViewModel(app) {
     val browse: StateFlow<String?> = _browse.asStateFlow()
 
     init {
+        // A screenshot's launch goes past money's pages, as a returning person's would; their
+        // route shows them (`money://welcome`).
+        if (dev.arkui.Shots.on) machine.skipIntro()
         send(Event.Launched(kept.remembered, null, false))
+    }
+
+    /** money's pages from the first, over wherever the app stands: their route. */
+    fun showIntro() {
+        machine.showIntro()
+        moved()
+    }
+
+    /** Past money's pages: a link that goes straight where it says. */
+    fun skipIntro() {
+        machine.skipIntro()
+        moved()
     }
 
     /** An event from a screen, the browser, a link or the app's phase. */

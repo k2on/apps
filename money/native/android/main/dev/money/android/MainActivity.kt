@@ -39,6 +39,8 @@ class MainActivity : ComponentActivity() {
     private val start: Start by viewModels()
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        // Whether this is a screenshot's launch, before the start is made: it goes past money's pages.
+        dev.arkui.Shots.read(intent)
         holdSplashUntil {
             when (start.step.value) {
                 is Step.Running, is Step.Demo -> start.book.value?.state?.value?.ready ?: false
@@ -73,7 +75,10 @@ class MainActivity : ComponentActivity() {
         val data = i?.data ?: return null
         if (data.scheme != MONEY.scheme) return null
         if (data.host == "auth") return data.getQueryParameter("code")?.takeIf { it.isNotEmpty() }?.let { Event.Code(it) }
-        val join = dev.arkui.Navigator.routeOf(data.toString(), MONEY.scheme, { uniffi.money_bridge.routeFromUrl(it) }) as? uniffi.money_bridge.Route.Join
+        val route = dev.arkui.Navigator.routeOf(data.toString(), MONEY.scheme, { uniffi.money_bridge.routeFromUrl(it) })
+        // money's pages, by their route; any other link goes straight where it says, past them.
+        if (route is uniffi.money_bridge.Route.Welcome) start.showIntro() else start.skipIntro()
+        val join = route as? uniffi.money_bridge.Route.Join
         return join?.let { Event.Joined(it.server, it.code) }
     }
 }
@@ -116,6 +121,9 @@ fun StartScreens(
     onSignOut: () -> Unit,
     addDevice: suspend () -> DeviceLinkShown = { DeviceLinkShown(null, 0, emptyList(), "Sign in first.") },
 ) {
+    val page by first.page.collectAsStateWithLifecycle()
+    // money's pages over the app itself when their route asked for them.
+    if (page.intro != null && (step is Step.Running || step is Step.Demo)) return WelcomeScreen(first)
     when (step) {
         is Step.Running, is Step.Demo -> {
             val b = book ?: return

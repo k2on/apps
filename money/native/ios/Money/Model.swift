@@ -24,6 +24,8 @@ final class Model: ObservableObject {
     @Published private(set) var said = Said(question: nil, status: nil, error: nil)
     /// The first run's page, as the generated WelcomeView reads it.
     let first = FirstRunScreen()
+    /// money's pages of what it is show (over the app, when their route asked).
+    @Published private(set) var introShown = false
     /// "Scan a Code" asked: the camera's code scanner up, its text to [scanned].
     @Published var scanning = false
     @Published private(set) var snapshot = Snapshot()
@@ -80,7 +82,7 @@ final class Model: ObservableObject {
 
     /// The model over `shelf` (the app's `UserDefaults`), replicas under
     /// `root`; on the demo for this launch alone when `demoLaunch`.
-    init(shelf: Shelf, root: URL, demoDay: String? = nil, demoLaunch: Bool = false, scan: Bool = false,
+    init(shelf: Shelf, root: URL, demoDay: String? = nil, demoLaunch: Bool = false, scan: Bool = false, intro: Bool = true,
          deliver: @escaping (@escaping () -> Void) -> Void = { DispatchQueue.main.async(execute: $0) }) {
         machine = FirstRunApp(app: .money, scan: scan, demo: true)
         kept = Kept(shelf)
@@ -92,6 +94,9 @@ final class Model: ObservableObject {
         month = Months.of(demoDay ?? moneyToday())
         let remembered = demoLaunch ? Remembered(server: nil, login: nil, demo: true) : kept.remembered
         first.press = { [weak self] m in self?.press(m) }
+        // A screenshot's launch, or the demo's, goes past money's pages, as
+        // a returning person's would; their route shows them (`money://welcome`).
+        if !intro || demoLaunch { machine.skipIntro() }
         send(.launched(remembered: remembered, code: nil, returned: false))
     }
 
@@ -125,6 +130,7 @@ final class Model: ObservableObject {
         step = machine.step()
         said = machine.said()
         first.page = machine.page()
+        introShown = first.page.intro != nil
     }
 
     private func carry(_ e: Effect) {
@@ -171,6 +177,13 @@ final class Model: ObservableObject {
     /// A join link of another scheme (a page's `https://…/join?…`) joins too.
     func open(url: URL) {
         if let code = Probe.code(url, scheme: AppInfo.money.scheme) { return send(.code(code: code)) }
+        if case .welcome? = Navigator<Route>.route(of: url, scheme: AppInfo.money.scheme, parse: { routeFromUrl(url: $0) }) {
+            machine.showIntro()
+            return moved()
+        }
+        // Any other link goes straight where it says: past money's pages.
+        machine.skipIntro()
+        moved()
         if let args = Navigator<Route>.launchArgs(of: url, scheme: AppInfo.money.scheme) {
             launchLink = args
             return
@@ -197,6 +210,7 @@ final class Model: ObservableObject {
     /// is the sign-in machine's ([open(url:)]), and is not navigated to.
     func takes(_ route: Route) -> Bool {
         if case .join = route { return true }
+        if case .welcome = route { return true }
         return false
     }
 

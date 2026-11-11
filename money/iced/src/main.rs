@@ -858,7 +858,7 @@ impl App {
             Route::Filter { .. } => Page::Ledger(Ledger::Saved(self.peer.filters().iter().find(|f| route.names(&f.id.hex(), &f.name))?.id)),
             Route::Filtered => Page::Ledger(Ledger::Adhoc),
             // A sign-in link is the onboarding's, not a page.
-            Route::Join { .. } => return None,
+            Route::Join { .. } | Route::Welcome => return None,
         })
     }
 

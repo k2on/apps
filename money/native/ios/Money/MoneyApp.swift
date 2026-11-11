@@ -32,7 +32,7 @@ struct MoneyApp: App {
         // iPhone's and the iPad's reference screens, on the reference's day).
         let demo = UserDefaults.standard.string(forKey: "demo")
         let model = Model(shelf: DefaultsShelf(), root: support, demoDay: demo.flatMap { $0.count == 10 ? $0 : nil },
-                          demoLaunch: demo != nil, scan: QrScanner.available)
+                          demoLaunch: demo != nil, scan: QrScanner.available, intro: !Shots.on)
         let camera = PhoneCamera()
         camera.answered = { [weak model] in model?.receipts?.answered() }
         model.devices = Devices(haptics: PhoneHaptics(), clipboard: PhoneClipboard(), share: PhoneShare(), camera: camera)
@@ -102,10 +102,15 @@ struct Root: View {
 
     var body: some View {
         SwiftUI.Group {
-            switch model.step {
-            case .running, .demo: Shell()
-            // The first run's pages every Ark app shares (generated from ark_app::welcome).
-            default: WelcomeView().environmentObject(model.first)
+            // money's pages over the app itself when their route asked for them.
+            if model.introShown {
+                WelcomeView().environmentObject(model.first)
+            } else {
+                switch model.step {
+                case .running, .demo: Shell()
+                // The first run's pages every Ark app shares (generated from ark_app::welcome).
+                default: WelcomeView().environmentObject(model.first)
+                }
             }
         }
         // "Scan a Code": another device's join code, asked about before it is used.

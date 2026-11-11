@@ -42,6 +42,11 @@
           "role": "tab"
         }
       ]
+    },
+    {
+      "id": "welcome",
+      "fresh": true,
+      "route": "welcome/"
     }
   ],
   "desktop": {

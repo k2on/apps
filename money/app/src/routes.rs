@@ -49,6 +49,9 @@ pub enum Route {
     Bank { name: String },
     #[route("/settings")]
     Settings,
+    /// What money is: its first run's pages, over wherever it stands.
+    #[route("/welcome")]
+    Welcome,
     /// Sign in to a server from a link or a QR code: `/join/?server=…&code=…`.
     /// Not a page: a shell hands it to the onboarding.
     #[route("/join?server=:server&code=:code")]
@@ -67,6 +70,7 @@ impl Route {
             Route::Banks => "Bank Connections".into(),
             Route::Settings => "Settings".into(),
             Route::Join { .. } => "Sign In".into(),
+            Route::Welcome => "Welcome".into(),
             Route::Account { name, .. } | Route::Filter { name, .. } | Route::Category { name, .. } | Route::Bank { name } => name.clone(),
         }
     }
@@ -160,6 +164,7 @@ mod tests {
             Route::Banks,
             Route::Bank { name: "Chase".into() },
             Route::Settings,
+            Route::Welcome,
             Route::Join {
                 server: "https://money.example.com:8443/household/?a=1&b=2".into(),
                 code: Some("XK-42 9".into()),
