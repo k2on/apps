@@ -258,7 +258,7 @@ struct Shell: View {
         case let .budget(msg): model.budget?.send(msg)
         case .refresh: Task { await model.refresh() }
         case let .reconcile(account): present(.reconcile(Id(account)))
-        case .review, .filter, .importReceipt: break
+        case .review, .filter, .importReceipt, .keepPhoto: break
         }
     }
 

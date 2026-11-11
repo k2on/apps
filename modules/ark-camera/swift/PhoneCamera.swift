@@ -143,7 +143,8 @@ private final class WatchController: UIViewController, AVCaptureVideoDataOutputS
     private let queue = DispatchQueue(label: "ark-camera.frames")
     private let watched = CameraLook()
     private var preview: AVCaptureVideoPreviewLayer?
-    private var answered = false
+    /// The reply given: nothing more is said, whatever comes after.
+    private var done = false
     private var taking = false
 
     /// About how wide a frame is shown to the eyes.
@@ -252,8 +253,8 @@ private final class WatchController: UIViewController, AVCaptureVideoDataOutputS
     }
 
     private func fail(_ why: String) {
-        guard !answered else { return }
-        answered = true
+        guard !done else { return }
+        done = true
         session.stopRunning()
         dismiss(animated: true)
         reply.failed(why: why)
@@ -261,8 +262,8 @@ private final class WatchController: UIViewController, AVCaptureVideoDataOutputS
     }
 
     private func finish(_ jpeg: Data?) {
-        guard !answered else { return }
-        answered = true
+        guard !done else { return }
+        done = true
         queue.async { self.session.stopRunning() }
         dismiss(animated: true)
         reply.taken(jpeg: jpeg)
