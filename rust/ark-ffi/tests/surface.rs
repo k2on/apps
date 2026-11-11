@@ -403,7 +403,7 @@ fn two_attaches_share_one_runtime_and_detaching_leaves_it_running() {
     assert_eq!(process.attached(), 0);
     assert!(process.running(), "the runtime outlives its UI");
     assert!(Arc::ptr_eq(&process.peer().unwrap(), &a));
-    process.close();
+    process.sign_out();
     assert!(!process.running());
     process.open("one", open).unwrap();
     assert_eq!(process.opened(), 2, "made again after a sign-out");

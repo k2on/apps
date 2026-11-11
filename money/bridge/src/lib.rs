@@ -112,7 +112,7 @@ pub fn money_open(dir: String, login: Option<Login>) -> Result<Arc<Peer>, Refusa
 /// (`ark_ffi::ArkProcess::shared`): opened the first time, the same peer
 /// for every Activity, Scene or window after, and running while none
 /// shows; another `dir` (another server) lets the old one go. Signing out
-/// is `ArkProcess::shared().close()`.
+/// is `ArkProcess::shared().sign_out()`.
 #[uniffi::export]
 pub fn money_process_open(dir: String, login: Option<Login>) -> Result<Arc<Peer>, Refusal> {
     ark_ffi::ArkProcess::shared().open(&dir.clone(), || money_open(dir, login))

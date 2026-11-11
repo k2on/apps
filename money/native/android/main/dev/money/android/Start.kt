@@ -266,7 +266,7 @@ class Start(app: Application) : AndroidViewModel(app) {
     fun signOut() {
         _book.value?.logout()
         // The process's runtime put away with the login: the next sign-in opens it again.
-        dev.arkdb.ffi.ArkProcess.shared().close()
+        dev.arkdb.ffi.ArkProcess.shared().signOut()
         send(Event.SignOut)
     }
 

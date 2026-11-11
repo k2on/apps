@@ -18,7 +18,7 @@
 //! An app reaches its runtime by [`ArkProcess::open`] with how to open it
 //! (its domain's config and disk, in its own crate: money's
 //! `money_process_open`); a second open is the first's peer. Sign-out puts
-//! it away ([`ArkProcess::close`]) and the next open makes a fresh one.
+//! it away ([`ArkProcess::sign_out`]) and the next open makes a fresh one.
 
 use std::any::Any;
 use std::sync::{Arc, Mutex, OnceLock};
@@ -104,7 +104,7 @@ impl ArkProcess {
 
     /// The process's runtime as `key` (its disk: one server's replica),
     /// its peer opened by `open` the first time and the same peer every
-    /// time after, until [`ArkProcess::close`]; asked as another key (the
+    /// time after, until [`ArkProcess::sign_out`]; asked as another key (the
     /// app moved to another server), the old one is let go first.
     pub fn open(&self, key: &str, open: impl FnOnce() -> Result<Arc<Peer>, Refusal>) -> Result<Arc<Peer>, Refusal> {
         let mut i = self.lock();
@@ -208,7 +208,7 @@ impl ArkProcess {
     /// Put away (signed out): its peer and its parts let go — closed once
     /// nothing else holds them — and the next open makes it again. The
     /// attached UIs stay attached.
-    pub fn close(&self) {
+    pub fn sign_out(&self) {
         let gone = {
             let mut i = self.lock();
             (i.peer.take(), std::mem::take(&mut i.parts))

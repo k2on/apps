@@ -323,7 +323,7 @@ final class Bridge {
         onPeer { p, _ in
             p.logout()
             // The process's runtime put away with the login: the next sign-in opens it again.
-            ArkProcess.shared().close()
+            ArkProcess.shared().signOut()
         }
     }
 
