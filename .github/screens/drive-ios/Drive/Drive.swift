@@ -303,6 +303,14 @@ final class Drive: XCTestCase {
     /// Signed in through the server's page, if the app shows it, and past
     /// arkui's "Sign In".
     private func signedIn(_ app: XCUIApplication, server: String, user: String, out: URL) throws {
+        // The first run's pages of what the app is (ark_app::welcome's
+        // intro), passed by its Skip.
+        let skip = app.buttons["Skip"]
+        if skip.exists {
+            let g = try ready(app)
+            skip.tap()
+            try ready(app, after: g)
+        }
         // The server's page: its one text field, whatever an app labels it.
         let field = app.textFields.firstMatch
         guard field.waitForExistence(timeout: 20) else { return }

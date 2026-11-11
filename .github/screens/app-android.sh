@@ -339,6 +339,8 @@ listen
 sign_in() {
   local t=$SECONDS
   open_app
+  # The first run's pages of what the app is (ark_app::welcome's intro), passed by its Skip.
+  if says Skip; then tap Skip 2 || true; ready || true; fi
   for try in 1 2 3; do
     tap --field
     sleep 1
