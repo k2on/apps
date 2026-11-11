@@ -180,8 +180,8 @@ ui/rust/module/       crate ark-module: Op, ModuleError, Reply, Modules — the 
 modules/<name>/
 ├── Cargo.toml        crate ark-<name>: the trait, its operations, its fake; desktop/web impls behind features
 ├── src/
-├── swift/            the iPhone's and the Mac's implementation (compiled into the app, not a package)
-├── kotlin/           Android's implementation (compiled into the app)
+├── swift/            the iPhone's and the Mac's implementation (nix: a module per app over its bindings, `ArkBindings`; Xcode: compiled into the app)
+├── kotlin/           Android's implementation (compiled into the app: it implements its bindings' interface)
 ├── module.toml       its crate, its [ops] and their outputs, and what it asks of each platform
 └── README.md         its API, what it does on each platform, the permissions it needs
 ```
