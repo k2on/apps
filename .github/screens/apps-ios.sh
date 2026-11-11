@@ -35,8 +35,12 @@ results=${RESULTS:-$(mktemp -d)}
 mkdir -p "$results" "$out"
 derived=${DRIVER:-$(mktemp -d)}
 udid=$(xcrun simctl list devices booted -j | jq -r --arg d "$device" '[.devices[][] | select(.state == "Booted")] | (map(select(.name == $d)) + .)[0].udid')
-# The status bar as Apple's own screenshots have it, whatever the time.
-xcrun simctl status_bar "$udid" override --time 9:41 --batteryState charged --batteryLevel 100 --cellularBars 4 --wifiBars 3
+# The status bar as Apple's own screenshots have it, whatever the time; the
+# battery full and not charging, as Android's demo mode has it (`plugged
+# false`): a charging battery's bolt is drawn by an animation that runs
+# again and again (dry run 42929213705: money never ready, "moving
+# CALayer.contents CAKeyframeAnimation 0.8s", the status bar's).
+xcrun simctl status_bar "$udid" override --time 9:41 --batteryState discharging --batteryLevel 100 --cellularBars 4 --wifiBars 3
 
 # Each app's part of the plan (Drive.swift's `Entry`): one for the iPhone,
 # two for the iPad (upright, then on its side, signed in already).
