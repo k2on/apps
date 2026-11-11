@@ -73,6 +73,11 @@ its tree kept beside it. It is never how long a shot waits when all is well.
   household is made an hour and a minute before it is seeded, so "Synced
   1 hour ago" holds for the hour after (in the day's first hour, minutes
   still).
+- A system banner over the app (the simulator's own notices, "Ready for
+  Apple Intelligence"): the iPhone's and the iPad's driver looks for one in
+  SpringBoard before every picture, swipes it away and waits it out, and
+  fails the shot if it stays; the Android emulator's are hidden by demo
+  mode (`notifications visible false`).
 - What the system shows that is not the app: Android's own animations
   off, its status bar's icons all said, the launcher's home laid out
   before the app is installed; each iOS device pass on a server of its own

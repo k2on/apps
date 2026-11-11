@@ -165,6 +165,7 @@ final class Drive: XCTestCase {
                 try open(shot, in: app, entry: entry, out: out)
                 let opened = Date()
                 try ready(app)
+                try noBanner(shot.id)
                 let isReady = Date()
                 try app.screenshot().pngRepresentation.write(to: out.appendingPathComponent("\(shot.id).png"))
                 let pictured = Date()
@@ -233,6 +234,23 @@ final class Drive: XCTestCase {
                 app.typeText(text)
                 try ready(app, after: g)
             }
+        }
+    }
+
+    /// No system banner over the app when it is taken: a notification
+    /// SpringBoard shows on its own (run 43083062235: "Ready for Apple
+    /// Intelligence" over money's accounts) swiped away and waited out, a
+    /// few times; one that stays fails the shot rather than be kept in it.
+    private func noBanner(_ id: String) throws {
+        let banner = springboard.descendants(matching: .any)
+            .matching(NSPredicate(format: "identifier BEGINSWITH 'NotificationShortLook'")).firstMatch
+        for _ in 0..<3 where banner.exists {
+            print("Drive: a system banner over \(id) (\(banner.label)); put away")
+            banner.swipeUp()
+            _ = banner.waitForNonExistence(timeout: 10)
+        }
+        if banner.exists {
+            throw NSError(domain: "Drive", code: 6, userInfo: [NSLocalizedDescriptionKey: "a system banner stayed over \(id): \(banner.label)"])
         }
     }
 
