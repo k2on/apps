@@ -488,3 +488,39 @@ fn a_paused_player_is_idle() {
     assert_eq!(*rig.wakes.lock().unwrap(), Vec::<i64>::new(), "no step asked for");
     assert_eq!(rig.sound.heard().place.ms(), Some(7_000), "and it stands where it paused");
 }
+
+/// A phone's media stream, faked: a level and a mute.
+struct Stream(Mutex<Option<harken_player::Vol>>);
+
+impl harken_player::Knob for Stream {
+    fn volume(&self) -> Option<harken_player::Vol> {
+        *self.0.lock().unwrap()
+    }
+    fn set(&self, v: harken_player::Vol) {
+        *self.0.lock().unwrap() = Some(v);
+    }
+}
+
+/// Where the device has a volume of its own (a phone's media stream),
+/// that is its volume in the session — what it reports and what is set —
+/// and the player's gain is left alone; where it has none, the gain is.
+#[test]
+fn a_device_volume_is_the_session_s_not_the_gain() {
+    use harken_player::{Change, Level, Vol};
+    let rig = Rig::new();
+    let stream = Arc::new(Stream(Mutex::new(Some(Vol { level: 33, muted: false }))));
+    let mut sound = rig.sound.with_knob(stream.clone());
+    assert_eq!(sound.volume(), Some(Vol { level: 33, muted: false }), "the stream's, not the gain's 100");
+    sound.set_volume(Vol { level: 60, muted: false });
+    sound.alone(&Press::Loud {
+        level: Level::Here,
+        change: Change::By { delta: 10 },
+    });
+    assert_eq!(*stream.0.lock().unwrap(), Some(Vol { level: 70, muted: false }));
+    assert_eq!(rig.fake.take(), Vec::<String>::new(), "the gain untouched");
+
+    *stream.0.lock().unwrap() = None;
+    assert_eq!(sound.volume(), Some(Vol { level: 100, muted: false }), "no stream: the gain");
+    sound.set_volume(Vol { level: 40, muted: false });
+    assert_eq!(rig.fake.take(), ["volume 0.4"]);
+}

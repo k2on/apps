@@ -24,7 +24,15 @@ use serde_json::{json, Value};
 pub const JOG_BACK_S: u32 = 15;
 pub const JOG_FORWARD_S: u32 = 30;
 
-/// What the phone does for its player: steps again, and finds a cover.
+/// A volume, 0 to 100, and its mute.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, uniffi::Record)]
+pub struct Loudness {
+    pub level: i64,
+    pub muted: bool,
+}
+
+/// What the phone does for its player: steps again, finds a cover, and
+/// keeps the volume the session has for this phone.
 #[uniffi::export(with_foreign)]
 pub trait PlayerShell: Send + Sync {
     /// Step again in `in_ms` milliseconds (0: now): the player moved, or a
@@ -33,6 +41,26 @@ pub trait PlayerShell: Send + Sync {
     /// A track's cover by its album and its creator (a show's, for an
     /// episode), as an address the system can fetch; none for none.
     fn cover(&self, album: String, creator: String) -> Option<String>;
+    /// The phone's own volume where it has one anybody may set (Android's
+    /// media stream), the session's for this phone; none, and the player's
+    /// own gain is (an iPhone, whose system volume no app may set).
+    fn volume(&self) -> Option<Loudness>;
+    fn set_volume(&self, level: i64, muted: bool);
+}
+
+/// The shell's volume as the player's knob.
+struct Knob(Arc<dyn PlayerShell>);
+
+impl harken_player::Knob for Knob {
+    fn volume(&self) -> Option<harken_player::Vol> {
+        self.0.volume().map(|v| harken_player::Vol {
+            level: v.level,
+            muted: v.muted,
+        })
+    }
+    fn set(&self, v: harken_player::Vol) {
+        self.0.set_volume(v.level, v.muted)
+    }
 }
 
 /// A phone's end of the account's listening session.
@@ -73,8 +101,9 @@ impl Player {
     /// from now on, `shell` told when to step; none, nothing is.
     pub fn attach(&self, media: Option<Arc<dyn NativeMediaPlayer>>, server: String, shell: Option<Arc<dyn PlayerShell>>) {
         *self.shell.lock().unwrap_or_else(|e| e.into_inner()) = shell.clone();
+        let knob = shell.clone().map(|sh| Arc::new(Knob(sh)) as Arc<dyn harken_player::Knob>);
         let sound = media.map(|m| {
-            MediaSound::new(
+            let s = MediaSound::new(
                 ark_media_player::phone::port(m),
                 &server,
                 move |ms| {
@@ -83,7 +112,11 @@ impl Player {
                     }
                 },
                 ark_peer::now_ms,
-            )
+            );
+            match knob {
+                Some(k) => s.with_knob(k),
+                None => s,
+            }
         });
         let old = std::mem::replace(&mut *self.sound.lock().unwrap_or_else(|e| e.into_inner()), sound);
         // The system shows nothing of a player let go.

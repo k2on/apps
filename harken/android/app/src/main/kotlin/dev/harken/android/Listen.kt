@@ -24,6 +24,7 @@ import dev.harken.android.onboarding.ArkSession
 import android.os.Handler
 import android.os.Looper
 import dev.harken.ffi.Player as Reconciled
+import dev.harken.ffi.Loudness
 import dev.harken.ffi.PlayerShell
 import uniffi.ark_media_player.NativeMediaPlayer
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -124,7 +125,19 @@ class Listen(private val session: ArkSession, val name: String) {
             // A `content://` URI the app answers itself (CoverProvider.kt): what a car will load.
             override fun cover(album: String, creator: String): String? =
                 CarArt.uri(art(album, creator).takeIf { it.isNotEmpty() }?.let { Media.url(server, it) }, album.ifEmpty { creator }, CarArt.PLAYING).toString()
+
+            // The phone's media stream, the session's volume for this phone: read and written
+            // here, on the session's thread (AudioManager's calls are safe from any), so the
+            // reconciler reads back what it has just set. None without one: the player's gain.
+            override fun volume(): Loudness? = stream?.read()?.let { (level, muted) -> Loudness(level.toLong(), muted) }
+
+            override fun setVolume(level: Long, muted: Boolean) {
+                stream?.apply(level.toInt(), muted)
+            }
         }
+
+    /** The phone's media stream, as the session's 0 to 100: this phone's volume (the media service's). */
+    @Volatile var stream: StreamLevel? = null
 
     private val heardFlow = MutableStateFlow(Heard(me = me))
 

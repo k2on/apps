@@ -22,7 +22,7 @@ use ark_ffi::Peer;
 use ark_media_player::phone::{MediaListener, NativeMediaPlayer};
 use ark_media_player::{BrowseItem, MediaControls, MediaEvent, NowPlaying, RemoteCommand, RouteChange};
 use harken_domain::{Active, Clock, Id, Output, Present, Track};
-use harken_ffi::{Hall, Player, PlayerShell};
+use harken_ffi::{Hall, Loudness, Player, PlayerShell};
 use harken_player::{Change, Level, Press, SYNC_MS};
 use serde_json::{json, Value};
 
@@ -168,9 +168,10 @@ impl NativeMediaPlayer for Fake {
     }
 }
 
-/// The phone's end of its player: the wake it was last asked for, and a cover for anything.
+/// The phone's end of its player: the wake it was last asked for, a cover
+/// for anything, and (Android's) a media stream, or none (an iPhone's).
 #[derive(Default)]
-struct Shell(Mutex<Option<i64>>);
+struct Shell(Mutex<Option<i64>>, Mutex<Option<Loudness>>);
 
 impl PlayerShell for Shell {
     fn wake(&self, in_ms: i64) {
@@ -181,6 +182,16 @@ impl PlayerShell for Shell {
 
     fn cover(&self, album: String, _: String) -> Option<String> {
         Some(format!("{SERVER}/art/{album}.jpg"))
+    }
+
+    fn volume(&self) -> Option<Loudness> {
+        *self.1.lock().unwrap()
+    }
+
+    fn set_volume(&self, level: i64, muted: bool) {
+        if let Some(v) = self.1.lock().unwrap().as_mut() {
+            *v = Loudness { level, muted };
+        }
     }
 }
 
@@ -831,4 +842,48 @@ fn a_step_told_of_its_own_change_does_not_wait_on_itself() {
         .recv_timeout(std::time::Duration::from_secs(20))
         .expect("a step waited on itself");
     assert_eq!(loads, 1);
+}
+
+/// A phone with a media stream (Android's) has the stream's level as its
+/// volume in the session: said at its `equip`, and set by whoever moves
+/// it; the player's gain is never written.
+///
+/// Falsified by the shell's volume left out of the player (no knob): the
+/// phone said 100, its gain, where its stream was at 33.
+#[test]
+fn a_phone_with_a_stream_has_the_stream_s_level() {
+    let hall = Hall::new();
+    let dir = tempfile::tempdir().unwrap();
+    let said = json!({ "can_play": true, "id": "", "kind": "phone", "name": "phone", "user": "" }).to_string();
+    let peer = hall
+        .device(dir.path().to_str().unwrap().into(), "alice".into(), "phone".into(), said)
+        .unwrap();
+    let player = Player::new(peer.clone(), "phone".into(), None);
+    let sound = Fake::new();
+    let shell = Arc::new(Shell::default());
+    *shell.1.lock().unwrap() = Some(Loudness { level: 33, muted: false });
+    player.attach(Some(sound.clone()), SERVER.into(), Some(shell.clone()));
+    hall.carry();
+    let phone = Device {
+        hall: &hall,
+        peer,
+        player,
+        sound,
+        shell,
+        _dir: dir,
+    };
+    let desk = on(&hall, "desktop", false, "computer");
+    phone.reconcile();
+    assert_eq!(phone.me("phone").volume, 33, "the stream's level, said at its equip");
+    desk.press(Press::Loud {
+        level: Level::Device { id: "phone".into() },
+        change: Change::To { level: 60 },
+    });
+    phone.reconcile();
+    assert_eq!(
+        *phone.shell.1.lock().unwrap(),
+        Some(Loudness { level: 60, muted: false }),
+        "set on the stream"
+    );
+    assert_eq!(phone.sound.s().volume, None, "the gain never written");
 }

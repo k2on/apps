@@ -152,11 +152,23 @@ class PlaybackService : ArkMediaService() {
     /** The app's session, held for as long as this service lives; none while nobody is signed in. */
     private var hold: Hold? = null
 
+    /** The phone's media stream, handed to whichever session's listening is followed. */
+    private var stream: StreamLevel? = null
+
+    /** Stop ringing the reconciler when the phone's media stream moves. */
+    private var unwatch: () -> Unit = {}
+
     override fun onCreate() {
         super.onCreate()
         val made = session ?: return
         // This service is the module's: the player needs no controller of its own to keep it.
         media = PhoneMediaPlayer(this, service = null)
+        // The phone's own volume, a device's of the session: its media stream, which the
+        // reconciler follows and reports — rung whenever a volume setting moves, since what moved
+        // it is read from the stream itself.
+        val music = MusicStream(this)
+        stream = StreamLevel(music)
+        unwatch = music.watch { Listen.current.value?.poke() }
         remote = RemotePlayer(mainLooper)
         val open =
             PendingIntent.getActivity(
@@ -233,6 +245,7 @@ class PlaybackService : ArkMediaService() {
             return
         }
         remote.listen = l
+        l.stream = stream
         l.attach(media)
         try {
             l.heard.collect { h ->
@@ -467,6 +480,7 @@ class PlaybackService : ArkMediaService() {
 
     override fun onDestroy() {
         scope.cancel()
+        unwatch()
         if (::media.isInitialized) Listen.current.value?.detach(media)
         if (::remote.isInitialized) remote.release()
         // Nothing plays and nothing is bound: the session closes, unless the activity holds it.
