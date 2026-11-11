@@ -367,7 +367,7 @@ jobs:
   # Linux runner while build's own APK jobs queued for one (twenty-two
   # minutes in app-screens 42959400546) and asked the API for its
   # artifacts until it refused them.
-  # Each app's server, its <app>/screens/server.sh's packages as the
+  # Each app's server, its <app>/demo/server.sh's packages as the
   # Android and desktop jobs start them, and the crates both desktop windows
   # link (flake.nix, `screens-crates`, at the commit they are built from),
   # built once and pushed before those jobs and the kernels' fan out: with
@@ -405,7 +405,7 @@ jobs:
       - name: Build the servers and the windows' crates
         run: |
           refs=()
-          for f in */screens/server.sh; do
+          for f in */demo/server.sh; do
             while read -r p; do refs+=(".#$p"); done < <(grep -o '\.#[A-Za-z0-9_-]*' "$f" | cut -c3- | sort -u)
           done
           # A commit from before `screens-crates` has none to build.
@@ -934,49 +934,6 @@ jobs:
         name: The simulator, booted
         run: bash .github/screens/meanwhile.sh wait boot
 
-      # Under the iPhone's shots, so neither waits for them: the iPad
-      # booted, ready when they end (the newest iPad Pro 13-inch of the
-      # pinned Xcode's iOS, else an iPad Air 13-inch, else the newest iPad:
-      # ios-runtime.sh), and the Mac's own window of each app whose commit
-      # has a Mac build (`<app>-macos`, built with the iPhone's by
-      # ios-build.sh), which needs no simulator: signed in to servers of its
-      # own (PORT_OFFSET), so nothing it does is the iPhone's.
-      - if: ${{ !cancelled() && steps.open.outputs.open == 'true' }}
-        name: Start booting the iPad, and the Mac's windows
-        run: |
-          # What the Mac has to spare while they overlap: free memory and
-          # swap every 30 seconds, printed with the servers' logs.
-          nohup bash -c 'while :; do echo "$(date +%T) $(memory_pressure -Q 2> /dev/null | tail -n 1) $(sysctl -n vm.swapusage)"; sleep 30; done' > "$RUNNER_TEMP/memory.log" 2>&1 < /dev/null &
-          if [ -n "$IPAD_APPS" ]; then
-            bash .github/screens/meanwhile.sh start ipad-boot bash -c '
-              rt=$(bash .github/screens/ios-runtime.sh)
-              read -r udid name < <(xcrun simctl list devices available -j | jq -r --arg rt "$rt" "
-                .devices[\$rt] as \$d
-                | [\"^iPad Pro 13-inch\", \"^iPad Air 13-inch\", \"^iPad\"]
-                | map(. as \$p | \$d | map(select(.name | test(\$p))) | sort_by(.name) | last) | map(select(. != null)) | first
-                | \"\(.udid) \(.name)\"")
-              echo "Booting $name ($udid)"
-              echo "$udid $name" > "$RUNNER_TEMP/ipad"
-              start=$(date +%s)
-              xcrun simctl boot "$udid" && xcrun simctl bootstatus "$udid" -b > /dev/null
-              echo "booted in $(( $(date +%s) - start ))s"'
-          fi
-          mac=$(find "$RUNNER_TEMP/apps" -mindepth 1 -maxdepth 1 -name 'macos-*' 2> /dev/null | sed 's|.*/macos-||' | tr '\n' ' ')
-          echo "MAC_APPS=${mac% }" >> "$GITHUB_ENV"
-          if [ -n "${mac// /}" ]; then
-            BUILT="$RUNNER_TEMP/apps" PORT_OFFSET=100 bash .github/screens/meanwhile.sh start mac bash -c '
-              for a in "$@"; do
-                [ -f "$a/demo/server.sh" ] && PORT_OFFSET=100 bash .github/screens/app-server.sh "$a" "$RUNNER_TEMP/server/mac-$a"
-              done
-              start=$(date +%s)
-              bash .github/screens/apps-mac.sh "$RUNNER_TEMP/out" src "$@"
-              code=$?
-              echo "the Mac windows took $(( $(date +%s) - start ))s"
-              exit $code' mac $mac
-          else
-            echo "no app has a Mac build: no Mac window"
-          fi
-
       # Each app in turn on the one simulator (apps-ios.sh); one that fails
       # is said, and the others still taken.
       # Each capture step has a limit of its own, so one that hangs fails in
@@ -995,10 +952,12 @@ jobs:
           path: ${{ runner.temp }}/out/*/ios/
           if-no-files-found: ignore
 
-      # The iPad's, after the iPhone's: the iPhone shut down, the iPad booted
-      # under its shots; each app whose build takes it, in portrait and then
-      # on its side, light and dark, on the same driver (apps-ios.sh,
-      # FAMILY=ipad).
+      # The iPad's, after the iPhone's: the iPhone shut down and only then
+      # the iPad booted (not under the iPhone's shots, which a second
+      # simulator would slow), the newest iPad Pro 13-inch (else an iPad Air
+      # 13-inch, else the newest iPad); each app whose build takes it, in
+      # portrait and then on its side, light and dark, on the same driver
+      # (apps-ios.sh, FAMILY=ipad).
       - if: ${{ !cancelled() && steps.open.outputs.open == 'true' && env.IPAD_APPS != '' }}
         name: Capture (iPad)
         timeout-minutes: 40
@@ -1006,8 +965,7 @@ jobs:
           RESULTS: ${{ runner.temp }}/results
           FAMILY: ipad
         run: |
-          # The iPhone shut down (the iPad, booted under its shots, stays).
-          xcrun simctl shutdown "$(xcrun simctl list devices booted -j | jq -r --arg d "$(cat "$RUNNER_TEMP/device")" '[.devices[][] | select(.state == "Booted" and .name == $d)][0].udid')" || true
+          xcrun simctl shutdown all || true
           # Each iPad app's server afresh, as the iPhone's had it: what the
           # iPhone's pass left on it is not the iPad's (harken's playback,
           # held by the iPhone just shut down: its iPad's devices shot said
@@ -1024,8 +982,19 @@ jobs:
             rm -rf "$d"
             bash .github/screens/app-server.sh "$a" "$d"
           done
-          bash .github/screens/meanwhile.sh wait ipad-boot
-          read -r udid name < "$RUNNER_TEMP/ipad"
+          # Of the pinned Xcode's iOS's simulators (ios-runtime.sh), the first
+          # kind there is.
+          rt=$(bash .github/screens/ios-runtime.sh)
+          read -r udid name < <(xcrun simctl list devices available -j | jq -r --arg rt "$rt" '
+            .devices[$rt] as $d
+            | ["^iPad Pro 13-inch", "^iPad Air 13-inch", "^iPad"]
+            | map(. as $p | $d | map(select(.name | test($p))) | sort_by(.name) | last) | map(select(. != null)) | first
+            | "\(.udid) \(.name)"')
+          echo "Booting $name ($udid)"
+          start=$(date +%s)
+          xcrun simctl boot "$udid"
+          xcrun simctl bootstatus "$udid" -b > /dev/null
+          echo "booted in $(( $(date +%s) - start ))s"
           bash .github/screens/apps-ios.sh "$RUNNER_TEMP/out" "$RUNNER_TEMP/apps" "$name" $IPAD_APPS
       - uses: actions/upload-artifact@v4
         if: always() && steps.open.outputs.open == 'true' && env.IPAD_APPS != ''
@@ -1034,12 +1003,15 @@ jobs:
           path: ${{ runner.temp }}/out/*/ipad-*/
           if-no-files-found: ignore
 
-      # The Mac's own windows, taken under the iPhone's and the iPad's shots
-      # (started with the iPad's boot): waited for here.
-      - if: ${{ !cancelled() && steps.open.outputs.open == 'true' && env.MAC_APPS != '' }}
+      # The Mac's own window, of each app whose commit has a Mac build
+      # (`<app>-macos`, built with the iPhone's by ios-build.sh: BUILT): on
+      # this Mac, signed in to the same server.
+      - if: ${{ !cancelled() && steps.open.outputs.open == 'true' }}
         name: Capture (Mac)
         timeout-minutes: 15
-        run: bash .github/screens/meanwhile.sh wait mac
+        env:
+          BUILT: ${{ runner.temp }}/apps
+        run: bash .github/screens/apps-mac.sh "$RUNNER_TEMP/out" src $APPS
       - uses: actions/upload-artifact@v4
         if: always() && steps.open.outputs.open == 'true'
         with:
@@ -1078,10 +1050,7 @@ jobs:
 
       - if: always() && steps.open.outputs.open == 'true'
         name: The servers' logs
-        run: |
-          tail -n 40 "$RUNNER_TEMP"/server/*/server.log "$RUNNER_TEMP"/server/*-iphone.log || true
-          echo "== memory and swap while the passes overlapped"
-          cat "$RUNNER_TEMP/memory.log" 2> /dev/null || true
+        run: tail -n 40 "$RUNNER_TEMP"/server/*/server.log "$RUNNER_TEMP"/server/*-iphone.log || true
 
       # The iPhone's again, now with each app's hash beside its shots (the
       # step above): compare and publish lay the app-screens-* artifacts

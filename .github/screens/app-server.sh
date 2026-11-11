@@ -5,17 +5,14 @@
 # answers /healthz, and until its log's head has stood still for five
 # seconds (a scanner done adding). Nothing here is any one app's.
 #
-#   app-server.sh <app> <dir>          (PORT_OFFSET: another port)
+#   app-server.sh <app> <dir>
 #
 # The server's pid is left in <dir>/pid and its log in <dir>/server.log,
 # by the app's script. Run from the repository's root.
 set -euo pipefail
 app=$1
 dir=$2
-# PORT_OFFSET: on the port shots.json names plus that, a second server of
-# the app's beside the first (the Mac window's, taken while the iPhone's
-# shots are, each signed in to a server of its own).
-port=$(( $(jq -r '.server.port' "$app/demo/shots.json") + ${PORT_OFFSET:-0} ))
+port=$(jq -r '.server.port' "$app/demo/shots.json")
 mkdir -p "$dir"
 # Who its dev sign-in signs in when a login names nobody (ark-auth): the
 # phone's sign-in sheet then opens and comes straight back, with no page
