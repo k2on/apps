@@ -77,6 +77,8 @@ pub mod watched;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod handle;
 #[cfg(all(feature = "server", not(target_arch = "wasm32")))]
+pub mod push;
+#[cfg(all(feature = "server", not(target_arch = "wasm32")))]
 pub mod serve;
 #[cfg(all(feature = "server", not(target_arch = "wasm32")))]
 pub mod settings;
@@ -111,7 +113,7 @@ pub use local::{Local, Logins, Shared};
 #[cfg(all(feature = "server", not(target_arch = "wasm32")))]
 pub use serve::{Running, Server};
 #[cfg(all(feature = "server", not(target_arch = "wasm32")))]
-pub use settings::{Keepalive, Retention, Serve, SignIn};
+pub use settings::{Apns, Keepalive, Retention, Serve, SignIn};
 pub use watched::Watched;
 
 /// One space's module: its schema, the functions a peer runs by name, and

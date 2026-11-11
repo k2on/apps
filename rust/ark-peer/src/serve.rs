@@ -54,6 +54,9 @@ pub struct Server {
     /// words, a header), each given the hub: in order, the last outermost.
     pub layers: Vec<Layer>,
     pub keepalive: Duration,
+    /// Who is woken when the app's rows change and they are not connected
+    /// ([`Server::push`]).
+    pub push: Option<(Arc<dyn ark_push::PushSender>, ark_push::Wake)>,
 }
 
 /// Middleware over every route a server answers, given the hub.
@@ -84,7 +87,17 @@ impl Server {
             routes: Router::new(),
             layers: vec![],
             keepalive: Duration::from_secs(20),
+            push: None,
         }
+    }
+
+    /// The devices of sessions not connected woken through `sender` when
+    /// the app's rows change, with `wake` (`crate::push`): a wake and
+    /// nothing of the rows. Only with sign-in ([`Server::auth`]): a device
+    /// is woken by its session's push row.
+    pub fn push(mut self, sender: Arc<dyn ark_push::PushSender>, wake: ark_push::Wake) -> Self {
+        self.push = Some((sender, wake));
+        self
     }
 
     /// Sign-in: its routes, each sign-in a session row the hub writes, a
@@ -127,7 +140,21 @@ impl Server {
             None => Box::new(Memory::default()),
         };
         let peer = Peer::serve(self.config, disk, now_ms());
-        let hub = Handle::watched(peer, self.auth.as_ref().map(|a| a.watcher()));
+        let slot = Arc::new(std::sync::OnceLock::new());
+        let watch = self.auth.as_ref().map(|a| {
+            let mut closes = a.watcher();
+            let mut pusher = self.push.take().map(|(s, w)| crate::push::Pusher::start(s, w, slot.clone()));
+            Box::new(
+                move |store: &ark::store::Store, changes: Option<&[ark::store::Change]>, open: &[ark::peer::Who], now: i64| {
+                    if let Some(p) = pusher.as_mut() {
+                        p.seen(store, changes, open, now)
+                    }
+                    closes(store, changes, open, now)
+                },
+            ) as ark_auth::server::Watch
+        });
+        let hub = Handle::watched(peer, watch);
+        let _ = slot.set(hub.clone());
         if let Some(auth) = &self.auth {
             auth.serve(Box::new(hub.clone()));
             self.authenticate = auth.authenticate();

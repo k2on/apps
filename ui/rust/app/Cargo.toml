@@ -21,3 +21,5 @@ ark-peer = { path = "../../../rust/ark-peer", default-features = false }
 # The tests' counter asks for a haptic and a scan.
 ark-haptics = { path = "../../../modules/ark-haptics" }
 ark-camera = { path = "../../../modules/ark-camera" }
+# A wake-up's test tells the person through the notifications' fake.
+ark-notifications = { path = "../../../modules/ark-notifications" }

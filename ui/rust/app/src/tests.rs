@@ -318,3 +318,114 @@ fn what_waits_on_a_draw_runs_once_the_screen_is_drawn() {
     assert!(!rt.awaits_draw());
     assert_eq!(format!("{:?}", Command::<Counter>::AfterDraw(Msg::Add)), "AfterDraw(Add)");
 }
+
+/// A wake-up, end to end over fakes: the smallest app that syncs when it
+/// is woken and then tells the person what came from its own rows.
+mod woken {
+    use super::*;
+    use ark_app::modules::notifications::{schedule, Notice};
+
+    struct Inbox;
+
+    #[derive(Clone, Debug, PartialEq)]
+    enum Msg {
+        Woken(Woken),
+        Synced,
+    }
+
+    impl App for Inbox {
+        type Key = NoView;
+        type State = ();
+        type Msg = Msg;
+        type Change = ();
+        type Route = ();
+        type Request = ();
+        type Screen = ();
+
+        fn holds(_: &()) -> Vec<NoView> {
+            vec![]
+        }
+
+        fn update(_: &mut (), msg: Msg, data: &Data<'_, NoView>) -> Vec<Command<Self>> {
+            match msg {
+                Msg::Woken(Woken::Sync | Woken::Push) => vec![Command::Sync { then: Some(Msg::Synced) }],
+                Msg::Woken(_) => vec![],
+                // The words are worked out here, from what the replica
+                // holds (the time, in this test), never from the push.
+                Msg::Synced => vec![Command::ask(schedule(Notice {
+                    id: "inbox".into(),
+                    title: "To review".into(),
+                    body: format!("as of {}", data.now_ms),
+                    opens: Some("/inbox".into()),
+                    ..Notice::default()
+                }))],
+            }
+        }
+
+        fn screen(_: &(), _: &Data<'_, NoView>) {}
+
+        fn woken(reason: Woken) -> Option<Msg> {
+            Some(Msg::Woken(reason))
+        }
+    }
+
+    /// A process woken with no screen: its replica syncs when asked and
+    /// says so later, as a phone's does.
+    struct Process {
+        store: Store<NoView>,
+        modules: Modules,
+        inbox: super::Inbox<Msg>,
+        syncing: Vec<Ticket>,
+    }
+
+    impl Host<Inbox> for Process {
+        fn read<R>(&self, f: impl FnOnce(&dyn Views<NoView>) -> R) -> R {
+            f(&self.store)
+        }
+        fn now_ms(&self) -> i64 {
+            7
+        }
+        fn send(&mut self, _: ()) -> Result<(), String> {
+            Ok(())
+        }
+        fn open(&mut self, _: ()) {}
+        fn ask(&mut self, ticket: Ticket, ask: Ask<Msg>) {
+            self.inbox.ask(&self.modules, ticket, ask)
+        }
+        fn sync(&mut self, ticket: Ticket) -> bool {
+            self.syncing.push(ticket);
+            false
+        }
+    }
+
+    /// Falsified by `Command::Sync` not counting as work: the runtime said
+    /// it was idle while the replica was still syncing, and a process would
+    /// have been let go before the notice.
+    #[test]
+    fn a_wake_up_syncs_then_notifies_and_goes_idle() {
+        let notices = ark_notifications::Fake::new();
+        let mut modules = Modules::new();
+        notices.register(&mut modules);
+        let mut host = Process {
+            store: Store::new(),
+            modules,
+            inbox: super::Inbox::default(),
+            syncing: vec![],
+        };
+        let mut rt = Runtime::<Inbox>::new();
+        assert!(rt.wake(Woken::Sync, &mut host));
+        assert_eq!(host.syncing.len(), 1, "the app asked to sync");
+        assert!(!rt.is_idle(&host.store), "a sync is work");
+        assert!(notices.notices().is_empty(), "nothing said before the sync");
+        // The replica caught up.
+        let t = host.syncing.remove(0);
+        rt.answer(t, None, &mut host);
+        host.inbox.clone().drain(&mut rt, &mut host);
+        assert!(rt.is_idle(&host.store), "done: the process may go");
+        let n = notices.notices();
+        assert_eq!((n.len(), n[0].body.as_str(), n[0].opens.as_deref()), (1, "as of 7", Some("/inbox")));
+        // A wake the app has nothing for is not work.
+        assert!(rt.wake(Woken::Boot, &mut host));
+        assert!(rt.is_idle(&host.store));
+    }
+}

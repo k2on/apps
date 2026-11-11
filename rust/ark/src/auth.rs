@@ -34,6 +34,7 @@ pub const CURRENT: &str = "session.current";
 pub const MINE: &str = "session.mine";
 pub const GRANT: &str = "role.grant";
 pub const UNGRANT: &str = "role.revoke";
+pub const PUSH: &str = "session.push";
 
 /// One sign-in on one device (`sign_in`: a `session` table's type would be
 /// named as an app's own sessions are). Kept after it ends, revoked or
@@ -70,6 +71,35 @@ pub struct Role {
     pub role: String,
 }
 
+/// Where one session's device is woken (ui/docs/app.md, Background And
+/// Notifications): its push endpoint, as the device's push adapter wrote it
+/// (`ark_push::Endpoint`'s JSON: an APNs token, a UnifiedPush endpoint and
+/// its keys), kept by the session it was handed under. Written by the
+/// device itself over its signed-in connection ([`set_push`]), taken away
+/// with its session ([`revoke`]), and held by nobody but that session and
+/// the server ([`feed`]). The server's hub wakes the devices of the sessions
+/// not connected when rows change (`ark_peer`'s push), and a wake carries
+/// nothing of the rows.
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Row)]
+#[ark(index(user))]
+pub struct Push {
+    #[ark(key)]
+    pub session: String,
+    pub user: String,
+    pub endpoint: String,
+    pub at_ms: i64,
+}
+
+/// A session's push endpoint, as [`set_push`] takes it: empty, none.
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
+pub struct SetPush {
+    pub endpoint: String,
+}
+
+/// The most an endpoint may be: a UnifiedPush URL and its keys fit many
+/// times over.
+pub const PUSH_MAX: usize = 4096;
+
 /// Which sign-in to end.
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
 pub struct Revoke {
@@ -100,10 +130,12 @@ pub trait AuthTables: Tables + Sized {
     fn sign_in_mut<'a, 't>(db: &'a mut Db<'t, Self>) -> &'a mut Tab<'t, SignIn>;
     fn role<'a, 't>(db: &'a Db<'t, Self>) -> &'a Tab<'t, Role>;
     fn role_mut<'a, 't>(db: &'a mut Db<'t, Self>) -> &'a mut Tab<'t, Role>;
+    fn push<'a, 't>(db: &'a Db<'t, Self>) -> &'a Tab<'t, Push>;
+    fn push_mut<'a, 't>(db: &'a mut Db<'t, Self>) -> &'a mut Tab<'t, Push>;
 }
 
-/// `auth_tables!(App)`: [`AuthTables`] for a schema whose tables `sign_in`
-/// and `role` are [`SignIn`] and [`Role`]. The app registers the functions
+/// `auth_tables!(App)`: [`AuthTables`] for a schema whose tables `sign_in`,
+/// `role` and `push` are [`SignIn`], [`Role`] and [`Push`]. The app registers the functions
 /// with `.with(ark::auth::register::<App>)`.
 #[macro_export]
 macro_rules! auth_tables {
@@ -121,6 +153,12 @@ macro_rules! auth_tables {
             fn role_mut<'a, 't>(db: &'a mut $crate::db::Db<'t, Self>) -> &'a mut $crate::db::Tab<'t, $crate::auth::Role> {
                 &mut db.role
             }
+            fn push<'a, 't>(db: &'a $crate::db::Db<'t, Self>) -> &'a $crate::db::Tab<'t, $crate::auth::Push> {
+                &db.push
+            }
+            fn push_mut<'a, 't>(db: &'a mut $crate::db::Db<'t, Self>) -> &'a mut $crate::db::Tab<'t, $crate::auth::Push> {
+                &mut db.push
+            }
         }
     };
 }
@@ -130,6 +168,7 @@ pub fn register<S: AuthTables>(d: Domain) -> Domain {
     d.mutator(REVOKE, revoke::<S>)
         .mutator(GRANT, grant::<S>)
         .mutator(UNGRANT, revoke_role::<S>)
+        .mutator(PUSH, set_push::<S>)
         .query(CURRENT, current::<S>)
         .view(MINE, mine::<S>)
 }
@@ -145,10 +184,45 @@ pub fn live(s: &SignIn, now: i64) -> bool {
 /// judges it.
 pub fn revoke<S: AuthTables>(ctx: &Ctx, db: &mut Db<S>, input: Revoke) -> Result<(), Refusal> {
     match S::sign_in(db).get(input.id) {
-        Some(s) if s.user == ctx.user() => S::sign_in_mut(db).update(SignIn { revoked: true, ..s }),
+        Some(s) if s.user == ctx.user() => {
+            // Its device is woken no more.
+            if S::push(db).get(s.id.clone()).is_some() {
+                S::push_mut(db).delete(s.id.clone())?;
+            }
+            S::sign_in_mut(db).update(SignIn { revoked: true, ..s })
+        }
         Some(_) => Err(Refusal::new("not your session")),
         None => Ok(()),
     }
+}
+
+/// Where the caller's own session's device is woken: `endpoint`, or none
+/// any more when it is empty. Only for a session of the caller's that is
+/// live; one this store does not hold is the server's to judge (a device
+/// whose sign-in has not synced yet), as [`revoke`]'s is.
+pub fn set_push<S: AuthTables>(ctx: &Ctx, db: &mut Db<S>, input: SetPush) -> Result<(), Refusal> {
+    if ctx.session.is_empty() {
+        return Err(Refusal::new("only a signed-in device is woken"));
+    }
+    match S::sign_in(db).get(ctx.session.clone()) {
+        Some(s) if s.user != ctx.user() || !live(&s, ctx.now) => return Err(Refusal::new("that session has ended; sign in again")),
+        _ => {}
+    }
+    if input.endpoint.trim().is_empty() {
+        return match S::push(db).get(ctx.session.clone()) {
+            Some(_) => S::push_mut(db).delete(ctx.session.clone()),
+            None => Ok(()),
+        };
+    }
+    if input.endpoint.len() > PUSH_MAX {
+        return Err(Refusal::new("that is not a push endpoint"));
+    }
+    S::push_mut(db).put(Push {
+        session: ctx.session.clone(),
+        user: ctx.user().to_string(),
+        endpoint: input.endpoint,
+        at_ms: ctx.now,
+    })
 }
 
 fn admin(ctx: &Ctx) -> Result<(), Refusal> {
@@ -195,9 +269,10 @@ pub fn mine<S: AuthTables>(ctx: &Ctx, _: &Db<S>, _: ()) -> Result<Plan<S, SignIn
 }
 
 /// `scope` holding, of the sign-ins and the roles, only the connection's
-/// person's (§1.8).
+/// person's (§1.8), and of the push endpoints only the connection's own.
 pub fn feed<S: AuthTables>(scope: Scope<S>) -> Scope<S> {
     scope
         .on::<SignIn>(|ctx, s| s.user == ctx.user())
         .on::<Role>(|ctx, r| r.user == ctx.user())
+        .on::<Push>(|ctx, p| p.session == ctx.session)
 }

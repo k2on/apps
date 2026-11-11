@@ -21,6 +21,7 @@ pub struct App {
     pub note: Note,
     pub sign_in: ark_auth::SignIn,
     pub role: ark_auth::Role,
+    pub push: ark_auth::Push,
 }
 
 ark_auth::install!(App);

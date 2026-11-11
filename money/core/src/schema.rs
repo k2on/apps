@@ -535,6 +535,9 @@ pub struct Money {
     pub item: Item,
     pub charge: Charge,
     pub photo: Photo,
+    /// Where each session's device is woken (`ark::auth::Push`): appended,
+    /// so rows written before it read as they are.
+    pub push: ark::auth::Push,
 }
 
 ark::auth_tables!(Money);

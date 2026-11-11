@@ -656,11 +656,13 @@ def android_manifest(root, a):
     andr = a["android"]
     perms = list(andr.get("permissions", []))
     services = []
+    receivers = []
     meta = []
     for _, m in modules_of(root, a):
         ma = m.get("android", {})
         perms += [p for p in ma.get("permissions", []) if p not in perms]
         services += ma.get("services", [])
+        receivers += ma.get("receivers", [])
         meta += ma.get("meta-data", [])
     scheme = a.get("scheme")
     lines = ['<?xml version="1.0" encoding="utf-8"?>', f"<!-- {HEADER.format(app=a['dir'])} -->",
@@ -695,8 +697,18 @@ def android_manifest(root, a):
             <intent-filter>{actions}
             </intent-filter>
         </service>'''
+    for r in receivers:
+        # One reached by its name alone has no filter and is not exported;
+        # one the system or another app broadcasts to has its actions.
+        actions = "".join(f'\n                <action android:name="{x}" />' for x in r.get("actions", []))
+        body = f"\n            <intent-filter>{actions}\n            </intent-filter>\n        " if actions else ""
+        extra += f'\n        <receiver android:name="{r["name"]}" android:exported="{str(r.get("exported", False)).lower()}">{body}</receiver>'
     for d in meta:
         extra += f'\n        <meta-data android:name="{d["name"]}" android:resource="{d["resource"]}" />'
+    if scheme:
+        # The scheme, for what opens a route through the app's links from
+        # outside an activity (a notice's tap: ark-notifications).
+        extra += f'\n        <meta-data android:name="dev.arkui.scheme" android:value="{scheme}" />'
     theme = andr.get("theme")
     # Kept out of backups (allowBackup is false) and, on Android 12 and
     # later, out of a device-to-device transfer, which allowBackup alone

@@ -29,6 +29,7 @@ pub struct App {
     pub playlist: Playlist,
     pub sign_in: SignIn,
     pub role: Role,
+    pub push: ark_auth::Push,
 }
 
 ark_auth::install!(App);
@@ -54,10 +55,11 @@ fn config() -> Config {
 /// The state hash is over the rows as this schema has them, so a column
 /// appended moves it though nothing on the disk did: `sign_in.picture`,
 /// defaulted, took it from `9781dcf4…`, the hash the fixture was written
-/// with.
+/// with, to `710d712e…`; the `push` table, appended empty (where each
+/// session's device is woken, `ark::auth::Push`), to `7ab48e41…`.
 const TOKEN: &str = "c3d0755a76b5a48571c12ae1b690ebed.e0d2394e21051a98976bd9d4d1f10569192f49f49b56c0d235ed92ed3273d0a1";
 const HEAD: i64 = 72;
-const STATE: &str = "710d712e81d1469987f08d80d37c0a1f0c386b03bd2e60f166bd62d86be01624";
+const STATE: &str = "7ab48e413a025330795712ead1f73fd661b7ba88d52db420daa69c6212c45cdc";
 const N: usize = 70;
 
 fn fixture() -> PathBuf {

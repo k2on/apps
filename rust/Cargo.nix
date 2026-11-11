@@ -177,6 +177,16 @@ rec {
       # File a bug if you depend on any for non-debug work!
       debug = internal.debugCrate { inherit packageId; };
     };
+    "ark-push" = rec {
+      packageId = "ark-push";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "ark-push";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
     "ark-router" = rec {
       packageId = "ark-router";
       build = internal.buildRustCrateWithFeatures {
@@ -1281,6 +1291,10 @@ rec {
             packageId = "ark-haptics";
           }
           {
+            name = "ark-notifications";
+            packageId = "ark-notifications";
+          }
+          {
             name = "ark-peer";
             packageId = "ark-peer";
             usesDefaultFeatures = false;
@@ -1747,6 +1761,12 @@ rec {
             packageId = "ark-module";
           }
           {
+            name = "ark-push";
+            packageId = "ark-push";
+            optional = true;
+            usesDefaultFeatures = false;
+          }
+          {
             name = "uniffi";
             packageId = "uniffi";
             optional = true;
@@ -1754,7 +1774,7 @@ rec {
           }
         ];
         features = {
-          "ffi" = [ "dep:uniffi" ];
+          "ffi" = [ "dep:uniffi" "dep:ark-push" ];
         };
         resolvedDefaultFeatures = [ "ffi" ];
       };
@@ -1779,6 +1799,12 @@ rec {
             name = "ark-auth";
             packageId = "ark-auth";
             usesDefaultFeatures = false;
+          }
+          {
+            name = "ark-push";
+            packageId = "ark-push";
+            optional = true;
+            features = [ "send" ];
           }
           {
             name = "axum";
@@ -1866,9 +1892,107 @@ rec {
         ];
         features = {
           "default" = [ "server" ];
-          "server" = [ "ark-auth/server" "dep:anyhow" "dep:axum" "dep:tokio" "dep:tower-http" ];
+          "server" = [ "ark-auth/server" "dep:ark-push" "dep:anyhow" "dep:axum" "dep:tokio" "dep:tower-http" ];
         };
         resolvedDefaultFeatures = [ "default" "server" ];
+      };
+      "ark-push" = rec {
+        crateName = "ark-push";
+        version = "0.1.0";
+        edition = "2021";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./ark-push; };
+        libName = "ark_push";
+        dependencies = [
+          {
+            name = "ark-module";
+            packageId = "ark-module";
+          }
+          {
+            name = "base64";
+            packageId = "base64 0.22.1";
+          }
+          {
+            name = "bytes";
+            packageId = "bytes";
+            optional = true;
+          }
+          {
+            name = "getrandom";
+            packageId = "getrandom 0.2.17";
+          }
+          {
+            name = "h2";
+            packageId = "h2";
+            optional = true;
+          }
+          {
+            name = "http";
+            packageId = "http";
+            optional = true;
+          }
+          {
+            name = "p256";
+            packageId = "p256";
+            features = [ "ecdh" ];
+          }
+          {
+            name = "ring";
+            packageId = "ring";
+          }
+          {
+            name = "rustls";
+            packageId = "rustls";
+            optional = true;
+            usesDefaultFeatures = false;
+            features = [ "ring" "std" "tls12" ];
+          }
+          {
+            name = "serde";
+            packageId = "serde";
+            features = [ "derive" ];
+          }
+          {
+            name = "serde_json";
+            packageId = "serde_json";
+            features = [ "raw_value" ];
+          }
+          {
+            name = "tokio";
+            packageId = "tokio";
+            optional = true;
+            features = [ "rt" "net" "time" ];
+          }
+          {
+            name = "tokio-rustls";
+            packageId = "tokio-rustls";
+            optional = true;
+            usesDefaultFeatures = false;
+            features = [ "ring" "tls12" "logging" ];
+          }
+          {
+            name = "ureq";
+            packageId = "ureq";
+            optional = true;
+            usesDefaultFeatures = false;
+            features = [ "tls" ];
+          }
+          {
+            name = "webpki-roots";
+            packageId = "webpki-roots 0.26.11";
+            optional = true;
+          }
+        ];
+        devDependencies = [
+          {
+            name = "tokio";
+            packageId = "tokio";
+            features = [ "rt" "net" "macros" ];
+          }
+        ];
+        features = {
+          "send" = [ "dep:h2" "dep:http" "dep:bytes" "dep:tokio" "dep:tokio-rustls" "dep:rustls" "dep:webpki-roots" "dep:ureq" ];
+        };
+        resolvedDefaultFeatures = [ "send" ];
       };
       "ark-router" = rec {
         crateName = "ark-router";
@@ -8032,6 +8156,20 @@ rec {
         };
         resolvedDefaultFeatures = [ "std" ];
       };
+      "fnv" = rec {
+        crateName = "fnv";
+        version = "1.0.7";
+        edition = "2015";
+        sha256 = "1hc2mcqha06aibcaza94vbi81j6pr9a1bbxrxjfhc91zin8yr7iz";
+        libPath = "lib.rs";
+        authors = [
+          "Alex Crichton <alex@alexcrichton.com>"
+        ];
+        features = {
+          "default" = [ "std" ];
+        };
+        resolvedDefaultFeatures = [ "default" "std" ];
+      };
       "foldhash 0.1.5" = rec {
         crateName = "foldhash";
         version = "0.1.5";
@@ -9423,6 +9561,78 @@ rec {
         features = {
           "serde" = [ "dep:serde" ];
           "serialization" = [ "serde" "euclid/serde" ];
+        };
+      };
+      "h2" = rec {
+        crateName = "h2";
+        version = "0.4.20";
+        edition = "2021";
+        sha256 = "0661bxispf05ik0idbjlyabwyqpngh9c2r6avaqkzann68104abx";
+        authors = [
+          "Carl Lerche <me@carllerche.com>"
+          "Sean McArthur <sean@seanmonstar.com>"
+        ];
+        dependencies = [
+          {
+            name = "atomic-waker";
+            packageId = "atomic-waker";
+          }
+          {
+            name = "bytes";
+            packageId = "bytes";
+          }
+          {
+            name = "fnv";
+            packageId = "fnv";
+          }
+          {
+            name = "futures-core";
+            packageId = "futures-core";
+            usesDefaultFeatures = false;
+          }
+          {
+            name = "futures-sink";
+            packageId = "futures-sink";
+            usesDefaultFeatures = false;
+          }
+          {
+            name = "http";
+            packageId = "http";
+          }
+          {
+            name = "indexmap";
+            packageId = "indexmap 2.14.2";
+            features = [ "std" ];
+          }
+          {
+            name = "slab";
+            packageId = "slab";
+          }
+          {
+            name = "tokio";
+            packageId = "tokio";
+            features = [ "io-util" ];
+          }
+          {
+            name = "tokio-util";
+            packageId = "tokio-util";
+            features = [ "codec" "io" ];
+          }
+          {
+            name = "tracing";
+            packageId = "tracing";
+            usesDefaultFeatures = false;
+            features = [ "std" ];
+          }
+        ];
+        devDependencies = [
+          {
+            name = "tokio";
+            packageId = "tokio";
+            features = [ "rt-multi-thread" "macros" "sync" "net" ];
+          }
+        ];
+        features = {
         };
       };
       "half" = rec {
@@ -15198,6 +15408,10 @@ rec {
             features = [ "server" ];
           }
           {
+            name = "ark-push";
+            packageId = "ark-push";
+          }
+          {
             name = "axum";
             packageId = "axum";
           }
@@ -19594,7 +19808,7 @@ rec {
           "test-vectors" = [ "dep:hex-literal" ];
           "voprf" = [ "elliptic-curve/voprf" "sha2" ];
         };
-        resolvedDefaultFeatures = [ "alloc" "arithmetic" "default" "digest" "ecdsa" "ecdsa-core" "pem" "pkcs8" "sha2" "sha256" "std" ];
+        resolvedDefaultFeatures = [ "alloc" "arithmetic" "default" "digest" "ecdh" "ecdsa" "ecdsa-core" "pem" "pkcs8" "sha2" "sha256" "std" ];
       };
       "p384" = rec {
         crateName = "p384";
@@ -27121,6 +27335,44 @@ rec {
         ];
 
       };
+      "tokio-rustls" = rec {
+        crateName = "tokio-rustls";
+        version = "0.26.6";
+        edition = "2021";
+        sha256 = "1nq5s413p6hkwrgjrpag1gi2mnjajpbszqhmhbpnkmfdq9w2dk69";
+        libName = "tokio_rustls";
+        dependencies = [
+          {
+            name = "rustls";
+            packageId = "rustls";
+            usesDefaultFeatures = false;
+            features = [ "std" ];
+          }
+          {
+            name = "tokio";
+            packageId = "tokio";
+          }
+        ];
+        devDependencies = [
+          {
+            name = "tokio";
+            packageId = "tokio";
+            features = [ "full" ];
+          }
+        ];
+        features = {
+          "aws-lc-rs" = [ "aws_lc_rs" ];
+          "aws_lc_rs" = [ "rustls/aws_lc_rs" ];
+          "brotli" = [ "rustls/brotli" ];
+          "default" = [ "logging" "tls12" "aws_lc_rs" ];
+          "fips" = [ "rustls/fips" ];
+          "logging" = [ "rustls/logging" ];
+          "ring" = [ "rustls/ring" ];
+          "tls12" = [ "rustls/tls12" ];
+          "zlib" = [ "rustls/zlib" ];
+        };
+        resolvedDefaultFeatures = [ "logging" "ring" "tls12" ];
+      };
       "tokio-tungstenite" = rec {
         crateName = "tokio-tungstenite";
         version = "0.24.0";
@@ -27205,6 +27457,12 @@ rec {
             packageId = "futures-sink";
           }
           {
+            name = "libc";
+            packageId = "libc";
+            optional = true;
+            target = { target, features }: (target."unix" or false);
+          }
+          {
             name = "pin-project-lite";
             packageId = "pin-project-lite";
           }
@@ -27238,7 +27496,7 @@ rec {
           "time" = [ "tokio/time" "slab" ];
           "tracing" = [ "dep:tracing" ];
         };
-        resolvedDefaultFeatures = [ "io" ];
+        resolvedDefaultFeatures = [ "codec" "default" "io" "libc" ];
       };
       "toml" = rec {
         crateName = "toml";

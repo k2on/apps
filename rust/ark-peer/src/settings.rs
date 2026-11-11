@@ -103,6 +103,30 @@ pub struct Serve {
     /// connection, so a restart with another configuration grants or
     /// revokes at once.
     pub roles: BTreeMap<String, Vec<String>>,
+    /// APNs, to push to the app's iPhones, iPads and Macs: none, they are
+    /// not pushed to (a UnifiedPush endpoint needs nothing configured).
+    pub apns: Option<Apns>,
+}
+
+/// APNs' token-based authentication, as a server is configured with it:
+/// the team's `.p8` key in a file (a systemd credential: never in the
+/// repository, a unit file or the store), its key id and the team's id.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Apns {
+    pub key_file: PathBuf,
+    pub key_id: String,
+    pub team_id: String,
+}
+
+impl Apns {
+    /// The sender this configures: the key read from its file.
+    pub fn sender(apns: Option<&Apns>) -> Result<ark_push::send::Sender> {
+        let apns = match apns {
+            Some(a) => Some(ark_push::send::Apns::from_file(&a.key_file, &a.key_id, &a.team_id).map_err(|e| anyhow!(e))?),
+            None => None,
+        };
+        Ok(ark_push::send::Sender::new(apns))
+    }
 }
 
 impl Serve {
@@ -121,6 +145,7 @@ impl Serve {
             keepalive: Keepalive::default(),
             retain: Retention::default(),
             roles: BTreeMap::new(),
+            apns: None,
         }
     }
 
@@ -144,6 +169,9 @@ impl Serve {
     /// _RETAIN_DAYS              read and checked; kept nothing by
     /// _RETAIN_ENTRIES           entries kept above the snapshot (10000)
     /// _ROLES                    who holds which role: `library=alice,bob;admin=alice`
+    /// _APNS_KEY_FILE, _APNS_KEY_ID, _APNS_TEAM_ID
+    ///                           APNs' key (a .p8 file), its id and the team's:
+    ///                           all three, or none (no push to Apple's devices)
     /// ```
     pub fn from_env(prefix: &str, listen: &str) -> Result<Serve> {
         Serve::from_vars(prefix, listen, |k| std::env::var(k).ok())
@@ -202,6 +230,20 @@ impl Serve {
         if let Some(n) = env("RETAIN_ENTRIES") {
             retain.entries = (n.trim().parse()).map_err(|_| anyhow!("{} is a count of entries: {n}", name("RETAIN_ENTRIES")))?;
         }
+        let apns = match (env("APNS_KEY_FILE"), env("APNS_KEY_ID"), env("APNS_TEAM_ID")) {
+            (Some(f), Some(key_id), Some(team_id)) => Some(Apns {
+                key_file: f.into(),
+                key_id: key_id.trim().into(),
+                team_id: team_id.trim().into(),
+            }),
+            (None, None, None) => None,
+            _ => bail!(
+                "{}, {} and {} go together; set all three",
+                name("APNS_KEY_FILE"),
+                name("APNS_KEY_ID"),
+                name("APNS_TEAM_ID")
+            ),
+        };
         let list = |k: &str| -> Vec<String> {
             let v = env(k).unwrap_or_default();
             v.split(',').map(str::trim).filter(|p| !p.is_empty()).map(str::to_string).collect()
@@ -219,6 +261,7 @@ impl Serve {
             keepalive,
             retain,
             roles: roles_of(&name("ROLES"), &env("ROLES").unwrap_or_default())?,
+            apns,
         })
     }
 
@@ -309,5 +352,35 @@ mod tests {
         ]));
         assert_eq!(trusted, ["app", "ark"]);
         assert_eq!(groups, ["app_users", "app_admins"]);
+    }
+
+    /// APNs is configured by all three of its settings or none; a key that
+    /// is not one is refused when the sender is made. Falsified by taking
+    /// two of the three: half a configuration starts a server that cannot push.
+    #[test]
+    fn apns_is_all_three_settings_or_none() {
+        let read = |pairs: &[(&str, &str)]| {
+            let mut m: BTreeMap<String, String> = [("APP_DEV_AUTH", "1")].iter().map(|(k, v)| (k.to_string(), v.to_string())).collect();
+            m.extend(pairs.iter().map(|(k, v)| (k.to_string(), v.to_string())));
+            Serve::from_vars("APP", "x:1", |k| m.get(k).cloned())
+        };
+        assert_eq!(read(&[]).unwrap().apns, None);
+        let all = read(&[
+            ("APP_APNS_KEY_FILE", "/run/credentials/app/apns.p8"),
+            ("APP_APNS_KEY_ID", "ABC123"),
+            ("APP_APNS_TEAM_ID", " TEAM "),
+        ])
+        .unwrap();
+        assert_eq!(
+            all.apns,
+            Some(Apns {
+                key_file: "/run/credentials/app/apns.p8".into(),
+                key_id: "ABC123".into(),
+                team_id: "TEAM".into(),
+            })
+        );
+        assert!(read(&[("APP_APNS_KEY_ID", "ABC123"), ("APP_APNS_TEAM_ID", "TEAM")]).is_err());
+        assert!(Apns::sender(all.apns.as_ref()).is_err(), "no key at that path");
+        assert!(Apns::sender(None).is_ok());
     }
 }

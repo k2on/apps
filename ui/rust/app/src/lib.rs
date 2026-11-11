@@ -78,6 +78,33 @@ pub trait App: 'static {
 
     /// What the screen shows of `state` and the views held.
     fn screen(state: &Self::State, data: &Data<'_, Self::Key>) -> Self::Screen;
+
+    /// The message a wake-up is to the app ([`Woken`]): the OS woke the
+    /// process for it, with no screen. None, the app has nothing to do then.
+    fn woken(_reason: Woken) -> Option<Self::Msg> {
+        None
+    }
+}
+
+/// Why the OS woke the process with no screen (ui/docs/app.md, Background
+/// And Notifications): what the host that woke it hands
+/// [`Runtime::wake`], which the app takes as its own message
+/// ([`App::woken`]) and answers with commands like any other. The host
+/// waits until the runtime is idle — a [`Command::Sync`] and every module's
+/// answer count as work — or its time from the OS runs out, then lets the
+/// process go.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Woken {
+    /// The periodic background sync app.toml asks for (`[background] sync`).
+    Sync,
+    /// A push came: a wake-up and nothing of the app's data; the app syncs
+    /// and says what came from its own rows.
+    Push,
+    /// A button on one of its notices was pressed (`notice` is the notice's
+    /// id, `action` the button's).
+    Action { notice: String, action: String },
+    /// The device started (Android, app.toml's `[background] boot`).
+    Boot,
 }
 
 /// What an update and a screen read besides the state: the views the store
@@ -237,6 +264,13 @@ pub enum Command<A: App + ?Sized> {
     /// screen about to show it asks ([`Views::file_url`] says where it is
     /// read once it is here; the views are rung when it arrives).
     Want(ark::file::FileRef),
+    /// The replica synced with its server now — dialled if it was not
+    /// connected, what is pending pushed and what is new pulled — and then
+    /// `then`, if any, run over what it holds: what a wake-up does before
+    /// it tells the person anything. Work until it is answered
+    /// ([`Runtime::is_idle`]), so a process woken for it is not let go
+    /// mid-sync.
+    Sync { then: Option<A::Msg> },
 }
 
 impl<A: App + ?Sized> Command<A> {
@@ -268,6 +302,7 @@ impl<A: App + ?Sized> Debug for Command<A> {
             Command::Then(m) => write!(f, "Then({m:?})"),
             Command::AfterDraw(m) => write!(f, "AfterDraw({m:?})"),
             Command::Want(file) => write!(f, "Want({})", file.hash),
+            Command::Sync { then } => write!(f, "Sync({then:?})"),
         }
     }
 }
@@ -295,6 +330,7 @@ where
             (Command::Then(a), Command::Then(b)) => a == b,
             (Command::AfterDraw(a), Command::AfterDraw(b)) => a == b,
             (Command::Want(a), Command::Want(b)) => a == b,
+            (Command::Sync { then: a }, Command::Sync { then: b }) => a == b,
             _ => false,
         }
     }
@@ -336,6 +372,15 @@ pub trait Host<A: App + ?Sized> {
     fn draws_between(&self) -> bool {
         false
     }
+    /// The replica synced now ([`Command::Sync`]): dialled if it is not
+    /// connected, then caught up with its server. True when it is done
+    /// already (a host with nothing to sync: the desktop's own store, a
+    /// test's); false when it will be, and the host then hands `ticket` to
+    /// [`Runtime::answer`] with the sync's message once the replica has
+    /// caught up, or its time ran out.
+    fn sync(&mut self, _ticket: Ticket) -> bool {
+        true
+    }
 }
 
 /// An app running: its state, the answers it waits for, and the number
@@ -349,6 +394,9 @@ pub struct Runtime<A: App> {
     answers: VecDeque<(Ticket, Option<A::Msg>)>,
     /// What waits for the screen to be drawn ([`Command::AfterDraw`]).
     after_draw: VecDeque<A::Msg>,
+    /// The message each sync waited on is to run when it is done
+    /// ([`Command::Sync`]), by its ticket.
+    syncs: std::collections::BTreeMap<Ticket, Option<A::Msg>>,
     running: bool,
 }
 
@@ -361,6 +409,7 @@ impl<A: App> Default for Runtime<A> {
             tickets: 0,
             answers: VecDeque::new(),
             after_draw: VecDeque::new(),
+            syncs: Default::default(),
             running: false,
         }
     }
@@ -456,9 +505,33 @@ impl<A: App> Runtime<A> {
         self.running = false;
     }
 
+    /// The OS woke the process for `reason`: the app's message for it taken
+    /// ([`App::woken`]); whether the app had one. The host waits for
+    /// [`Runtime::is_idle`] after, within its time.
+    pub fn wake(&mut self, reason: Woken, host: &mut impl Host<A>) -> bool {
+        match A::woken(reason) {
+            Some(m) => {
+                self.dispatch(m, host);
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// The message a sync's ticket comes back as ([`Command::Sync`]): kept
+    /// until the host answers it.
+    fn synced(&mut self, ticket: Ticket) -> Option<A::Msg> {
+        self.syncs.remove(&ticket).flatten()
+    }
+
     /// What came of the operation `ticket` was given for: the message it
     /// became taken, when the update wanted one.
     pub fn answer(&mut self, ticket: Ticket, msg: Option<A::Msg>, host: &mut impl Host<A>) {
+        // A sync's answer is the message its command kept.
+        let msg = match self.syncs.contains_key(&ticket) {
+            true => self.synced(ticket),
+            false => msg,
+        };
         if self.running {
             self.answers.push_back((ticket, msg));
             return;
@@ -498,6 +571,17 @@ impl<A: App> Runtime<A> {
             Command::Then(m) => queue.push_back(m),
             Command::AfterDraw(m) if host.draws_between() => self.after_draw.push_back(m),
             Command::AfterDraw(m) => queue.push_back(m),
+            Command::Sync { then } => {
+                self.tickets += 1;
+                let ticket = self.tickets;
+                match host.sync(ticket) {
+                    true => queue.extend(then),
+                    false => {
+                        self.waiting.insert(ticket);
+                        self.syncs.insert(ticket, then);
+                    }
+                }
+            }
         }
     }
 }

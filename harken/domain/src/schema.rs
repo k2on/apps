@@ -444,6 +444,9 @@ pub struct Harken {
     pub cue: Cue,
     pub voice: Voice,
     pub voice_name: VoiceName,
+    /// Where each session's device is woken (`ark::auth::Push`): appended,
+    /// so rows written before it read as they are.
+    pub push: ark::auth::Push,
 }
 
 ark::auth_tables!(Harken);
