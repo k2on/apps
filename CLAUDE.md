@@ -24,3 +24,12 @@ app uses only the libraries' springs, transitions, press and haptics: no
 number, curve, spring or component of its own that another app could
 share. One that is missing is added to arkui (and to `theme.toml` if it is a
 value), then used from there.
+
+## An App's Directory
+
+An ark app's committed shape is `app.toml`, `icon.svg`, `core/`, `app/`,
+`server/` and `demo/`. Its `bridge/`, `views/`, `native/`, `iced/` and
+`web/` are being removed and must not grow: a screen goes in `app/` as a
+`#[view]`, a device feature in an `ark-*` module behind an `ark-module`
+port, domain rules in `core/`. `ui/docs/app.md` ("Generated, Not
+Committed") says what to do in each case.

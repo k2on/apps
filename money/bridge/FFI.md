@@ -1,5 +1,16 @@
 # money's library for its phones
 
+> **This crate is being removed.** It is here only while some of money's
+> screens are still native (Receipts, Settings, and the phones'
+> `Model.swift` / `Book.kt`). The end state generates the phones'
+> bindings from `money/app` and `money/core` (nix/ark-app.nix), with no
+> committed `money/bridge`. Don't build on it: a new screen or field goes
+> in `money/app` as a `#[view]`; a device feature is a port in
+> `ark-module` with a module under `modules/ark-*`; domain rules go in
+> `money/core`. ui/docs/app.md, "Generated, Not Committed", says what to
+> do instead in each case. Anything that truly must stay an export here
+> is listed below under "Still Here".
+
 The Rust kernel with money's domain linked in (`docs/plan-v5.md` §1.16,
 N3): `ark-ffi` through UniFFI, one shared library the iOS and Android apps
 load — `MoneyFFI.xcframework` on the phone, `libmoney_ffi.so` on Android —
@@ -124,3 +135,10 @@ tests and has UniFFI write its Kotlin and Swift.
 Neither framework has been built (no Mac; no x86_64 builder for the NDK
 here), and no phone has loaded either. The sign-in is the bridge's and
 harken's, untried against money's server.
+
+## Still Here
+
+What the phones call through this crate that the generated bindings will
+have to carry when it goes: `moneyOpen`, `moneyDemo` and `DemoBank`, the
+session (`session.rs`), the hall of servers and logins (`hall.rs`), and
+the routes (`routes.rs`). Add to this list only with a reason in the commit.
