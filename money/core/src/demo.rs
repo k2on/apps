@@ -402,7 +402,12 @@ fn household(today: &str, now: i64) -> Store {
     let this = month_of(today);
     let months = [add_months(&this, -2), add_months(&this, -1), this.clone()];
     let first = format!("{}-01", months[0]);
-    let mut s = Seeder::new(now - 1_000_000);
+    // Its facts made an hour and a minute before `now`: a screen that says
+    // how long ago the bank synced says "1 hour ago" for the hour after
+    // seeding, where minutes turned over between two screenshots of one run
+    // (ui/docs/shots.md). Never before `today` began, by which a fact made
+    // now is dated.
+    let mut s = Seeder::new((now - 3_660_000).max(now - now.rem_euclid(86_400_000)));
     let mut draw = Draw(7);
 
     s.run(ME, "setup", &());

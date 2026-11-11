@@ -68,9 +68,11 @@ its tree kept beside it. It is never how long a shot waits when all is well.
 
 - The day and the clock: the demo's fixed day (`-demo <day>`, the
   showcase's time warp), the system's status bar overridden
-  (`simctl status_bar`, Android's demo mode). Not yet a time the app
-  works out from the clock against its server's seed: money's "Synced 20
-  minutes ago" turns over with the minute.
+  (`simctl status_bar`, Android's demo mode). A time the app works out
+  from the clock against its server's seed is said in hours: money's demo
+  household is made an hour and a minute before it is seeded, so "Synced
+  1 hour ago" holds for the hour after (in the day's first hour, minutes
+  still).
 - What the system shows that is not the app: Android's own animations
   off, its status bar's icons all said, the launcher's home laid out
   before the app is installed (its taskbar on the tablet); each iOS device
