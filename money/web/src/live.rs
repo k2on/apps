@@ -144,6 +144,9 @@ impl MoneyWeb {
         let (code, returned) = (ark_auth::web::take_code(), ark_auth::web::came_back());
         #[cfg(not(target_arch = "wasm32"))]
         let (code, returned) = (None, false);
+        // Read before the machine is told: `take_code` has already taken
+        // the code out of the address, so the page reads as its root.
+        let brought_code = code.is_some();
         let remembered = Remembered {
             server: Some(server),
             login: login.map(Into::into),
@@ -152,9 +155,11 @@ impl MoneyWeb {
         app.onboard(Event::Launched { remembered, code, returned });
         // money's pages from the first, as on every platform, until this
         // browser has seen them; not on a load that goes straight somewhere
-        // (a link's path or query, a sign-in coming back), and their own
-        // path, /welcome/, shows them whatever was seen (`arrive`).
-        let straight = returned || !at_root();
+        // (a link's path or query, a sign-in coming back, a code brought to
+        // trade, whose query `take_code` has already cleared: the Welcome
+        // covered what the sign-in said of it), and their own path,
+        // /welcome/, shows them whatever was seen (`arrive`).
+        let straight = returned || brought_code || !at_root();
         if let Some(live) = &mut app.live {
             live.first_run.launch(intro_seen(), straight);
         }
