@@ -90,9 +90,11 @@ jobs:
           echo "pages=$(jq -c .pages plan.json)" >> "$GITHUB_OUTPUT"
           echo "apks=$(jq -c .apks plan.json)" >> "$GITHUB_OUTPUT"
 
+  # After `crates`, which has built every crate of the docs (docs-site
+  # builds the same page), or without it if it failed.
   page:
-    needs: plan
-    if: github.ref == 'refs/heads/main'
+    needs: [plan, crates]
+    if: ${{ !cancelled() && needs.plan.result == 'success' && github.ref == 'refs/heads/main' }}
     strategy:
       fail-fast: false
       matrix:
@@ -145,8 +147,11 @@ jobs:
   # as it is published, and every page shot at a phone's width and a
   # desktop's, light and dark, with script and without. With script a page
   # fails on any console error or word of hydration (docs-shots.js).
-  # Nothing is published: the shots are this run's artifact.
+  # Nothing is published: the shots are this run's artifact. After `crates`,
+  # as `page` (which builds the same site on main).
   docs-site:
+    needs: crates
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -181,13 +186,17 @@ jobs:
   # The flake's Linux checks: each member's tests and lints a derivation of
   # its own over the crates' (flake.nix, nix/rust.nix), so with Cachix a
   # commit compiles and runs only what its change reaches. First `crates`:
-  # every crate the checks' test and lint builds depend on (flake.nix,
-  # `checks-crates`; resolved once for the whole workspace, as `cargo test
-  # --workspace` resolves them, so each is one build), compiled once and
-  # pushed. Then the checks fan out, a job per group, each fetching those
-  # crates and building only its own tests and lints: no crate is compiled
-  # by two jobs. They were one job of 16 to 22 minutes, nearly all of it one
-  # step on one runner's four cores.
+  # every crate the checks' test and lint builds depend on (resolved once
+  # for the whole workspace, as `cargo test --workspace` resolves them, so
+  # each is one build), the docs' crates, and every crate two of the run's
+  # other jobs both reach (`server`, the APKs: flake.nix, `ci-crates`),
+  # compiled once and pushed. Then the checks fan out, a job per group, and
+  # the server, the docs and the APKs start, each fetching those crates and
+  # building only what is its own: no crate is compiled by two jobs. The
+  # checks were one job of 16 to 22 minutes, nearly all of it one step on
+  # one runner's four cores; and before `ci-crates` the APKs, the server and
+  # the checks each compiled the crates they share at once (build
+  # 42923951723: 107 crates compiled twice or more).
   crates:
     runs-on: ubuntu-latest
     steps:
@@ -208,8 +217,8 @@ jobs:
             echo "::error::rust/Cargo.nix or docs/site/Cargo.nix is not the lockfile's: nix run .#update-cargo-nix"
             exit 1
           }
-      - name: Build the checks' crates
-        run: nix build --print-build-logs --no-link .#checks-crates
+      - name: Build the run's shared crates
+        run: nix build --print-build-logs --no-link .#ci-crates
 
   checks:
     needs: crates
@@ -253,7 +262,7 @@ jobs:
   # each of app-screens' Linux jobs, a dozen at once, then fetches them
   # rather than every one compiling the same seed and its crates.
   server:
-    needs: plan
+    needs: crates
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     steps:
@@ -286,8 +295,11 @@ jobs:
       - name: Build ArkUI's Kotlin
         run: nix build --print-build-logs --no-link .#arkui-kotlin-shots .#arkui-kotlin
 
+  # After `crates` too (the crates both apps' libraries and the checks
+  # share), or without it if it failed: an APK is not held back by a check.
   apk:
-    needs: [plan, arkui-kotlin]
+    needs: [plan, crates, arkui-kotlin]
+    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.arkui-kotlin.result == 'success' }}
     strategy:
       fail-fast: false
       matrix:
@@ -368,9 +380,13 @@ jobs:
 
   # Each APK's unit tests, beside its build rather than inside it: the APK
   # is up (for its screenshots) while they run. An APK goes to F-Droid only
-  # once its tests have passed (deploy reads `tested-<app>`).
+  # once its tests have passed (deploy reads `tested-<app>`). After the
+  # APKs, whose builds are of the same library and crates (`<app>-android-lib`):
+  # run beside them, both compiled the app's Rust at once (build
+  # 42923951723: 36 of money's crates twice). Then it fetches them.
   tests:
-    needs: [plan, arkui-kotlin]
+    needs: [plan, arkui-kotlin, apk]
+    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.arkui-kotlin.result == 'success' }}
     strategy:
       fail-fast: false
       matrix:

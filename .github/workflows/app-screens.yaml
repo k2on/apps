@@ -367,6 +367,54 @@ jobs:
   # Linux runner while build's own APK jobs queued for one (twenty-two
   # minutes in app-screens 42959400546) and asked the API for its
   # artifacts until it refused them.
+  # Each app's server, its <app>/screens/server.sh's packages as the
+  # Android and desktop jobs start them, and the crates both desktop windows
+  # link (flake.nix, `screens-crates`, at the commit they are built from),
+  # built once and pushed before those jobs and the kernels' fan out: with
+  # none of it in the cache, each of a dozen Android jobs and both desktop
+  # jobs compiled the same server and crates at once (app-screens
+  # 42959400546: harken-server in six jobs, money-web in five). A fork's
+  # code is never built here (`SAME_REPO`): its jobs build what they need.
+  servers:
+    needs: which
+    if: needs.which.outputs.mode != '' && (github.event_name != 'workflow_run' || github.event.workflow_run.head_repository.full_name == github.repository)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      SOURCE: ${{ github.event.workflow_run.head_sha || github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.SOURCE }}
+          path: src
+          persist-credentials: false
+      - uses: DeterminateSystems/nix-installer-action@main
+        with:
+          extra-conf: |
+            extra-substituters = https://k2on.cachix.org
+            extra-trusted-public-keys = k2on.cachix.org-1:oI4Db0uW5ER+s4Te/MrXSmjWUWkOc9rmKdzsgUDxQP8=
+      - if: vars.CACHIX_NAME != ''
+        uses: cachix/cachix-action@v15
+        with:
+          name: ${{ vars.CACHIX_NAME }}
+          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
+      - name: Build the servers and the windows' crates
+        run: |
+          refs=()
+          for f in */screens/server.sh; do
+            while read -r p; do refs+=(".#$p"); done < <(grep -o '\.#[A-Za-z0-9_-]*' "$f" | cut -c3- | sort -u)
+          done
+          # A commit from before `screens-crates` has none to build.
+          if [ "$(nix eval --json ./src#packages.x86_64-linux --apply 'p: p ? screens-crates' 2> /dev/null)" = true ]; then
+            refs+=("./src#screens-crates")
+          fi
+          echo "${refs[*]}"
+          nix build --no-link --print-build-logs "${refs[@]}"
+
   apks:
     needs: which
     if: needs.which.outputs.mode != '' && needs.which.outputs.android != '' && github.event_name != 'workflow_run'
@@ -396,7 +444,7 @@ jobs:
 
   # A job per app, at once: each its own emulator.
   android:
-    needs: [which, apks]
+    needs: [which, apks, servers]
     if: >-
       !cancelled() && needs.which.outputs.mode != '' && needs.which.outputs.android != '' &&
       (needs.apks.result == 'success' || needs.apks.result == 'skipped')
@@ -606,9 +654,11 @@ jobs:
   # is that run's already, and this is a minute of finding it so; by hand
   # (a dry run, a PR's number) it is built here.
   kernels:
-    needs: which
+    # After `servers`: money's server and the kernels' Mac builds share its
+    # page (money-web).
+    needs: [which, servers]
     if: >-
-      needs.which.outputs.mode != '' && needs.which.outputs.ios != '' &&
+      !cancelled() && needs.which.outputs.mode != '' && needs.which.outputs.ios != '' &&
       (github.event_name != 'workflow_run' || github.event.workflow_run.head_repository.full_name == github.repository)
     runs-on: ubuntu-latest
     permissions:
@@ -1055,11 +1105,13 @@ jobs:
   # The desktop windows: each app's built by nix at the run's commit, as the
   # iPhone's are, and photographed with no window (arkui-shots) on Linux.
   desktop:
-    needs: which
+    # After `servers`, which has built the server and the crates both
+    # windows link.
+    needs: [which, servers]
     # Built from the run's own commit and then run, so only a run of this
     # repository's.
     if: >-
-      needs.which.outputs.mode != '' && needs.which.outputs.desktop != '' &&
+      !cancelled() && needs.which.outputs.mode != '' && needs.which.outputs.desktop != '' &&
       (github.event_name != 'workflow_run' || github.event.workflow_run.head_repository.full_name == github.repository)
     strategy:
       fail-fast: false

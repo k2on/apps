@@ -215,7 +215,7 @@
             in
             pkgs.runCommand "test-${name}" ({
               inherit nativeBuildInputs;
-              # The crates' test builds, whose dependencies `checks-crates`
+              # The crates' test builds, whose dependencies `ci-crates`
               # builds ahead (`rootsOf`).
               passthru.roots = map built crates;
             } // env) ''
@@ -361,7 +361,7 @@
           icedApp = packageId:
             let built = crate { inherit packageId; }; in
             if pkgs.stdenv.hostPlatform.isLinux then
-              pkgs.runCommand (lib.removePrefix "rust_" built.name) { } ''
+              pkgs.runCommand (lib.removePrefix "rust_" built.name) { passthru.crate = built; } ''
                 mkdir -p $out/bin
                 cat > $out/bin/${packageId} <<'EOF'
                 #!${pkgs.runtimeShell}
@@ -522,7 +522,8 @@
           # app's JVM tests load; with the crate's `features`, which are the
           # phone's (none for an iPhone: money's `page` is Android's).
           ffiHostLib = { crate, so, features ? [ "default" ], ... }:
-            "${(rustCrates.build { inherit pkgs rust features; packageId = crate; }).lib}/lib/lib${so}${pkgs.stdenv.hostPlatform.extensions.sharedLibrary}";
+            "${(ffiHostCrate { inherit crate features; }).lib}/lib/lib${so}${pkgs.stdenv.hostPlatform.extensions.sharedLibrary}";
+          ffiHostCrate = { crate, features ? [ "default" ] }: rustCrates.build { inherit pkgs rust features; packageId = crate; };
           harkenFfi = { name = "harken"; crate = "harken-ffi"; so = "harken_ffi"; };
           # An Ark app's library is the shim nix/ark-app.nix generates over
           # its crate (`ark`: its app.toml), no crate of the app's own.
@@ -589,8 +590,11 @@
               '';
             in
             # Each ABI's library and the host's part, one directory: what the
-            # app's APK builds over.
-            pkgs.runCommand "${name}-android-lib-0.1.0" { } ''
+            # app's APK builds over. `passthru.crates`: the crates it is
+            # built from, for `ciCrates`.
+            pkgs.runCommand "${name}-android-lib-0.1.0" {
+              passthru.crates = map androidCrate (lib.attrNames androidTargets) ++ [ (ffiHostCrate { inherit crate; }) ];
+            } ''
               mkdir -p $out
               for part in ${lib.concatStringsSep " " (lib.mapAttrsToList androidLib androidTargets)} ${androidHost}; do
                 cp -r --no-preserve=mode $part/. $out/
@@ -1734,16 +1738,40 @@
           # The crate builds a check is made of at its top (each test build,
           # each lint-clean build), whose dependencies are what checks share.
           rootsOf = d: d.roots or (if d ? completeDeps then [ d ] else [ ]);
-          # Every crate the named checks' top builds depend on, once: what
-          # build.yaml's `crates` job builds and pushes before the checks
-          # fan out, so that two checks never compile the same crate at once.
-          checksCrates = names:
+          # Every crate derivation `roots` are built from, themselves too:
+          # each one's dependencies and build dependencies, all the way down.
+          crateClosure = roots:
+            let item = d: { key = builtins.unsafeDiscardStringContext d.drvPath; inherit d; }; in
+            lib.listToAttrs (map (x: lib.nameValuePair x.key x.d) (builtins.genericClosure {
+              startSet = map item roots;
+              operator = x: map item (x.d.completeDeps ++ x.d.completeBuildDeps);
+            }));
+          # What build.yaml's `crates` job builds and pushes before anything
+          # else of the run starts: every crate the checks' test and lint
+          # builds depend on, so that two checks never compile the same
+          # crate at once; every crate of what they run (harken-server's binaries
+          # for its tests, both apps' host libraries for the bindings' test,
+          # arkdb for the fuzzer's and the traces', money's server, seed and
+          # page for money-web-sync, its generator for money-native), the
+          # crates of `all` (what two jobs build whole), and every crate two
+          # of the run's other jobs both reach, so that no crate is compiled
+          # by two jobs at once. Each `groups` entry is a job's crate roots;
+          # what one job alone reaches it builds itself.
+          ciCrates = { checks, all ? [ ], groups, tools ? [ ] }:
             let
-              roots = lib.concatMap (n: rootsOf self.checks.${system}.${n}) names;
-              deps = lib.concatMap (r: r.completeDeps ++ r.completeBuildDeps) roots;
-              key = d: builtins.unsafeDiscardStringContext (baseNameOf d.drvPath);
+              # A check's own test and lint builds are its job's: what they
+              # are built from is here.
+              first = crateClosure (lib.concatMap (r: r.completeDeps ++ r.completeBuildDeps) (lib.concatMap (n: rootsOf self.checks.${system}.${n}) checks)
+                ++ [ harken-server money-server-bin money-web.wasm money-seed arkdb arkOf.money.gen ]
+                ++ map (f: ffiHostCrate { inherit (f) crate; }) [ harkenFfi moneyFfi ]
+                ++ all);
             in
-            allOf "checks-crates" (lib.attrValues (lib.listToAttrs (map (d: lib.nameValuePair (key d) d) deps)));
+            allOf "ci-crates" (lib.attrValues (first // sharedCrates groups) ++ tools);
+          # Of `groups` (each a job's crate roots), every crate two or more
+          # of them reach, by derivation.
+          sharedCrates = groups:
+            let each = map crateClosure (lib.attrValues groups); in
+            lib.filterAttrs (k: _: lib.count (g: g ? ${k}) each > 1) (lib.foldl' (a: b: a // b) { } each);
 
           # The pinned previous revisions (nix/versions.nix), each its
           # `harken-server` package as that revision's own flake builds it:
@@ -1863,12 +1891,32 @@
             harken-fdroid = fdroid.apps-fdroid;
           } // lib.listToAttrs (map (v: lib.nameValuePair "harken-server-${v.name}" v.server) versions)
           // lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
-            # The crates build.yaml's checks share, built once before they
-            # fan out (`checksCrates`): of every check its `checks` jobs run.
-            checks-crates = checksCrates [
-              "fmt" "clippy" "rust" "ffi" "traces" "vectors" "fuzz-smoke" "versions"
-              "harken-domain" "harken-module" "docs" "theme" "theme-contrast"
-            ];
+            # build.yaml's `crates` job (`ciCrates`): the checks' crates, and
+            # those its `server`, `docs-site`/`page` and `apk`/`tests` jobs
+            # share. UniFFI's and wasm-bindgen's CLIs, cargo builds of their
+            # own, are each a job's input beside the checks'.
+            ci-crates = ciCrates {
+              checks = [
+                "fmt" "clippy" "rust" "ffi" "traces" "vectors" "fuzz-smoke" "versions"
+                "harken-domain" "harken-module" "docs" "theme" "theme-contrast"
+                "prebuild" "money-native" "revelation-native" "money-web-sync"
+              ];
+              # The docs, which on main `page` and `docs-site` both build.
+              all = [ (docsCrate { }) docs-web.wasm ];
+              groups = {
+                server = [ harken-server arkdb money-server-bin harken-seed money-seed money-web.wasm ];
+                harken-apk = harken-android-lib.crates;
+                money-apk = money-android-lib.crates;
+              };
+              tools = [ uniffiBindgen wasm-bindgen-cli ];
+            };
+            # app-screens.yaml's `servers` job builds it beside the servers,
+            # before the desktop jobs fan out: the crates both windows link
+            # (iced, wgpu, arkui, …), which each desktop job compiled at once.
+            screens-crates = allOf "screens-crates" (lib.attrValues (sharedCrates {
+              harken = [ harken-iced.crate ];
+              money = [ money-iced.crate ];
+            }));
             # The fleet on three NixOS machines (docs/plan-fleet.md §3): an
             # interface down, the service restarted, the server crashed, the
             # scanner over a bound directory. A package and not a check: it
