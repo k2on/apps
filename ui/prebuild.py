@@ -841,17 +841,20 @@ def check(root):
         ops = m.get("ops", {})
         if not ops:
             problems.append(f"modules/{n}/module.toml lists no [ops]")
-        src = os.path.join(root, "modules", n, "src", "lib.rs")
-        text = open(src).read() if os.path.exists(src) else ""
+        # The operations are the module's port, in its crate or (a port
+        # an app's update asks through) the runtime's, ark-module's
+        # `src/<name>.rs`.
+        srcs = [os.path.join(root, "modules", n, "src", "lib.rs"), os.path.join(root, "ui", "rust", "module", "src", f"{n}.rs")]
+        text = "".join(open(src).read() for src in srcs if os.path.exists(src))
         for op, output in ops.items():
             found = re.search(r"impl Op for " + re.escape(op) + r" \{\s*type Module = [^;]+;\s*type Output = ([^;]+);", text)
             if not found:
-                problems.append(f"modules/{n}/module.toml lists the op {op}, which modules/{n}/src/lib.rs does not implement")
+                problems.append(f"modules/{n}/module.toml lists the op {op}, which neither modules/{n}/src/lib.rs nor ark-module's port implements")
             elif found.group(1).strip() != output:
                 problems.append(f"modules/{n}: {op}'s Output is {found.group(1).strip()}, module.toml says {output}")
         for op in re.findall(r"impl Op for (\w+)", text):
             if op not in ops:
-                problems.append(f"modules/{n}/src/lib.rs implements the op {op}, which its module.toml's [ops] does not list")
+                problems.append(f"modules/{n}'s port implements the op {op}, which its module.toml's [ops] does not list")
     for app in apps(root):
         a = app_of(root, app)
         for k in ("name", "id", "accent", "platforms"):
@@ -871,12 +874,16 @@ def check(root):
             for k in STORE_KEYS:
                 if k not in a.get("store", {}):
                     problems.append(f"{app}/app.toml's [store] says no `{k}`")
-        crate_dir = os.path.join(root, app, "app")
+        # The app's crate reaches a module only through its port
+        # (ark_app::modules); the phones' bridge links the module's crate,
+        # whose foreign trait the phones implement.
+        bridge = a.get("ffi", {}).get("dir")
+        crate_dir = os.path.join(root, app, bridge or "app")
         if a.get("crate") and os.path.exists(os.path.join(crate_dir, "Cargo.toml")):
             deps = load(os.path.join(crate_dir, "Cargo.toml")).get("dependencies", {})
             for n in a.get("modules", []):
                 if n in every and module(root, n)["crate"] not in deps:
-                    problems.append(f"{app}/app/Cargo.toml has no dependency on {module(root, n)['crate']}, which app.toml lists")
+                    problems.append(f"{app}/{bridge or 'app'}/Cargo.toml has no dependency on {module(root, n)['crate']}, which app.toml lists")
         # In a checkout (not nix's copy, which has no git): nothing committed
         # where the generated projects and library are.
         if shutil.which("git") and os.path.exists(os.path.join(root, ".git")):

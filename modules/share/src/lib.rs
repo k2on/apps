@@ -1,41 +1,42 @@
-//! Share: text (and a link) handed to the system's share sheet. An update
-//! asks with [`share`], a [`ShareOp`] whose output is `()`, given once the
-//! sheet is shown.
+//! Share: text (and a link) handed to the system's share sheet. Its port —
+//! the [`Share`] trait, [`share`], a [`ShareOp`] whose output is `()`,
+//! given once the sheet is shown — is the runtime's (`ark_module::share`);
+//! here is what implements it: the fake, and (`ffi`) the phones' foreign
+//! trait.
 
 use std::sync::{Arc, Mutex};
 
-use ark_module::{Modules, Op, Reply};
+use ark_module::Modules;
+
+pub use ark_module::share::*;
 
 #[cfg(feature = "ffi")]
 uniffi::setup_scaffolding!();
 
-/// The system's share sheet.
-#[cfg_attr(feature = "ffi", uniffi::export(with_foreign))]
-pub trait Share: Send + Sync {
-    fn share(&self, text: String, url: Option<String>);
-}
+/// The phones' share sheet, through UniFFI (`ffi`): the foreign trait
+/// Swift's `PhoneShare` implements, and it registered as the port.
+#[cfg(feature = "ffi")]
+pub mod phone {
+    use std::sync::Arc;
 
-/// What an update asks of the share sheet.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum ShareOp {
-    Share { text: String, url: Option<String> },
-}
-
-impl Op for ShareOp {
-    type Module = dyn Share;
-    type Output = ();
-    const MODULE: &'static str = "share";
-    fn run(&self, m: &dyn Share, reply: Reply<()>) {
-        match self {
-            ShareOp::Share { text, url } => m.share(text.clone(), url.clone()),
-        }
-        reply.done(())
+    /// The system's share sheet, as Swift and Kotlin show it.
+    #[uniffi::export(with_foreign)]
+    pub trait Share: Send + Sync {
+        fn share(&self, text: String, url: Option<String>);
     }
-}
 
-/// `text`, and `url` when there is one, handed to the share sheet.
-pub fn share(text: impl Into<String>, url: Option<String>) -> ShareOp {
-    ShareOp::Share { text: text.into(), url }
+    struct Phone(Arc<dyn Share>);
+
+    impl super::Share for Phone {
+        fn share(&self, text: String, url: Option<String>) {
+            self.0.share(text, url)
+        }
+    }
+
+    /// The phone's share sheet as the port an update asks through.
+    pub fn port(s: Arc<dyn Share>) -> Arc<dyn super::Share> {
+        Arc::new(Phone(s))
+    }
 }
 
 /// What was shared: the text, and the link when there was one.

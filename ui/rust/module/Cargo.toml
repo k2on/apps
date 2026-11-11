@@ -6,12 +6,9 @@ edition.workspace = true
 license.workspace = true
 description = "What every Ark device module shares: an operation as data with its typed output, why one gave nothing, a reply for later, and the registry a shell fills at startup. The modules themselves are packages of their own (modules/<name>)."
 
-# No module and no platform: each module crate (modules/haptics, …) brings
-# its trait, its operations and its fake, and an app registers what it uses.
+# No platform and no UniFFI (the runtime's layer, layers.toml): the ports an
+# app asks through (haptics, clipboard, share) are here; each module crate
+# (modules/haptics, …) implements its port — its fake, the desktop's, the
+# browser's, the phones' foreign trait — and a shell registers what it has.
 
 [dependencies]
-uniffi = { version = "0.32.2", default-features = false, optional = true }
-
-[features]
-# The module error as a UniFFI type, for the modules' foreign traits.
-ffi = ["dep:uniffi"]

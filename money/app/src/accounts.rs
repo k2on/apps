@@ -11,9 +11,9 @@
 
 use crate::routes::Route;
 use ark::row::Id;
+use ark_app::modules::haptics::{perform, Haptic};
 use ark_app::{App, Command, Data};
 use ark_format::NumberStyle;
-use ark_haptics::{perform, Haptic};
 use money_core::accounts::{net_worth, shelves, AccountKind, Shelving, STARTING_BALANCE};
 use money_core::dates::day_of_ms;
 use money_core::*;
@@ -452,7 +452,7 @@ impl App for Accounts {
                 _ => vec![],
             },
             M::CopyBalance { id } => match find(accounts, &id) {
-                Some(a) => vec![Command::ask(ark_clipboard::copy(ark_format::amount(a.balance, &s.style.0)))],
+                Some(a) => vec![Command::ask(ark_app::modules::clipboard::copy(ark_format::amount(a.balance, &s.style.0)))],
                 None => vec![],
             },
             M::Sent { closed, refused } => match refused {

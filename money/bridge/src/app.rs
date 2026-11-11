@@ -11,10 +11,10 @@
 use std::sync::{Arc, Mutex};
 
 use ark_app::{Ask, Host, Inbox, Modules, Runtime, Ticket};
-use ark_clipboard::Clipboard;
+use ark_clipboard::phone::Clipboard;
 use ark_ffi::Refusal;
-use ark_haptics::Haptics;
-use ark_share::Share;
+use ark_haptics::phone::Haptics;
+use ark_share::phone::Share;
 use money_app::accounts::{Accounts, AccountsMsg};
 use money_app::budget::{Budget, BudgetMsg};
 use money_app::routes::Route;
@@ -145,7 +145,9 @@ impl AccountsApp {
     /// registered once at startup; any may be none.
     pub fn use_modules(&self, haptics: Option<Arc<dyn Haptics>>, clipboard: Option<Arc<dyn Clipboard>>, share: Option<Arc<dyn Share>>) {
         let mut m = self.modules.lock().unwrap_or_else(|e| e.into_inner());
-        m.set(haptics).set(clipboard).set(share);
+        m.set(haptics.map(ark_haptics::phone::port))
+            .set(clipboard.map(ark_clipboard::phone::port))
+            .set(share.map(ark_share::phone::port));
     }
 }
 
@@ -246,7 +248,9 @@ impl BudgetApp {
 
     pub fn use_modules(&self, haptics: Option<Arc<dyn Haptics>>, clipboard: Option<Arc<dyn Clipboard>>, share: Option<Arc<dyn Share>>) {
         let mut m = self.modules.lock().unwrap_or_else(|e| e.into_inner());
-        m.set(haptics).set(clipboard).set(share);
+        m.set(haptics.map(ark_haptics::phone::port))
+            .set(clipboard.map(ark_clipboard::phone::port))
+            .set(share.map(ark_share::phone::port));
     }
 }
 

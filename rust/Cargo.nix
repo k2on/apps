@@ -1380,7 +1380,7 @@ rec {
           }
         ];
         features = {
-          "ffi" = [ "dep:uniffi" "ark-module/ffi" ];
+          "ffi" = [ "dep:uniffi" ];
         };
         resolvedDefaultFeatures = [ "ffi" ];
       };
@@ -1410,7 +1410,7 @@ rec {
           }
         ];
         features = {
-          "ffi" = [ "dep:uniffi" "ark-module/ffi" ];
+          "ffi" = [ "dep:uniffi" ];
           "web" = [ "dep:web-sys" ];
         };
         resolvedDefaultFeatures = [ "desktop" "ffi" "web" ];
@@ -1527,7 +1527,7 @@ rec {
           }
         ];
         features = {
-          "ffi" = [ "dep:uniffi" "ark-module/ffi" ];
+          "ffi" = [ "dep:uniffi" ];
         };
         resolvedDefaultFeatures = [ "ffi" ];
       };
@@ -1575,7 +1575,7 @@ rec {
           }
         ];
         features = {
-          "ffi" = [ "dep:uniffi" "ark-module/ffi" ];
+          "ffi" = [ "dep:uniffi" ];
         };
         resolvedDefaultFeatures = [ "ffi" ];
       };
@@ -1585,18 +1585,7 @@ rec {
         edition = "2021";
         src = lib.cleanSourceWith { filter = sourceFilter;  src = ../ui/rust/module; };
         libName = "ark_module";
-        dependencies = [
-          {
-            name = "uniffi";
-            packageId = "uniffi";
-            optional = true;
-            usesDefaultFeatures = false;
-          }
-        ];
-        features = {
-          "ffi" = [ "dep:uniffi" ];
-        };
-        resolvedDefaultFeatures = [ "ffi" ];
+
       };
       "ark-notifications" = rec {
         crateName = "ark-notifications";
@@ -1617,7 +1606,7 @@ rec {
           }
         ];
         features = {
-          "ffi" = [ "dep:uniffi" "ark-module/ffi" ];
+          "ffi" = [ "dep:uniffi" ];
         };
         resolvedDefaultFeatures = [ "ffi" ];
       };
@@ -1791,7 +1780,7 @@ rec {
           }
         ];
         features = {
-          "ffi" = [ "dep:uniffi" "ark-module/ffi" ];
+          "ffi" = [ "dep:uniffi" ];
         };
         resolvedDefaultFeatures = [ "ffi" ];
       };
@@ -1814,7 +1803,7 @@ rec {
           }
         ];
         features = {
-          "ffi" = [ "dep:uniffi" "ark-module/ffi" ];
+          "ffi" = [ "dep:uniffi" ];
         };
         resolvedDefaultFeatures = [ "ffi" ];
       };
@@ -14114,24 +14103,12 @@ rec {
             packageId = "ark-app";
           }
           {
-            name = "ark-clipboard";
-            packageId = "ark-clipboard";
-          }
-          {
             name = "ark-format";
             packageId = "ark-format";
           }
           {
-            name = "ark-haptics";
-            packageId = "ark-haptics";
-          }
-          {
             name = "ark-router";
             packageId = "ark-router";
-          }
-          {
-            name = "ark-share";
-            packageId = "ark-share";
           }
           {
             name = "ark-ui-gen";
@@ -14156,9 +14133,21 @@ rec {
         ];
         devDependencies = [
           {
+            name = "ark-clipboard";
+            packageId = "ark-clipboard";
+          }
+          {
+            name = "ark-haptics";
+            packageId = "ark-haptics";
+          }
+          {
             name = "ark-peer";
             packageId = "ark-peer";
             usesDefaultFeatures = false;
+          }
+          {
+            name = "ark-share";
+            packageId = "ark-share";
           }
           {
             name = "money-core";
@@ -14217,7 +14206,6 @@ rec {
           {
             name = "ark-module";
             packageId = "ark-module";
-            features = [ "ffi" ];
           }
           {
             name = "ark-peer";

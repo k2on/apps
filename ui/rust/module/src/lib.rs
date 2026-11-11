@@ -25,10 +25,19 @@
 //!   that is not registered (haptics on the desktop) is answered
 //!   [`ModuleError::Unavailable`].
 //!
-//! Under its `ffi` feature each module crate marks its trait
-//! `#[uniffi::export(with_foreign)]`, so Swift and Kotlin classes implement
-//! the protocol or interface UniFFI writes, and an app's ffi crate takes
-//! them (`Option<Arc<dyn Haptics>>`) and registers them here. A module that
+//! - The ports an app's update asks through ([`haptics`], [`clipboard`],
+//!   [`share`]): each module's trait, its operations and their outputs,
+//!   here in the runtime, so an app reaches a module only through these
+//!   typed operations and never depends on the module's crate (layers.toml).
+//!   The module's crate implements the port (its fake, the desktop's, the
+//!   browser's, the phones').
+//!
+//! This crate is pure and has no UniFFI. Under its `ffi` feature each
+//! module crate declares a foreign trait of the same name
+//! (`ark_haptics::phone::Haptics`, `#[uniffi::export(with_foreign)]`), so
+//! Swift and Kotlin classes implement the protocol or interface UniFFI
+//! writes, and an app's bridge takes them and registers each as the port
+//! (`ark_haptics::phone::port`). A module that
 //! answers later hands its foreign implementation a typed reply object of
 //! its own (the camera's `ScanReply` and `PhotoReply`), so what Swift and
 //! Kotlin answer is the operation's output, not a shape shared by all.
@@ -40,14 +49,14 @@ use std::collections::HashMap;
 use std::fmt::{self, Debug};
 use std::sync::{Arc, Mutex};
 
-#[cfg(feature = "ffi")]
-uniffi::setup_scaffolding!();
+pub mod clipboard;
+pub mod haptics;
+pub mod share;
 
 // * What came of an operation
 
 /// Why an operation gave nothing.
 #[derive(Clone, Debug, PartialEq, Eq)]
-#[cfg_attr(feature = "ffi", derive(uniffi::Enum))]
 pub enum ModuleError {
     /// The platform has no such module, or it is not registered.
     Unavailable,

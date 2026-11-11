@@ -177,7 +177,7 @@ What an app asks of the device is a module: one package each under
 `modules/`, and a small core under `ui/rust/module`.
 
 ```
-ui/rust/module/       crate ark-module: Op, ModuleError, Reply, Modules — the plumbing, no module
+ui/rust/module/       crate ark-module: Op, ModuleError, Reply, Modules — the plumbing — and the ports an app asks (haptics, clipboard, share)
 modules/<name>/
 ├── Cargo.toml        crate ark-<name>: the trait, its operations, its fake; desktop/web impls behind features
 ├── src/
@@ -189,17 +189,27 @@ modules/<name>/
 
 An update never calls a module. It returns `Command::ask(op)` or
 `Command::ask_then(op, Msg::Scanned)`, where `op` is one of the module's
-operations (`ark_haptics::perform(Haptic::Success)`, a `HapticsOp`;
-`ark_clipboard::copy(text)`; `ark_camera::scan_qr()`, a `ScanQr`), each
+operations (`ark_app::modules::haptics::perform(Haptic::Success)`, a
+`HapticsOp`; `ark_app::modules::clipboard::copy(text)`;
+`ark_camera::scan_qr()`, a `ScanQr`), each
 implementing `ark_module::Op` with the trait that carries it out and the
 type of what comes of it (`Output`: `()` for a haptic, `Option<String>`
 for a scan, `Option<Vec<u8>>` for a photo). Effects and Ports, below,
-says how it is carried. A test registers each module's fake
+says how it is carried. **A module an app's update asks is a port of the
+runtime's**: its trait, its operations and their outputs are in
+`ark-module` (`ark_module::haptics`, `clipboard`, `share`; re-exported
+as `ark_app::modules`), so the app's crate depends on no module crate
+(layers.toml), and the module's crate implements the port — its fake,
+the desktop's and the browser's, and the phones' foreign trait. A test
+registers each module's fake
 (`ark_haptics::fake::Fake`, `ark_clipboard::fake::Fake`, `ark_camera::Fake`
 …) and looks at what was asked.
 
-Under each crate's `ffi` feature its trait is a UniFFI foreign trait
-(`#[uniffi::export(with_foreign)]`, harken's `PhoneSound` pattern), and a
+Under each crate's `ffi` feature it declares a UniFFI foreign trait of
+the port's name (`ark_haptics::phone::Haptics`,
+`#[uniffi::export(with_foreign)]`, harken's `PhoneSound` pattern) and
+registers what the phone gives as the port (`ark_haptics::phone::port`);
+`ark-module` itself has no UniFFI. A
 module that answers later hands its implementation a typed reply object
 of its own (the camera's `ScanReply.scanned(code)`,
 `PhotoReply.taken(jpeg)`, either's `failed(why)`): the module's Swift
@@ -340,7 +350,7 @@ the same way.
 |---|---|---|
 | kernel | `ark`, `ark-macros` | external pure crates only (serde, sha2, postcard, …) |
 | core | `money-core`, `harken-domain` | the kernel; serde |
-| runtime | `ark-app`, `ark-router`, `ark-format`, `arkui-macros` | the kernel and the core |
+| runtime | `ark-app`, `ark-module`, `ark-router`, `ark-format`, `arkui-macros` | the kernel and the core |
 | app | `money-app` | the core, the kernel, the runtime |
 | adapters | `ark-peer`, `ark-auth`, `ark-ffi`, `arkdb`, the toolkits (`arkui*`, `ark-ui-gen`), the modules, the servers, the shells | anything below them |
 
@@ -391,12 +401,9 @@ records (generated in the bridges), the phones' bridge (money/bridge) and
 the demo's peer (money/seed) are out of the core and the app; display
 text with a figure in it is the app's (`money_app::words`), and
 ark-format's UniFFI exports are an adapter's (ark-format-ffi, namespace
-`ark_format`). Left, in order:
-
-1. ark-module into the runtime, and each module's operations ports of
-   it, so money-app depends on no module crate.
-2. money-app's views behind features — iced, the browser and
-   `screens()` — into adapter crates of their own.
+`ark_format`); ark-module is the runtime's, and the modules money asks
+are ports of it. Left: money-app's views behind features — iced, the
+browser and `screens()` — into adapter crates of their own.
 
 ## Generated, Not Committed
 

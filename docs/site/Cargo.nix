@@ -801,9 +801,7 @@ rec {
         edition = "2021";
         src = lib.cleanSourceWith { filter = sourceFilter;  src = ../../ui/rust/module; };
         libName = "ark_module";
-        features = {
-          "ffi" = [ "dep:uniffi" ];
-        };
+
       };
       "ark-router" = rec {
         crateName = "ark-router";

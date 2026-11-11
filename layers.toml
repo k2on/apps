@@ -25,7 +25,7 @@ external = ["serde", "serde_json"]
 [layers.runtime]
 # What an app is written against: the runtime and its commands, routes as
 # paths, the words numbers and days are written in, the #[view] macro.
-crates = ["ark-app", "ark-router", "ark-router-macros", "ark-format", "arkui-macros"]
+crates = ["ark-app", "ark-module", "ark-router", "ark-router-macros", "ark-format", "arkui-macros"]
 uses = ["kernel", "core"]
 external = ["proc-macro2", "quote", "syn"]
 
@@ -42,7 +42,7 @@ external = ["serde_json"]
 # shells and what generates code. They may use anything below them.
 crates = [
   "ark-peer", "arkdb", "ark-auth", "ark-ffi", "ark-format-ffi",
-  "ark-module", "ark-haptics", "ark-clipboard", "ark-share", "ark-camera",
+  "ark-haptics", "ark-clipboard", "ark-share", "ark-camera",
   "ark-media-player", "ark-notifications", "ark-secure-store",
   "ark-ui-gen", "arkui", "arkui-glyphs", "arkui-web", "arkui-serve", "arkui-shots",
   "money-iced", "money-server", "money-web", "money-seed", "money-bridge",
@@ -55,10 +55,6 @@ external = ["*"]
 # it. The check fails on a violation not listed here, and on a line here
 # that is no longer a violation: delete the line in the change that fixes it.
 [allow]
-"ark-app -> ark-module" = "the operations' plumbing (ark-module) is the runtime's own"
-"money-app -> ark-haptics" = "the modules' operations are ports of the runtime's layer"
-"money-app -> ark-clipboard" = "the modules' operations are ports of the runtime's layer"
-"money-app -> ark-share" = "the modules' operations are ports of the runtime's layer"
 "money-app -> ark-ui-gen" = "screens() (feature gen) moves to an adapter crate"
 "money-app -> arkui" = "the iced views (feature iced) move to an adapter crate"
 "money-app -> arkui-web" = "the browser's views (feature web) move to an adapter crate"

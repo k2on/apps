@@ -13,10 +13,6 @@ path = "src/lib.rs"
 [dependencies]
 ark = { path = "../../rust/ark" }
 ark-app = { path = "../../ui/rust/app" }
-# The device modules money lists (money/app.toml).
-ark-haptics = { path = "../../modules/haptics" }
-ark-clipboard = { path = "../../modules/clipboard" }
-ark-share = { path = "../../modules/share" }
 ark-format = { path = "../../rust/ark-format" }
 money-core = { path = "../core" }
 # Where money can be, spelled as paths (`src/routes.rs`).
@@ -34,6 +30,11 @@ iced = ["dep:arkui", "arkui/app"]
 web = ["dep:arkui-web"]
 
 [dev-dependencies]
+# The fakes of the device modules money lists (money/app.toml), whose ports
+# (ark_app::modules) its updates ask through.
+ark-haptics = { path = "../../modules/haptics" }
+ark-clipboard = { path = "../../modules/clipboard" }
+ark-share = { path = "../../modules/share" }
 # The tests' store, a peer's, over the demo's household.
 ark-peer = { path = "../../rust/ark-peer", default-features = false }
 money-core = { path = "../core", features = ["demo"] }

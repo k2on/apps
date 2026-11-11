@@ -1,5 +1,7 @@
-//! The clipboard: text put where the person can paste it. An update asks
-//! with [`copy`], a [`ClipboardOp`] whose output is `()`.
+//! The clipboard: text put where the person can paste it. Its port — the
+//! [`Clipboard`] trait, [`copy`], a [`ClipboardOp`] whose output is `()` —
+//! is the runtime's (`ark_module::clipboard`), which an update asks
+//! through; here is what implements it:
 //!
 //! - iPhone and Mac: `PhoneClipboard` (swift/: UIPasteboard, NSPasteboard).
 //! - Android: `PhoneClipboard` (kotlin/: ClipboardManager).
@@ -8,40 +10,37 @@
 //! - The browser's DOM (feature `web`, wasm32): [`Browser`], the page's
 //!   `navigator.clipboard`.
 
-use ark_module::{Op, Reply};
+pub use ark_module::clipboard::*;
 
 #[cfg(feature = "ffi")]
 uniffi::setup_scaffolding!();
 
 pub mod fake;
 
-/// Text put on the clipboard.
-#[cfg_attr(feature = "ffi", uniffi::export(with_foreign))]
-pub trait Clipboard: Send + Sync {
-    fn copy_text(&self, text: String);
-}
+/// The phones' clipboard, through UniFFI (`ffi`): the foreign trait Swift's
+/// and Kotlin's `PhoneClipboard` implement, and it registered as the port.
+#[cfg(feature = "ffi")]
+pub mod phone {
+    use std::sync::Arc;
 
-/// What an update asks of the clipboard.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum ClipboardOp {
-    Copy(String),
-}
-
-impl Op for ClipboardOp {
-    type Module = dyn Clipboard;
-    type Output = ();
-    const MODULE: &'static str = "clipboard";
-    fn run(&self, m: &dyn Clipboard, reply: Reply<()>) {
-        match self {
-            ClipboardOp::Copy(t) => m.copy_text(t.clone()),
-        }
-        reply.done(())
+    /// Text put on the clipboard, as Swift and Kotlin do it.
+    #[uniffi::export(with_foreign)]
+    pub trait Clipboard: Send + Sync {
+        fn copy_text(&self, text: String);
     }
-}
 
-/// `text` put on the clipboard.
-pub fn copy(text: impl Into<String>) -> ClipboardOp {
-    ClipboardOp::Copy(text.into())
+    struct Phone(Arc<dyn Clipboard>);
+
+    impl super::Clipboard for Phone {
+        fn copy_text(&self, text: String) {
+            self.0.copy_text(text)
+        }
+    }
+
+    /// The phone's clipboard as the port an update asks through.
+    pub fn port(c: Arc<dyn Clipboard>) -> Arc<dyn super::Clipboard> {
+        Arc::new(Phone(c))
+    }
 }
 
 #[cfg(feature = "desktop")]

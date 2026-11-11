@@ -12,4 +12,4 @@ uniffi = { version = "0.32.2", default-features = false, optional = true }
 
 [features]
 # The trait as a UniFFI foreign trait, for the phones.
-ffi = ["dep:uniffi", "ark-module/ffi"]
+ffi = ["dep:uniffi"]

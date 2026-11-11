@@ -20,9 +20,9 @@
 
 use crate::routes::Route;
 use ark::row::Id;
+use ark_app::modules::haptics::{perform, Haptic};
 use ark_app::{App, Command, Data};
 use ark_format::{amount, NumberStyle};
-use ark_haptics::{perform, Haptic};
 use money_core::words::Tone;
 
 use crate::words::LineWords;

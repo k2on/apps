@@ -1,55 +1,49 @@
 //! Haptics: the phone's answer in the hand (`ui/docs/motion.md`,
-//! Haptics). Fired on the change itself, never on a tap that might change
-//! nothing. An update asks with [`perform`], a [`HapticsOp`] whose output
-//! is `()` (nothing says whether it was felt), or `Unavailable` where there
-//! is none (the desktop, the browser).
+//! Haptics). Its port — [`Haptic`], the [`Haptics`] trait, [`perform`], a
+//! [`HapticsOp`] whose output is `()` — is the runtime's
+//! (`ark_module::haptics`), which an update asks through; here is what
+//! implements it: the fake, and (`ffi`) the phones' foreign trait.
 
-use ark_module::{Op, Reply};
+pub use ark_module::haptics::*;
 
 #[cfg(feature = "ffi")]
 uniffi::setup_scaffolding!();
 
 pub mod fake;
 
-/// What a haptic says: `ui/docs/motion.md`'s three, kept for what matters.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "ffi", derive(uniffi::Enum))]
-pub enum Haptic {
-    /// Something was kept: a transaction saved, an account added.
-    Success,
-    /// A choice stepped: a month, a tick, a detent.
-    Selection,
-    /// Something went that cannot simply come back: an account closed.
-    Warning,
-}
+/// The phones' haptics, through UniFFI (`ffi`): the foreign trait Swift's
+/// and Kotlin's `PhoneHaptics` implement, and it registered as the port.
+#[cfg(feature = "ffi")]
+pub mod phone {
+    use std::sync::Arc;
 
-/// The phone's haptics.
-#[cfg_attr(feature = "ffi", uniffi::export(with_foreign))]
-pub trait Haptics: Send + Sync {
-    fn perform(&self, haptic: Haptic);
-}
+    use super::Haptic;
 
-/// What an update asks of the haptics.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum HapticsOp {
-    Perform(Haptic),
-}
-
-impl Op for HapticsOp {
-    type Module = dyn Haptics;
-    type Output = ();
-    const MODULE: &'static str = "haptics";
-    fn run(&self, m: &dyn Haptics, reply: Reply<()>) {
-        match *self {
-            HapticsOp::Perform(h) => m.perform(h),
-        }
-        reply.done(())
+    #[uniffi::remote(Enum)]
+    pub enum Haptic {
+        Success,
+        Selection,
+        Warning,
     }
-}
 
-/// `haptic` performed.
-pub fn perform(haptic: Haptic) -> HapticsOp {
-    HapticsOp::Perform(haptic)
+    /// The phone's haptics, as Swift and Kotlin implement them.
+    #[uniffi::export(with_foreign)]
+    pub trait Haptics: Send + Sync {
+        fn perform(&self, haptic: Haptic);
+    }
+
+    struct Phone(Arc<dyn Haptics>);
+
+    impl super::Haptics for Phone {
+        fn perform(&self, haptic: Haptic) {
+            self.0.perform(haptic)
+        }
+    }
+
+    /// The phone's haptics as the port an update asks through.
+    pub fn port(h: Arc<dyn Haptics>) -> Arc<dyn super::Haptics> {
+        Arc::new(Phone(h))
+    }
 }
 
 #[cfg(test)]

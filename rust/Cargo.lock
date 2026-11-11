@@ -359,9 +359,6 @@ dependencies = [
 [[package]]
 name = "ark-module"
 version = "0.1.0"
-dependencies = [
- "uniffi",
-]
 
 [[package]]
 name = "ark-notifications"
