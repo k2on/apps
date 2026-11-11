@@ -95,20 +95,49 @@ echo "the $family's plan: $(jq -c 'map({bundle, out, shots: (.shots | length)})'
 status=0
 start=$(date +%s)
 drive() {
-  TEST_RUNNER_APP_PLAN="$plan" \
+  TEST_RUNNER_APP_PLAN="${DRIVE_PLAN:-$plan}" \
     xcodebuild test-without-building -project "$here/drive-ios/Drive.xcodeproj" -scheme Drive \
       -destination "id=$udid" -derivedDataPath "$derived" -resultBundlePath "$results/$1.xcresult" \
       > "$results/$1.log" 2>&1
 }
+# Of the plan $1, the entries any of whose shots are not there in either
+# theme, as a plan of their own.
+missing() {
+  local keep='[]' n i out want have theme
+  n=$(jq length "$1")
+  for ((i = 0; i < n; i++)); do
+    out=$(jq -r ".[$i].out" "$1")
+    want=$(jq ".[$i].shots | length" "$1")
+    for theme in light dark; do
+      have=$(find "$out/$theme" -maxdepth 1 -name '*.png' ! -name 'stuck.png' 2> /dev/null | wc -l | tr -d ' ')
+      if [ "$have" -lt "$want" ]; then
+        keep=$(jq -c --argjson e "$(jq -c ".[$i]" "$1")" '. + [$e]' <<< "$keep")
+        break
+      fi
+    done
+  done
+  printf '%s\n' "$keep"
+}
+
 drive "$family" || status=$?
-# An app the simulator would not launch in time, once: run again, once.
-if [ "$status" != 0 ] && grep -q "Timed out attempting to launch" "$results/$family.log"; then
-  echo "an app did not launch in time; the driver run again"
-  status=0
-  drive "$family-again" || status=$?
-  cp "$results/$family-again.log" "$results/$family.log"
-fi
 grep -E "^Drive: |error:|failed|passed|Test Case|XCTAssert|\*\* TEST" "$results/$family.log" || true
+# A run that ended early, once, run again on what it did not take: an app
+# the simulator would not launch in time, or XCUITest losing the app
+# ("Failed to get matching snapshots: … kAXErrorServerNotFound", "Timed out
+# while evaluating UI query", app-screens 43113069044), which ends the test
+# and every shot after it. Each entry left whole is taken whole again, in
+# both themes; one already signed in passes over its sign-in.
+if [ "$status" != 0 ]; then
+  again=$results/plan-$family-again.json
+  missing "$plan" > "$again"
+  if [ "$(jq length "$again")" -gt 0 ]; then
+    echo "the driver ended early; run again on $(jq -c 'map(.out | split("/") | .[-2:] | join("/"))' "$again")"
+    status=0
+    DRIVE_PLAN="$again" drive "$family-again" || status=$?
+    grep -E "^Drive: |error:|failed|passed|Test Case|XCTAssert|\*\* TEST" "$results/$family-again.log" || true
+    cat "$results/$family-again.log" >> "$results/$family.log"
+  fi
+fi
 echo "the driver ran for $(( $(date +%s) - start ))s (status $status)"
 
 # Each shot's size, as it was drawn.
