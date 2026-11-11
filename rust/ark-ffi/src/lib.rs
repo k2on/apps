@@ -39,7 +39,7 @@ pub mod process;
 pub mod session;
 pub mod typed;
 pub use keep::{LoginKeep, OldShelf};
-pub use process::{ArkProcess, Attached};
+pub use process::{ArkProcess, Attached, Work};
 pub use session::{Hold, Session};
 pub use typed::{FileRefFfi, Op, RowId, Taken, Twin, Typed};
 

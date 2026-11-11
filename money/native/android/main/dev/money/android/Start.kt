@@ -133,6 +133,9 @@ class Start(app: Application) : AndroidViewModel(app) {
     val holder = FirstRunHolder(page) { press(it) }
 
     private val _book = MutableStateFlow<Book?>(null)
+
+    /** This activity's screens attached to the process's runtime: online while they show (ArkProcess). */
+    private val attached = dev.arkdb.ffi.ArkProcess.shared().attach()
     /** The budget open now: the server's, or the demo's. */
     val book: StateFlow<Book?> = _book.asStateFlow()
 
@@ -268,6 +271,7 @@ class Start(app: Application) : AndroidViewModel(app) {
     }
 
     override fun onCleared() {
+        attached.detach()
         _book.value?.close()
     }
 

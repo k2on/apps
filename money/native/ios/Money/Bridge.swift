@@ -101,6 +101,9 @@ final class Bridge {
     private var budget: Holding? = nil
     /// Each view's version when it was last read into the snapshot.
     private var seen = [MoneyView: UInt64]()
+    /// This bridge's screens attached to the process's runtime: online
+    /// while they show (ArkProcess), let go when it closes.
+    private let attached = ArkProcess.shared().attach()
 
     /// The session `opening` says, showing `month`; what it sees told
     /// through `deliver` — the main queue unless a test says otherwise.
@@ -332,6 +335,7 @@ final class Bridge {
     func close() {
         queue.async {
             self.closed = true
+            self.attached.detach()
             self.peer?.setListener(listener: nil)
             self.session?.setListener(listener: nil)
             self.always = []

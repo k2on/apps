@@ -9,6 +9,12 @@
 //! object owning the peer per screen. ark-media-player's process player
 //! (`ArkMedia`) is the same idea for sound.
 //!
+//! **Online while wanted.** The live connection is open while a UI is
+//! attached or background work runs ([`ArkProcess::work`]: the media
+//! service playing, a woken task) and closed when neither is, as it was
+//! when the activity went; it redials when a UI attaches or work begins.
+//! The replica, its session and the state stay in memory either way.
+//!
 //! An app reaches its runtime by [`ArkProcess::open`] with how to open it
 //! (its domain's config and disk, in its own crate: money's
 //! `money_process_open`); a second open is the first's peer. Sign-out puts
@@ -34,9 +40,24 @@ struct Inner {
     /// by name: made once, shared by every attachment.
     parts: Vec<(String, Arc<dyn Any + Send + Sync>)>,
     attached: u32,
+    /// Background work running now (a player playing, a woken task).
+    working: u32,
+    /// Whether the live connection is wanted open, as last told.
+    online: bool,
+    /// Where online and offline are said: the peer's link, or a test's.
+    link: Option<Arc<dyn Fn(bool) + Send + Sync>>,
     /// How many times the runtime was made: one per process, again only
     /// after a sign-out.
     opened: u32,
+}
+
+/// Background work that keeps the runtime online while it runs, with no
+/// UI attached: the media service playing, a woken task. Ended with
+/// [`Work::end`], or when it is dropped.
+#[derive(uniffi::Object)]
+pub struct Work {
+    process: Arc<ArkProcess>,
+    done: Mutex<bool>,
 }
 
 /// A UI attached to the runtime: an Activity's, a Scene's, a window's.
@@ -54,6 +75,33 @@ impl ArkProcess {
         self.inner.lock().unwrap_or_else(|e| e.into_inner())
     }
 
+    /// Online while a UI is attached or work runs, offline when neither:
+    /// told to the link only when it changes.
+    fn follow(&self) {
+        let (link, online) = {
+            let mut i = self.lock();
+            let want = i.attached > 0 || i.working > 0;
+            if want == i.online {
+                return;
+            }
+            i.online = want;
+            let link = i.link.clone().or_else(|| {
+                i.peer
+                    .clone()
+                    .map(|p| Arc::new(move |on| p.set_online(on)) as Arc<dyn Fn(bool) + Send + Sync>)
+            });
+            (link, want)
+        };
+        if let Some(link) = link {
+            link(online)
+        }
+    }
+
+    /// Online and offline said to `link` instead of the peer: a test's host.
+    pub fn with_link(&self, link: impl Fn(bool) + Send + Sync + 'static) {
+        self.lock().link = Some(Arc::new(link));
+    }
+
     /// The process's runtime as `key` (its disk: one server's replica),
     /// its peer opened by `open` the first time and the same peer every
     /// time after, until [`ArkProcess::close`]; asked as another key (the
@@ -69,6 +117,17 @@ impl ArkProcess {
         i.peer = Some(p.clone());
         i.key = key.into();
         i.opened += 1;
+        // Opened with nothing to show it or work for it: offline until there is.
+        let wanted = i.attached > 0 || i.working > 0;
+        i.online = wanted;
+        if !wanted {
+            let link = i.link.clone();
+            drop(i);
+            match link {
+                Some(link) => link(false),
+                None => p.set_online(false),
+            }
+        }
         Ok(p)
     }
 
@@ -103,10 +162,27 @@ impl ArkProcess {
     /// A UI attached: it draws over the runtime until it detaches.
     pub fn attach(self: Arc<Self>) -> Arc<Attached> {
         self.lock().attached += 1;
+        self.follow();
         Arc::new(Attached {
             process: self,
             done: Mutex::new(false),
         })
+    }
+
+    /// Background work begun (the media service playing, a woken task):
+    /// online while it runs, whether or not a UI is attached.
+    pub fn work(self: Arc<Self>) -> Arc<Work> {
+        self.lock().working += 1;
+        self.follow();
+        Arc::new(Work {
+            process: self,
+            done: Mutex::new(false),
+        })
+    }
+
+    /// Whether the live connection is open: a UI attached or work running.
+    pub fn online(&self) -> bool {
+        self.lock().online
     }
 
     /// How many UIs are attached now.
@@ -151,6 +227,8 @@ impl Attached {
             *done = true;
             let mut i = self.process.lock();
             i.attached = i.attached.saturating_sub(1);
+            drop(i);
+            self.process.follow();
         }
     }
 
@@ -163,5 +241,59 @@ impl Attached {
 impl Drop for Attached {
     fn drop(&mut self) {
         self.detach()
+    }
+}
+
+#[uniffi::export]
+impl Work {
+    /// The work done: offline again if no UI is attached and nothing else
+    /// runs. Twice is once.
+    pub fn end(&self) {
+        let mut done = self.done.lock().unwrap_or_else(|e| e.into_inner());
+        if !*done {
+            *done = true;
+            let mut i = self.process.lock();
+            i.working = i.working.saturating_sub(1);
+            drop(i);
+            self.process.follow();
+        }
+    }
+}
+
+impl Drop for Work {
+    fn drop(&mut self) {
+        self.end()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// With a fake host for the link: attached, online; detached and idle,
+    /// offline; a wake-up's work online again, then offline once it ends;
+    /// a UI and work together stay online until both are gone. Falsified
+    /// by going offline when the last UI goes while work runs.
+    #[test]
+    fn online_while_a_ui_or_work_wants_it() {
+        let said = Arc::new(Mutex::new(vec![]));
+        let p = ArkProcess::apart();
+        let s = said.clone();
+        p.with_link(move |on| s.lock().unwrap().push(on));
+        let ui = p.clone().attach();
+        assert!(p.online());
+        ui.detach();
+        assert!(!p.online());
+        let woken = p.clone().work();
+        assert!(p.online(), "a wake-up connects");
+        let ui = p.clone().attach();
+        woken.end();
+        assert!(p.online(), "the UI still wants it");
+        let playing = p.clone().work();
+        drop(ui);
+        assert!(p.online(), "the player still plays");
+        drop(playing);
+        assert!(!p.online(), "idle: offline");
+        assert_eq!(*said.lock().unwrap(), [true, false, true, false]);
     }
 }
