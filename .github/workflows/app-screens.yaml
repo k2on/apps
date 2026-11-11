@@ -599,10 +599,17 @@ jobs:
           name: ${{ vars.CACHIX_NAME }}
           authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
           pushFilter: "macOS-SDK"
+      # And what of the Mac's servers is Linux's (money's browser client):
+      # each server.sh's packages, as the Mac's job builds them.
       - name: Build the kernels
         run: |
           attrs=()
-          for a in $APPS; do attrs+=("$a-ios-simulator" "$a-macos"); done
+          for a in $APPS; do
+            attrs+=("$a-ios-simulator" "$a-macos")
+            if [ -f "src/$a/screens/server.sh" ]; then
+              while read -r p; do attrs+=("$p"); done < <(grep -o '\.#[A-Za-z0-9_-]*' "src/$a/screens/server.sh" | cut -c3- | sort -u)
+            fi
+          done
           bash .github/apple-ahead.sh "$PWD/src" "$RUNNER_TEMP/kernels.txt" "${attrs[@]}"
 
   ios:

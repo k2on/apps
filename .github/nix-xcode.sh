@@ -2,6 +2,7 @@
 # `nix-xcode.sh <checkout> <Xcode.app> <attr>...`: each of the checkout's
 # aarch64-darwin packages <attr> built, or fetched from the cache, its store
 # path printed on stdout as `<attr> <path>` (everything else on stderr).
+# They are built by one `nix build`, side by side where nothing orders them.
 #
 # The iPhone builds use the runner's installed Xcode, <Xcode.app>, where it
 # is (flake.nix, `xcode`: pinned by version and build number, never put in
@@ -20,6 +21,9 @@ if [ ! -d "$xcode/Contents/Developer" ]; then
   echo "::error::$xcode is no Xcode (run xcode-pinned.sh first)" >&2
   exit 1
 fi
+# Each attr whose plan passed the guard below, and its derivation.
+attrs=()
+drvs=()
 for attr in "$@"; do
   ref="$flake#packages.aarch64-darwin.$attr"
   # Evaluated once: its derivation, which the plan and the build then take
@@ -46,10 +50,28 @@ for attr in "$@"; do
     echo "::error::$attr's plan has an Xcode store path in it: Xcode must stay out of the store (flake.nix, xcode)" >&2
     exit 1
   fi
-  echo "$attr: building (or fetching)" >&2
-  start=$(date +%s)
-  if path=$(nix build --no-link --print-out-paths --print-build-logs "$drv^out" 2> >(cat >&2)); then
-    echo "$attr: built or fetched in $(( $(date +%s) - start ))s" >&2
+  attrs+=("$attr")
+  drvs+=("$drv")
+done
+[ ${#drvs[@]} -gt 0 ] || exit $status
+# The machine, and how many builds nix runs at once on it: every attr
+# is built by one `nix build`, so what does not depend on another (two
+# apps; the simulator's ArkUI and the Mac's) is built at the same time,
+# and what they share (`arkuiSwift`) once.
+echo "this Mac: $(sysctl -n hw.ncpu 2> /dev/null || nproc) cores, $(( $(sysctl -n hw.memsize 2> /dev/null || echo 0) / 1073741824 )) GB; nix: max-jobs $(nix config show max-jobs 2> /dev/null), cores $(nix config show cores 2> /dev/null)" >&2
+refs=()
+for d in "${drvs[@]}"; do refs+=("$d^out"); done
+echo "building (or fetching) ${attrs[*]} at once" >&2
+start=$(date +%s)
+# One that fails is said, and the others still built (--keep-going).
+nix build --no-link --keep-going --print-build-logs "${refs[@]}" 2> >(cat >&2) || true
+echo "built or fetched in $(( $(date +%s) - start ))s" >&2
+# Each one's path, in the order asked: built above, so only looked up
+# (one that failed is not built again).
+for i in "${!attrs[@]}"; do
+  attr=${attrs[$i]}
+  path=$(nix-store -q --outputs "${drvs[$i]}" | head -1)
+  if [ -n "$path" ] && nix path-info "$path" > /dev/null 2>&1; then
     echo "$attr $path"
   else
     echo "::error::$attr did not build" >&2

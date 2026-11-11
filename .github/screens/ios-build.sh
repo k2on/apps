@@ -16,33 +16,43 @@ xcode=$2
 out=$3
 shift 3
 failed=0
-for a in "$@"; do
-  if ! line=$(bash "$(dirname "$0")/../nix-xcode.sh" "$src" "$xcode" "$a-ios-simulator"); then
-    case $? in
-      2) echo "$a: this commit has no $a-ios-simulator; skipped" ;;
-      *) failed=1 ;;
-    esac
-    continue
-  fi
-  path=${line#* }
-  mkdir -p "$out/simulator-$a"
-  cp -R "$path"/*.app "$out/simulator-$a/"
-  chmod -R u+w "$out/simulator-$a"
-  echo "$a: $path"
-done
 # The Mac's, of each app the commit has one for (listed, not evaluated).
 names=$(nix eval --json "git+file://$(cd "$src" && pwd)#packages.aarch64-darwin" --apply builtins.attrNames 2> /dev/null || echo '[]')
+attrs=()
 for a in "$@"; do
-  jq -e --arg p "$a-macos" 'index($p) != null' <<< "$names" > /dev/null || continue
-  if ! line=$(bash "$(dirname "$0")/../nix-xcode.sh" "$src" "$xcode" "$a-macos"); then
-    failed=1
-    continue
+  if jq -e --arg p "$a-ios-simulator" 'index($p) != null' <<< "$names" > /dev/null; then
+    attrs+=("$a-ios-simulator")
+  else
+    echo "$a: this commit has no $a-ios-simulator; skipped"
   fi
-  app=$(find "${line#* }" -maxdepth 2 -name '*.app' | head -1)
-  [ -n "$app" ] || { echo "::error::$a-macos has no .app in it"; failed=1; continue; }
-  mkdir -p "$out/macos-$a"
-  cp -R "$app" "$out/macos-$a/"
-  chmod -R u+w "$out/macos-$a"
-  echo "$a (Mac): $app"
+  if jq -e --arg p "$a-macos" 'index($p) != null' <<< "$names" > /dev/null; then attrs+=("$a-macos"); fi
+done
+[ ${#attrs[@]} -gt 0 ] || exit 0
+# All at once (../nix-xcode.sh): the apps' builds side by side, over the
+# ArkUI each platform's share. Each line `<attr> <path>`, of each built.
+start=$(date +%s)
+built=$(bash "$(dirname "$0")/../nix-xcode.sh" "$src" "$xcode" "${attrs[@]}") || failed=1
+echo "every app built or fetched in $(( $(date +%s) - start ))s"
+for attr in "${attrs[@]}"; do
+  path=$(awk -v p="$attr" '$1 == p {print $2}' <<< "$built")
+  if [ -z "$path" ]; then failed=1; continue; fi
+  case $attr in
+    *-ios-simulator)
+      a=${attr%-ios-simulator}
+      mkdir -p "$out/simulator-$a"
+      cp -R "$path"/*.app "$out/simulator-$a/"
+      chmod -R u+w "$out/simulator-$a"
+      echo "$a: $path"
+      ;;
+    *-macos)
+      a=${attr%-macos}
+      app=$(find "$path" -maxdepth 2 -name '*.app' | head -1)
+      [ -n "$app" ] || { echo "::error::$attr has no .app in it"; failed=1; continue; }
+      mkdir -p "$out/macos-$a"
+      cp -R "$app" "$out/macos-$a/"
+      chmod -R u+w "$out/macos-$a"
+      echo "$a (Mac): $app"
+      ;;
+  esac
 done
 exit $failed
