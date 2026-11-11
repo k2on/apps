@@ -75,9 +75,20 @@ its tree kept beside it. It is never how long a shot waits when all is well.
   still).
 - What the system shows that is not the app: Android's own animations
   off, its status bar's icons all said, the launcher's home laid out
-  before the app is installed (its taskbar on the tablet); each iOS device
-  pass on a server of its own (the iPad's not left what the iPhone's
-  played).
+  before the app is installed; each iOS device pass on a server of its own
+  (the iPad's not left what the iPhone's played).
+
+Not held still yet, and so different between two runs' Android shots
+(dry runs 42971809544 and 42977527249, 37 of 81 byte-identical): the
+launcher's taskbar on the tablet and the open Fold (the apps it predicts,
+in its own order), one to three levels of antialiasing at rounded edges
+(faces, the gesture handle's ends, the status bar's icons: the emulator's
+GPU), harken's player backdrop, and harken's server crediting an album to
+different performers from one run to the next (its desktop library too).
+Hiding the navigation bars in shots mode took the taskbar and the handle
+away but brought up the system's "Viewing full screen" confirmation over
+the first launch (dry run 42984084410); the setting
+`immersive_mode_confirmations` is what would be tried next.
 - The caret: clear in shots mode.
 - Where a list is scrolled: where a shot's steps put it, or its top.
 
