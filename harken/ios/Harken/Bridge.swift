@@ -278,7 +278,7 @@ final class Bridge {
         harken = h
         // What it counted is kept beside the replica.
         let p = Player(peer: h.peer, me: login.session, dir: dir.path)
-        p.attach(media: media, server: server, shell: Shell(self))
+        p.attach(media: media, server: server, shell: PlayerHost(self))
         player = p
         h.peer.setListener(listener: Told { [weak self] in self?.drainSoon() })
         let v = HarkenSession(peer: h.peer)
@@ -729,7 +729,7 @@ final class Bridge {
 
 /// What the player asks of the phone: a step now or later, and a track's cover. Told on the
 /// session's queue, or the player's (the main queue); each goes to the session's queue.
-private final class Shell: PlayerShell, @unchecked Sendable {
+private final class PlayerHost: PlayerShell, @unchecked Sendable {
     private weak var bridge: Bridge?
 
     init(_ b: Bridge) { bridge = b }
