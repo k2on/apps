@@ -113,7 +113,8 @@ on:
         default: ""
       # Every app taken as by hand, and nothing published (no `screens`
       # branch): to try this file as a branch has it, run on that branch,
-      # before it is merged. Its builds still go to the cache, as every run
+      # before it is merged. A run by hand on any branch but main is a dry
+      # one whatever this says. Its builds still go to the cache, as every run
       # of this repository's code.
       dry:
         description: "Without a PR: take every app, publish nothing"
@@ -426,7 +427,10 @@ jobs:
       APPS: ${{ needs.which.outputs.android }}
       GH_TOKEN: ${{ github.token }}
       # A dry run: the APKs build made at the branch's commit, where it made any.
-      COMMIT: ${{ inputs.dry == true && github.sha || '' }}
+      # A run by hand on any branch but main is one, `dry` said or not: F-Droid's
+      # APKs are main's, and have no ready signal to wait for (43159033586,
+      # dispatched on a branch without `dry`: every Android job failed so).
+      COMMIT: ${{ (inputs.dry == true || (github.event_name == 'workflow_dispatch' && github.ref_name != 'main')) && github.sha || '' }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -1168,7 +1172,12 @@ jobs:
   # run replaced, the rest as it was.
   publish:
     needs: [which, android, ios, desktop]
-    if: ${{ !cancelled() && needs.which.outputs.mode == 'release' && inputs.dry != true }}
+    # Not a dry run, nor one by hand on any branch but main: a branch's shots
+    # are never main's published ones (43159033586, by hand on a branch
+    # without `dry`, pushed its shots to `screens`).
+    if: >-
+      ${{ !cancelled() && needs.which.outputs.mode == 'release' && inputs.dry != true &&
+      (github.event_name != 'workflow_dispatch' || github.ref_name == 'main') }}
     runs-on: ubuntu-latest
     # One writer of the branch at a time, with screens.yaml's publish.
     concurrency:
