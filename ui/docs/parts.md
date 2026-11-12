@@ -85,7 +85,8 @@ Material's own, and an app that imports both could not say which.
 `panel-right` (the inspector's toggle), `wand-sparkles`, `refresh-cw`,
 `list-filter`, `mail`, `chart-column`, `list`, `settings`, `inbox`,
 `triangle-alert`, `clock`, `dollar-sign`, `banknote`, `cloud`, `target`,
-`arrow-left-right`, `users`, `house`, `landmark`. Android and the desktop
+`arrow-left-right`, `users`, `house`, `landmark`; for a search picker
+`chevrons-up-down` (its row) and `circle-help` (a choice still to make). Android and the desktop
 draw Lucide's paths; the iPhone draws the SF Symbol each maps to.
 
 ## A screen laid out in Rust
@@ -108,6 +109,7 @@ by the generated views by these names.
 | FormSheet | title, onDismiss, confirm, canConfirm, onConfirm, content | `ModalBottomSheet`, the confirm a full-width button under the form | `.sheet` over a `Form`, Cancel ✕ and the confirming ✓ in its bar | a dialog with Cancel and the confirm |
 | FormSection | header, footer, content | a column, its label over and its note under | `Section(header:footer:)` | a column |
 | OptionPicker / PickerChoice | label, selection, onChange; title, glyph, tag | `FilterChip`s in a `FlowRow` | `Picker` (a menu in the form's row), each a tagged `Label` (`\.choiceSymbol` for the app's own symbols) | chips that wrap |
+| SearchPicker / SearchChoice | label, selection, unset, prompt, onChange; title, glyph, tag, group, detail, tint | a `ListItem` row (`Press.Highlight`); compact (`compact-width`), a `ModalBottomSheet` under `SheetBar`; wider, a `DropdownMenu` anchored to the row, `dropdown-width` wide, its list at most `dropdown-height`; either a `SearchField` focused on open over the grouped rows (`SearchPicker.kt`) | a form's row; on the iPhone a sheet (`NavigationStack`, `.searchable` focused, `.medium`/`.large`, Cancel); on the iPad a popover anchored to the row holding the same list; on the Mac the same with the search field over it (`SearchPicker.swift`) | `arkui::search_picker`: a dropdown anchored under its field, a typed search line, declared heights; the browser's ARIA combobox (`fields::search_picker`), a sheet from the foot when compact |
 | AmountEntry | label, prompt, text, cents, problem, onType, onCents | `AmountField` (typed) | ArkUI's `AmountEntry` (the figure over the keypad, in cents) | a text field (typed) |
 | SwitchRow | title, note?, isOn, onChange | `ListItem` with a `Switch` | `Toggle` | `checkbox` |
 | Prompt, NameField, AmountField, ChipRow, Chip, FormButton, HeroFigure | as they read | | | |
@@ -118,6 +120,17 @@ by the generated views by these names.
 | CodeImage | size, dark | `QrCode` | `QrCode` | `arkui::qr::qr_code`; the browser's inline SVG |
 | Photo (`photo`, `zoom_photo`) | url (`file:`, `data:`, `https:`; empty while fetched), label, zoom | `Image` decoded off the main thread (upright by its EXIF, at most 2400 a side); zoomed, `transformable` and a double tap, rubber-banded past 1 and `zoom-max` (`Springs.band`), settling on `Springs.move` (`Springs.fade` when reduced) | `Image` from the URL's bytes (`AsyncImage` for `https:`); zoomed, `MagnifyGesture`, a pan while larger, a double tap to `zoom-tap`, banded by `Momentum.band`, settling on `Springs.move` | `arkui::images::local`, fitted; zoomed, the room it is given (a window zooms by its size); the browser's `<img>` |
 | Paper | heading, date, names, figures, notes, total | white, monospace, the light side's ink in either theme; its shadow and `corner` | the same, `.environment(\.colorScheme, .light)` | the light tokens on `SURFACE`, Fira Mono; the browser's `.ark-paper` |
+
+**A search picker** (`search_picker`, ark_app::view::search) chooses one
+of many by typing. What it finds is said once: folded (case and Latin
+accents off), every word of what is typed in a choice's title or its
+group's name, in the app's order under the groups, "No Matches" when
+nothing is. The chosen one is lit as it opens, the first found after each
+change; ↑/↓ move, Return chooses, Esc closes. While nothing is chosen the
+row says `unset` after `circle-help` in the caution tint. A choice ticks
+(`.selection` / `Feedback.Selection`). Nothing in it moves of its own: the
+sheet and the popover are the platform's, and the desktop's and the
+browser's are there at once.
 
 ## Layout Primitives
 
