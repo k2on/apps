@@ -89,6 +89,8 @@ pub const GLYPHS: &[(&str, &[u8])] = &[
     ("IMAGE", glyphs::IMAGE),
     ("KEYBOARD", glyphs::KEYBOARD),
     ("CIRCLE_MINUS", glyphs::CIRCLE_MINUS),
+    ("CHOOSE", glyphs::CHOOSE),
+    ("UNCHOSEN", glyphs::UNCHOSEN),
     ("COPY", glyphs::COPY),
     ("RECONCILE", glyphs::RECONCILE),
     ("REOPEN", glyphs::REOPEN),
