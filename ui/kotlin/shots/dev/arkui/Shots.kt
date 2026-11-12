@@ -142,8 +142,24 @@ public object Ready {
         // for either.
         val drew = drawn
         drawn = false
-        val asked = synchronized(lock) { probes.values.toList() }
-        val busy = asked.any { !it() }
+        val asked = synchronized(lock) { probes.toList() }
+        val idle = asked.map { (name, probe) -> name to probe() }
+        val busy = idle.any { !it.second }
+        // What holds it this frame, for a walk's trace.
+        val holding =
+            synchronized(lock) {
+                when {
+                    waiting.isNotEmpty() -> "waiting ${waiting.keys}"
+                    busy -> "probe ${idle.filter { !it.second }.map { it.first }}"
+                    drew && drawing < ENDLESS -> "drawing"
+                    else -> "quiet"
+                }
+            }
+        tracing?.let { t ->
+            synchronized(heldLock) {
+                if (heldList.lastOrNull()?.second != holding) heldList.add((System.currentTimeMillis() - t) to holding)
+            }
+        }
         val label =
             synchronized(lock) {
                 if (waiting.isNotEmpty() || busy) {
@@ -170,6 +186,19 @@ public object Ready {
             readyLock.notifyAll()
         }
     }
+
+    @Volatile private var tracing: Long? = null
+    private val heldLock = Any()
+    private val heldList = mutableListOf<Pair<Long, String>>()
+
+    /** Start a trace of what holds the screen ([held] after): a walk's slow step, explained. */
+    public fun trace() {
+        synchronized(heldLock) { heldList.clear() }
+        tracing = System.currentTimeMillis()
+    }
+
+    /** What held the screen since [trace], each with when it began (ms). */
+    public fun held(): List<Pair<Long, String>> = synchronized(heldLock) { heldList.toList() }
 
     /** Whether the screen is ready now, at generation [at] still. */
     public fun isReady(at: Int): Boolean = readyAt == at && generation() == at

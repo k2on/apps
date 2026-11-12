@@ -198,6 +198,12 @@ private struct ShotsRoot: ViewModifier {
         for scene in UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }) {
             for window in scene.windows where !(window.gestureRecognizers ?? []).contains(where: { $0 is Touched }) {
                 window.addGestureRecognizer(Touched())
+                // What the system still animates by Core Animation itself,
+                // which `setAnimationsEnabled` does not reach (a tab bar's
+                // selection, Liquid Glass settling, a navigation bar's
+                // title): over in a hundredth of its time, so the ready
+                // signal is not held by motion nobody sees in a picture.
+                window.layer.speed = 100
             }
         }
         #endif

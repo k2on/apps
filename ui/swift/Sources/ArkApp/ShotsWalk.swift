@@ -184,13 +184,18 @@ final class ShotsWalk {
         }
     }
 
-    /// Until the app says its screen is ready at a newer generation.
+    /// Until the app says its screen is ready at a newer generation; what
+    /// held it, each with when it began, logged.
     private func settled(_ what: String) async throws {
         let g = Ready.shared.generation
+        let t = Date()
+        Ready.shared.trace()
         Ready.shared.changed()
         guard await Ready.shared.untilReady(after: g, within: Self.settle) else {
             throw Stop(why: "\(what): not ready in \(Int(Self.settle)) s (\(Ready.shared.why))")
         }
+        let held = Ready.shared.held.map { "\(Int($0.at * 1000)) ms \($0.why)" }
+        if !held.isEmpty { say("  \(what): ready in \(ms(t)), held by: \(held.joined(separator: " | "))") }
     }
 
     private func ms(_ since: Date) -> String { "\(Int(Date().timeIntervalSince(since) * 1000)) ms" }

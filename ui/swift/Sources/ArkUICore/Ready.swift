@@ -127,6 +127,16 @@ public final class Ready {
     /// What it still waits for, as the last frame found it: said on the
     /// screen while not ready (`ark.busy`), what to read when a shot times out.
     public private(set) var why = ""
+    /// While a walk settles, each thing it waited for in turn and when it
+    /// began (seconds since the trace began): what a slow step was held by.
+    public private(set) var held: [(at: Double, why: String)] = []
+    private var tracing: Date? = nil
+
+    /// Start a trace of what holds the screen; `held` after.
+    public func trace() {
+        tracing = Date()
+        held = []
+    }
 
     /// One frame drawn: ready once everything is done and a frame has been
     /// drawn so (what is done is then on the screen, not only in a view).
@@ -138,6 +148,7 @@ public final class Ready {
             let now = (waiting.keys.sorted() + idle.enumerated().filter { !$0.element }.map { "probe \($0.offset)" } + (moves.map { ["moving \($0)"] } ?? [])).joined(separator: ", ")
             if now != why {
                 why = now
+                if let t = tracing { held.append((Date().timeIntervalSince(t), now)) }
                 onChange?()
             }
             return

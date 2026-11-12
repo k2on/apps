@@ -94,15 +94,19 @@ public object ShotsWalk {
 
     private class Stop(val why: String) : Exception(why)
 
+    /** The walk's log, as it goes: Android's (`ArkShots`) and walk.log. */
+    private val written = StringBuilder()
+
+    private fun log(line: String) {
+        android.util.Log.i("ArkShots", line)
+        synchronized(written) { written.append(line).append('\n') }
+    }
+
     private fun run(plan: File, ui: UiModeManager) {
         val out = File(plan.parentFile, "out")
         out.deleteRecursively()
         out.mkdirs()
-        val log = StringBuilder()
-        val say: (String) -> Unit = { line ->
-            android.util.Log.i("ArkShots", line)
-            log.append(line).append('\n')
-        }
+        val say: (String) -> Unit = { line -> log(line) }
         val failed =
             try {
                 walk(plan, out, ui, say)
@@ -113,7 +117,7 @@ public object ShotsWalk {
                 e.toString()
             }
         say(failed?.let { "failed: $it" } ?: "done")
-        File(out, "walk.log").writeText(log.toString())
+        File(out, "walk.log").writeText(synchronized(written) { written.toString() })
         File(out, if (failed == null) "done" else "failed").writeText(failed ?: "")
         Process.killProcess(Process.myPid())
     }
@@ -195,8 +199,12 @@ public object ShotsWalk {
     /** Until the app says its screen is ready at a newer generation. */
     private fun settled(what: String) {
         val g = Ready.generation()
+        val t = System.currentTimeMillis()
+        Ready.trace()
         Ready.changed()
         if (!Ready.awaitReady(g, SETTLE)) throw Stop("$what: not ready in ${SETTLE / 1000} s (${Ready.why})")
+        val held = Ready.held().filter { it.second != "quiet" }
+        if (held.isNotEmpty()) log("  $what: ready in ${System.currentTimeMillis() - t} ms, held by: ${held.joinToString(" | ") { "${it.first} ms ${it.second}" }}")
     }
 
     /** The app drawn dark or light: its own night mode, which makes its activity again in it. */
