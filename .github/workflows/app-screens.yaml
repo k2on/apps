@@ -226,7 +226,8 @@ jobs:
               lists
             } | tee -a "$GITHUB_OUTPUT"
           }
-          shots() { [ -f "$1/demo/shots.json" ]; }
+          # harken and revelation come back to the screenshots once ported to Ark apps.
+          shots() { [ -f "$1/demo/shots.json" ] && ! grep -qxE 'harken|revelation' <<< "$1"; }
           # An app whose shots.json has the desktop's shots.
           desktop() { shots "$1" && jq -e '.desktop.shots | length > 0' "$1/demo/shots.json" > /dev/null; }
           iphones() { for a in $(jq -r '.ios[]' "$RUNNER_TEMP/apps.json"); do if shots "$a"; then echo "$a"; fi; done; }
@@ -413,6 +414,8 @@ jobs:
         run: |
           refs=()
           for f in */demo/server.sh; do
+            # harken and revelation come back to the screenshots once ported to Ark apps.
+            grep -qxE 'harken|revelation' <<< "${f%%/*}" && continue
             while read -r p; do refs+=(".#$p"); done < <(grep -o '\.#[A-Za-z0-9_-]*' "$f" | cut -c3- | sort -u)
           done
           # A commit from before `screens-crates` has none to build.
@@ -472,7 +475,7 @@ jobs:
         # theme the app is in, the theme switched in the app, and taken again
         # (app-android.sh), so a job per app and device, not per theme too.
         # The phone (a Pixel 7), a Pixel Tablet in landscape, and a Pixel
-        # Fold open and then folded (apps-android.sh): the same APK, driver
+        # Fold open and then folded (apps-android.sh): the same APK, walk
         # and shots on each, each its own job. The tablet and the Fold were
         # one job, one emulator after the other, to pay one nix, one server
         # and one wait for the APK; that job was the longest of a run
@@ -658,7 +661,7 @@ jobs:
   # install, the servers' builds and a simulator's boot. Here they are paid
   # once: one simulator booted, every app built (ios-build.sh) and its
   # server started under the boot, then each app taken in turn on it
-  # (apps-ios.sh), the driver built once for all. One that fails to build
+  # (apps-ios.sh), each walking itself. One that fails to build
   # or to be taken is said, the others still taken and kept, and the job
   # fails at its end. Each app's shots are its own <app>/ios/ in the
   # artifact, as a job each had them.
@@ -770,10 +773,9 @@ jobs:
             fi
           fi
           echo "open=$open" >> "$GITHUB_OUTPUT"
-          # The driver, built once for the iPhone and the iPad (driver-ios.sh);
-          # and each app any of whose shots failed (apps-ios.sh,
-          # apps-mac.sh), for which no hash is kept.
-          { echo "DRIVER=$RUNNER_TEMP/driver"; echo "PARTIAL=$RUNNER_TEMP/partial"; } >> "$GITHUB_ENV"
+          # Each app any of whose shots failed (apps-ios.sh, apps-mac.sh), for
+          # which no hash is kept.
+          echo "PARTIAL=$RUNNER_TEMP/partial" >> "$GITHUB_ENV"
 
       # The scripts, main's; and the commit whose apps are built, beside them.
       - if: steps.open.outputs.open == 'true'
@@ -820,16 +822,6 @@ jobs:
           name: ${{ vars.CACHIX_NAME }}
           authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
           pushFilter: "[Xx]code([^Gg]|$)"
-
-      # The driver (driver-ios.sh), built in the background for any
-      # simulator, under the apps' build and the simulator's boot: the
-      # captures only run it. XcodeGen from the flake (the cache's), as every
-      # other tool here: no Homebrew.
-      - if: steps.open.outputs.open == 'true'
-        name: Start building the driver
-        run: |
-          bash .github/screens/tools.sh get xcodegen
-          PATH="$(tail -n 1 "$RUNNER_TEMP/tools")/bin:$PATH" bash .github/screens/meanwhile.sh start driver bash .github/screens/driver-ios.sh "$DRIVER"
 
       # The servers' packages (each server.sh's `.#<name>`) and the apps
       # (ios-build.sh's), evaluated once, with nothing beside them: under a
@@ -946,13 +938,11 @@ jobs:
           if [ -z "${ipad// /}" ]; then echo "no app's build takes the iPad: none will be booted"; else echo "the iPad's: $ipad"; fi
 
       # Everything the captures run, there before any starts: the servers
-      # (built under the apps' build) and the driver. No capture step
-      # builds or fetches anything.
+      # (built under the apps' build). No capture step builds or fetches
+      # anything.
       - if: steps.open.outputs.open == 'true'
-        name: The servers, and the driver
-        run: |
-          bash .github/screens/meanwhile.sh wait servers
-          bash .github/screens/meanwhile.sh wait driver
+        name: The servers
+        run: bash .github/screens/meanwhile.sh wait servers
 
       - if: steps.open.outputs.open == 'true'
         name: The simulator, booted
@@ -980,7 +970,7 @@ jobs:
       # the iPad booted (not under the iPhone's shots, which a second
       # simulator would slow), the newest iPad Pro 13-inch (else an iPad Air
       # 13-inch, else the newest iPad); each app whose build takes it, in
-      # portrait and then on its side, light and dark, on the same driver
+      # portrait and then on its side, light and dark, in one walk
       # (apps-ios.sh, FAMILY=ipad).
       - if: ${{ !cancelled() && steps.open.outputs.open == 'true' && env.IPAD_APPS != '' }}
         name: Capture (iPad)
@@ -990,22 +980,6 @@ jobs:
           FAMILY: ipad
         run: |
           xcrun simctl shutdown all || true
-          # Each iPad app's server afresh, as the iPhone's had it: what the
-          # iPhone's pass left on it is not the iPad's (harken's playback,
-          # held by the iPhone just shut down: its iPad's devices shot said
-          # "iPhone 17 Pro (not answering)"). The iPhone's log kept beside.
-          for a in $IPAD_APPS; do
-            [ -f "$a/demo/server.sh" ] || continue
-            d=$RUNNER_TEMP/server/$a
-            pid=$(cat "$d/pid" 2> /dev/null || true)
-            if [ -n "$pid" ]; then
-              kill "$pid" 2> /dev/null || true
-              for _ in $(seq 1 30); do kill -0 "$pid" 2> /dev/null || break; sleep 1; done
-            fi
-            mv "$d/server.log" "$RUNNER_TEMP/server/$a-iphone.log" 2> /dev/null || true
-            rm -rf "$d"
-            bash .github/screens/app-server.sh "$a" "$d"
-          done
           # Of the pinned Xcode's iOS's simulators (ios-runtime.sh), the first
           # kind there is.
           rt=$(bash .github/screens/ios-runtime.sh)
@@ -1063,12 +1037,12 @@ jobs:
             fi
           done
 
-      # The driver's results (its log, and the test's recording of the
-      # screen), when a capture failed: what to look at, each app's its own.
+      # The walks' results (each walk's log, its plan), when a capture
+      # failed: what to look at, each app's its own.
       - uses: actions/upload-artifact@v4
         if: failure() && steps.open.outputs.open == 'true'
         with:
-          name: ios-driver-results
+          name: ios-walk-results
           path: ${{ runner.temp }}/results
           if-no-files-found: ignore
 

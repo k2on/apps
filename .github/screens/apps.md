@@ -227,28 +227,12 @@ which nix builds at the commit (see below).
   with `-shots YES`, and waited for until it says it is over; its pictures
   and `walk.log` copied out. One command per device, its own everything:
   `PORT_OFFSET` (its servers' instances, `app-server.sh <app> <dir>
-  <port>`), `RESULTS`, `PARTIAL` and `DRIVER`, so the iPhone and the iPad
+  <port>`), `RESULTS` and `PARTIAL`, so the iPhone and the iPad
   can be taken at once. The iPad's walk writes upright and on its side
-  apart (ipad-portrait/, ipad-landscape/). **`driver-ios.sh`** and the UI
-  test in **`drive-ios/`**, for an app driven from outside (harken): an
-  XCUITest bundle of its own, built once for any
-  simulator, which drives the installed apps by their bundle ids (the
-  apps' projects are untouched). One run of it per device and theme takes
-  every app, from a plan apps-ios.sh writes, the simulator's appearance
-  set by `simctl ui` before it (set from the test alone, every dark pass
-  drew light), so xcodebuild's first-run cost is paid once per device and
-  theme. Each shot fails unless the app says its window draws in the
-  pass's theme (the value of its `ark.ready`). Each app is launched with `-shots YES` (ArkUI's `Shots`: no
-  motion, and the ready signal, ui/docs/shots.md): after every launch,
-  link and step the driver waits for the app's `ark.ready` at a newer
-  generation, then takes the screen. Nothing waits for a time. It signs in
-  through `ASWebAuthenticationSession` (the system's "wants to use … to
-  sign in", then the page) and writes each shot's PNG. Each app is
-  launched once a theme; a shot's launch link, `route` link and steps are
-  all in the running app, and only a `fresh` shot, or one whose launch
-  arguments change, launches it again. The log says, for each shot, how it
-  was reached and what its parts took (`Drive: …`); Android's says the same
-  under each shot's name.
+  apart (ipad-portrait/, ipad-landscape/). No UI-test driver is built:
+  every app the phones take walks itself. harken and revelation are left
+  out of the screenshots (app-screens.yaml's `which`) until they are
+  ported to Ark apps; their shots.json stay.
 - **`app-desktop.sh`**: runs the window nix built with `ARK_SHOTS` set,
   in a home of its own, given `--server` and `--user`; it signs in, does
   each shot's steps and writes its PNGs ([the desktop](#the-desktop)).
@@ -437,7 +421,7 @@ build, the same driver, the same shots.json, light and dark.
   `on` "mac", the app opened afresh with `launch.mac` and its arguments. No app has a Mac build yet, so every app is
   passed over in the seconds the listing takes; this is plumbing, not yet
   seen running an app. Steps are not driven yet: a Mac window needs a
-  macOS UI-test driver of its own (`drive-ios` is the iPhone's), which is
+  macOS UI-test driver of its own, which is
   the next thing to add when there is a Mac build to drive.
 - **What a run costs.** Linux: a tablet's and a Fold's job per app and
   theme, beside the phone's, each its own nix, server and emulator, at

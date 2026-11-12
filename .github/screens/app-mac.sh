@@ -13,7 +13,7 @@
 # app opened with that screen's launch arguments (`args`, after
 # shots.json's `launch.mac`, the Mac's own: a demo, a window size), so a
 # screen is opened with no steps. No steps beyond that: a Mac window has
-# no XCUITest driver here (drive-ios is the iPhone's).
+# no step driver here: the phones walk themselves (ui/docs/shots.md).
 set -euo pipefail
 out=$1
 bundle_app=$2
