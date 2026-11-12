@@ -12,8 +12,12 @@ set -euo pipefail
 dir=$1
 listen=$2
 # The seed and the server as nix builds them: the cache's, unless they changed.
-seed=$(nix build --no-link --print-out-paths .#money-seed)
-server=$(nix build --no-link --print-out-paths .#money-server)
+# One build of both: each `nix build` evaluates the flake again, which on
+# the Mac was half a minute apiece (app-screens 43318181211: the seed's
+# ~60 s were two evaluations, not seeding).
+for p in $(nix build --no-link --print-out-paths .#money-seed .#money-server); do
+  case $p in *money-seed*) seed=$p ;; *money-server*) server=$p ;; esac
+done
 "$seed/bin/money-seed" "$dir/data" ${DEMO_DAY:+"$DEMO_DAY"}
 MONEY_DEV_AUTH=1 MONEY_DATA="$dir/data" nohup "$server/bin/money-server" "$listen" > "$dir/server.log" 2>&1 &
 echo $! > "$dir/pid"
