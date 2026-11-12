@@ -5,15 +5,17 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light dark">
 <title>Money</title>
-<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
 </head>
 <body>
 <script type="module">
   // The page names the module and the wasm with `?v=dev`; the build's own
   // hash replaces it (flake.nix, `wasmPage`), so a browser holding an
-  // older build is sent URLs its cache has never seen.
-  import init from "./pkg/money-web.js?v=dev";
-  init({ module_or_path: "./pkg/money-web_bg.wasm?v=dev" });
+  // older build is sent URLs its cache has never seen. From the root,
+  // not beside the page: a deep path (/welcome/, /accounts/…) is answered
+  // with this page, and `./pkg/` there would be that path's, also this page.
+  import init from "/pkg/money-web.js?v=dev";
+  init({ module_or_path: "/pkg/money-web_bg.wasm?v=dev" });
 </script>
 </body>
 </html>
