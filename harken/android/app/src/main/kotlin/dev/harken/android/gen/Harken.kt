@@ -800,6 +800,15 @@ data class ProgressEntry(val durationMs: Long, val finished: Boolean, val mediaI
     }
 }
 
+/** The record `Push`. */
+data class Push(val session: String, val user: String, val endpoint: String, val atMs: Long) {
+    fun json(): String = "{" + "\"session\":" + J.q(session) + "," + "\"user\":" + J.q(user) + "," + "\"endpoint\":" + J.q(endpoint) + "," + "\"at_ms\":" + atMs.toString() + "}"
+
+    companion object {
+        fun of(j: Any?): Push = (j as JSONObject).let { o -> Push(J.text(o.opt("session")), J.text(o.opt("user")), J.text(o.opt("endpoint")), J.int(o.opt("at_ms"))) }
+    }
+}
+
 /** The record `QueueDownload`. */
 data class QueueDownload(val file: String, val source: String) {
     fun json(): String = "{" + "\"file\":" + J.q(file) + "," + "\"source\":" + J.q(source) + "}"
@@ -1009,6 +1018,15 @@ data class SetPeople(val file: String, val people: List<PersonOn>) {
 
     companion object {
         fun of(j: Any?): SetPeople = (j as JSONObject).let { o -> SetPeople(J.text(o.opt("file")), J.list(o.opt("people")) { v0 -> PersonOn.of(v0) }) }
+    }
+}
+
+/** The record `SetPush`. */
+data class SetPush(val endpoint: String) {
+    fun json(): String = "{" + "\"endpoint\":" + J.q(endpoint) + "}"
+
+    companion object {
+        fun of(j: Any?): SetPush = (j as JSONObject).let { o -> SetPush(J.text(o.opt("endpoint"))) }
     }
 }
 
@@ -1544,6 +1562,9 @@ class Harken(val peer: Peer) {
 
     /** `session.mine`, kept. */
     fun mine(): View<SignIn> = View(peer.view("session.mine", "null")) { j -> SignIn.of(j) }
+
+    /** `session.push`: its intent's id. */
+    fun push(input: SetPush): String = peer.mutate("session.push", input.json())
 
     /** `session.revoke`: its intent's id. */
     fun sessionRevoke(input: Revoke): String = peer.mutate("session.revoke", input.json())

@@ -1400,6 +1400,23 @@ public struct ProgressEntry: Equatable {
     public var json: String { J.obj(["\"duration_ms\":" + String(durationMs), "\"finished\":" + String(finished), "\"media_id\":" + J.q(mediaId.hex), "\"name\":" + J.q(name), "\"position_ms\":" + String(positionMs), "\"updated_ms\":" + String(updatedMs), "\"user_id\":" + J.q(userId)]) }
 }
 
+/// The record `Push`.
+public struct Push: Equatable {
+    public var session: String
+    public var user: String
+    public var endpoint: String
+    public var atMs: Int64
+
+    public init(session: String, user: String, endpoint: String, atMs: Int64) { self.session = session; self.user = user; self.endpoint = endpoint; self.atMs = atMs; }
+
+    public init(json j: Any?) {
+        let o = j as! [String: Any]
+        self.init(session: J.text(o["session"]), user: J.text(o["user"]), endpoint: J.text(o["endpoint"]), atMs: J.int(o["at_ms"]))
+    }
+
+    public var json: String { J.obj(["\"session\":" + J.q(session), "\"user\":" + J.q(user), "\"endpoint\":" + J.q(endpoint), "\"at_ms\":" + String(atMs)]) }
+}
+
 /// The record `QueueDownload`.
 public struct QueueDownload: Equatable {
     public var file: String
@@ -1748,6 +1765,20 @@ public struct SetPeople: Equatable {
     }
 
     public var json: String { J.obj(["\"file\":" + J.q(file), "\"people\":" + J.wlist(people) { v0 in v0.json }]) }
+}
+
+/// The record `SetPush`.
+public struct SetPush: Equatable {
+    public var endpoint: String
+
+    public init(endpoint: String) { self.endpoint = endpoint; }
+
+    public init(json j: Any?) {
+        let o = j as! [String: Any]
+        self.init(endpoint: J.text(o["endpoint"]))
+    }
+
+    public var json: String { J.obj(["\"endpoint\":" + J.q(endpoint)]) }
 }
 
 /// The record `SetTranscript`.
@@ -2523,6 +2554,9 @@ public struct Harken {
 
     /// `session.mine`, kept.
     public func mine() throws -> LiveView<SignIn> { LiveView(try peer.view(name: "session.mine", input: "null")) { j in SignIn(json: j) } }
+
+    /// `session.push`: its intent's id.
+    @discardableResult public func push(_ input: SetPush) throws -> String { try peer.mutate(name: "session.push", input: input.json) }
 
     /// `session.revoke`: its intent's id.
     @discardableResult public func sessionRevoke(_ input: Revoke) throws -> String { try peer.mutate(name: "session.revoke", input: input.json) }
