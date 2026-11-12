@@ -29,17 +29,20 @@ public enum SearchSizes {
 
 /// A search field as a row of the page: the glass, `prompt` until something
 /// is typed into `text`, and a way to empty it. `onSearch` is told when the
-/// keyboard's Search key is pressed. VoiceOver hears it as Search, with the
-/// field and its Clear button inside.
+/// keyboard's Search key is pressed. With `autofocus` it takes the keyboard
+/// as it appears (a dropdown's search). VoiceOver hears it as Search, with
+/// the field and its Clear button inside.
 public struct SearchField: View {
     @Binding var text: String
     let prompt: String
+    let autofocus: Bool
     let onSearch: () -> Void
     @FocusState private var focused: Bool
 
-    public init(text: Binding<String>, prompt: String, onSearch: @escaping () -> Void = {}) {
+    public init(text: Binding<String>, prompt: String, autofocus: Bool = false, onSearch: @escaping () -> Void = {}) {
         self._text = text
         self.prompt = prompt
+        self.autofocus = autofocus
         self.onSearch = onSearch
     }
 
@@ -71,8 +74,9 @@ public struct SearchField: View {
         // The glass and the capsule's ends put the cursor in the field, as
         // the system's do: focusing a field, not a press, so no press feedback.
         .onTapGesture { focused = true }
+        .task { if autofocus { focused = true } }
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("Search")
+        .accessibilityLabel(prompt)
     }
 }
 #endif
