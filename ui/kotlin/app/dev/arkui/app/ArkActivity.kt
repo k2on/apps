@@ -22,6 +22,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.arkui.Shots
@@ -39,6 +41,8 @@ public abstract class ArkActivity : ComponentActivity() {
         val app = ark.launch(intent)
         holdSplashUntil { app.ready() }
         super.onCreate(savedInstanceState)
+        // Its screens attached to the process's runtime while it lives (across a rotation).
+        ViewModelProvider(this)[Attachment::class.java]
         enableEdgeToEdge()
         ark.background?.opened(intent)
         intent?.data?.let { app.open(it.toString()) }
@@ -57,6 +61,21 @@ public abstract class ArkActivity : ComponentActivity() {
         }
         // The window is there: the launch's screen may open.
         app.shown()
+    }
+}
+
+/**
+ * The activity's screens attached to the process's runtime ([dev.arkdb.ffi.ArkProcess]): online
+ * while they show, as the iPhone's app is for its life (ArkApp.swift), and let go when the activity
+ * is finished, not when it is only recreated. Without it the session's peer never dialled: money's
+ * server session never linked, never settled, and a screenshot never ready (app-screens
+ * 43168945655, "not ready (after generation -1)" after signing in).
+ */
+internal class Attachment : ViewModel() {
+    private val attached = dev.arkdb.ffi.ArkProcess.shared().attach()
+
+    override fun onCleared() {
+        attached.detach()
     }
 }
 
