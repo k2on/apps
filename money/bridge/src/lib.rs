@@ -3,16 +3,15 @@
 //! through UniFFI — an adapter (layers.toml), so money-core and money-app
 //! know nothing of UniFFI. Every record and message that crosses is a
 //! twin written here from the core's and the app's types (`ark::twins!`
-//! below; ui/docs/app.md, Layers), with the rules the phones call as its
-//! methods ([`core`]). The phones' library is no crate of money's: nix
+//! below; ui/docs/app.md, Layers); the rules are worked out in Rust into
+//! each screen's page, so no phone calls one. The phones' library is no crate of money's: nix
 //! generates it (nix/ark-app.nix, `money-ffi`), a shim that links this
 //! crate as a static library for the iPhone and the Mac and a shared one
 //! for Android. The apps open their replica with
 //! [`money_open`] — or the demo's household with [`money_demo`] — and
-//! send every change of the domain's through it as a `MoneyChange`
-//! ([`Session::send`]). Every view hands over UniFFI's records, and the
-//! records carry the domain's rules as methods ([`core`]): nothing
-//! crosses as JSON.
+//! send every change of the domain's through a screen's runtime as a
+//! `MoneyChange`. Every page hands over UniFFI's records: nothing crosses
+//! as JSON.
 //!
 //! Signing in is `ark_auth::onboarding`'s machine, through the bridge: the server's page
 //! (`Effect::Browse`, redirecting to `money://auth`), the code exchanged
@@ -22,10 +21,6 @@
 //! [`money_send`] is a mutation whose own refusal is one too. A [`Hall`] is
 //! a money server in the same process, over memory, that devices dial
 //! without a socket: what the apps' tests sync through.
-//!
-//! The session's views ([`MoneyView`], [`Budget`], [`Holding`]) are what
-//! the screens still hand-written in money/native read; they go as those
-//! screens move into this crate's views.
 
 use std::sync::Arc;
 
@@ -86,7 +81,6 @@ ark_ffi::welcome_app!();
 pub use ark_format_ffi;
 
 mod app;
-pub mod core;
 mod demo;
 mod hall;
 mod host;

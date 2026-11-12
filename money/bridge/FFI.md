@@ -50,14 +50,11 @@ in Swift, `session.send(MoneyChange.Assign(Assign(month, id, 25_000)))` in
 Kotlin. It crosses as its bytes, never JSON; `session.check(change)` is the
 domain's sentence for its first failed refinement, before it is sent.
 
-**Rows say what they mean.** The records carry their rules as methods
-(`money_core::words`, exported on their twins in src/core.rs): a budget line's
-`tone()`, `meter()`, `story(style)`, `captions(style)`, `isPayment()`,
-`toCover()`; a transaction's `needsCategory()`, `bankSaid()`,
-`transferAccountId` and `draft()`; the form's `Draft` with `problem()` and
-`toChange()`; an ask's `said(now)`, a bank's `status(now)`, and
-`follow(asks, since)`; `accountShelves`, `netWorth`, `accountKinds()`,
-`suggestPayees`, `unmatchedReceipts`. A phone decides none of them.
+**Rows say what they mean, in Rust.** The rules the phones once called on
+the records (a line's tone and meter, a draft's problem, an ask's words)
+are worked out into each screen's page by money-app (`money_app::words`,
+over `money_core::words`); the bridge exports none of them (its `core.rs`
+went when nothing native called it).
 
 **Views are the core's.** The screens' runtimes hold what they read
 (`money_app::host`, over ark-ffi's `PhonePlace`); a phone reads only the
