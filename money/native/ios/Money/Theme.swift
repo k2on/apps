@@ -7,19 +7,6 @@
 import ArkUI
 import SwiftUI
 
-extension Tone {
-    /// The core's tone in ArkUI's tint, as its pill and hero draw it:
-    /// money's one map, Android's and the desktop's the same.
-    var tint: Tint {
-        switch self {
-        case .neutral: return .neutral
-        case .positive: return .positive
-        case .short, .onCard: return .caution
-        case .overspent: return .negative
-        }
-    }
-}
-
 /// The SF Symbol an account of a kind is drawn with.
 enum Accounts {
     static func symbol(_ kind: String) -> String {
@@ -33,13 +20,6 @@ enum Accounts {
         default: return "building.columns.fill"
         }
     }
-}
-
-/// Now, as the domain counts time: milliseconds since 1970.
-extension Summary {
-    /// Ready to Assign's tint: green while there is money to give a job,
-    /// red when more was assigned than there is, quiet at nothing.
-    var tint: Tint { tone().tint }
 }
 
 /// An account's mark: its kind's symbol in its colour on a faint wash of
