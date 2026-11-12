@@ -119,15 +119,17 @@
           # crates of harken. Each target (the host, each Android
           # ABI) is nixpkgs for that platform (`importPkgs`'s `crossSystem`)
           # and the toolchain with the target added.
+          cargoNix = import ./rust/Cargo.nix { inherit pkgs; };
           rustCrates = import ./nix/rust.nix {
-            inherit lib;
-            cargoNix = import ./rust/Cargo.nix { inherit pkgs; };
+            inherit lib cargoNix;
             # A cross build's build scripts and proc macros by the plain
             # toolchain, whichever target's it is (nix/rust.nix): one
             # derivation each for every Android ABI, Apple slice and wasm.
             buildRust = rust;
-            # Each Ark app's generated crates (its generator's main).
-            extraCrates = lib.foldl' (acc: dir: acc // arkApp.crates pkgs dir) { } arkApps;
+            # Each Ark app's generated crates (its generator's main), and
+            # its entry points built from the app's directory, beside the
+            # icon they draw (nix/ark-app.nix's `entrySources`).
+            extraCrates = lib.foldl' (acc: dir: acc // arkApp.crates pkgs dir // arkApp.entrySources cargoNix.internal.crates dir) { } arkApps;
           };
           # The root crate `packageId` of the workspace, for the host unless
           # `pkgs` and `rust` say another target; its binaries under `bin/`,

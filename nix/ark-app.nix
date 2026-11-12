@@ -106,6 +106,32 @@ rec {
       };
     };
 
+  # The app's entry points that draw the app's own mark: its desktop
+  # (`iced/`) and its browser (`web/`) read its icon.svg as cargo finds it,
+  # beside their crate (`include_str!("../../icon.svg")`). Each is built
+  # from the app's directory with only that crate, the icon and app.toml in
+  # it, the crate its workspace member, rather than from the crate's own
+  # directory, which has no icon. When they are generated (ui/docs/app.md)
+  # the generator places them so.
+  entrySources = crates: dir:
+    let
+      a = read dir;
+      root = "${self}/${dir}";
+      icon = a.icon.svg or "icon.svg";
+      entry = sub: lib.mapAttrs
+        (_: c: c // {
+          src = lib.cleanSourceWith {
+            src = self + "/${dir}";
+            filter = path: _:
+              let p = toString path; in
+              p == "${root}/${icon}" || p == "${root}/app.toml" || p == "${root}/${sub}" || lib.hasPrefix "${root}/${sub}/" p;
+          };
+          workspace_member = sub;
+        })
+        (lib.filterAttrs (_: c: c ? src && toString (c.src.origSrc or c.src) == "${root}/${sub}") crates);
+    in
+    entry "iced" // entry "web";
+
   # The app's packages: `build` is flake.nix's `crate` (a crate of the
   # workspace, or of `crates`, for the host); `only` its source filter.
   packages = { pkgs, build, only, bundlePrefix }: dir:
