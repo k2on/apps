@@ -121,6 +121,12 @@ public final class ArkApp<Library: ArkAppHost>: ObservableObject {
         host.scanned(text: text)
     }
 
+    /// The app's own content is in the window: what the launch's arguments
+    /// open (a sheet, Settings) is opened now. Before the Mac's main window
+    /// was on the screen, a sheet or Settings window asked for kept it from
+    /// ever showing (app-screens 43159033586).
+    public func shown() { host.shown() }
+
     /// Back in front after it was away.
     public func foreground() { host.foreground() }
 
@@ -196,6 +202,9 @@ public struct ArkRoot<Library: ArkAppHost, Welcome: View, Content: View>: View {
         SwiftUI.Group {
             if app.showsApp && !app.introShown {
                 content()
+                    // The launch's screen opened over it from now, as each
+                    // app's own shell sent the launch once its tabs appeared.
+                    .onAppear { app.shown() }
             } else {
                 welcome().environmentObject(app.welcome)
             }

@@ -181,6 +181,14 @@ public class ArkApp internal constructor(public val host: ArkHost) {
         _browse.value = null
     }
 
+    /**
+     * The activity's window is made: what the launch's arguments open is opened from now (at once,
+     * or once the session is). The iPhone and the Mac say so once the app's content has appeared, as
+     * a sheet asked for before the Mac's window showed kept it hidden; here the window is there
+     * before anything draws.
+     */
+    public fun shown(): Unit = host.shown()
+
     /** Back in front after it was away: the link dialled now, a sign-in tried again. */
     public fun foreground(): Unit = host.foreground()
 

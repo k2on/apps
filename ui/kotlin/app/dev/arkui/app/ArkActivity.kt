@@ -55,6 +55,8 @@ public abstract class ArkActivity : ComponentActivity() {
             Frame(app)
             Content(app)
         }
+        // The window is there: the launch's screen may open.
+        app.shown()
     }
 }
 

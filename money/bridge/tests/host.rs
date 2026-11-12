@@ -173,3 +173,28 @@ fn a_server_that_is_not_there_is_said() {
     });
     assert!(phone.browsed.lock().unwrap().is_empty());
 }
+
+/// A launch's arguments open nothing until the shell says its window is up
+/// (`ArkHost::shown`), then open once: the Mac's main window never showed
+/// when a launch's sheet or Settings was asked for before it was on the
+/// screen (app-screens 43159033586). Falsified by handing the arguments to
+/// the app as soon as the session opens (Settings asked before `shown`).
+#[test]
+fn a_launch_opens_once_the_window_is_up() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut l = launch(dir.path(), true);
+    l.args = ["-demo", TODAY, "-screen", "settings", "-settingsTab", "banks"]
+        .map(String::from)
+        .to_vec();
+    let m = MoneyHost::new(l, None);
+    let phone = Arc::new(Phone::default());
+    m.host().start(phone.clone());
+    until("the demo shows", || m.host().shows_app());
+    until("idle", || m.host().idle());
+    assert!(m.take_asks().is_empty(), "nothing asked before the window is up");
+    m.host().shown();
+    until("Settings asked", || m.take_asks().iter().any(|a| matches!(a, NativeAsk::Settings { .. })));
+    m.host().shown();
+    until("idle", || m.host().idle());
+    assert!(m.take_asks().is_empty(), "the launch opened once");
+}

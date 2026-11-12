@@ -146,8 +146,11 @@ struct State {
     scanning: bool,
     /// The server's denial of this login, said to the machine once.
     denied: bool,
-    /// The launch's arguments, handed to the app once.
+    /// The launch's arguments, handed to the app once, once the session is
+    /// open and the shell's window is up ([`ArkHost::shown`]).
     args: Option<Vec<String>>,
+    /// The shell said its window is up.
+    shown: bool,
     version: u64,
     started: bool,
 }
@@ -224,6 +227,7 @@ impl ArkHost {
                 scanning: false,
                 denied: false,
                 args: Some(launch.args.clone()),
+                shown: false,
                 version: 0,
                 started: false,
             }),
@@ -395,12 +399,29 @@ impl ArkHost {
             s.denied = false;
         }
         peer.set_listener(Some(Arc::new(Told(self.teller()))));
-        if let Some(args) = self.lock().args.take() {
-            self.app.launched(args);
-        }
+        self.launch_args();
         self.drain();
         self.offer_link();
         self.changed();
+    }
+
+    /// The launch's arguments handed to the app, once: only with the
+    /// session open and the shell's window up. What they open can be a
+    /// sheet or the Mac's Settings window, and one asked for before the
+    /// Mac's main window was on the screen kept that window from ever
+    /// showing (app-screens 43159033586: money's Mac shots of a sheet, To
+    /// Review and Settings, "window never opened").
+    fn launch_args(&self) {
+        let args = {
+            let mut s = self.lock();
+            match (s.shown, s.open.is_some()) {
+                (true, true) => s.args.take(),
+                _ => None,
+            }
+        };
+        if let Some(args) = args {
+            self.app.launched(args);
+        }
     }
 
     fn close(&self) {
@@ -546,6 +567,20 @@ impl ArkHost {
         self.lock().run.open_link(url);
         self.offer_link();
         self.changed();
+    }
+
+    /// The shell's window is up, showing the app: what the launch's
+    /// arguments open (a screen, a sheet, Settings) is opened now, or as
+    /// soon as the session is. The iPhone's, the iPad's and the Mac's say so
+    /// once the app's own content has appeared in the window, as their
+    /// shells sent the launch before the app library; Android's once its
+    /// activity's window is made, which is there before anything draws.
+    pub fn shown(&self) {
+        let first = !std::mem::replace(&mut self.lock().shown, true);
+        if first {
+            self.launch_args();
+            self.changed();
+        }
     }
 
     /// The app came back to the front after it was away: the link dialled
