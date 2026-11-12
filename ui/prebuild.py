@@ -1625,9 +1625,9 @@ def check(root):
                 if "app" not in sc:
                     problems.append(f"{app}/app.toml's screen {n} says no `app`, the type it runs in {a['crate']}")
             if all(k in a["ffi"] for k in ("route", "native", "domain")) and all("app" in sc for sc in a.get("screens", {}).values()):
-                dirs = workspace_dirs(root)
+                names = {p["name"] for p in cargo_metadata(root)["packages"]}
                 for c in ffi_crates(a):
-                    if c not in dirs:
+                    if c not in names:
                         problems.append(f"{app}/app.toml's [ffi] names {c.replace('-', '_')}, whose package is no {c} of the workspace")
         bg = background(a)
         for k, v in bg.items():
