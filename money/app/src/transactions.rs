@@ -142,6 +142,10 @@ pub struct CategoryChoice {
     pub key: String,
     pub title: String,
     pub glyph: String,
+    /// Its group, and what it has available in its tone's tint.
+    pub group: String,
+    pub detail: String,
+    pub tint: String,
 }
 
 /// The category's sheet.
@@ -388,10 +392,16 @@ impl App for Transactions {
                     chosen: c.chosen.clone().unwrap_or_default(),
                     choices: ls
                         .iter()
-                        .map(|l| CategoryChoice {
-                            key: l.category_id.hex(),
-                            title: l.name.clone(),
-                            glyph: crate::look::category_glyph(&l.name).into(),
+                        .map(|l| {
+                            let o = crate::look::category_offered(l, style);
+                            CategoryChoice {
+                                key: l.category_id.hex(),
+                                title: l.name.clone(),
+                                glyph: crate::look::category_glyph(&l.name).into(),
+                                group: o.group,
+                                detail: o.detail,
+                                tint: o.tint.into(),
+                            }
                         })
                         .collect(),
                     confirm: if c.approve { "Categorize and Approve" } else { "Categorize" }.into(),

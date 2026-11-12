@@ -253,12 +253,43 @@ pub struct PayeeChoice {
     pub category: String,
 }
 
-/// One category, account or Ready to Assign a picker offers.
+/// One category, account or Ready to Assign a picker offers: under its
+/// group, a figure at its end in its tint (none for a way).
 #[derive(Clone, Debug, PartialEq, ark::twin::Twin)]
 pub struct SheetChoice {
     pub key: String,
     pub title: String,
     pub glyph: String,
+    pub group: String,
+    pub detail: String,
+    pub tint: String,
+}
+
+impl SheetChoice {
+    /// A choice with no group and nothing at its end.
+    fn plain(key: &str, title: &str, glyph: &str) -> SheetChoice {
+        SheetChoice::offered(
+            key,
+            title,
+            glyph,
+            crate::look::Offered {
+                group: String::new(),
+                detail: String::new(),
+                tint: "neutral",
+            },
+        )
+    }
+
+    fn offered(key: &str, title: &str, glyph: &str, o: crate::look::Offered) -> SheetChoice {
+        SheetChoice {
+            key: key.into(),
+            title: title.into(),
+            glyph: glyph.into(),
+            group: o.group,
+            detail: o.detail,
+            tint: o.tint.into(),
+        }
+    }
 }
 
 /// The transaction form as it shows.
@@ -649,12 +680,8 @@ impl Sheets {
             },
             categorizing: match &s.up {
                 Some(Up::Categorize(c)) => {
-                    let mut choices = vec![SheetChoice {
-                        key: READY.into(),
-                        title: "Ready to Assign".into(),
-                        glyph: "dollar-sign".into(),
-                    }];
-                    choices.extend(lines(s, data).iter().map(|l| category_choice(l)));
+                    let mut choices = vec![ready_choice()];
+                    choices.extend(lines(s, data).iter().map(|l| category_choice(l, style)));
                     Some(CategorizeSheet {
                         chosen: c.chosen.clone().unwrap_or_default(),
                         choices,
@@ -721,12 +748,19 @@ fn reconcile(s: &State, data: &Data<'_, MoneyView>, agree: bool) -> Vec<Command<
     )
 }
 
-fn category_choice(l: &BudgetLine) -> SheetChoice {
-    SheetChoice {
-        key: format!("c{}", l.category_id.hex()),
-        title: l.name.clone(),
-        glyph: crate::look::category_glyph(&l.name).into(),
-    }
+fn category_choice(l: &BudgetLine, style: &NumberStyle) -> SheetChoice {
+    SheetChoice::offered(
+        &format!("c{}", l.category_id.hex()),
+        &l.name,
+        crate::look::category_glyph(&l.name),
+        crate::look::category_offered(l, style),
+    )
+}
+
+fn ready_choice() -> SheetChoice {
+    let mut c = SheetChoice::plain(READY, "Ready to Assign", "dollar-sign");
+    c.group = crate::look::INFLOW.into();
+    c
 }
 
 fn txn_sheet(s: &State, f: &TxnForm, data: &Data<'_, MoneyView>) -> TxnSheet {
@@ -756,18 +790,14 @@ fn txn_sheet(s: &State, f: &TxnForm, data: &Data<'_, MoneyView>) -> TxnSheet {
     let mut categories = vec![];
     if !f.transfer {
         if f.inflow || d.category == Some(money_core::budget::ready_to_assign()) {
-            categories.push(SheetChoice {
-                key: READY.into(),
-                title: "Ready to Assign".into(),
-                glyph: "dollar-sign".into(),
-            });
+            categories.push(ready_choice());
         }
-        categories.extend(lines.iter().map(|l| category_choice(l)));
+        categories.extend(lines.iter().map(|l| category_choice(l, style)));
     }
-    categories.extend(open.iter().filter(|a| Some(a.id) != d.account).map(|a| SheetChoice {
-        key: format!("t{}", a.id.hex()),
-        title: format!("Transfer: {}", a.name),
-        glyph: "arrow-left-right".into(),
+    categories.extend(open.iter().filter(|a| Some(a.id) != d.account).map(|a| {
+        let mut o = crate::look::account_offered(a, style);
+        o.group = crate::look::TRANSFERS.into();
+        SheetChoice::offered(&format!("t{}", a.id.hex()), &format!("Transfer: {}", a.name), "arrow-left-right", o)
     }));
     let category = match (d.transfer_to, d.category) {
         (Some(a), _) => format!("t{}", a.hex()),
@@ -805,16 +835,8 @@ fn txn_sheet(s: &State, f: &TxnForm, data: &Data<'_, MoneyView>) -> TxnSheet {
         }),
         way: if f.inflow { "inflow" } else { "outflow" }.into(),
         ways: vec![
-            SheetChoice {
-                key: "outflow".into(),
-                title: "Outflow".into(),
-                glyph: "arrow-up".into(),
-            },
-            SheetChoice {
-                key: "inflow".into(),
-                title: "Inflow".into(),
-                glyph: "arrow-down".into(),
-            },
+            SheetChoice::plain("outflow", "Outflow", "arrow-up"),
+            SheetChoice::plain("inflow", "Inflow", "arrow-down"),
         ],
         prompt: if f.inflow { "Coming in" } else { "Going out" }.into(),
         typed: f.figure.typed.clone(),
@@ -835,10 +857,13 @@ fn txn_sheet(s: &State, f: &TxnForm, data: &Data<'_, MoneyView>) -> TxnSheet {
         account: d.account.map(|a| a.hex()).unwrap_or_default(),
         accounts: open
             .iter()
-            .map(|a| SheetChoice {
-                key: a.id.hex(),
-                title: a.name.clone(),
-                glyph: crate::accounts::kind_glyph(&a.kind).into(),
+            .map(|a| {
+                SheetChoice::offered(
+                    &a.id.hex(),
+                    &a.name,
+                    crate::accounts::kind_glyph(&a.kind),
+                    crate::look::account_offered(a, style),
+                )
             })
             .collect(),
         account_name: d

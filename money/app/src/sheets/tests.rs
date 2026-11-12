@@ -169,3 +169,33 @@ fn entered_by_says_the_name() {
         format!("Entered by {}", money_core::demo::PARTNER)
     );
 }
+
+/// The category and account pickers offer each choice under its group with
+/// its figure at its end: a category under its group with what it has
+/// available, a transfer's account under Transfers, an account under
+/// Budget or Tracking Accounts with its balance, negative below nothing.
+/// Falsified by the choices made as before, ungrouped and bare.
+#[test]
+fn choices_are_grouped_with_their_figures() {
+    let (mut d, mut rt) = open();
+    d.run(&mut rt, [SheetsMsg::New { account: None }]);
+    let t = rt.screen(&d).transaction.unwrap();
+    let lines: Vec<BudgetLine> = d.rows::<BudgetLine>(&MoneyView::Lines { month: "2026-10".into() }).to_vec();
+    let c = t.categories.iter().find(|c| c.key.starts_with('c')).expect("a category");
+    let l = lines.iter().find(|l| format!("c{}", l.category_id.hex()) == c.key).unwrap();
+    assert_eq!(c.group, l.group);
+    assert_eq!(c.detail, amount(l.available, &NumberStyle::us()));
+    assert!(t.categories.iter().any(|c| c.key.starts_with('t') && c.group == "Transfers"));
+    let accounts = d.rows::<AccountLine>(&MoneyView::Accounts).to_vec();
+    for a in &t.accounts {
+        let line = accounts.iter().find(|x| x.id.hex() == a.key).unwrap();
+        let group = if line.on_budget { "Budget Accounts" } else { "Tracking Accounts" };
+        assert_eq!(
+            (a.group.as_str(), a.tint.as_str() == "negative"),
+            (group, line.balance < 0),
+            "{}",
+            a.title
+        );
+        assert_eq!(a.detail, amount(line.balance, &NumberStyle::us()));
+    }
+}

@@ -53,22 +53,24 @@ pub fn budget(p: &BudgetPage) -> View<BudgetMsg> {
                         BudgetMsg::Dismiss,
                         (
                             form_section((
-                                option_picker(
+                                search_picker(
                                     "From",
                                     m.from,
                                     |key| BudgetMsg::MoveFrom { key },
                                     for c in m.choices {
-                                        picker_choice(c.title, c.glyph, c.key)
+                                        search_choice(c.title, c.glyph, c.key).group(c.group).detail(c.detail, c.tint)
                                     },
-                                ),
-                                option_picker(
+                                )
+                                .prompt("Search Categories"),
+                                search_picker(
                                     "To",
                                     m.to,
                                     |key| BudgetMsg::MoveTo { key },
                                     for c in m.choices {
-                                        picker_choice(c.title, c.glyph, c.key)
+                                        search_choice(c.title, c.glyph, c.key).group(c.group).detail(c.detail, c.tint)
                                     },
-                                ),
+                                )
+                                .prompt("Search Categories"),
                             )),
                             form_section(amount_entry(
                                 m.amount.label,

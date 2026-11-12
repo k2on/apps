@@ -295,6 +295,11 @@ pub struct BudgetChoice {
     pub key: String,
     pub title: String,
     pub glyph: String,
+    /// Its group, and what it has available in its tone's tint (none for a
+    /// group itself).
+    pub group: String,
+    pub detail: String,
+    pub tint: String,
 }
 
 /// A sheet's amount, as it stands.
@@ -946,11 +951,20 @@ fn move_form(lines: &[BudgetLine], from: &Option<String>, to: &Option<String>, f
         key: READY.into(),
         title: "Ready to Assign".into(),
         glyph: "inbox".into(),
+        group: crate::look::INFLOW.into(),
+        detail: String::new(),
+        tint: "neutral".into(),
     }];
-    choices.extend(lines.iter().filter(|l| l.assignable() && !l.hidden).map(|l| BudgetChoice {
-        key: l.category_id.hex(),
-        title: l.name.clone(),
-        glyph: crate::look::category_glyph(&l.name).into(),
+    choices.extend(lines.iter().filter(|l| l.assignable() && !l.hidden).map(|l| {
+        let o = crate::look::category_offered(l, style);
+        BudgetChoice {
+            key: l.category_id.hex(),
+            title: l.name.clone(),
+            glyph: crate::look::category_glyph(&l.name).into(),
+            group: o.group,
+            detail: o.detail,
+            tint: o.tint.into(),
+        }
     }));
     let name = |k: &Option<String>| {
         k.as_deref()
@@ -998,6 +1012,9 @@ fn category_form(groups: &[GroupLine], group: &str, name: &str) -> CategoryForm 
                 key: g.id.hex(),
                 title: g.name.clone(),
                 glyph: "folder".into(),
+                group: String::new(),
+                detail: String::new(),
+                tint: "neutral".into(),
             })
             .collect(),
     }

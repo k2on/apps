@@ -106,3 +106,38 @@ mod tests {
         assert_eq!(category_emoji("Something Else"), "");
     }
 }
+
+/// How a category or an account is offered where one is chosen by typing
+/// (ArkUI's search picker): the group it is listed under, and the figure at
+/// its end in its tint.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Offered {
+    pub group: String,
+    pub detail: String,
+    pub tint: &'static str,
+}
+
+/// A category: under its group, what it has available in its tone's tint
+/// (overspent negative, short or on a card caution).
+pub fn category_offered(l: &money_core::BudgetLine, style: &ark_format::NumberStyle) -> Offered {
+    Offered {
+        group: l.group.clone(),
+        detail: ark_format::amount(l.available, style),
+        tint: crate::shell::inspect::tint_of(l.tone()),
+    }
+}
+
+/// An account: under Budget Accounts or Tracking Accounts, its balance,
+/// negative below nothing.
+pub fn account_offered(a: &money_core::AccountLine, style: &ark_format::NumberStyle) -> Offered {
+    Offered {
+        group: if a.on_budget { "Budget Accounts" } else { "Tracking Accounts" }.into(),
+        detail: ark_format::amount(a.balance, style),
+        tint: if a.balance < 0 { "negative" } else { "neutral" },
+    }
+}
+
+/// Ready to Assign, Inflow's one choice.
+pub const INFLOW: &str = "Inflow";
+/// Where a transfer's other accounts are listed among the categories.
+pub const TRANSFERS: &str = "Transfers";

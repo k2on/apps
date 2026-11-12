@@ -51,14 +51,18 @@ pub fn transactions(p: &TransactionsPage) -> View<TransactionsMsg> {
                     form_sheet(
                         "Categorize",
                         TransactionsMsg::Dismiss,
-                        form_section(option_picker(
-                            "Category",
-                            c.chosen,
-                            |key| TransactionsMsg::Chose { key },
-                            for o in c.choices {
-                                picker_choice(o.title, o.glyph, o.key)
-                            },
-                        )),
+                        form_section(
+                            search_picker(
+                                "Category",
+                                c.chosen,
+                                |key| TransactionsMsg::Chose { key },
+                                for o in c.choices {
+                                    search_choice(o.title, o.glyph, o.key).group(o.group).detail(o.detail, o.tint)
+                                },
+                            )
+                            .unset("Needs a Category")
+                            .prompt("Search Categories"),
+                        ),
                     )
                     .confirm("Save", c.can_save, TransactionsMsg::SaveCategory)
                 },

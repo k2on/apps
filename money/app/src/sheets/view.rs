@@ -24,14 +24,18 @@ pub fn sheets(p: &SheetsPage) -> View<SheetsMsg> {
             form_sheet(
                 "Categorize",
                 SheetsMsg::Dismiss,
-                form_section(option_picker(
-                    "Category",
-                    c.chosen,
-                    |key| SheetsMsg::ChoseCategory { key },
-                    for o in c.choices {
-                        picker_choice(o.title, o.glyph, o.key)
-                    },
-                )),
+                form_section(
+                    search_picker(
+                        "Category",
+                        c.chosen,
+                        |key| SheetsMsg::ChoseCategory { key },
+                        for o in c.choices {
+                            search_choice(o.title, o.glyph, o.key).group(o.group).detail(o.detail, o.tint)
+                        },
+                    )
+                    .unset("Needs a Category")
+                    .prompt("Search Categories"),
+                ),
             )
             .confirm("Save", c.can_save, SheetsMsg::SaveCategory)
         },
@@ -84,28 +88,32 @@ pub fn txn_fields(t: &TxnSheet) -> View<SheetsMsg> {
             if t.has_bank {
                 list_row("Bank Description").subtitle(t.bank).quiet()
             },
-            option_picker(
+            search_picker(
                 "Category",
                 t.category,
                 |key| SheetsMsg::Category { key },
                 for o in t.categories {
-                    picker_choice(o.title, o.glyph, o.key)
+                    search_choice(o.title, o.glyph, o.key).group(o.group).detail(o.detail, o.tint)
                 },
-            ),
+            )
+            .unset("Needs a Category")
+            .prompt("Search Categories"),
         ))
         .footer(t.category_note),
         form_section((
             if t.editing {
                 list_row("Account").value(t.account_name)
             } else {
-                option_picker(
+                search_picker(
                     "Account",
                     t.account,
                     |key| SheetsMsg::Account { key },
                     for a in t.accounts {
-                        picker_choice(a.title, a.glyph, a.key)
+                        search_choice(a.title, a.glyph, a.key).group(a.group).detail(a.detail, a.tint)
                     },
                 )
+                .unset("Choose an Account")
+                .prompt("Search Accounts")
             },
             date_field("Date", t.day, |day| SheetsMsg::Day { day }),
             if t.adding {
