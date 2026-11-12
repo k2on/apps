@@ -143,7 +143,12 @@ All of it is in `<app>/demo/`:
   beside the app, not in it (`docs/seed.md`): `nix build .#<app>-seed`, then
   `<app>-seed <dir>/data`, then the server from `nix build .#<app>-server`
   on it. money's writes the demo household as the log the server boots on
-  (`money-seed`); harken's writes the demo catalogue as a media root of
+  (`money-seed`), up to the run's day: the workflow's `which` says it once
+  (`day`, UTC) and every job has it as `DEMO_DAY`, so the phones, the
+  tablets, the desktop and the Mac's demo (`app-mac.sh` gives `-demo` that
+  day) are one household on one day, however long a job waited for its
+  runner (a device's own clock still says which day is today: a job that
+  starts after midnight shows the household a day old); harken's writes the demo catalogue as a media root of
   tagged FLAC files and covers, `<dir>/data/media`, for the server's own
   scanner to read (`harken-seed`, no ffmpeg).
 

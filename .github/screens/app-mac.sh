@@ -47,6 +47,14 @@ if [ -n "$server" ]; then args=(--server "$server" --user "$user"); fi
 # The Mac's own launch arguments, then each screen's id and arguments.
 base=()
 while IFS= read -r a; do base+=("$a"); done < <(jq -r '.launch.mac // [] | .[]' "$app/demo/shots.json")
+# Its demo (`-demo <day>`) on the run's day when one is given (DEMO_DAY,
+# what the phones' servers are seeded up to, app-screens.yaml): the same
+# household as theirs, on the same day.
+if [ -n "${DEMO_DAY:-}" ]; then
+  for i in "${!base[@]}"; do
+    if [ "${base[$i]}" = -demo ] && [ $((i + 1)) -lt ${#base[@]} ]; then base[$((i + 1))]=$DEMO_DAY; fi
+  done
+fi
 screens=$(jq -c '[.screens // [] | .[] | select((.on // []) | index("mac"))]' "$app/demo/shots.json")
 
 # The app opened with `$@`, its window taken as <out>/<theme>/<name>.png.

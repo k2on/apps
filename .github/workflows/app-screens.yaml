@@ -176,6 +176,11 @@ jobs:
       # Each iPhone app taken, and the hash of what it is taken from
       # (ios-inputs.sh), as a JSON object: kept beside its shots.
       ios-inputs: ${{ steps.which.outputs.ios-inputs }}
+      # The run's day (UTC), which every job's sample-data server is seeded
+      # up to (DEMO_DAY, <app>/demo/server.sh) and the Mac's demo opens on
+      # (app-mac.sh): the phones, the tablets and the desktop show one
+      # household on one day, however long a job waited for its runner.
+      day: ${{ steps.which.outputs.day }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -217,6 +222,7 @@ jobs:
             {
               echo "mode=$mode"; echo "pr=$pr"; echo "sha=$sha"; echo "branch=$branch"
               echo "android=$android"; echo "ios=$ios"; echo "desktop=$desktop"; echo "ios-inputs=$inputs"
+              echo "day=$(date -u +%F)"
               lists
             } | tee -a "$GITHUB_OUTPUT"
           }
@@ -490,6 +496,7 @@ jobs:
       # A run still going: its APK awaited (await-apk.sh), not downloaded.
       EARLY: ${{ github.event.action == 'requested' }}
       GH_TOKEN: ${{ github.token }}
+      DEMO_DAY: ${{ needs.which.outputs.day }}
     steps:
       - uses: actions/checkout@v4
 
@@ -741,6 +748,7 @@ jobs:
       INPUTS: ${{ needs.which.outputs.ios-inputs }}
       SOURCE: ${{ needs.which.outputs.sha }}
       PR: ${{ needs.which.outputs.pr }}
+      DEMO_DAY: ${{ needs.which.outputs.day }}
     steps:
       # The queue for a Mac can be an hour: a PR merged or closed meanwhile
       # is taken nothing of. Every step after says `open`, so the job ends
@@ -1111,6 +1119,7 @@ jobs:
     env:
       APPS: ${{ matrix.app }}
       SOURCE: ${{ github.event.workflow_run.head_sha || github.sha }}
+      DEMO_DAY: ${{ needs.which.outputs.day }}
     steps:
       # The scripts, main's; and the commit whose windows are built, beside them.
       - uses: actions/checkout@v4

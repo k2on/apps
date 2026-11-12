@@ -10,7 +10,7 @@ the app's, `harken/demo`. Both are members of the workspace in `rust/`.
 
 | where | its library | its binary |
 | --- | --- | --- |
-| `money/core` (`money-core`, `demo`), `money/demo` (`money-seed`) | the demo household: three months of a family's budget up to today, run through the domain's own mutations (`seeded_disk`, `log`, `open`, `seeded`, `Bank`, `ME`, …) | `money-seed DATA` (money/demo, an adapter crate of its own): the household as `DATA/log`, the log a money server boots on |
+| `money/core` (`money-core`, `demo`), `money/demo` (`money-seed`) | the demo household: three months of a family's budget up to today, run through the domain's own mutations (`seeded_disk`, `log`, `open`, `seeded`, `Bank`, `ME`, …) | `money-seed DATA [DAY]` (money/demo, an adapter crate of its own): the household as `DATA/log`, the log a money server boots on, up to DAY when given (the screenshots' run day) |
 | `harken/demo` (`harken-seed`) | the demo library: the classical catalogue (`catalogue.json`) and the shows (`shows.json`), embedded, and the library made of them (`catalogue`, `shelf`, `seeded_disk`) | `harken-seed [--covers DIR] DATA`: the catalogue as a media root, `DATA/media`: a FLAC of silence per track, tagged as the catalogue says, and each album's cover (from `--covers`, the flake's `harken-covers`, the covers kept in `harken/demo/covers`), which a harken server's scanner reads |
 
 The binaries share one contract: `<app>-seed DATA` writes what that app's
