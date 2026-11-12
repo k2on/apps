@@ -122,8 +122,10 @@ what each holds and the contract they share.
 `revelation/` is another app, and not on ArkDB: an Android app in plain
 Kotlin, no Rust and no native library, that is the Bible as one scroll
 zoomed like a map. `revelation/README.md` says how to build and run it and
-`docs/plan-bible.md` is its plan. Both apps' APKs are published through one
-F-Droid repository.
+`docs/plan-bible.md` is its plan. Every app's APKs are published through
+F-Droid, in two channels: the tagged releases in one repository and every
+build of main, as `.unstable` apps beside them, in another
+(`docs/releasing.md`, which also says how to cut a release).
 
 One command holds all of it:
 
@@ -147,8 +149,9 @@ One command holds all of it:
     nix run .#money-iced        # money's desktop window
     nix build .#harken-apk      # the kernel for three ABIs and the APK over it
     nix build .#revelation-apk  # Revelation's APK
-    nix build .#fdroid-repo     # both APKs as the F-Droid repository, signed
-                                # and checked; apps-fdroid is what CI runs
+    nix build .#fdroid-repo     # every APK as the stable F-Droid repository,
+                                # signed and checked; apps-fdroid is what CI
+                                # runs, for either channel (docs/releasing.md)
     nix run .#fuzz -- 1000 1 traces
     nix run .#update-cargo-nix  # after a Cargo.toml or lockfile edit: the
                                 # crates every Rust build is made of

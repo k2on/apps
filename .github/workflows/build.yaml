@@ -1,7 +1,21 @@
-# Everything a push to main publishes, in one run: each page at
-# https://k2on.github.io/apps/<name>/ (arkui's docs at docs/, …) and every Android app in one F-Droid repository at
-# https://k2on.github.io/apps/fdroid/repo. A `v*` tag builds the APKs alone
-# and attaches them to a release.
+# Everything the site publishes, in two release channels
+# (docs/releasing.md, .github/channels.sh), each deploy one of them:
+#
+#   a push to main  the unstable channel: every Android app's `.unstable`
+#                   twin (" Unstable", its icon banded) in the F-Droid
+#                   repository https://k2on.github.io/apps/fdroid/unstable/repo,
+#                   each browser app's page at /apps/unstable/<app>/, and
+#                   the docs at /apps/docs/.
+#   a `v*` tag      the stable channel: every Android app under its own id
+#                   in https://k2on.github.io/apps/fdroid/repo, each browser
+#                   app's page at /apps/<app>/, and the APKs attached to a
+#                   GitHub release.
+#
+# Pages deploys the site whole, so each deploy carries the other channel
+# forward from the live site unchanged. A pull request, and any other
+# branch, deploys nothing: a PR builds the stable APKs whose inputs moved
+# (app-screens.yaml photographs them), and a run by hand builds the
+# channel it is asked for (stable when not).
 #
 # **What there is to publish is not written here.** It is the flake's
 # `publish` output (flake.nix): a list of pages and a list of APKs, each with
@@ -58,6 +72,12 @@ on:
       - "flake.lock"
       - "docs/site/**"
   workflow_dispatch:
+    inputs:
+      channel:
+        description: "Which channel's APKs and pages to build (nothing is deployed off main and tags)"
+        type: choice
+        options: [stable, unstable]
+        default: stable
 
 permissions:
   # A tag's release is created with GITHUB_TOKEN.
@@ -81,26 +101,32 @@ concurrency:
 jobs:
   # What there is to build, and the key each is built under: evaluated, not
   # built, so this takes the time to install nix and read the flake.
+  # The run's channel picks each APK's package (the app's own, or its
+  # `.unstable` twin's) and the pages it builds (.github/channels.sh).
   plan:
     runs-on: ubuntu-latest
     outputs:
+      channel: ${{ steps.plan.outputs.channel }}
       pages: ${{ steps.plan.outputs.pages }}
+      all-pages: ${{ steps.plan.outputs.all-pages }}
       apks: ${{ steps.plan.outputs.apks }}
     steps:
       - uses: actions/checkout@v4
       - uses: DeterminateSystems/nix-installer-action@main
       - id: plan
+        env:
+          CHANNEL_INPUT: ${{ inputs.channel }}
         run: |
           nix eval --json .#publish.x86_64-linux > plan.json
           jq . plan.json
-          echo "pages=$(jq -c .pages plan.json)" >> "$GITHUB_OUTPUT"
-          echo "apks=$(jq -c .apks plan.json)" >> "$GITHUB_OUTPUT"
+          bash .github/channels.sh plan plan.json | tee -a "$GITHUB_OUTPUT"
 
   # After `crates`, which has built every crate of the docs (docs-site
-  # builds the same page), or without it if it failed.
+  # builds the same page), or without it if it failed. The run's channel's
+  # pages: main's and a tag's, which deploy them, and a run by hand's.
   page:
     needs: [plan, crates]
-    if: ${{ !cancelled() && needs.plan.result == 'success' && github.ref == 'refs/heads/main' }}
+    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.pages != '[]' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch') }}
     strategy:
       fail-fast: false
       matrix:
@@ -239,7 +265,7 @@ jobs:
           - { name: clippy, checks: "clippy" }
           - { name: ffi, checks: "ffi harken-domain harken-module traces vectors fuzz-smoke versions" }
           - { name: docs, checks: "docs" }
-          - { name: lint, checks: "fmt theme theme-contrast layers" }
+          - { name: lint, checks: "fmt theme theme-contrast layers channels" }
           - { name: apps, checks: "prebuild money-native revelation-native money-web-sync" }
     name: checks (${{ matrix.group.name }})
     runs-on: ubuntu-latest
@@ -370,11 +396,20 @@ jobs:
             nix build ".#$p" --out-link "$RUNNER_TEMP/first-$p" --print-build-logs
           done
 
+      # The version the phone shows (flake.nix, `versionFlags`): a `v*`
+      # tag's own (`v1.2` is 1.2), and anything else
+      # `<last tag>-unstable+<commit>` (.github/channels.sh). The version
+      # code is the commit's time either way.
+      - name: The version name
+        if: steps.seen.outputs.cache-hit != 'true'
+        run: echo "APPS_VERSION_NAME=$(bash .github/channels.sh version-name)" | tee -a "$GITHUB_ENV"
+
+      # Impure only so that the version name above is read.
       - name: Build ${{ matrix.apk.package }}
         id: build
         if: steps.seen.outputs.cache-hit != 'true'
         run: |
-          nix build .#${{ matrix.apk.package }} --print-build-logs
+          nix build --impure .#${{ matrix.apk.package }} --print-build-logs
           cp result/${{ matrix.apk.file }} ${{ matrix.apk.file }}
 
       - if: steps.build.outcome == 'success'
@@ -385,21 +420,24 @@ jobs:
           if-no-files-found: error
 
       # Remember these inputs as published, so the next push does not build
-      # them again: only main's (a PR's APK is published nowhere), and only
-      # once the APK has built, so a failed build is tried again on the next
-      # push.
-      - if: steps.build.outcome == 'success' && github.ref == 'refs/heads/main'
+      # them again: only main's pushes (a PR's APK is published nowhere, and
+      # a tag builds whatever it finds), and only once the APK has built, so
+      # a failed build is tried again on the next push. The key is the
+      # unstable twin's, which only main builds.
+      - if: steps.build.outcome == 'success' && github.ref == 'refs/heads/main' && github.event_name == 'push'
         run: mkdir -p apk-seen && git rev-parse HEAD > apk-seen/commit
       - name: Mark these inputs as built
-        if: steps.build.outcome == 'success' && github.ref == 'refs/heads/main'
+        if: steps.build.outcome == 'success' && github.ref == 'refs/heads/main' && github.event_name == 'push'
         uses: actions/cache/save@v4
         with:
           path: apk-seen
           key: apk-${{ matrix.apk.name }}-${{ matrix.apk.key }}
 
-  # A tag is a release: every APK, attached to it, by one job so the builds
-  # never race to create the same release. The keys are public, so the APKs
-  # install anywhere and belong nowhere public (harken/android/README.md).
+  # A tag is a release: every APK (the stable channel's, the apps' own
+  # ids), attached to it, by one job so the builds never race to create
+  # the same release. The keys are public, so the APKs install anywhere
+  # and belong nowhere public (harken/android/README.md). The same APKs go
+  # to the stable F-Droid repository (`deploy`).
   release:
     needs: apk
     if: startsWith(github.ref, 'refs/tags/v')
@@ -415,14 +453,20 @@ jobs:
           files: apks/*.apk
           generate_release_notes: true
 
+  # A push to main deploys the unstable channel, a `v*` tag the stable
+  # one; each carries the other forward from the live site
+  # (.github/channels.sh). Nothing else deploys: not a run by hand on
+  # main, whose channel is whatever it was asked.
   deploy:
     needs: [plan, page, apk]
-    # Every page, or none: Pages deploys the site whole, so a page that failed
-    # would vanish from it. A failed APK does not hold the site back: it goes
-    # up with the repository as it was, plus whichever APKs did build.
-    if: ${{ !cancelled() && github.ref == 'refs/heads/main' && needs.page.result == 'success' }}
+    # Every page of the channel, or none: Pages deploys the site whole, so
+    # a page that failed would vanish from it. A failed APK does not hold
+    # the site back: it goes up with the repository as it was, plus
+    # whichever APKs did build.
+    if: ${{ !cancelled() && ((github.event_name == 'push' && github.ref == 'refs/heads/main') || startsWith(github.ref, 'refs/tags/v')) && (needs.page.result == 'success' || (needs.page.result == 'skipped' && needs.plan.outputs.pages == '[]')) }}
     runs-on: ubuntu-latest
-    # One deployment at a time; a deploy in flight finishes before the next.
+    # One deployment at a time; a deploy in flight finishes before the next,
+    # so each reads the other channel as the last deploy left it.
     concurrency:
       group: pages
       cancel-in-progress: false
@@ -445,15 +489,6 @@ jobs:
           merge-multiple: true
           path: ${{ runner.temp }}/apk
 
-      - name: Lay out the pages
-        env:
-          PAGES: ${{ needs.plan.outputs.pages }}
-        run: |
-          mkdir -p _site
-          for name in $(jq -r '.[].name' <<<"$PAGES"); do
-            cp -r "$RUNNER_TEMP/pages/page-$name" "_site/$name"
-          done
-
       - uses: DeterminateSystems/nix-installer-action@main
 
       - if: vars.CACHIX_NAME != ''
@@ -462,73 +497,25 @@ jobs:
           name: ${{ vars.CACHIX_NAME }}
           authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
 
-      # The phones' F-Droid repository, one for every app
-      # (harken/android/fdroid/README.md).
-      #
-      # Pages deploys the site whole, so the versions the live repository
-      # already offers are fetched back and kept, of each app the newest
-      # three by version code, and the index is signed again over all of
-      # them: with the committed key, or with FDROID_KEYSTORE when that
+      # The whole site (.github/channels.sh): this channel's pages and
+      # F-Droid repository from this run, the other channel's as the live
+      # site has them, and the front page over both. Each F-Droid index is
+      # signed with the committed key, or with FDROID_KEYSTORE when that
       # secret is set (nix/fdroid.nix says why). An app with no new APK (its
-      # inputs had not moved, or its build failed) is offered as it was.
-      #
-      # Nothing here fails the deploy. No APK anywhere, the live repository
-      # unreachable, or fdroid itself failing, and the site goes up without
-      # fdroid/, saying so.
-      - name: Lay out the F-Droid repository
+      # inputs had not moved, or its build failed) is offered as it was. A
+      # channel that could not be carried forward fails the deploy rather
+      # than vanish from the site.
+      - name: Lay out the site
         env:
+          CHANNEL: ${{ needs.plan.outputs.channel }}
+          PAGES: ${{ needs.plan.outputs.all-pages }}
+          PAGES_DIR: ${{ runner.temp }}/pages
+          APK_DIR: ${{ runner.temp }}/apk
+          SITE_URL: https://k2on.github.io/apps
           FDROID_KEYSTORE: ${{ secrets.FDROID_KEYSTORE }}
           FDROID_KEYSTORE_PASS: ${{ secrets.FDROID_KEYSTORE_PASS }}
           FDROID_KEY_ALIAS: ${{ secrets.FDROID_KEY_ALIAS }}
-        run: |
-          shopt -s nullglob
-          apks=("$RUNNER_TEMP"/apk/*.apk)
-          if [ ${#apks[@]} -eq 0 ]; then
-            echo "::notice::No new APK in this run; the F-Droid repository offers what it already had."
-          fi
-          if [ -z "$FDROID_KEYSTORE" ]; then
-            echo "Signing the F-Droid index with the committed key; FDROID_KEYSTORE is not set."
-          fi
-          if nix run .#apps-fdroid -- repo --keep https://k2on.github.io/apps/fdroid/repo \
-            "$RUNNER_TEMP/fdroid" "${apks[@]}"; then
-            mkdir -p _site/fdroid
-            cp -r "$RUNNER_TEMP/fdroid" _site/fdroid/repo
-          else
-            echo "::warning::No F-Droid repository in this deploy; the site goes up without fdroid/."
-          fi
-
-      # The site's front page: what this is, then a line per page from the
-      # plan, then the F-Droid repository if this deploy has one.
-      - name: Assemble the site
-        env:
-          PAGES: ${{ needs.plan.outputs.pages }}
-        run: |
-          chmod -R u+w _site
-          {
-            cat <<'HTML'
-          <!doctype html>
-          <html lang="en">
-          <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>apps</title>
-          <style>body{font:16px/1.5 system-ui,sans-serif;max-width:40em;margin:4em auto;padding:0 1em;color-scheme:light dark}</style></head>
-          <body>
-          <h1>apps</h1>
-          <p>ArkDB is a local-first sync engine: one runtime in Rust, a domain
-          written in plain Rust, and the phones embedding the same kernel.
-          harken, a music library with playlists, is the first app on it.
-          Revelation, the second app, is the Bible as one scroll zoomed like
-          a map: an Android app in plain Kotlin, on none of ArkDB. The source
-          is at <a href="https://github.com/k2on/apps">github.com/k2on/apps</a>.</p>
-          <ul>
-          HTML
-            jq -r '.[] | "<li><a href=\"\(.name)/\">\(.title)</a>: \(.about)</li>"' <<<"$PAGES"
-            echo '</ul>'
-            if [ -d _site/fdroid/repo ]; then
-              echo '<p><a href="fdroid/repo/">fdroid/repo</a> is every Android app as an F-Droid repository: add that address in F-Droid and each APK built from main arrives as an update.</p>'
-            fi
-            echo '</body>'
-            echo '</html>'
-          } > _site/index.html
-          cat _site/index.html
+        run: bash .github/channels.sh deploy _site
 
       - uses: actions/configure-pages@v5
 

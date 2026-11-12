@@ -107,7 +107,8 @@ object ArkPush {
     fun message(context: Context, body: ByteArray): Boolean {
         val (kept, _, _) = keys(context)
         val app = webPushWake(kept, body) ?: return false
-        if (!context.packageName.endsWith(".$app")) return false
+        // The unstable channel's app is `<id>.unstable` (docs/releasing.md).
+        if (!context.packageName.removeSuffix(".unstable").endsWith(".$app")) return false
         ArkNotices.tell(NotificationEvent.Pushed)
         return true
     }

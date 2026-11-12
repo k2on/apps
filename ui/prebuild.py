@@ -1699,6 +1699,10 @@ def fdroid_yml(a):
     return "\n".join(out)
 
 
+# app.toml's `[channels]` (nix/channels.nix): stable and unstable default
+# to true, ios-unstable (the unstable TestFlight app's hook) to false.
+CHANNELS = ("stable", "unstable", "ios-unstable")
+
 STORE_KEYS = ("summary", "description", "categories", "license", "website", "source", "issues")
 
 
@@ -1809,6 +1813,13 @@ def check(root):
             for k in STORE_KEYS:
                 if k not in a.get("store", {}):
                     problems.append(f"{app}/app.toml's [store] says no `{k}`")
+        # The release channels an app is in (nix/channels.nix): each key a
+        # channel, each a boolean; every app is in both unless it says not.
+        for k, v in a.get("channels", {}).items():
+            if k not in CHANNELS:
+                problems.append(f"{app}/app.toml's [channels] says `{k}`, which is none of {', '.join(CHANNELS)}")
+            elif not isinstance(v, bool):
+                problems.append(f"{app}/app.toml's [channels] `{k}` is true or false")
         # A device the phone hands the process (module.toml's `[phone]`) is
         # registered through ark-ffi, by its feature of the module's name,
         # which the app's generated library turns on (nix/ark-app.nix).

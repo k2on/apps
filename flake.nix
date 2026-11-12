@@ -76,6 +76,8 @@
       # The Ark apps that are generated (nix/ark-app.nix, ui/docs/app.md:
       # "Generated, Not Committed"): each its directory with an app.toml.
       arkApp = import ./nix/ark-app.nix { inherit lib self; };
+      # The release channels, stable and unstable, every app's alike.
+      channelsOf = pkgs: import ./nix/channels.nix { inherit lib pkgs self; };
       arkApps = [ "money" "revelation" ];
 
       rustDirs = [ "rust" "ui/rust" "modules" "harken/domain" "harken/app" "harken/player" "harken/server" "harken/iced" "harken/ffi" "money/core" "money/demo" "money/app" "money/iced" "money/server" "harken/demo" ];
@@ -330,6 +332,24 @@
           # Each Ark app's generated pieces (nix/ark-app.nix): its
           # generator, the SwiftUI and Compose of its #[view]s (`<app>-ui`),
           # its native projects (`<app>-native`) and its prebuild.
+          channels = channelsOf pkgs;
+          # The apps with a browser page (app.toml's `platforms`), and each
+          # page per channel it is in: built from `<app>-web`.
+          webApps = lib.filter (n: lib.elem "web" ((arkApp.read n).platforms or [ ])) arkApps;
+          webPages = lib.concatMap
+            (n:
+              let
+                a = arkApp.read n;
+                page = self.packages.${pkgs.system}."${n}-web";
+                one = channel: path: package: title: {
+                  inherit n channel path package title;
+                  about = "${a.store.summary or a.name}: the demo in the browser, ${channel}.";
+                  drv = channels.webPage { name = package; inherit page path channel; };
+                };
+              in
+              lib.optional (channels.enabled n "stable") (one "stable" n "${n}-page" a.name)
+              ++ lib.optional (channels.enabled n "unstable") (one "unstable" "unstable/${n}" "${n}-unstable-page" "${a.name}${channels.label}"))
+            webApps;
           arkOf = lib.genAttrs arkApps (arkApp.packages { inherit pkgs only bundlePrefix cargoMetadata; build = crate; });
           # The workspace's `cargo metadata --no-deps`, run once: what
           # ui/prebuild.py finds an app's device modules in (its crate's
@@ -760,8 +780,14 @@
           # generated project (`<name>/.native/android`) over its own Kotlin
           # (`<name>/native/android`), its Maven graph that directory's
           # deps.json.
+          #
+          # `apk` is the stable channel's, the app's own id; `apkUnstable`
+          # the unstable channel's (nix/channels.nix): the same build with
+          # its id, label, launcher icon and providers made `.unstable`'s, a
+          # second app beside the first.
           androidApp = { name, flags ? [ ], shared ? [ ], ark ? null }:
             let
+              appid = "${bundlePrefix}.${name}";
               dir = if ark == null then "${name}/android" else "${name}/.native/android";
               deps = if ark == null then "${name}/android/deps.json" else "${name}/native/android/deps.json";
               src =
@@ -787,14 +813,23 @@
                 __darwinAllowLocalNetworking = true;
                 ANDROID_HOME = sdkRoot;
                 ANDROID_SDK_ROOT = sdkRoot;
-                gradleFlags = androidGradleFlags ++ [
-                  # Its id: every app's is `bundlePrefix` and its name.
-                  "-PapplicationId=${bundlePrefix}.${name}"
-                ] ++ flags ++ final.versionFlags;
+                gradleFlags = androidGradleFlags ++ final.idFlags ++ flags ++ final.versionFlags;
+                # Its id: every app's is `bundlePrefix` and its name.
+                idFlags = [ "-PapplicationId=${appid}" ];
                 # Read by app/build.gradle.kts; a local build falls back to 1.
+                # The code is the commit's time in minutes, a release's too, so
+                # what comes later is always the higher. The name is CI's
+                # (build.yaml, `apk`; .github/channels.sh): a `v*` tag's
+                # version (`v1.2` is 1.2), and otherwise
+                # `<last tag>-unstable+<commit>` (docs/releasing.md). Only an impure
+                # build (`--impure`, APPS_VERSION_NAME set) sees it; a pure one
+                # names the commit's date as before.
                 versionFlags = [
                   "-PversionCode=${toString (self.lastModified / 60)}"
-                  "-PversionName=0.1.${self.lastModifiedDate}"
+                  "-PversionName=${
+                    let v = builtins.getEnv "APPS_VERSION_NAME";
+                    in if v != "" then v else "0.1.${self.lastModifiedDate}"
+                  }"
                 ];
                 # AGP keeps its state under ~/.android, and the builder has no home.
                 preBuild = ''
@@ -811,8 +846,13 @@
                   cp app/build/outputs/apk/release/app-release.apk $out/${name}.apk
                 '';
               });
+              apkUnstable = apk.overrideAttrs (old: {
+                pname = "${name}-unstable-apk";
+                idFlags = [ "-PapplicationId=${appid}${channels.suffix}" ];
+                postPatch = (old.postPatch or "") + channels.androidPatch appid;
+              });
             in
-            { inherit apk; deps = apk.mitmCache.updateScript; };
+            { inherit apk apkUnstable appid; deps = apk.mitmCache.updateScript; };
 
           # The phone (harken/android/README.md): the app — its onboarding
           # and its look are its own code — over `harken-android-lib` (the
@@ -841,6 +881,8 @@
             shared = [ "modules" ];
           };
           money-apk = money.apk;
+          # Every Android app by its name, each with both channels' APKs.
+          androidApps = { inherit harken money revelation; };
 
           # The Bible as one scroll, zoomed like a map (revelation/README.md,
           # docs/plan-bible.md): plain Kotlin, no native library and none of
@@ -860,30 +902,32 @@
             python3 ui/prebuild.py fdroid ${dir} --root . --out $out
           '';
 
-          # Every app as one F-Droid repository (nix/fdroid.nix): each app is
-          # its id, its APK, its metadata and its icon.
+          # Every app as F-Droid repositories, one per channel
+          # (nix/fdroid.nix, nix/channels.nix): each app is its id, its
+          # APKs, its metadata and its icon, the unstable app's made from
+          # them.
           fdroid = import ./nix/fdroid.nix {
-            inherit lib pkgs;
-            apps = [
+            inherit lib pkgs channels;
+            apps = map (a: a // {
+              inherit (androidApps.${a.name}) appid apkUnstable;
+              apk = androidApps.${a.name}.apk;
+              apkName = "${a.name}.apk";
+              stable = channels.enabled a.name "stable";
+              unstable = channels.enabled a.name "unstable";
+            }) [
               {
-                appid = "${bundlePrefix}.harken";
-                apk = harken-apk;
-                apkName = "harken.apk";
+                name = "harken";
                 metadata = ./harken/android/fdroid/metadata/us.koon.harken.yml;
                 # The trumpet the desktop window and the docs draw.
                 icon = ./harken/iced/icon.svg;
               }
               {
-                appid = "${bundlePrefix}.revelation";
-                apk = revelation.apk;
-                apkName = "revelation.apk";
+                name = "revelation";
                 metadata = storeYml "revelation";
                 icon = ./revelation/icon.svg;
               }
               {
-                appid = "${bundlePrefix}.money";
-                apk = money-apk;
-                apkName = "money.apk";
+                name = "money";
                 metadata = storeYml "money";
                 icon = ./money/icon.svg;
               }
@@ -1930,13 +1974,21 @@
             # The workflow builds these first and keeps them as gc roots.
             inherit aapt2;
             android-sdk = androidSdk;
-            # The APKs' F-Droid repository, one for both apps, and a key for
-            # it (nix/fdroid.nix). `harken-fdroid` is the tool's old name,
+            # The APKs' F-Droid repositories, one per channel for every app,
+            # and a key for them (nix/fdroid.nix). `harken-fdroid` is the tool's old name,
             # kept while a workflow on main still calls it.
             inherit (fdroid) fdroid-repo apps-fdroid fdroid-keygen;
             harken-fdroid = fdroid.apps-fdroid;
-          } // lib.listToAttrs (map (v: lib.nameValuePair "harken-server-${v.name}" v.server) versions)
-          // lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
+          }
+          # Each Android app's unstable channel (nix/channels.nix):
+          # `<app>-unstable-apk`, the `.unstable` app beside it.
+          // lib.mapAttrs' (n: a: lib.nameValuePair "${n}-unstable-apk" a.apkUnstable) androidApps // lib.listToAttrs (map (v: lib.nameValuePair "harken-server-${v.name}" v.server) versions)
+          // lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux (
+            # Each browser app's page as the site serves it, one per
+            # channel (nix/channels.nix): `<app>-page` at /apps/<app>/,
+            # `<app>-unstable-page` at /apps/unstable/<app>/.
+            lib.listToAttrs (map (p: lib.nameValuePair p.package p.drv) webPages)
+          ) // lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
             # build.yaml's `crates` job (`ciCrates`): the checks' crates, and
             # those its `server`, `docs-site`/`page` and `apk`/`tests` jobs
             # share. UniFFI's and wasm-bindgen's CLIs, cargo builds of their
@@ -1999,6 +2051,17 @@
               }
               touch $out
             '';
+            # The release channels are every app's alike (nix/channels.nix):
+            # no app's directory, id or name is written in their code, so an
+            # app joining `publish` has both channels and nothing there
+            # changes.
+            channels = channels.check {
+              names = lib.unique (lib.concatMap
+                (n: [ n "${bundlePrefix}.${n}" ] ++ lib.optional (lib.elem n arkApps) (arkApp.read n).name)
+                (map (a: a.name) self.publish.${pkgs.system}.apks ++ map (a: a.name) self.publish.${pkgs.system}.ios ++ arkApps)
+                ++ map (a: a.App) self.publish.${pkgs.system}.ios);
+              files = [ ./nix/channel.py ./nix/channels.nix ./.github/channels.sh ./.github/ios-archive.sh ];
+            };
             # What is generated from ui/theme.toml is what is committed:
             # edit the tokens, then `nix run .#update-theme`.
             theme = pkgs.runCommand "theme-current" { nativeBuildInputs = [ pkgs.python3 ]; } ''
@@ -2220,9 +2283,10 @@
           };
 
           # Everything the workflows publish, as data, and the one list of
-          # the apps: a page goes up at k2on.github.io/apps/<name>/, an APK
-          # into the F-Droid repository (and onto a tag's release), an
-          # iPhone app to TestFlight (ios.yaml); and each app with
+          # the apps, each in two release channels (docs/releasing.md,
+          # nix/channels.nix): a page goes up at k2on.github.io/apps/<path>/,
+          # an APK into the channel's F-Droid repository (and a tag's onto
+          # its release), an iPhone app to TestFlight from a tag (ios.yaml); and each app with
           # <name>/demo/shots.json is photographed on the phones and the
           # desktop it is listed for (app-screens.yaml). Adding one is adding it here; the
           # workflow builds each in a job of its own.
@@ -2237,12 +2301,27 @@
           publish =
             let
               key = drv: builtins.substring 0 32 (baseNameOf (builtins.unsafeDiscardStringContext drv.drvPath));
-              page = name: package: title: about: { inherit name package title about; key = key self.packages.${pkgs.system}.${package}; };
+              # A page's channel is the deploy that publishes it
+              # (.github/channels.sh): main's (unstable) or a tag's
+              # (stable); `path` is where under the site, and `demo` says
+              # the site links it with `?demo`.
+              page = name: package: title: about: { channel ? "unstable", path ? name, demo ? false }: {
+                inherit name package title about channel path demo;
+                key = key self.packages.${pkgs.system}.${package};
+              };
+              # An APK and its unstable twin (nix/channels.nix): build.yaml
+              # builds the stable one on a tag and a pull request, the
+              # unstable one on main (.github/channels.sh `plan`).
               apk = name: app: { first ? [ ] }: {
                 inherit name first;
                 package = "${name}-apk";
                 file = "${name}.apk";
                 key = key (app.apk.overrideAttrs (_: { versionFlags = [ ]; }));
+                stable = channels.enabled name "stable";
+                unstable = lib.optionalAttrs (channels.enabled name "unstable") {
+                  package = "${name}-unstable-apk";
+                  key = key (app.apkUnstable.overrideAttrs (_: { versionFlags = [ ]; }));
+                };
               };
               # An iPhone app (ios.yaml builds and sends each; app-screens.yaml
               # photographs each): `App` its scheme and product; whether it goes
@@ -2250,9 +2329,15 @@
               # whether its tests run. Its key is its archive's: the archive
               # has no build number in it (ios.yaml gives it one), so it moves
               # only with what the app is built from.
+              #
+              # `unstable` is the hook for a second TestFlight app,
+              # `<bundle>.unstable`, which main would send (ios.yaml): its
+              # app.toml's `[channels] ios-unstable`, off for every app until
+              # its App Store Connect record exists.
               iphone = name: App: { testflight ? true, test ? false }:
                 let archive = self.packages.aarch64-darwin."${name}-ios-archive"; in {
                   inherit name App testflight test;
+                  unstable = channels.enabled name "ios-unstable";
                   inherit (archive) bundle;
                   package = "${name}-ios-archive";
                   key = key archive;
@@ -2260,8 +2345,8 @@
             in
             {
               pages = [
-                (page "docs" "docs" "docs" "the components every app here shares (arkui), a page each in an ArkUI app written as static HTML, with live arkui-web parts, pictures drawn by arkui itself, and catalogue.json beside it.")
-              ];
+                (page "docs" "docs" "docs" "the components every app here shares (arkui), a page each in an ArkUI app written as static HTML, with live arkui-web parts, pictures drawn by arkui itself, and catalogue.json beside it." { })
+              ] ++ map (p: page (lib.replaceStrings [ "/" ] [ "-" ] p.path) p.package p.title p.about { inherit (p) channel path; demo = true; }) webPages;
               apks = [
                 # The kernel for every ABI first, so its failure reads on its own.
                 (apk "harken" harken { first = [ "harken-android-lib" ]; })
