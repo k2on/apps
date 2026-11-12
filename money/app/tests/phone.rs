@@ -15,7 +15,7 @@ use ark_app::welcome::WelcomeMsg;
 use ark_ffi::ark_auth::onboarding::Step;
 use ark_ffi::hall::Hall;
 use ark_ffi::hosted::{Hosted, PhoneApp};
-use ark_ffi::{ArkHost, HostShell, Launch, Peer, Standing, Taken};
+use ark_ffi::{ArkHost, HostShell, Launch, Peer, ShotsTook, Standing, Taken};
 use money_app::budget::Budget;
 use money_app::host::{Money, ShellAsk};
 use money_app::shell::{MoneyShell, ShellMsg};
@@ -64,6 +64,7 @@ fn launch(root: &std::path::Path, demo: bool) -> Launch {
         demo,
         demo_day: demo.then(|| TODAY.into()),
         shots: false,
+        walk: false,
         scan: false,
         args: vec![],
     }
@@ -338,4 +339,30 @@ fn a_household_shares_one_budget() {
     let id = importer.mutate("import".into(), import.into()).unwrap();
     hall.carry();
     assert_eq!(importer.standing(id), Standing::Confirmed);
+}
+
+/// A screenshot walk's steps on a new install (ui/docs/shots.md, "In the
+/// App"): the first run's pages are a new person's, and each step reaches
+/// what it names on them — Get Started, the address field typed into,
+/// Continue — through the host, as a tap sends it. Falsified by a walk's
+/// launch passing over the pages (as a `-shots` launch once did), or a
+/// step taking nothing.
+#[test]
+fn a_walk_goes_through_the_first_run() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut l = launch(dir.path(), false);
+    l.shots = true;
+    l.walk = true;
+    let (host, _, _) = library(l);
+    let tree = host.shots_tree();
+    assert!(tree.contains("[button] Get Started (taps)"), "{tree}");
+    assert_eq!(host.shots_step(r#"{"tap": "Get Started"}"#.into()), ShotsTook::Done);
+    let tree = host.shots_tree();
+    assert!(tree.contains("[field] Server Address (types)"), "{tree}");
+    assert!(matches!(host.shots_step(r#"{"tap": "Nowhere"}"#.into()), ShotsTook::NotYet { .. }));
+    assert_eq!(host.shots_step(r#"{"tap": "Server Address", "role": "field"}"#.into()), ShotsTook::Done);
+    assert_eq!(host.shots_step(r#"{"type": "http://127.0.0.1:9"}"#.into()), ShotsTook::Done);
+    let typed = host.with_run(|r| r.page()).server.map(|s| s.typed).unwrap_or_default();
+    assert_eq!(typed, "http://127.0.0.1:9");
+    assert_eq!(host.shots_step(r#"{"tap": "Continue", "role": "button"}"#.into()), ShotsTook::Done);
 }

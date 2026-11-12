@@ -43,7 +43,7 @@ pub mod process;
 pub mod session;
 pub mod typed;
 pub mod wake;
-pub use host::{ArkHost, Handle, HostApp, HostShell, Launch, Opened};
+pub use host::{ArkHost, Handle, HostApp, HostShell, Launch, Opened, ShotsTook};
 pub use keep::{LoginKeep, OldShelf};
 pub use process::{ArkProcess, Attached, BackgroundWork};
 pub use session::{Hold, Session};

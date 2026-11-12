@@ -30,6 +30,9 @@ use ark_module::Modules;
 
 use crate::{ArkProcess, Login, Peer, Refusal};
 
+mod shots;
+pub use shots::ShotsTook;
+
 /// What a native shell does for its app's host.
 #[uniffi::export(with_foreign)]
 pub trait HostShell: Send + Sync {
@@ -51,13 +54,19 @@ pub struct Launch {
     /// The app's version as the device says it: `0.1 (12)`.
     pub version: String,
     /// The demo's household for this launch alone, whatever sign-in is
-    /// remembered (`-demo`: the screenshots'), on this day when one is
-    /// given (`2026-10-26`), today otherwise.
+    /// remembered (`-demo`: the Mac's screenshots'), on this day when one
+    /// is given (`2026-10-26`), today otherwise.
     pub demo: bool,
     pub demo_day: Option<String>,
-    /// A screenshot's launch: past the app's pages, as a returning
-    /// person's would be.
+    /// A screenshot's launch (`-shots`): no motion, and the ready signal.
+    /// Its first run's pages are a new person's, as any launch's.
     pub shots: bool,
+    /// A screenshot walk's launch (ui/docs/shots.md, "In the App"): the
+    /// shell found a walk's plan in the app's own directory, where only the
+    /// app and the machine's own tools write, on a simulator or an
+    /// emulator. Then, and only then, a sign-in a dev server sends straight
+    /// back is taken without the browser's sheet ([`ArkHost::shots_step`]).
+    pub walk: bool,
     /// A camera reads another device's code here ("Scan a Code").
     pub scan: bool,
     /// The launch's own arguments (`-screen budget`), for the app's shell.
@@ -105,6 +114,12 @@ pub trait HostApp: Send + Sync + 'static {
     /// A number that grows with every message the app's runtimes take.
     fn version(&self) -> u64 {
         0
+    }
+    /// Its runtimes' views as a screenshot walk's steps reach them, each
+    /// under its screen's name (`ark_app::shots`); none for an app whose
+    /// screens are its own (`hosted::Hosted`'s are its library's).
+    fn shots(&self) -> Vec<ark_app::shots::Screen> {
+        vec![]
     }
 }
 
@@ -161,6 +176,9 @@ struct State {
     args: Option<Vec<String>>,
     /// The shell said its window is up.
     shown: bool,
+    /// The field a screenshot walk's step tapped last (its label): what it
+    /// types into.
+    focus: Option<String>,
     version: u64,
     started: bool,
 }
@@ -238,6 +256,7 @@ impl ArkHost {
                 denied: false,
                 args: Some(launch.args.clone()),
                 shown: false,
+                focus: None,
                 version: 0,
                 started: false,
             }),
@@ -343,6 +362,12 @@ impl ArkHost {
                 self.keep.keep(remembered.login.as_ref());
             }
             Effect::Browse { url, .. } => {
+                // A screenshot walk's sign-in at a dev server, straight back
+                // with no sheet (`shots::straight`); anything else, the
+                // browser's, for a person.
+                if self.straight(&url) {
+                    return;
+                }
                 if let Some(shell) = self.lock().shell.clone() {
                     shell.browse(url)
                 }
@@ -528,7 +553,7 @@ impl ArkHost {
                 demo: k.demo,
             },
         };
-        self.lock().run.launch(k.seen, self.launch.shots || self.launch.demo);
+        self.lock().run.launch(k.seen, self.launch.demo);
         self.event(Event::Launched {
             remembered,
             code: None,

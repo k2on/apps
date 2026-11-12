@@ -9,7 +9,7 @@
 
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Mutex, MutexGuard, Weak};
 
 use ark_app::host::{Has, HostedApp, Hosting, Link, Place, Screen, Session as Facts, Waker};
 use ark_app::{App, ViewKey, Views};
@@ -213,6 +213,20 @@ pub struct Hosted<P: PhoneApp> {
     /// What only the phone's shell does, taken by it.
     natives: Mutex<Vec<Native<P>>>,
     generation: AtomicU64,
+    /// Its screens' views as a screenshot walk reaches them (`HostApp::
+    /// shots`): what [`phone_host!`] hands it, each screen by its name.
+    views: Mutex<Option<ShotsViews>>,
+    /// The screens run beside it the phone holds now, by app.toml's name
+    /// (`register`), the newest last.
+    besides: Mutex<Vec<(&'static str, Weak<dyn ShotsNodes>)>>,
+}
+
+/// Every hosted screen's view, as a walk's steps reach it.
+type ShotsViews = Box<dyn Fn() -> Vec<ark_app::shots::Screen> + Send + Sync>;
+
+/// A screen run beside the app's part, as a walk's steps reach its view.
+pub trait ShotsNodes: Send + Sync {
+    fn nodes(&self) -> Vec<ark_app::shots::Node>;
 }
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -227,7 +241,21 @@ impl<P: PhoneApp> Hosted<P> {
             handle: Mutex::new(None),
             natives: Mutex::new(vec![]),
             generation: AtomicU64::new(0),
+            views: Mutex::new(None),
+            besides: Mutex::new(vec![]),
         })
+    }
+
+    /// Its screens' views, for a walk's steps ([`phone_host!`]'s).
+    pub fn set_views(&self, views: ShotsViews) {
+        *lock(&self.views) = Some(views);
+    }
+
+    /// A screen run beside it (`name`, app.toml's), now held by the phone.
+    pub fn shown_beside(&self, name: &'static str, screen: Weak<dyn ShotsNodes>) {
+        let mut b = lock(&self.besides);
+        b.retain(|(_, w)| w.strong_count() > 0);
+        b.push((name, screen));
     }
 
     /// `f` over the session open, then what it said and asked carried out
@@ -456,6 +484,25 @@ where
     fn version(&self) -> u64 {
         lock(&self.open).as_ref().map_or(0, |o| o.hosting.version())
     }
+
+    /// Every hosted screen's view, then the newest of each screen run
+    /// beside them the phone still holds.
+    fn shots(&self) -> Vec<ark_app::shots::Screen> {
+        let mut out = lock(&self.views).as_ref().map_or_else(Vec::new, |v| v());
+        let besides: Vec<_> = lock(&self.besides).clone();
+        for (name, w) in besides.iter().rev() {
+            if out.iter().any(|s| s.name == *name) {
+                continue;
+            }
+            if let Some(s) = w.upgrade() {
+                out.push(ark_app::shots::Screen {
+                    name: name.to_string(),
+                    nodes: s.nodes(),
+                });
+            }
+        }
+        out
+    }
 }
 
 /// A screen of the app's part as UniFFI exports it: `$name` over the
@@ -464,10 +511,27 @@ where
 /// once per app.toml `[screens]` entry.
 #[macro_export]
 macro_rules! hosted_screen {
-    ($(#[$doc:meta])* $name:ident, $phone:ty, $app:ty, $msg:ty, $page:ty) => {
+    ($(#[$doc:meta])* $name:ident, $phone:ty, $app:ty, $msg:ty, $page:ty, view: $view:path) => {
         $(#[$doc])*
         #[derive(uniffi::Object)]
         pub struct $name(pub(crate) std::sync::Arc<$crate::hosted::Hosted<$phone>>);
+
+        impl $name {
+            /// Its view as a screenshot walk's steps reach it, each element's
+            /// message sent as the phone sends it.
+            pub fn shots_nodes(host: &std::sync::Arc<$crate::hosted::Hosted<$phone>>) -> Vec<$crate::ark_app::shots::Node> {
+                let page = host.page::<$app>();
+                let host = std::sync::Arc::downgrade(host);
+                $crate::ark_app::shots::nodes(
+                    &$view(&page),
+                    std::rc::Rc::new(move |m| {
+                        if let Some(h) = host.upgrade() {
+                            h.send::<$app>(m)
+                        }
+                    }),
+                )
+            }
+        }
 
         #[uniffi::export]
         impl $name {
@@ -578,16 +642,32 @@ impl<P: PhoneApp, A: App<Key = Key<P>, Change = Change<P>>> Drop for Beside<P, A
 /// its page's `$page` ([`Beside`]).
 #[macro_export]
 macro_rules! beside_screen {
-    ($(#[$doc:meta])* $name:ident, $phone:ty, $app:ty, $msg:ty, $page:ty) => {
+    ($(#[$doc:meta])* $name:ident, $phone:ty, $app:ty, $msg:ty, $page:ty, view: $view:path) => {
         $(#[$doc])*
         #[derive(uniffi::Object)]
-        pub struct $name($crate::hosted::Beside<$phone, $app>);
+        pub struct $name($crate::hosted::Beside<$phone, $app>, std::sync::Weak<$name>);
 
         impl $name {
             /// The screen over `host`'s session, told `first` (twin).
             pub fn over(host: std::sync::Arc<$crate::hosted::Hosted<$phone>>, first: $msg) -> Option<std::sync::Arc<$name>> {
                 use $crate::Twin;
-                $crate::hosted::Beside::over(host, <<$app as $crate::ark_app::App>::Msg>::from_ffi(first)).map(|b| std::sync::Arc::new($name(b)))
+                $crate::hosted::Beside::over(host, <<$app as $crate::ark_app::App>::Msg>::from_ffi(first))
+                    .map(|b| std::sync::Arc::new_cyclic(|me| $name(b, me.clone())))
+            }
+        }
+
+        impl $crate::hosted::ShotsNodes for $name {
+            fn nodes(&self) -> Vec<$crate::ark_app::shots::Node> {
+                let page = self.0.page();
+                let me = self.1.clone();
+                $crate::ark_app::shots::nodes(
+                    &$view(&page),
+                    std::rc::Rc::new(move |m| {
+                        if let Some(s) = me.upgrade() {
+                            s.0.send(m)
+                        }
+                    }),
+                )
             }
         }
 
@@ -665,6 +745,15 @@ macro_rules! phone_host {
                 store: Option<std::sync::Arc<dyn $crate::ark_secure_store::phone::SecureStore>>,
             ) -> std::sync::Arc<$host> {
                 let app = $crate::hosted::Hosted::<$phone>::new();
+                // Every screen's view, for a screenshot walk's steps.
+                let weak = std::sync::Arc::downgrade(&app);
+                app.set_views(Box::new(move || match weak.upgrade() {
+                    Some(a) => vec![$($crate::ark_app::shots::Screen {
+                        name: stringify!($screen).into(),
+                        nodes: $screen_ty::shots_nodes(&a),
+                    }),*],
+                    None => vec![],
+                }));
                 let host = $crate::ArkHost::new(app.clone(), launch, store);
                 std::sync::Arc::new($host { host, app })
             }
@@ -692,7 +781,10 @@ macro_rules! phone_host {
                 /// A runtime of its own for as long as the phone shows it,
                 /// told `first`; none while no session is open.
                 pub fn $beside(&self, first: $beside_msg) -> Option<std::sync::Arc<$beside_ty>> {
-                    $beside_ty::over(self.app.clone(), first)
+                    let b = $beside_ty::over(self.app.clone(), first)?;
+                    let shown: std::sync::Arc<dyn $crate::hosted::ShotsNodes> = b.clone();
+                    self.app.shown_beside(stringify!($beside), std::sync::Arc::downgrade(&shown));
+                    Some(b)
                 }
             )*
 

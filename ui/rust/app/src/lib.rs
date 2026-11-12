@@ -653,6 +653,7 @@ impl<M: Send + 'static> Inbox<M> {
 pub mod background;
 pub mod host;
 pub mod shell;
+pub mod shots;
 pub mod view;
 pub mod welcome;
 pub mod writing;

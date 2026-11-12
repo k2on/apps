@@ -550,3 +550,62 @@ fn the_toolbars_end_with_the_account() {
     assert_eq!(ark_app::shell::account_initial("sam"), "S");
     assert_eq!(ark_app::shell::account_initial(""), "?");
 }
+
+/// The phones' walk (money/demo/shots.json, taken in the app: ui/docs/
+/// shots.md) reaches what it taps in the views every phone draws: the
+/// sections' tabs, the account's button, a new transaction, Auto-Assign and
+/// a category of the budget the Budget tab hosts. Falsified by a label the
+/// walk names that no view says (a tab renamed, the account's button gone).
+#[test]
+fn the_walk_reaches_what_it_taps() {
+    use ark_app::shots::{compose, nodes, take, tree, Role, Screen, Step, Took};
+    use std::cell::RefCell;
+    use std::rc::Rc;
+    let mut demo = Demo::new();
+    let mut rt = Runtime::<MoneyShell>::new();
+    rt.dispatch(ShellMsg::Month { month: "2026-10".into() }, &mut demo);
+    rt.dispatch(ShellMsg::Select { tag: "budget".into() }, &mut demo);
+    let mut bd = crate::testing::Demo::<crate::budget::Budget>::new();
+    let mut brt = Runtime::<crate::budget::Budget>::new();
+    bd.run(&mut brt, [crate::budget::BudgetMsg::Month { month: "2026-10".into() }]);
+    let sent: Rc<RefCell<Vec<String>>> = Rc::default();
+    let (s1, s2) = (sent.clone(), sent.clone());
+    let targets = compose(vec![
+        Screen {
+            name: "shell".into(),
+            nodes: nodes(
+                &money_shell::view(&rt.screen(&demo)),
+                Rc::new(move |m: ShellMsg| s1.borrow_mut().push(format!("{m:?}"))),
+            ),
+        },
+        Screen {
+            name: "budget".into(),
+            nodes: nodes(
+                &crate::budget::view::budget::view(&brt.screen(&bd)),
+                Rc::new(move |m: crate::budget::BudgetMsg| s2.borrow_mut().push(format!("{m:?}"))),
+            ),
+        },
+    ]);
+    let said = tree(&targets);
+    for want in [
+        "[tab] Budget (taps)",
+        "[tab] Accounts (taps)",
+        "[tab] Transactions (taps)",
+        "[tab] Insights (taps)",
+        "[button] Account (taps)",
+        "[button] New Transaction (taps)",
+        "[button] Auto-Assign (taps)",
+        "[row] 🍜 Dining Out (taps",
+    ] {
+        assert!(said.contains(want), "{want}, in:\n{said}");
+    }
+    let mut focus = None;
+    let tap = |label: &str, role: Option<Role>| Step::Tap {
+        label: label.into(),
+        role,
+        bottom: true,
+    };
+    assert_eq!(take(&tap("Auto-Assign", Some(Role::Button)), &targets, &mut focus), Took::Done);
+    assert_eq!(take(&tap("Accounts", Some(Role::Tab)), &targets, &mut focus), Took::Done);
+    assert_eq!(sent.borrow().clone(), ["AutoAssign", "Select { tag: \"accounts\" }"]);
+}

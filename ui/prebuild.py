@@ -1369,8 +1369,11 @@ def ffi_lib(a):
     objects = []
     for n, sc in screens:
         mac = "beside_screen" if sc.get("beside") else "hosted_screen"
+        # Its view (`view`, the #[view] function's path in the app's crate):
+        # what a screenshot walk's steps reach (ark_app::shots).
         objects.append(f"ark_ffi::{mac}!(\n    /// {a['name']}'s `{n}` screen, running.\n"
-                       f"    {sc['runtime']}, Phone, {crate}::{sc['app']}, {sc['msg']}Ffi, {sc['page']}Ffi\n);")
+                       f"    {sc['runtime']}, Phone, {crate}::{sc['app']}, {sc['msg']}Ffi, {sc['page']}Ffi,\n"
+                       f"    view: {crate}::{sc['view']}::view\n);")
     hosted = ", ".join(f"{n}: {sc['runtime']}" for n, sc in screens if not sc.get("beside"))
     beside = ", ".join(f"{n}: {sc['runtime']} ({sc['msg']}Ffi)" for n, sc in screens if sc.get("beside"))
     return f"""//! {HEADER.format(app=a['dir'])}

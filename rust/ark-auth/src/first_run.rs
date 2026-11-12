@@ -95,9 +95,9 @@ impl FirstRun {
     /// Where a launch starts with the app's pages, on every platform: from
     /// the first, over wherever the machine stands, unless they were seen
     /// before (`seen`, what the shell remembered of [`Asked::seen`]) or the
-    /// launch goes straight somewhere (`straight`: a screenshot's, the
-    /// demo's, a link's). A link that comes later is [`FirstRun::open_link`];
-    /// the pages' own route is [`FirstRun::show_intro`].
+    /// launch goes straight somewhere (`straight`: the demo's, a link's).
+    /// A link that comes later is [`FirstRun::open_link`]; the pages' own
+    /// route is [`FirstRun::show_intro`].
     pub fn launch(&mut self, seen: bool, straight: bool) {
         match seen || straight {
             true => self.skip_intro(),
@@ -106,7 +106,7 @@ impl FirstRun {
     }
 
     /// The app's pages passed over: a launch that goes straight to a
-    /// route, a link or a screenshot's, as a returning person's would.
+    /// route or a link, as a returning person's would.
     pub fn skip_intro(&mut self) {
         self.intro = self.copy.pages.len();
         self.asked = false;

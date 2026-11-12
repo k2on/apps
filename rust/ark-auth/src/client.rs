@@ -124,6 +124,22 @@ pub fn code_with(server: &str, user: Option<&str>, open: impl FnOnce(&str), pati
     Ok(code)
 }
 
+/// Where a sign-in page at `url` sends the browser at once, when it sends
+/// it straight back to `scheme` (`money://auth?code=…`): what a dev server
+/// with its own user (`ARK_DEV_USER`) answers, with no page between, as
+/// [`code_with`] reads it on a desktop. None for anything else — a page for
+/// a person, a provider's, an error — which only a browser goes through.
+/// A phone's screenshot walk signs in so (ui/docs/shots.md): the system's
+/// browser sheet is not the app's, and cannot be reached from inside it.
+pub fn straight_back(url: &str, scheme: &str) -> Option<String> {
+    let resp = Patience::DEFAULT.agent(0).get(url).call().ok()?;
+    if resp.status() / 100 != 3 {
+        return None;
+    }
+    let location = resp.header("Location")?.to_string();
+    location.starts_with(&format!("{scheme}://auth")).then_some(location)
+}
+
 /// The code, for the login it stands for.
 pub fn exchange(server: &str, code: &str) -> Result<Login, String> {
     exchange_with(server, code, Patience::DEFAULT)
