@@ -9,17 +9,10 @@
 # The screens (SwiftUI, Charts, AuthenticationServices) are left out: none of
 # those is on Linux. harken's tools/typecheck.sh, for money.
 #
-# Then the tests (MoneyTests/, when there are any: what the model and the
-# session did is money's host's in Rust now, tested there) are compiled
-# against the same sources with a stand-in for XCTest's assertions, and —
-# when `MONEY_FFI_LIB` names money's library built for this machine
-# (`libmoney_ffi.so`) — linked against it and run.
-#
 #   typecheck.sh BINDINGS   # a directory of `uniffi-bindgen generate --language swift`
 set -eu
 HERE="$(cd "$(dirname "$0")" && pwd)"
 APP="$HERE/Money"
-TESTS="$HERE/MoneyTests"
 BINDINGS="$1"
 TYPED="${TYPED:-$HERE/../../../rust/ark-ffi/swift/Typed.swift}"
 # ArkUI's Foundation half (ui/swift), which the rows import: built first
@@ -56,36 +49,6 @@ public protocol ObservableObject: AnyObject {}
     public init(wrappedValue: Value) { self.wrappedValue = wrappedValue }
 }
 SWIFT
-cat > "$OUT/XCTest.swift" <<'SWIFT'
-// A stand-in for XCTest's assertions, for running MoneyTests on Linux: a
-// failure is counted and said, and the runner exits non-zero after.
-import Foundation
-open class XCTestCase { public init() {} }
-public var xcFailures = 0
-private func fail(_ what: String, _ message: String, _ file: StaticString, _ line: UInt) {
-    xcFailures += 1
-    print("\(file):\(line): \(what) failed\(message.isEmpty ? "" : ": " + message)")
-}
-public func XCTAssertEqual<T: Equatable>(_ a: @autoclosure () throws -> T, _ b: @autoclosure () throws -> T, _ message: @autoclosure () -> String = "", file: StaticString = #filePath, line: UInt = #line) {
-    do {
-        let x = try a(), y = try b()
-        if x != y { fail("XCTAssertEqual", "(\(x)) is not (\(y)) \(message())", file, line) }
-    } catch { fail("XCTAssertEqual", "threw \(error)", file, line) }
-}
-public func XCTAssertTrue(_ a: @autoclosure () throws -> Bool, _ message: @autoclosure () -> String = "", file: StaticString = #filePath, line: UInt = #line) {
-    if (try? a()) != true { fail("XCTAssertTrue", message(), file, line) }
-}
-public func XCTAssertFalse(_ a: @autoclosure () throws -> Bool, _ message: @autoclosure () -> String = "", file: StaticString = #filePath, line: UInt = #line) {
-    if (try? a()) != false { fail("XCTAssertFalse", message(), file, line) }
-}
-public func XCTAssertNil<T>(_ a: @autoclosure () throws -> T?, _ message: @autoclosure () -> String = "", file: StaticString = #filePath, line: UInt = #line) {
-    if let v = try? a() { fail("XCTAssertNil", "(\(v)) \(message())", file, line) }
-}
-public func XCTAssertNotNil<T>(_ a: @autoclosure () throws -> T?, _ message: @autoclosure () -> String = "", file: StaticString = #filePath, line: UInt = #line) {
-    if (try? a()) == nil { fail("XCTAssertNotNil", message(), file, line) }
-}
-public func XCTFail(_ message: String = "", file: StaticString = #filePath, line: UInt = #line) { fail("XCTFail", message, file, line) }
-SWIFT
 mkdir -p "$OUT/ffi"
 cp "$BINDINGS"/*.h "$OUT/ffi/"
 cat "$BINDINGS"/*.modulemap > "$OUT/ffi/module.modulemap"
@@ -98,34 +61,3 @@ SWIFTC="${SWIFT_EXEC:-swiftc}"
   "$BINDINGS"/*.swift "$TYPED" "${SOURCES[@]}"
 echo "money/native/ios: $(for f in "${SOURCES[@]}"; do printf '%s ' "${f#$APP/}"; done)type-check against money's library"
 
-# The tests: one module with the sources, as `@testable import Money` reads
-# them, and a runner calling every `func test…` of every `final class …Tests`.
-[ -d "$TESTS" ] || exit 0
-TESTFILES=("$TESTS"/*.swift)
-mkdir -p "$OUT/tests"
-for f in "${TESTFILES[@]}"; do
-  sed -e '/^@testable import Money/d' -e '/^import XCTest/d' "$f" > "$OUT/tests/$(basename "$f")"
-done
-{
-  echo "import Foundation"
-  echo "@main enum Run { static func main() {"
-  for f in "${TESTFILES[@]}"; do
-    class=$(sed -n 's/^final class \([A-Za-z]*Tests\).*/\1/p' "$f")
-    for t in $(sed -n 's/^    func \(test[A-Za-z0-9_]*\)().*/\1/p' "$f"); do
-      echo "  print(\"$class.$t\"); $class().$t()"
-    done
-  done
-  echo "  if xcFailures > 0 { print(\"\\(xcFailures) failed\"); exit(1) }"
-  echo "  print(\"every test passed\")"
-  echo "} }"
-} > "$OUT/tests/Run.swift"
-if [ -z "${MONEY_FFI_LIB:-}" ]; then
-  "$SWIFTC" -typecheck -parse-as-library -module-name Money -I "$OUT" -I "$OUT/ffi" \
-    "$BINDINGS"/*.swift "$TYPED" "${SOURCES[@]}" "$OUT"/tests/*.swift "$OUT/XCTest.swift"
-  echo "money/native/ios: MoneyTests type-check (not run: no MONEY_FFI_LIB)"
-else
-  "$SWIFTC" -parse-as-library -module-name Money -I "$OUT" -I "$OUT/ffi" \
-    "$BINDINGS"/*.swift "$TYPED" "${SOURCES[@]}" "$OUT"/tests/*.swift "$OUT/XCTest.swift" \
-    -L "$OUT" -lCombine -lArkUICore -L "$(dirname "$MONEY_FFI_LIB")" -lmoney_ffi -Xlinker -rpath -Xlinker "$(dirname "$MONEY_FFI_LIB")" -o "$OUT/tests/run"
-  "$OUT/tests/run"
-fi

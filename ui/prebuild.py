@@ -458,15 +458,6 @@ def apple_project(root, a, prefix):
             "settings": {"base": {"PRODUCT_BUNDLE_IDENTIFIER": f"{bundle}.notices", "GENERATE_INFOPLIST_FILE": False}},
         }
         target["dependencies"].append({"target": notices, "embed": True, "platformFilter": "ios"})
-    tests = os.path.join(root, app, "native", "ios", f"{product}Tests")
-    if os.path.isdir(tests):
-        targets[f"{product}Tests"] = {
-            "type": "bundle.unit-test",
-            "platform": "iOS",
-            "sources": [{"path": f"{native}/{product}Tests"}],
-            "dependencies": [{"target": product}],
-            "settings": {"base": {"PRODUCT_BUNDLE_IDENTIFIER": f"{bundle}.tests", "GENERATE_INFOPLIST_FILE": True}},
-        }
     project = {
         "name": product,
         "options": {
@@ -489,8 +480,7 @@ def apple_project(root, a, prefix):
         "packages": {"ArkUI": {"path": f"{TO_REPO}/ui/swift"}},
         "targets": targets,
         "schemes": {product: {
-            "build": {"targets": {product: "all"} | ({f"{product}Tests": ["test"]} if len(targets) > 1 else {})},
-            **({"test": {"targets": [f"{product}Tests"]}} if len(targets) > 1 else {}),
+            "build": {"targets": {product: "all"}},
             "archive": {"config": "Release"},
         }},
     }

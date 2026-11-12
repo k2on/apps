@@ -2325,8 +2325,8 @@
               };
               # An iPhone app (ios.yaml builds and sends each; app-screens.yaml
               # photographs each): `App` its scheme and product; whether it goes
-              # to TestFlight (its App Store Connect record must exist), and
-              # whether its tests run. Its key is its archive's: the archive
+              # to TestFlight from a tag (its App Store Connect record must
+              # exist). Its key is its archive's: the archive
               # has no build number in it (ios.yaml gives it one), so it moves
               # only with what the app is built from.
               #
@@ -2334,9 +2334,9 @@
               # `<bundle>.unstable`, which main would send (ios.yaml): its
               # app.toml's `[channels] ios-unstable`, off for every app until
               # its App Store Connect record exists.
-              iphone = name: App: { testflight ? true, test ? false }:
+              iphone = name: App: { testflight ? true }:
                 let archive = self.packages.aarch64-darwin."${name}-ios-archive"; in {
-                  inherit name App testflight test;
+                  inherit name App testflight;
                   unstable = channels.enabled name "ios-unstable";
                   inherit (archive) bundle;
                   package = "${name}-ios-archive";
@@ -2356,7 +2356,7 @@
               ];
               ios = [
                 (iphone "harken" "Harken" { })
-                (iphone "money" "Money" { test = true; })
+                (iphone "money" "Money" { })
               ];
               # The desktop windows (`<name>-iced`), published nowhere yet but
               # photographed beside the phones (app-screens.yaml), each built
