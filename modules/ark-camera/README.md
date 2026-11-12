@@ -2,7 +2,7 @@
 
 `ark-camera` (`modules/ark-camera`): a device module, one package with its crate,
 its Swift and its Kotlin (ui/docs/app.md, The Device). An app opts in by
-listing `ark-camera` in its app.toml and depending on `ark-camera`.
+depending on `ark-camera` (ui/docs/app.md, How an App Opts In).
 
 A QR code scanned, a photo taken, a photo taken while eyes in Rust watch
 the frames, or a photo chosen from the library: each shows the platform's own camera page and answers when it
@@ -51,7 +51,7 @@ An app's runtimes take what came of a page once it answers, with nothing
 of the app's on the phone: the answer wakes the app's host (ark-app's
 `Inbox::ask_telling`, ark-ffi's `Handle::moved`), which drains every
 runtime on its own thread. The app library registers the camera as the
-process's from app.toml's modules (module.toml's `[phone]`), and on Android
+process's when the app's crate depends on it (module.toml's `[phone]`), and on Android
 puts `CameraPage` at the root.
 
 ## Motion

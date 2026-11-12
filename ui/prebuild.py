@@ -71,8 +71,61 @@ def module(root, name):
     return load(os.path.join(root, "modules", name, "module.toml"))
 
 
+_METADATA = {}
+
+
+def cargo_metadata(root):
+    """The workspace's `cargo metadata --no-deps`: a build's copy of it
+    when `ARK_CARGO_METADATA` names one (nix's, which runs cargo once), or
+    cargo asked here."""
+    if root not in _METADATA:
+        given = os.environ.get("ARK_CARGO_METADATA")
+        if given:
+            with open(given) as f:
+                _METADATA[root] = json.load(f)
+        else:
+            out = subprocess.run(["cargo", "metadata", "--no-deps", "--offline", "--format-version", "1"],
+                                 cwd=os.path.join(root, "rust"), capture_output=True, text=True, check=True).stdout
+            _METADATA[root] = json.loads(out)
+    return _METADATA[root]
+
+
+def crate_modules(root, crate):
+    """The device modules `crate` depends on, directly or through its other
+    path dependencies (normal and build, never dev): each a crate whose
+    Cargo.toml says `[package.metadata.ark] module`. What an app takes on;
+    nix/ark-app.nix's `modulesOf` reads the same manifests for ark-ffi's
+    features."""
+    meta = cargo_metadata(root)
+    by_dir = {os.path.dirname(p["manifest_path"]): p for p in meta["packages"]}
+    by_name = {p["name"]: p for p in meta["packages"]}
+    if crate not in by_name:
+        return []
+    seen, out, todo = set(), [], [by_name[crate]]
+    while todo:
+        p = todo.pop()
+        if p["name"] in seen:
+            continue
+        seen.add(p["name"])
+        if ((p.get("metadata") or {}).get("ark") or {}).get("module"):
+            out.append(p["name"])
+        for d in p["dependencies"]:
+            if d.get("kind") in (None, "build") and d.get("path") in by_dir:
+                todo.append(by_dir[d["path"]])
+    return sorted(out)
+
+
+def module_names(root, a):
+    """The device modules the app takes on: its crate's (`crate_modules`).
+    A fixture's own list (`modules`, set in this file, never in an
+    app.toml) stands in for an app with no crate behind it."""
+    if "modules" in a:
+        return list(a["modules"])
+    return crate_modules(root, a["crate"]) if a.get("crate") else []
+
+
 def modules_of(root, a):
-    return [(n, module(root, n)) for n in a.get("modules", [])]
+    return [(n, module(root, n)) for n in module_names(root, a)]
 
 
 def has(a, platform):
@@ -991,7 +1044,7 @@ def swift_devices(root, a):
             lines.append(f"        process.{ph['register']}()")
     if not lines:
         return ""
-    return ("        // The device modules app.toml lists (module.toml's `[phone]`),\n"
+    return ("        // The device modules the app's crate depends on (module.toml's `[phone]`),\n"
             "        // the process's: every screen's runtime asks through them.\n"
             "        let process = ArkProcess.shared()\n" + "\n".join(lines) + "\n")
 
@@ -1017,7 +1070,7 @@ def kotlin_devices(root, a):
     body = "\n".join(made + ["    remember(view) {", "        val process = ArkProcess.shared()"] + calls + ["    }"] + pages)
     fn = f"""
 /**
- * The device modules app.toml lists (module.toml's `[phone]`), registered as the process's while
+ * The device modules the app's crate depends on (module.toml's `[phone]`), registered as the process's while
  * the activity shows (every screen's runtime asks through them), and the pages a module puts at
  * the root.
  */
@@ -1036,7 +1089,7 @@ def swift_main(root, a):
     product = a["apple"]["product"]
     host = library_host(a)
     bg = background(a)
-    store = "PhoneSecureStore()" if "ark-secure-store" in a.get("modules", []) else "nil"
+    store = "PhoneSecureStore()" if "ark-secure-store" in module_names(root, a) else "nil"
     delegate = ""
     hooks = ""
     if bg:
@@ -1122,7 +1175,7 @@ def kotlin_app(root, a):
     secure store, and its background's hookup when it declares one."""
     pkg = a["android"]["package"]
     host = library_host(a)
-    store = "dev.arkui.modules.PhoneSecureStore(this)" if "ark-secure-store" in a.get("modules", []) else "null"
+    store = "dev.arkui.modules.PhoneSecureStore(this)" if "ark-secure-store" in module_names(root, a) else "null"
     bg = background(a)
     hooks = ""
     if bg.get("push"):
@@ -1356,8 +1409,11 @@ def check(root):
     every = {os.path.basename(os.path.dirname(p)) for p in glob.glob(os.path.join(root, "modules", "*", "module.toml"))}
     # Each module's operations are what its module.toml's [ops] says: an
     # `impl Op for <name>` in its crate, its Output the type listed.
+    declared = {p["name"] for p in cargo_metadata(root)["packages"] if ((p.get("metadata") or {}).get("ark") or {}).get("module")}
     for n in sorted(every):
         m = module(root, n)
+        if m.get("crate") not in declared:
+            problems.append(f"modules/{n}/Cargo.toml says no [package.metadata.ark] module, so no app can take it on")
         ops = m.get("ops", {})
         if not ops:
             problems.append(f"modules/{n}/module.toml lists no [ops]")
@@ -1383,9 +1439,9 @@ def check(root):
                 problems.append(f"{app}/app.toml says no `{k}`")
         if a.get("accent") not in theme.load()["accent"]:
             problems.append(f"{app}/app.toml's accent {a.get('accent')} is no [accent.*] of ui/theme.toml")
-        for n in a.get("modules", []):
-            if n not in every:
-                problems.append(f"{app}/app.toml lists {n}, which is no module (modules/{n}/module.toml)")
+        # An app's modules are its crate's dependencies, and nowhere else.
+        if "modules" in a:
+            problems.append(f"{app}/app.toml lists modules: an app takes a module on by depending on its crate (ui/docs/app.md, How an App Opts In)")
         # Each screen and further view says its #[view] and the names it is
         # written under: the views' generator's main is made of them.
         if a.get("crate"):
@@ -1408,8 +1464,8 @@ def check(root):
             problems.append(f"{app}/app.toml's [background] sync is \"30m\" or \"2h\", at least 15m")
         needs = {"sync": "ark-background", "boot": "ark-background", "push": "ark-notifications"}
         for k, n in needs.items():
-            if bg.get(k) and n not in a.get("modules", []):
-                problems.append(f"{app}/app.toml's [background] {k} needs {n} in its modules")
+            if bg.get(k) and n not in module_names(root, a):
+                problems.append(f"{app}/app.toml's [background] {k} needs its crate to depend on {n}")
         if bg.get("service-extension") and not bg.get("push"):
             problems.append(f"{app}/app.toml's [background] service-extension needs push")
         if apple_targets(a) and "apple" not in a:
@@ -1421,26 +1477,14 @@ def check(root):
             for k in STORE_KEYS:
                 if k not in a.get("store", {}):
                     problems.append(f"{app}/app.toml's [store] says no `{k}`")
-        # The app's crate reaches a module only through its port
-        # (ark_app::modules); the phones' bridge links the module's crate,
-        # whose foreign trait the phones implement.
-        bridge = a.get("ffi", {}).get("dir")
-        crate_dir = os.path.join(root, app, bridge or "app")
-        if a.get("crate") and os.path.exists(os.path.join(crate_dir, "Cargo.toml")):
-            deps = load(os.path.join(crate_dir, "Cargo.toml")).get("dependencies", {})
-            # A device the phone hands the process (module.toml's `[phone]`)
-            # is registered through ark-ffi, its feature of the module's name
-            # turned on by the bridge, which links the module's crate.
-            ffi = load(os.path.join(root, "rust", "ark-ffi", "Cargo.toml"))
-            on = deps.get("ark-ffi", {}).get("features", []) if isinstance(deps.get("ark-ffi"), dict) else []
-            for n in a.get("modules", []):
-                feature = n.removeprefix("ark-")
-                if n in every and "phone" in module(root, n) and (module(root, n)["crate"] not in ffi.get("dependencies", {}) or feature not in ffi.get("features", {})):
-                    problems.append(f"rust/ark-ffi/Cargo.toml has no feature {feature} over {module(root, n)['crate']}, whose [phone] it registers")
-                elif n in every and "phone" in module(root, n) and feature not in on:
-                    problems.append(f"{app}/{bridge or 'app'}/Cargo.toml's ark-ffi has no feature {feature}, which app.toml's modules ask")
-                elif n in every and "phone" not in module(root, n) and module(root, n)["crate"] not in deps:
-                    problems.append(f"{app}/{bridge or 'app'}/Cargo.toml has no dependency on {module(root, n)['crate']}, which app.toml lists")
+        # A device the phone hands the process (module.toml's `[phone]`) is
+        # registered through ark-ffi, by its feature of the module's name,
+        # which the app's generated library turns on (nix/ark-app.nix).
+        ffi = load(os.path.join(root, "rust", "ark-ffi", "Cargo.toml"))
+        for n in module_names(root, a) if a.get("crate") else []:
+            feature = n.removeprefix("ark-")
+            if "phone" in module(root, n) and (module(root, n)["crate"] not in ffi.get("dependencies", {}) or feature not in ffi.get("features", {})):
+                problems.append(f"rust/ark-ffi/Cargo.toml has no feature {feature} over {module(root, n)['crate']}, whose [phone] it registers")
         # In a checkout (not nix's copy, which has no git): nothing committed
         # where the generated projects and library are.
         if shutil.which("git") and os.path.exists(os.path.join(root, ".git")):
@@ -1501,7 +1545,7 @@ def background_fixture(root):
     self-test holds the projects to, and what `fixture` writes for the app
     library's build to compile."""
     fixture = app_of(root, "money")
-    fixture["modules"] = list(fixture.get("modules", [])) + ["ark-notifications", "ark-background"]
+    fixture["modules"] = module_names(root, fixture) + ["ark-notifications", "ark-background"]
     fixture["background"] = {"sync": "30m", "push": True, "boot": True, "service-extension": True}
     return fixture
 
@@ -1530,6 +1574,8 @@ def main(argv):
     f.add_argument("app")
     sub.add_parser("check")
     sub.add_parser("apps")
+    md = sub.add_parser("modules")
+    md.add_argument("app")
     fx = sub.add_parser("fixture")
     fx.add_argument("--kotlin")
     fx.add_argument("--swift")
@@ -1555,6 +1601,8 @@ def main(argv):
         write_fixture(REPO, args.kotlin, args.swift)
     elif args.cmd == "apps":
         print("\n".join(apps(REPO)))
+    elif args.cmd == "modules":
+        print("\n".join(module_names(REPO, app_of(REPO, args.app))))
     elif args.cmd == "views" and args.written:
         missing = [f for g in generated_views(app_of(args.root, args.app)) for f in (g["swift"] + ".swift", g["kotlin"] + ".kt")
                    if not os.path.exists(os.path.join(args.written, f))]

@@ -2,7 +2,7 @@
 
 `ark-media-player` (`modules/ark-media-player`): a device module, one package with its crate,
 its Swift and its Kotlin (ui/docs/app.md, The Device). An app opts in by
-listing `ark-media-player` in its app.toml's `modules` and asking through
+depending on `ark-media-player` and asking through
 the port (`ark_module::media_player`).
 
 One sound at a time: loaded from a URL at a position, played and paused,

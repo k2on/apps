@@ -11,8 +11,9 @@ version = "0.1"
 # ui/theme.toml's [accent.green].
 accent = "green"
 platforms = ["iphone", "ipad", "mac", "android", "desktop", "web"]
-# The device modules money's update asks of (modules/<name>).
-modules = ["ark-haptics", "ark-clipboard", "ark-share", "ark-camera", "ark-scanner", "ark-secure-store"]
+# Its device modules are its crate's dependencies (money/app/Cargo.toml):
+# depending on a module's crate is what takes it on (ui/docs/app.md, How an
+# App Opts In).
 # The scheme the server's sign-in sends the code back on (money://auth),
 # and a route opened by a link (money://account/…).
 scheme = "money"

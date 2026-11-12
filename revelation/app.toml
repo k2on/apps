@@ -10,7 +10,6 @@ version = "0.1"
 # ArkUI's own, nobody's: revelation draws nothing of ArkUI's.
 accent = "blue"
 platforms = ["android"]
-modules = []
 
 [icon]
 # The whole Bible zoomed all the way out: one thin white line on the dark

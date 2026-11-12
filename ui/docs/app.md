@@ -302,28 +302,39 @@ over it (harken-player's `MediaSound`).
 
 #### How an App Opts In
 
-An app lists its modules in its app.toml (`modules = ["ark-haptics",
-"ark-clipboard", "ark-share"]`), and a module says in its `module.toml` what it
-takes on each platform. ui/prebuild.py writes them into the generated
-projects (below): each listed module's `swift/` and `kotlin/` among the
+An app takes a module on by depending on its crate (`cargo add
+ark-camera` in its app crate), directly or through another of its path
+dependencies, and nowhere else: there is no list of modules in app.toml.
+Each module's crate declares itself in its Cargo.toml
+(`[package.metadata.ark] module = "module.toml"`), and its `module.toml`
+says what it takes on each platform. ui/prebuild.py finds an app's modules
+in `cargo metadata` over the workspace (`crate_modules`: the app's crate's
+normal and build dependencies, walked; nix runs cargo once and hands it
+the JSON as `ARK_CARGO_METADATA`; `prebuild.py modules <app>` prints them),
+and nix/ark-app.nix's `modulesOf` reads the same manifests while it
+evaluates, for what must be known then (ark-ffi's features, the iPhone's
+module builds). ui/prebuild.py writes them into the generated
+projects (below): each module's `swift/` and `kotlin/` among the
 sources; its `[ios.info]` keys (the app's own win), `[ios] entitlements`
 and `background-modes` (`UIBackgroundModes`); its `[android]`
 `permissions`, `services` (a `<service>` with its actions and
 foreground type), `meta-data` and Maven `dependencies`. A device the phone
 hands the process says how in its module.toml's `[phone]` (the ark-ffi
 method that registers it, and how Swift and Kotlin make it): the generated
-`@main` and activity register each listed one as the process's
+`@main` and activity register each one as the process's
 (`ArkProcess.registerHaptics(device: PhoneHaptics())`, … ark-ffi's
-`devices`: a feature of ark-ffi per module, which the app's bridge turns
-on, links its crate and carries its UniFFI traits), and
+`devices`: a feature of ark-ffi per module, which the app's generated
+library turns on from the same modules — `<id>-ffi`'s dependency on
+ark-ffi — links its crate and carries its UniFFI traits), and
 the activity puts a module's page at its root (ark-camera's
 `CameraPage`); an app writes nothing native for its modules. An answer
 that comes later (the camera's) wakes the app's host, which drains its
-runtimes. Any other module's crate is a dependency of the app's own
-(`checks.prebuild` holds both). The desktop registers its own (the
+runtimes. `checks.prebuild` holds that no app.toml lists modules, that
+every module's crate declares itself, and that ark-ffi has a feature for
+each device a module's `[phone]` registers. The desktop registers its own (the
 `Queued` clipboard in `money/iced/src/overview.rs`).
 
-The iPhone typecheck (`checks.money-ios-typecheck`) compiles the listed
+The iPhone typecheck (`checks.money-ios-typecheck`) compiles the app's
 modules' Swift on Linux against the generated bindings, so every name
 they use is checked.
 
@@ -331,9 +342,11 @@ they use is checked.
 and their outputs, the functions that make them, a fake, tests),
 `module.toml` (its `[ops]`: each operation's type and its output's, which
 `checks.prebuild` holds to the crate),
-`README.md`, `swift/` and `kotlin/`; add the crate to `rust/Cargo.toml`'s
-members; an app that wants it lists it in app.toml, depends on its crate
-and registers the platform's class. A module is a device capability any
+`README.md`, `swift/` and `kotlin/`, and its Cargo.toml's
+`[package.metadata.ark] module = "module.toml"`; add the crate to
+`rust/Cargo.toml`'s members (and to layers.toml's `modules`); an app that
+wants it depends on its crate (`nix run .#update-cargo-nix` after), and
+everything native follows. A module is a device capability any
 app could use, never one app's: what an app makes of it stays in the app.
 One app's own native capability that no other would share is a local
 module, `<app>/modules/<name>/` in the same shape, which ui/prebuild.py
@@ -697,7 +710,8 @@ the same way.
 | kernel | `ark`, `ark-macros` | external pure crates only (serde, sha2, postcard, …) |
 | core | `money-core`, `harken-domain` | the kernel; serde |
 | runtime | `ark-app`, `ark-module`, `ark-router`, `ark-format`, `arkui-macros` | the kernel and the core |
-| app | `money-app` | the core, the kernel, the runtime |
+| modules | the device modules (`ark-haptics`, `ark-camera`, …), `ark-push` | the kernel and the runtime; their platforms' crates behind features |
+| app | `money-app` | the core, the kernel, the runtime, the modules it asks |
 | adapters | `ark-peer`, `ark-auth`, `ark-ffi`, `arkdb`, the toolkits (`arkui*`, `ark-ui-gen`), the modules, the servers, the shells | anything below them |
 
 **Pure code is held inside too.** Beside each crate of the kernel and
@@ -835,7 +849,6 @@ id = "money"                   # us.koon.<id>: the bundle id and the application
 version = "0.1"
 accent = "green"               # ui/theme.toml's [accent.<name>]
 platforms = ["iphone", "ipad", "mac", "android", "desktop", "web"]
-modules = ["ark-haptics", "ark-clipboard", "ark-share"]
 scheme = "money"               # money://auth (the sign-in's return), money://<route>
 crate = "money-app"            # the app's crate
 

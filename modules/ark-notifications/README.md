@@ -2,9 +2,8 @@
 
 `ark-notifications` (`modules/ark-notifications`): a device module, one
 package with its crate, its Swift and its Kotlin (ui/docs/app.md, The
-Device; Background And Notifications). An app opts in by listing
-`ark-notifications` in its app.toml's `modules` and registering the
-platform's class; its update asks through the port
+Device; Background And Notifications). An app opts in by depending
+on `ark-notifications`, and the platform's class is registered for it; its update asks through the port
 (`ark_app::modules::notifications`), never this crate.
 
 A notice now or at a time, taken back; the person asked once whether the

@@ -15149,12 +15149,36 @@ rec {
             packageId = "ark-app";
           }
           {
+            name = "ark-camera";
+            packageId = "ark-camera";
+          }
+          {
+            name = "ark-clipboard";
+            packageId = "ark-clipboard";
+          }
+          {
             name = "ark-format";
             packageId = "ark-format";
           }
           {
+            name = "ark-haptics";
+            packageId = "ark-haptics";
+          }
+          {
             name = "ark-router";
             packageId = "ark-router";
+          }
+          {
+            name = "ark-scanner";
+            packageId = "ark-scanner";
+          }
+          {
+            name = "ark-secure-store";
+            packageId = "ark-secure-store";
+          }
+          {
+            name = "ark-share";
+            packageId = "ark-share";
           }
           {
             name = "money-core";
@@ -15164,25 +15188,9 @@ rec {
         ];
         devDependencies = [
           {
-            name = "ark-clipboard";
-            packageId = "ark-clipboard";
-          }
-          {
-            name = "ark-haptics";
-            packageId = "ark-haptics";
-          }
-          {
             name = "ark-peer";
             packageId = "ark-peer";
             usesDefaultFeatures = false;
-          }
-          {
-            name = "ark-scanner";
-            packageId = "ark-scanner";
-          }
-          {
-            name = "ark-share";
-            packageId = "ark-share";
           }
           {
             name = "money-core";
@@ -15219,7 +15227,6 @@ rec {
           {
             name = "ark-ffi";
             packageId = "ark-ffi";
-            features = [ "haptics" "clipboard" "share" "camera" "scanner" ];
           }
           {
             name = "ark-format";

@@ -2,7 +2,7 @@
 
 `ark-haptics` (`modules/ark-haptics`): a device module, one package with its crate,
 its Swift and its Kotlin (ui/docs/app.md, The Device). An app opts in by
-listing `haptics` in its `modules.toml` and depending on `ark-haptics`.
+depending on `ark-haptics` (ui/docs/app.md, How an App Opts In).
 
 The phone's answer in the hand: a success, a selection step, a warning
 (`ui/docs/motion.md`, Haptics). Fired on the change itself, never on a tap

@@ -58,6 +58,39 @@ rec {
   # UniFFI export of the bridge and of what it links in it. `lib.rs`, and
   # the Cargo.toml the iPhone's cargo build adds to the workspace at
   # `<dir>/.ffi` (nix/rust.nix builds the same crate from `crates` below).
+  # The device modules an app takes on: the crates its app crate
+  # (`<dir>/app`) depends on, directly or through its other path
+  # dependencies (normal and build, never dev), whose Cargo.toml says
+  # `[package.metadata.ark] module` — what ui/prebuild.py reads of `cargo
+  # metadata`, read here off the same manifests while nix evaluates. Each
+  # by its crate's name, with its module.toml.
+  modulesOf = a:
+    let
+      manifest = dir: builtins.fromTOML (builtins.readFile (self + "/${dir}/Cargo.toml"));
+      # `money/app/../../modules/ark-camera` as `modules/ark-camera`.
+      normal = p: lib.concatStringsSep "/" (lib.foldl'
+        (acc: seg: if seg == ".." then lib.init acc else if seg == "." || seg == "" then acc else acc ++ [ seg ])
+        [ ] (lib.splitString "/" p));
+      paths = dir:
+        let m = manifest dir; in
+        lib.concatMap (d: lib.optional (builtins.isAttrs d && d ? path) (normal "${dir}/${d.path}"))
+          (builtins.attrValues ((m.dependencies or { }) // (m.build-dependencies or { })));
+      reached = builtins.genericClosure {
+        startSet = [{ key = "${a.dir}/app"; }];
+        operator = item: map (key: { inherit key; }) (paths item.key);
+      };
+      isModule = dir: ((manifest dir).package.metadata.ark.module or null) != null;
+    in
+    lib.optionals (a ? crate) (map
+      (r: {
+        name = (manifest r.key).package.name;
+        toml = builtins.fromTOML (builtins.readFile (self + "/${r.key}/${(manifest r.key).package.metadata.ark.module}"));
+      })
+      (lib.filter (r: isModule r.key) reached));
+  # ark-ffi's feature for each module whose device the phone hands the
+  # process (module.toml's `[phone]`): `camera` for ark-camera.
+  arkFfiFeatures = a: map (m: lib.removePrefix "ark-" m.name) (lib.filter (m: m.toml ? phone) (modulesOf a));
+
   ffiName = a: "${a.id}-ffi";
   ffiLib = a: "${a.id}_ffi";
   bridge = a: a.ffi.crate;
@@ -83,6 +116,8 @@ rec {
 
     [dependencies]
     ${bridge a} = { path = "../${a.ffi.dir}" }
+    # The devices of the modules ${a.crate} depends on, registered by the app library.
+    ark-ffi = { path = "../../rust/ark-ffi", features = [${lib.concatMapStringsSep ", " (f: "\"${f}\"") (arkFfiFeatures a)}] }
 
     [features]
     default = [${lib.concatMapStringsSep ", " (f: "\"${f}\"") (ffiFeatures a "android")}]
@@ -102,6 +137,7 @@ rec {
         type = [ "lib" "cdylib" "staticlib" ];
         dependencies = [
           { name = bridge a; packageId = bridge a; }
+          { name = "ark-ffi"; packageId = "ark-ffi"; features = arkFfiFeatures a; }
         ];
         # Android's are its default; the iPhone's build takes none.
         features = { default = ffiFeatures a "android"; };
@@ -160,7 +196,7 @@ rec {
 
   # The app's packages: `build` is flake.nix's `crate` (a crate of the
   # workspace, or of `crates`, for the host); `only` its source filter.
-  packages = { pkgs, build, only, bundlePrefix }: dir:
+  packages = { pkgs, build, only, bundlePrefix, cargoMetadata }: dir:
     let
       a = read dir;
       gen = build { packageId = "${a.id}-gen"; };
@@ -183,6 +219,8 @@ rec {
           "${dir}/app.toml" "${dir}/${a.icon.svg or "icon.svg"}" "${dir}/native" "${dir}/modules" ];
       } ''
         cd $src
+        # Its device modules: its crate's dependencies, in the workspace's metadata.
+        export ARK_CARGO_METADATA=${cargoMetadata}
         python3 ui/prebuild.py write ${dir} ${lib.optionalString (ui != null) "--views ${ui}"} --bundle-prefix ${bundlePrefix} --out $out/${dir}/.native
       '';
     in

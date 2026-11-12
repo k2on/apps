@@ -310,7 +310,15 @@
           # Each Ark app's generated pieces (nix/ark-app.nix): its
           # generator, the SwiftUI and Compose of its #[view]s (`<app>-ui`),
           # its native projects (`<app>-native`) and its prebuild.
-          arkOf = lib.genAttrs arkApps (arkApp.packages { inherit pkgs only bundlePrefix; build = crate; });
+          arkOf = lib.genAttrs arkApps (arkApp.packages { inherit pkgs only bundlePrefix cargoMetadata; build = crate; });
+          # The workspace's `cargo metadata --no-deps`, run once: what
+          # ui/prebuild.py finds an app's device modules in (its crate's
+          # dependencies, `ARK_CARGO_METADATA`).
+          cargoMetadata = pkgs.runCommand "cargo-metadata.json" { nativeBuildInputs = [ rust ]; } ''
+            cd ${only rustDirs}/rust
+            export CARGO_HOME=$TMPDIR/cargo
+            cargo metadata --no-deps --offline --format-version 1 > $out
+          '';
           harken-seed = crate { packageId = "harken-seed"; };
           # The catalogue's covers, kept in the repository (harken/demo/covers,
           # each 600 pixels at most, named as harken-seed's `media::key` names
@@ -710,7 +718,7 @@
             extraSrc = [ "rust/ark-ffi/kotlin" "modules" "ui/prebuild.py" "ui/theme.py" "ui/theme.toml" "money/app.toml" "money/icon.svg" ];
             flags = [ "-ParkuiLib=${arkui-kotlin}" "-ParkBindings=${self.checks.${system}.ffi}/money/kotlin" ];
             # The fixture's generated Kotlin, written where `:fixture` compiles it.
-            preGradle = "python3 ../../prebuild.py fixture --kotlin fixture/generated";
+            preGradle = "ARK_CARGO_METADATA=${cargoMetadata} python3 ../../prebuild.py fixture --kotlin fixture/generated";
             extraTasks = [ ":fixture:compileReleaseKotlin" ];
           };
 
@@ -1505,8 +1513,8 @@
               # An Ark app's own bindings, compiled once as a module of their
               # own (`ArkBindings`): the Swift UniFFI writes for its kernel and
               # the bridge's typed half (the kernel's swift/), over the
-              # kernel's C headers. Then each device module it lists (its
-              # app.toml's `modules`, each its swift/ alone) over them, a
+              # kernel's C headers. Then each device module it takes on (its
+              # crate's dependencies, `modulesOf`; each its swift/ alone) over them, a
               # module each (`ArkHaptics`, …): each implements a protocol of
               # those bindings, so it is built per app, but no longer inside
               # the app's xcodebuild, and an edit to the app compiles neither
@@ -1533,7 +1541,7 @@
                 # springs. Only there, so an edit to ArkUI rebuilds no module
                 # that does not draw with it.
                 deps = [ bindings ] ++ lib.optionals (swiftImportsArkUI "modules/${m}/swift") (arkuiSwift kind);
-              }) (lib.filter (m: builtins.pathExists (./modules + "/${m}/swift")) (ark.a.modules or [ ])));
+              }) (lib.filter (m: builtins.pathExists (./modules + "/${m}/swift")) (map (m: m.name) (arkApp.modulesOf ark.a))));
               # The app library (ui/swift's ArkApp: ui/docs/app.md, "The App
               # Library"), over the app's own bindings and ArkUI, so a module
               # of its own per app, as a device module is.
@@ -1685,7 +1693,7 @@
               };
               written = pkgs.runCommand "ark-app-fixture-swift" { nativeBuildInputs = [ pkgs.python3 ]; } ''
                 cd ${only [ "ui/prebuild.py" "ui/theme.py" "ui/theme.toml" "modules" "money/app.toml" "money/icon.svg" ]}
-                python3 ui/prebuild.py fixture --swift $out
+                ARK_CARGO_METADATA=${cargoMetadata} python3 ui/prebuild.py fixture --swift $out
               '';
             in
             swiftModule {
@@ -2054,15 +2062,16 @@
             # it is drawn on, at WCAG's 4.5:1 (3:1 for large text, icons and
             # a control's edge), the player's wash among them.
             # What an app opts into is what it builds with (ui/docs/app.md,
-            # The Device): its app.toml says what it must, each module it
-            # lists exists, and its crate depends on each listed module's.
+            # The Device): its app.toml says what it must, its modules are its
+            # crate's dependencies (the workspace's `cargo metadata`), each a
+            # module that declares itself, and ark-ffi registers each device.
             prebuild = pkgs.runCommand "prebuild-check" { nativeBuildInputs = [ pkgs.python3 ]; } ''
               # The modules, their ports (ark-module's src), each app's
-              # crates that name them (its bridge's, when it has one), and
-              # ark-ffi's, which registers the phones' devices.
+              # app.toml, and ark-ffi's, which registers the phones' devices.
               cd ${only ([ "ui/prebuild.py" "ui/theme.py" "ui/theme.toml" "modules" "ui/rust/module/src" "rust/ark-ffi/Cargo.toml" ]
                 ++ lib.filter (p: builtins.pathExists (./. + "/${p}"))
-                  (lib.concatMap (d: [ "${d}/app.toml" "${d}/app/Cargo.toml" "${d}/bridge/Cargo.toml" "${d}/icon.svg" ]) arkApps))}
+                  (lib.concatMap (d: [ "${d}/app.toml" "${d}/icon.svg" ]) arkApps))}
+              export ARK_CARGO_METADATA=${cargoMetadata}
               python3 ui/prebuild.py check
               touch $out
             '';
@@ -2231,6 +2240,7 @@
                 chmod u+w bindings/*
                 sed -i 's/nonisolated(unsafe) //' bindings/*.swift
                 SWIFT_EXEC=$PWD/bin/swiftc-here TYPED=$PWD/rust/ark-ffi/swift/Typed.swift \
+                  ARK_MODULES="${lib.concatMapStringsSep " " (m: m.name) (arkApp.modulesOf (arkApp.read "money"))}" \
                   bash money/native/ios/typecheck.sh bindings
               '';
               installPhase = "touch $out";

@@ -13,17 +13,16 @@ path = "src/lib.rs"
 [dependencies]
 ark = { path = "../../rust/ark" }
 ark-app = { path = "../../ui/rust/app" }
-# With the device modules money lists (app.toml's `modules`), which the
-# app library registers through it (`devices`).
-ark-ffi = { path = "../../rust/ark-ffi", features = ["haptics", "clipboard", "share", "camera", "scanner"] }
+# Its device features (`devices`, one per module money-app depends on) are
+# turned on by the phones' generated library (nix/ark-app.nix).
+ark-ffi = { path = "../../rust/ark-ffi" }
 ark-peer = { path = "../../rust/ark-peer", default-features = false }
 # Every number, day and length as the apps write them, in the library
 # (its bindings are `ark_format`'s).
 ark-format = { path = "../../rust/ark-format" }
 ark-format-ffi = { path = "../../rust/ark-format-ffi" }
-# The login's keychain and keystore (ark-ffi's `LoginKeep` takes them).
-# The other modules money lists are registered by the app library through
-# ark-ffi (its `devices`).
+# The login's keychain and keystore (ark-ffi's `LoginKeep` takes them, as
+# `MoneyHost::new` does).
 ark-secure-store = { path = "../../modules/ark-secure-store", features = ["ffi"] }
 money-core = { path = "../core", features = ["demo"] }
 # The demo's household on a peer (`money_demo`).

@@ -2,7 +2,7 @@
 
 `ark-clipboard` (`modules/ark-clipboard`): a device module, one package with its crate,
 its Swift and its Kotlin (ui/docs/app.md, The Device). An app opts in by
-listing `clipboard` in its `modules.toml` and depending on `ark-clipboard`.
+depending on `ark-clipboard` (ui/docs/app.md, How an App Opts In).
 
 Text put where the person can paste it.
 

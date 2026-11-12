@@ -18,14 +18,19 @@ ark-format = { path = "../../rust/ark-format" }
 money-core = { path = "../core", features = ["demo"] }
 # Where money can be, spelled as paths (`src/routes.rs`).
 ark-router = { path = "../../ui/rust/router" }
-
-[dev-dependencies]
-# The fakes of the device modules money lists (money/app.toml), whose ports
-# (ark_app::modules) its updates ask through.
+# The device modules money's update asks through their ports
+# (ark_app::modules): depending on one is what takes it on, on every
+# platform (ui/docs/app.md, How an App Opts In). The tests register their
+# fakes.
 ark-haptics = { path = "../../modules/ark-haptics" }
 ark-clipboard = { path = "../../modules/ark-clipboard" }
 ark-share = { path = "../../modules/ark-share" }
+ark-camera = { path = "../../modules/ark-camera" }
 ark-scanner = { path = "../../modules/ark-scanner" }
+# The login kept in the keychain and the keystore.
+ark-secure-store = { path = "../../modules/ark-secure-store" }
+
+[dev-dependencies]
 # The tests' store, a peer's, over the demo's household.
 ark-peer = { path = "../../rust/ark-peer", default-features = false }
 money-core = { path = "../core", features = ["demo"] }

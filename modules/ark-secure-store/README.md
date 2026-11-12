@@ -2,8 +2,7 @@
 
 `ark-secure-store` (`modules/ark-secure-store`): a device module, one package with its crate,
 its Swift and its Kotlin (ui/docs/app.md, The Device). An app opts in by
-listing `ark-secure-store` in its app.toml's `modules` and depending on
-`ark-secure-store`.
+depending on `ark-secure-store` (ui/docs/app.md, How an App Opts In).
 
 Secrets kept by the system: a login's token. A read answers the secret
 (none when nothing is kept under the key); a write the value; a removal

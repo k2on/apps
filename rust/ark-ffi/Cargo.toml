@@ -15,11 +15,12 @@ ark-app = { path = "../../ui/rust/app" }
 # foreign trait the keychain and the Android keystore implement.
 ark-module = { path = "../../ui/rust/module" }
 ark-secure-store = { path = "../../modules/ark-secure-store", features = ["ffi"] }
-# The phone's device modules an app lists, registered as the process's
+# The phone's device modules an app takes on, registered as the process's
 # (`devices`): each one's foreign trait, which its swift/ and kotlin/
 # implement, and the scanner over the camera. Each is a feature, which the
-# app's bridge turns on for the modules its app.toml lists, so another app's
-# library carries none of their types (harken's `Look` is its own).
+# app's generated library (nix/ark-app.nix) turns on for the modules its
+# crate depends on, so another app's library carries none of their types
+# (harken's `Look` is its own).
 ark-haptics = { path = "../../modules/ark-haptics", features = ["ffi"], optional = true }
 ark-clipboard = { path = "../../modules/ark-clipboard", features = ["ffi"], optional = true }
 ark-share = { path = "../../modules/ark-share", features = ["ffi"], optional = true }

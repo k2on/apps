@@ -30,11 +30,13 @@ trap 'rm -rf "$OUT"' EXIT
 
 # The app's files Linux can read: none of Apple's frameworks but Foundation and Combine.
 SOURCES=()
-# And the device modules money lists (../../app.toml): their Swift is
-# behind `canImport(UIKit)` / `canImport(AppKit)`, so on Linux it is the
-# classes over the protocols UniFFI wrote, and each name is checked.
+# And the device modules money takes on (money-app's dependencies: nix
+# hands them as ARK_MODULES, ui/prebuild.py's `modules` says them here):
+# their Swift is behind `canImport(UIKit)` / `canImport(AppKit)`, so on
+# Linux it is the classes over the protocols UniFFI wrote, and each name
+# is checked.
 MODULES="${MODULES:-$HERE/../../../modules}"
-for m in $(sed -n 's/^modules *= *\[\(.*\)\]/\1/p' "$HERE/../../app.toml" | tr -d '"' | tr ',' ' '); do
+for m in ${ARK_MODULES:-$(python3 "$HERE/../../../ui/prebuild.py" modules money)}; do
   for f in "$MODULES/$m"/swift/*.swift; do
     [ -e "$f" ] && SOURCES+=("$f")
   done

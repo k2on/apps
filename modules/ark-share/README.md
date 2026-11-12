@@ -2,7 +2,7 @@
 
 `ark-share` (`modules/ark-share`): a device module, one package with its crate,
 its Swift and its Kotlin (ui/docs/app.md, The Device). An app opts in by
-listing `share` in its `modules.toml` and depending on `ark-share`.
+depending on `ark-share` (ui/docs/app.md, How an App Opts In).
 
 Text, and a link when there is one, handed to the system's share sheet.
 

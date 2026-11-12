@@ -30,6 +30,10 @@ value), then used from there.
 An ark app's committed shape is `app.toml`, `icon.svg`, `core/`, `app/`,
 `server/` and `demo/`. Its `bridge/`, `views/`, `native/`, `iced/` and
 `web/` are being removed and must not grow: a screen goes in `app/` as a
-`#[view]`, a device feature in an `ark-*` module behind an `ark-module`
-port, domain rules in `core/`. `ui/docs/app.md` ("Generated, Not
-Committed") says what to do in each case.
+`#[view]`, what the app's host does with what its screens ask (routing
+between runtimes, its month, its bank, its session's facts) in `app/` as
+its `ark_app::host::HostedApp`, a device feature in an `ark-*` module
+behind an `ark-module` port, domain rules in `core/`. An app takes a
+module on by depending on its crate from `app/`; nothing lists modules
+anywhere else. `ui/docs/app.md` ("Generated, Not Committed") says what to
+do in each case.

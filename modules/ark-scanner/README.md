@@ -1,9 +1,8 @@
 # Scanner
 
 `ark-scanner` (`modules/ark-scanner`): a device module (ui/docs/app.md, The
-Device). An app opts in by listing `ark-scanner` — and `ark-camera`, whose
-frames and shutter it uses — in its app.toml, and its bridge depending on
-`ark-scanner`.
+Device). An app opts in by depending on `ark-scanner`, which brings
+`ark-camera`, whose frames and shutter it uses.
 
 A page (a receipt, a letter) photographed and made flat, as a JPEG. The
 port is the runtime's (`ark_module::scanner`), which an update asks
