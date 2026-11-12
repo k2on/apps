@@ -997,6 +997,7 @@ def swift_main(root, a):
 // {a['name']}'s entry point on the app library (ui/swift's ArkApp): its library,
 // its accent and the scene it draws; the holders its generated views read
 // each screen's runtime through.
+import ArkUI
 import SwiftUI
 
 @main
