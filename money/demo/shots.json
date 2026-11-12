@@ -623,7 +623,8 @@
         "query": "screen=transactions",
         "steps": [
           {
-            "click": "Approve All"
+            "click": "Approve All",
+            "prefix": true
           }
         ]
       },

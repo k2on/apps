@@ -135,7 +135,8 @@ async function main() {
           await page.waitForSelector('.ark-window', { timeout: 20000 });
           await ready(page);
           for (const step of shot.steps || []) {
-            if (step.click) await page.getByText(step.click, { exact: true }).first().click({ button: step.button || 'left' });
+            // `"prefix": true`: a text that begins so (a count after it: "Approve All (5)").
+            if (step.click) await page.getByText(step.prefix ? new RegExp('^' + step.click.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')) : step.click, { exact: !step.prefix }).first().click({ button: step.button || 'left' });
             if (step.context) await page.getByText(step.context, { exact: true }).first().click({ button: 'right' });
             if (step.hover) await page.getByText(step.hover, { exact: true }).last().hover();
             if (step.key) await page.keyboard.press(step.key);
