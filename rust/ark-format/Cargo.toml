@@ -7,7 +7,7 @@ description = "Numbers, days and lengths as people read them, the same text in e
 
 # No UI and no clock: every function is pure, the time and the number style
 # are its arguments. The phones reach it through UniFFI by ark-format-ffi,
-# an adapter linked into each app's library (money/bridge, harken/ffi); the
+# an adapter linked into each app's library (through ark-ffi); the
 # desktop and the browser through arkui, which re-exports it
 # (`arkui::format`).
 

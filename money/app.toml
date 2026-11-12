@@ -21,7 +21,10 @@ scheme = "money"
 # `commands()`; its UniFFI namespace is the crate's.
 crate = "money-app"
 
-# Each screen's runtime as the bridge exports it, its page and message, and
+# Each screen's runtime (`app`, its type in the app's crate, whose page and
+# message are beside it) as the phones' library exports it (`beside`: one
+# the phone runs for as long as it shows a page, told what it shows, rather
+# than one of its host's), its page and message, and
 # the holder each toolkit's generated views read it through (ui/prebuild.py
 # writes the holders over the app library's `ArkScreen`); its `#[view]` in
 # the app's crate (`view`, a path in it: its source is that module's file)
@@ -30,14 +33,14 @@ crate = "money-app"
 # (`views`; nix/ark-app.nix builds it as `<id>-gen`), the first run's
 # screen, every app's, among them.
 [screens]
-accounts = { runtime = "AccountsApp", page = "AccountsPage", msg = "AccountsMsg", swift = "AccountsScreen", kotlin = "AccountsHolder", view = "accounts::view::accounts", swift-view = "AccountsView", kotlin-view = "AccountsScreen" }
-budget = { runtime = "BudgetApp", page = "BudgetPage", msg = "BudgetMsg", swift = "BudgetScreen", kotlin = "BudgetHolder", view = "budget::view::budget", swift-view = "BudgetView", kotlin-view = "BudgetScreen" }
-transactions = { runtime = "TransactionsApp", page = "TransactionsPage", msg = "TransactionsMsg", swift = "TransactionsScreen", kotlin = "TransactionsHolder", view = "transactions::view::transactions", swift-view = "TransactionsView", kotlin-view = "TransactionsScreen" }
-insights = { runtime = "InsightsApp", page = "InsightsPage", msg = "InsightsMsg", swift = "InsightsScreen", kotlin = "InsightsHolder", view = "insights::view::insights", swift-view = "InsightsView", kotlin-view = "InsightsScreen" }
-register = { runtime = "RegisterApp", page = "RegisterPage", msg = "RegisterMsg", swift = "RegisterScreen", kotlin = "RegisterHolder", view = "register::view::register", swift-view = "RegisterView", kotlin-view = "RegisterScreen" }
-sheets = { runtime = "SheetsApp", page = "SheetsPage", msg = "SheetsMsg", swift = "SheetsScreen", kotlin = "SheetsHolder", view = "sheets::view::sheets", swift-view = "SheetsView", kotlin-view = "SheetsScreen" }
+accounts = { app = "accounts::Accounts", runtime = "AccountsApp", page = "AccountsPage", msg = "AccountsMsg", swift = "AccountsScreen", kotlin = "AccountsHolder", view = "accounts::view::accounts", swift-view = "AccountsView", kotlin-view = "AccountsScreen" }
+budget = { app = "budget::Budget", runtime = "BudgetApp", page = "BudgetPage", msg = "BudgetMsg", swift = "BudgetScreen", kotlin = "BudgetHolder", view = "budget::view::budget", swift-view = "BudgetView", kotlin-view = "BudgetScreen" }
+transactions = { app = "transactions::Transactions", runtime = "TransactionsApp", page = "TransactionsPage", msg = "TransactionsMsg", swift = "TransactionsScreen", kotlin = "TransactionsHolder", view = "transactions::view::transactions", swift-view = "TransactionsView", kotlin-view = "TransactionsScreen" }
+insights = { app = "insights::Insights", runtime = "InsightsApp", page = "InsightsPage", msg = "InsightsMsg", swift = "InsightsScreen", kotlin = "InsightsHolder", view = "insights::view::insights", swift-view = "InsightsView", kotlin-view = "InsightsScreen" }
+register = { app = "register::Register", beside = true, runtime = "RegisterApp", page = "RegisterPage", msg = "RegisterMsg", swift = "RegisterScreen", kotlin = "RegisterHolder", view = "register::view::register", swift-view = "RegisterView", kotlin-view = "RegisterScreen" }
+sheets = { app = "sheets::Sheets", runtime = "SheetsApp", page = "SheetsPage", msg = "SheetsMsg", swift = "SheetsScreen", kotlin = "SheetsHolder", view = "sheets::view::sheets", swift-view = "SheetsView", kotlin-view = "SheetsScreen" }
 # The shell's main window.
-shell = { runtime = "ShellApp", page = "ShellPage", msg = "ShellMsg", swift = "MoneyShellScreen", kotlin = "MoneyShellHolder", view = "shell::view::money_shell", swift-view = "MoneyShellView", kotlin-view = "MoneyShell" }
+shell = { app = "shell::MoneyShell", runtime = "ShellApp", page = "ShellPage", msg = "ShellMsg", swift = "MoneyShellScreen", kotlin = "MoneyShellHolder", view = "shell::view::money_shell", swift-view = "MoneyShellView", kotlin-view = "MoneyShell" }
 
 # A screen's further views, over its runtime (`screen`): Settings, Connected
 # Banks alone (where Accounts' Bank Connections opens it), and the menu
@@ -119,17 +122,69 @@ This is a release build signed with a key committed to that repository, so anyon
 """
 
 [ffi]
-# The phones' bridge (an adapter crate: the UniFFI twins of money-core's
-# and money-app's types, and the exports over them), which nix's
-# generated money-ffi links.
-crate = "money-bridge"
-dir = "bridge"                 # beside app.toml
-# The object the bridge exports that the phone holds: the app host's (ark-ffi's
-# ArkHost) and money's screens' runtimes (bridge/src/host.rs).
+# The phones' library, generated (ui/prebuild.py's `ffi`, nix/ark-app.nix):
+# `money-ffi` (lib and UniFFI namespace `money_ffi`, Kotlin's
+# `uniffi.money_ffi`), the UniFFI twins of what crosses and the exports
+# over money's part of its host (`app`), run by ark-ffi's `Hosted` under the
+# app host every Ark app has. Nothing of it is committed.
+# The object the phone holds: the app host's (ark-ffi's ArkHost), the first
+# run's, and each screen's runtime by its `[screens]` name.
 host = "MoneyHost"
-# The features of the bridge each phone's library links: Android's camera
-# gives the scanner's eyes a colour square, which the corner model reads
+# The app's part of its host, in its crate (`ark_app::host::HostedApp`), and
+# where its routes and what only the phone's shell does are (its `Route` and
+# `Native`, each crossing as a twin).
+app = "host::Money"
+route = "routes::Route"
+native = "host::Native"
+# The domain its replica's log is of: a function of a crate's giving it.
+domain = "money_core::shared"
+# The crate of its demo's household (demo/): its `seeded_disk(today,
+# now_ms)` opened as a peer of its own by its `open(disk)`. An app with no
+# demo says none.
+demo = "money-seed"
+# ark-ffi's features each phone's library links: Android's camera gives
+# the scanner's eyes a colour square, which the corner model reads
 # (`model`, ark-scanner's); the iPhone and the Mac find the page by its
 # bright region, so with none.
 android = ["model"]
 apple = []
+
+# What else crosses to the phones, by crate, as a `use` names them: every
+# type a screen's page or message holds, the domain's change and what it
+# carries (`ark::twins!`, written in the library). The screens' pages and
+# messages, the route, the native and the first run's are written without
+# being listed.
+[ffi.twins]
+money_core = [
+  "accounts::{AccountKind, AccountShelf, Shelving}",
+  "banks::Follow",
+  "changes::MoneyChange",
+  "schema::{AskState, Direction, Filter, Term}",
+  "transactions::Draft",
+  """types::{
+    AccountLine, AddCategory, AddGroup, AddPhoto, AddSplit, AddSubcategory, AddTransaction, Answer, AskLine,
+    Assign, Auto, AutoAssign, BankAccount, BankFailed, BankLine, BankName, BankRemoved, BankTxn, BudgetLine,
+    Categorize, ChangeFilter, ChargeImport, ClassifyItems, ClearFormula, Cleared, CloseAccount,
+    DeleteCategory, DeleteGroup, EditTransaction, FilterId, GroupLine, HideCategory, HideGroup,
+    IgnoreLinked, Import, ItemLine, ItemRef, LinkAccount, LinkedLine, MatchReceipt, MoveCategory,
+    MoveFilter, MoveGroup, MoveMoney, OpenAccount, OpenLinked, PayCharge, PayeeLine, PhotoLine,
+    ReceiptImport, ReceiptLine, Reconcile, RenameAccount, RenameCategory, RenameFilter, RenameGroup,
+    SaveFilter, SetCleared, SetFormula, SetRule, SetTarget, SpendingLine, SplitPart, SplitTxn,
+    StoreCharge, StoreItem, StoreReceipt, Summary, TxnLine, Txns, WriteReceipt,
+  }""",
+  "words::{Meter, Tone}",
+]
+money_app = [
+  "MoneyRequest",
+  "accounts::{AccountItem, AccountsShelf, AddForm, KindChoice, RenameForm}",
+  "insights::{PlanRow, SpentGroup}",
+  "budget::{AmountForm, BudgetChoice, CategoryForm, CategoryItem, GroupItem, MoveForm, NameForm}",
+  "receipts::{FormItem, MatchRow, MatchSheet, PhotoSheet, ReadingPhoto, ReceiptForm, ReceiptSection}",
+  "register::{RegisterDay, RegisterRow}",
+  "sheets::{CategorizeSheet, PayeeChoice, ReconcileSheet, SheetChoice, TxnSheet}",
+  "transactions::{CategorizeForm, CategoryChoice, DeleteQuestion, TxnDay, TxnItem}",
+  "shell::{AccountPlace, Appearance, Household}",
+  "shell::settings::{AskItem, BankItem, BankPage, FeedChoice, FeedItem, FeedTarget, SessionFacts, SettingsPage}",
+  "shell::inspect::{CategoryInspector, DetailLine, TransactionInspector}",
+  "words::{BankStatus, Captions}",
+]

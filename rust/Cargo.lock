@@ -349,11 +349,14 @@ dependencies = [
  "ark-background",
  "ark-camera",
  "ark-clipboard",
+ "ark-format",
+ "ark-format-ffi",
  "ark-haptics",
  "ark-module",
  "ark-notifications",
  "ark-peer",
  "ark-push",
+ "ark-router",
  "ark-scanner",
  "ark-secure-store",
  "ark-share",
@@ -4618,6 +4621,7 @@ dependencies = [
  "ark-app",
  "ark-camera",
  "ark-clipboard",
+ "ark-ffi",
  "ark-format",
  "ark-haptics",
  "ark-peer",
@@ -4628,25 +4632,7 @@ dependencies = [
  "money-core",
  "money-seed",
  "serde_json",
-]
-
-[[package]]
-name = "money-bridge"
-version = "0.1.0"
-dependencies = [
- "ark",
- "ark-app",
- "ark-ffi",
- "ark-format",
- "ark-format-ffi",
- "ark-peer",
- "ark-secure-store",
- "money-app",
- "money-core",
- "money-seed",
- "serde_json",
  "tempfile",
- "uniffi",
 ]
 
 [[package]]

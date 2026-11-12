@@ -9,7 +9,7 @@
 // Each tab keeps its own place, as Google's apps do, and the tab already
 // showing goes back to its top when it is pressed again.
 //
-// Every screen's runtime is money's host's (`MoneyHost`, money/bridge/src/host.rs), which carries
+// Every screen's runtime is money's host's (`MoneyHost`, its generated library's, over money_app::host), which carries
 // out what each asks of another; what it asks of this shell (a page pushed, Settings, Add a Device)
 // comes as its asks. What the app says once — a refusal, a sync — is a snackbar on the page
 // showing.
@@ -74,7 +74,7 @@ import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavHostController
 import dev.arkui.LocalHostedScreens
 import dev.arkui.shellShortcuts
-import uniffi.money_bridge.ShellMsg
+import uniffi.money_ffi.ShellMsg
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
@@ -89,17 +89,17 @@ import dev.arkui.LargeTitles
 import dev.arkui.RouteArg
 import dev.arkui.Transitions
 import dev.arkui.reducedMotion
-import uniffi.money_bridge.Route
-import uniffi.money_bridge.routeFromUrl
+import uniffi.money_ffi.Route
+import uniffi.money_ffi.routeFromUrl
 import androidx.compose.material3.Surface
 import dev.arkui.app.ArkApp
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
-import uniffi.money_bridge.Household
-import uniffi.money_bridge.Appearance
+import uniffi.money_ffi.Household
+import uniffi.money_ffi.Appearance
 import androidx.compose.foundation.isSystemInDarkTheme
-import uniffi.money_bridge.MoneyHost
-import uniffi.money_bridge.NativeAsk
+import uniffi.money_ffi.MoneyHost
+import uniffi.money_ffi.Native
 
 /** The four tabs. */
 enum class Tab(val route: String, val label: String, val icon: ImageVector, val selected: ImageVector, val section: String) {
@@ -129,7 +129,7 @@ fun MoneyRoot(app: ArkApp, library: MoneyHost) {
     // The shell's appearance over the device's (a launch's `-appearance`, Settings' Light or
     // Dark), as on the iPhone; none (System, the default) follows the device.
     val moves by app.moves.collectAsStateWithLifecycle()
-    val appearance = remember(moves) { library.shell()?.page()?.appearance }
+    val appearance = remember(moves) { library.shell().page().appearance }
     MoneyTheme(dark = appearance?.let { it == Appearance.DARK } ?: isSystemInDarkTheme()) {
         Surface(color = MaterialTheme.colorScheme.background, modifier = Modifier.fillMaxSize()) {
             val shows by app.showsApp.collectAsStateWithLifecycle()
@@ -146,12 +146,12 @@ fun MoneyRoot(app: ArkApp, library: MoneyHost) {
 
 /** money's screens' holders over the runtimes its host made for one session. */
 class Holders(library: MoneyHost) {
-    val shell = MoneyShellHolder(library.shell()!!)
-    val budget = BudgetHolder(library.budget()!!)
-    val accounts = AccountsHolder(library.accounts()!!)
-    val transactions = TransactionsHolder(library.transactions()!!)
-    val insights = InsightsHolder(library.insights()!!)
-    val sheets = SheetsHolder(library.sheets()!!)
+    val shell = MoneyShellHolder(library.shell())
+    val budget = BudgetHolder(library.budget())
+    val accounts = AccountsHolder(library.accounts())
+    val transactions = TransactionsHolder(library.transactions())
+    val insights = InsightsHolder(library.insights())
+    val sheets = SheetsHolder(library.sheets())
 
     /** Every page read again: something moved. */
     fun reload() {
@@ -179,7 +179,7 @@ private fun MoneyApp(app: ArkApp, library: MoneyHost, holders: Holders, moves: L
     var account by remember { mutableStateOf(false) }
     var addingDevice by remember { mutableStateOf(false) }
     LaunchedEffect(app) { app.notices.collect { snackbar.showSnackbar(it) } }
-    val household = remember(library) { MutableStateFlow(library.household()) }
+    val household = remember(library) { MutableStateFlow(library.shell().page().household) }
     val context = LocalContext.current
     val sections = holders.shell
     val sheets = holders.sheets
@@ -209,10 +209,10 @@ private fun MoneyApp(app: ArkApp, library: MoneyHost, holders: Holders, moves: L
     // shows of its own (the shell is told the launch by the host).
     LaunchedEffect(moves) {
         holders.reload()
-        household.value = library.household()
-        for (ask in library.takeAsks()) {
+        household.value = holders.shell.page.value.household
+        for (ask in library.natives()) {
             when (ask) {
-                is NativeAsk.Open ->
+                is Native.Open ->
                     when (val r = ask.route) {
                         is Route.Banks -> {
                             sections.send(ShellMsg.Pane(title = "Connected Banks"))
@@ -224,16 +224,18 @@ private fun MoneyApp(app: ArkApp, library: MoneyHost, holders: Holders, moves: L
                         }
                         else -> nav.navigate(register(r))
                     }
-                is NativeAsk.Settings -> {
+                is Native.Settings -> {
                     if (ask.pane.isNotEmpty()) sections.send(ShellMsg.Pane(title = ask.pane))
                     shell.onSettings()
                 }
-                is NativeAsk.AddDevice -> addingDevice = true
-                is NativeAsk.Reset -> {
+                is Native.AddDevice -> addingDevice = true
+                is Native.Reset -> {
                     dev.arkui.Ready.changed()
                     account = false
                     nav.popBackStack("shell", inclusive = false)
                 }
+                // The app library signs out itself: never handed to a shell.
+                is Native.SignOut -> {}
             }
         }
     }
@@ -264,7 +266,7 @@ private fun MoneyApp(app: ArkApp, library: MoneyHost, holders: Holders, moves: L
                 // account's (All Accounts) for any other.
                 val route = RouteArg.path(e.arguments?.getString("arg"))?.let(::routeFromUrl)
                 val id = (route as? Route.Account)?.id
-                RegisterHosted(library, moves, id, "", title = route?.title() ?: "All Accounts", onBack = { nav.popBackStack() })
+                RegisterHosted(library, moves, id, "", title = (route as? Route.Account)?.name ?: "All Accounts", onBack = { nav.popBackStack() })
             }
             // Settings, written from Rust (generated/MoneySettings.kt): the shell's panes.
             composable("settings") {
@@ -329,10 +331,10 @@ private fun RegisterHosted(
     title: String? = null,
     onBack: (() -> Unit)? = null,
 ) {
-    val holder = remember(library, account) { library.register(account)?.let { RegisterHolder(it) } } ?: return
+    val holder = remember(library, account) { library.register(uniffi.money_ffi.RegisterMsg.Show(account = account))?.let { RegisterHolder(it) } } ?: return
     LaunchedEffect(moves) { holder.reload() }
-    LaunchedEffect(holder, search) { holder.send(uniffi.money_bridge.RegisterMsg.Search(text = search)) }
-    LaunchedEffect(holder, selected) { holder.send(uniffi.money_bridge.RegisterMsg.Select(id = selected)) }
+    LaunchedEffect(holder, search) { holder.send(uniffi.money_ffi.RegisterMsg.Search(text = search)) }
+    LaunchedEffect(holder, selected) { holder.send(uniffi.money_ffi.RegisterMsg.Select(id = selected)) }
     ScreenFrame(title = title, onBack = onBack) { RegisterScreen(holder) }
 }
 
@@ -464,8 +466,8 @@ fun Page(
         val under = if (onBack == null && !hosted) TabTitle.BELOW else 0.dp
         if (refresh) {
             PullToRefreshBox(
-                isRefreshing = household.syncing,
-                onRefresh = { shell.library.syncBank() },
+                isRefreshing = false,
+                onRefresh = { shell.library.shell().send(ShellMsg.Refresh) },
                 modifier = Modifier.fillMaxSize().padding(top = pad.calculateTopPadding()),
             ) {
                 content(PaddingValues(top = under, bottom = pad.calculateBottomPadding()), bar)

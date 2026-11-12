@@ -221,14 +221,14 @@ exists.
 
 The first run, the session and the model are Rust's: the generated
 `@main` (ui/prebuild.py, from money/app.toml) holds money's host
-(`MoneyHost`, money/bridge/src/host.rs, over ark-ffi's `ArkHost`) through
+(`MoneyHost`, its generated library's over money_app::host, under ark-ffi's `ArkHost`) through
 the app library every Ark app shares (ui/swift's `ArkApp`: `ArkApp`,
 `ArkRoot`, `ArkScreen`) — the first run every app shares, the sign-in in
 `ASWebAuthenticationSession`'s shared session, what is remembered (the
 login in the keychain, the server and the demo in Application Support),
 the session's link watched, and every screen's runtime over the session,
 what one asks of another carried out there. Its tests are Rust's
-(money/bridge/tests/host.rs).
+(money/app/tests/phone.rs).
 
 Foundation only — type-checked on Linux:
 

@@ -35,6 +35,7 @@ use ark_peer::{monotonic_ms, Config, Files, Update, Watched};
 uniffi::setup_scaffolding!();
 
 pub mod devices;
+pub mod hall;
 pub mod host;
 pub mod hosted;
 pub mod keep;
@@ -869,6 +870,12 @@ pub use ark_auth;
 /// The periodic sync's foreign trait, linked into every app's library (see
 /// Cargo.toml).
 pub use ark_background;
+/// What an app's generated library names through this crate
+/// (`phone_host!`): the login's store, its routes, its words.
+pub use ark_format_ffi;
+pub use ark_peer;
+pub use ark_router;
+pub use ark_secure_store;
 
 /// An app's first run over UniFFI: the shared pages (`ark_app::welcome`)
 /// over the sign-in machine its host runs ([`ArkHost`]), as one screen the

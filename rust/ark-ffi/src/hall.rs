@@ -1,15 +1,15 @@
-//! A hall: a money server in this process — the hub a server runs, the
-//! household's log fed whole to every connection (`money_core::feed`) —
-//! over memory, which devices dial without a socket. Its devices are
-//! pumped by hand ([`Hall::carry`]), so a test says when what was said has
-//! been answered. What the apps' own tests sync two phones through, and
-//! what this crate's do.
+//! A hall: an app's server in this process — the hub a server runs over
+//! its domain — over memory, which devices dial without a socket. Its
+//! devices are pumped by hand ([`Hall::carry`]), so a test says when what
+//! was said has been answered. What an app's tests sync two phones
+//! through.
 
 use std::sync::{Arc, Mutex, Weak};
 
 use ark::peer::Who;
-use ark_ffi::{Login, Peer, Refusal};
-use ark_peer::{now_ms, Handle, Memory};
+use ark_peer::{now_ms, Config, Handle, Memory};
+
+use crate::{Login, Peer, Refusal};
 
 /// Who a hall's token, `user/session` or `user/session/role,role`, is.
 fn token(t: &str) -> Option<Who> {
@@ -25,18 +25,19 @@ fn token(t: &str) -> Option<Who> {
     })
 }
 
-#[derive(uniffi::Object)]
+/// An app's server in the process, and the devices that dial it.
 pub struct Hall {
+    config: Config,
     hub: Handle,
     devices: Mutex<Vec<Weak<Peer>>>,
 }
 
-#[uniffi::export]
 impl Hall {
-    #[uniffi::constructor]
-    pub fn new() -> Arc<Hall> {
-        let hub = Handle::spawn(ark_peer::Peer::serve(crate::config(), Box::new(Memory::default()), now_ms()));
+    /// A server of the domain `config` names, over memory.
+    pub fn new(config: Config) -> Arc<Hall> {
+        let hub = Handle::spawn(ark_peer::Peer::serve(config.clone(), Box::new(Memory::default()), now_ms()));
         Arc::new(Hall {
+            config,
             hub,
             devices: Mutex::default(),
         })
@@ -56,7 +57,7 @@ impl Hall {
             expires_ms: 0,
             picture: String::new(),
         };
-        let p = Peer::open(crate::config(), &dir, Some(login))?;
+        let p = Peer::open(self.config.clone(), &dir, Some(login))?;
         p.by_hand();
         p.connect_with("hall", self.hub.dialer(Arc::new(token)));
         self.devices.lock().unwrap_or_else(|e| e.into_inner()).push(Arc::downgrade(&p));

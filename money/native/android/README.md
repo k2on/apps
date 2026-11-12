@@ -78,7 +78,7 @@ and its icon money/icon.svg).
 activity and its screens' holders are generated (ui/prebuild.py, from
 money/app.toml) over the app library every Ark app shares (ui/kotlin/app,
 `dev.arkui.app`: `ArkApplication`, `ArkActivity`, `ArkScreen`), and what
-they hold is money's host (`MoneyHost`, money/bridge/src/host.rs, over
+they hold is money's host (`MoneyHost`, its generated library's over money_app::host, under
 ark-ffi's `ArkHost`): the first run every app shares — the server's
 `/healthz` asked, the server's own page opened in a Custom Tab
 (`loginUrl(server, "money://auth")`), the code that comes back exchanged,
@@ -215,7 +215,7 @@ hundredths).
 - `ReorderTests` — arkui's Reorder in sections (a section of its own kept
   so); the budget's moves are Rust's (money/app/src/budget/tests.rs).
 - What the model and the way in did is money's host's, tested in Rust
-  (money/bridge/tests/host.rs: a demo launch running every screen, the
+  (money/app/tests/phone.rs: a demo launch running every screen, the
   demo remembered and left, a server that is not there).
 - `AmountsTests` — arkui's amounts in the US and in Germany, typed and
   written.

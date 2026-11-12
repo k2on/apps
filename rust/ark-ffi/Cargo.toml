@@ -35,6 +35,12 @@ ark-notifications = { path = "../../modules/ark-notifications", features = ["ffi
 # ui/kotlin/app).
 ark-background = { path = "../../modules/ark-background", features = ["ffi"] }
 ark-push = { path = "../ark-push" }
+# Today, and noon of a demo's day, as the apps write a day (`hosted`), and
+# every number, day and length as the apps write them, which an app's
+# generated library carries (`phone_app!`, ark-format-ffi's exports).
+ark-format = { path = "../ark-format" }
+ark-format-ffi = { path = "../ark-format-ffi" }
+ark-router = { path = "../../ui/rust/router" }
 serde_json = { workspace = true }
 uniffi = { version = "0.32.2", default-features = false }
 tracing = { version = "0.1", default-features = false, features = ["std"] }

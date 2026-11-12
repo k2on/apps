@@ -1008,7 +1008,7 @@ def library_host(a):
 
 def kotlin_namespace(a):
     """The Kotlin package UniFFI writes the app's bridge in."""
-    return a.get("ffi", {}).get("kotlin", "uniffi." + a.get("ffi", {}).get("crate", a["id"]).replace("-", "_"))
+    return a.get("ffi", {}).get("kotlin", "uniffi." + ffi_namespace(a))
 
 
 def app_screens(a):
@@ -1298,14 +1298,175 @@ use ark_ui_gen::app::{{App, Generated, Names}};
 
 fn main() {{
     ark_ui_gen::app::main(App {{
-        // The bridge's namespace, where the messages' twins are.
-        namespace: "{rust_name(a['ffi']['crate'])}",
+        // The phones' library's namespace, where the messages' twins are.
+        namespace: "{ffi_namespace(a)}",
         screens: vec![
 {body}
         ],
     }})
 }}
 """
+
+
+# ------------------------------------------------------------- the phones' library
+
+# An Ark app's library for its phones is generated, never committed: one
+# crate, `<id>-ffi` (its lib and UniFFI namespace `<id>_ffi`), written from
+# app.toml's `[ffi]` and `[screens]`, that links the app's crate under
+# ark-ffi's `Hosted` and exports, through UniFFI, the twins of what crosses
+# (`ark::twins!`), the first run's pages, each screen's runtime and the
+# object the phone holds (ark-ffi's `hosted_screen!`, `beside_screen!`,
+# `phone_host!`). nix/ark-app.nix builds it (`<id>-ffi`), and a cargo build
+# of the phones' (the iPhone's) adds it to the workspace at `<app>/.ffi`.
+
+# The first run's records, every Ark app's (ark_app::welcome).
+WELCOME_TWINS = "welcome::{AddDeviceMsg, AddDevicePage, ConfirmPage, IntroPage, OpeningPage, ServerPage, SignInPage, WelcomeMsg, WelcomePage}"
+
+
+def ffi_namespace(a):
+    """The UniFFI namespace of the app's library: its lib's name."""
+    return f"{a['id']}_ffi"
+
+
+def ffi_twins(a):
+    """Every type that crosses, by crate (its lib's name), as `use` names
+    them: `[ffi.twins]`, then the app's screens' pages and messages, its
+    route and native, and the first run's records."""
+    crate = rust_name(a["crate"])
+    out = {k: list(v) for k, v in a["ffi"].get("twins", {}).items()}
+    mine = out.setdefault(crate, [])
+    for sc in a.get("screens", {}).values():
+        module = sc["app"].rsplit("::", 1)[0]
+        mine.append(f"{module}::{{{sc['page']}, {sc['msg']}}}")
+    mine += [a["ffi"]["route"], a["ffi"]["native"]]
+    out.setdefault("ark_app", []).append(WELCOME_TWINS)
+    return out
+
+
+def ffi_crates(a):
+    """The crates the library names, by their packages' names (a lib's name
+    with dashes): the app's, every twin's, its domain's and its demo's."""
+    names = [a["crate"]] + [k.replace("_", "-") for k in ffi_twins(a)]
+    names.append(a["ffi"]["domain"].split("::", 1)[0].replace("_", "-"))
+    if a["ffi"].get("demo"):
+        names.append(a["ffi"]["demo"])
+    return list(dict.fromkeys(names + ["ark", "ark-app"]))
+
+
+def ffi_lib(a):
+    """The library's lib.rs."""
+    f = a["ffi"]
+    crate = rust_name(a["crate"])
+    twin = lambda path: path.rsplit("::", 1)[-1] + "Ffi"
+    # Each `use` tree on its lines, its own continuation lines indented under it.
+    def tree(u):
+        lines = [l.strip() for l in u.strip().splitlines() if l.strip()]
+        return "\n".join(("        " if i == 0 or (i == len(lines) - 1 and l == "}") else "            ") + l for i, l in enumerate(lines))
+    twins = "\n".join(f"    {k}::{{\n" + "".join(f"{tree(u)},\n" for u in v) + "    }," for k, v in ffi_twins(a).items())
+    demo = f.get("demo")
+    seed = rust_name(demo) if demo else None
+    screens = [(n, sc) for n, sc in a.get("screens", {}).items()]
+    objects = []
+    for n, sc in screens:
+        mac = "beside_screen" if sc.get("beside") else "hosted_screen"
+        objects.append(f"ark_ffi::{mac}!(\n    /// {a['name']}'s `{n}` screen, running.\n"
+                       f"    {sc['runtime']}, Phone, {crate}::{sc['app']}, {sc['msg']}Ffi, {sc['page']}Ffi\n);")
+    hosted = ", ".join(f"{n}: {sc['runtime']}" for n, sc in screens if not sc.get("beside"))
+    beside = ", ".join(f"{n}: {sc['runtime']} ({sc['msg']}Ffi)" for n, sc in screens if sc.get("beside"))
+    return f"""//! {HEADER.format(app=a['dir'])}
+//! {a['name']}'s library for its phones (ui/docs/app.md, "The App Library"):
+//! its crate's part of its host ({crate}::{f['app']}) under ark-ffi's
+//! `Hosted`, every type that crosses as a UniFFI twin, and the objects the
+//! phone holds. Never committed.
+
+uniffi::setup_scaffolding!();
+
+// What crosses: app.toml's `[ffi.twins]`, the screens' pages and messages,
+// the route, the native and the first run's records.
+ark::twins!(
+{twins}
+);
+
+// The first run's pages, every app's, over its host's sign-in machine.
+ark_ffi::welcome_app!();
+
+/// {a['name']} on the phones: its name, its scheme, its domain and its demo.
+pub struct Phone;
+
+impl ark_ffi::hosted::PhoneApp for Phone {{
+    type App = {crate}::{f['app']};
+    const NAME: &'static str = {json.dumps(a['name'])};
+    const SCHEME: &'static str = {json.dumps(a.get('scheme', a['id']))};
+    const DEMO: bool = {'true' if demo else 'false'};
+
+    fn domain() -> std::sync::Arc<ark::domain::Domain> {{
+        {f['domain']}()
+    }}
+
+    fn demo(today: &str, now_ms: i64) -> ark_ffi::ark_peer::Peer {{
+        {f"{seed}::open({seed}::seeded_disk(today, now_ms))" if seed else 'unreachable!("{} has no demo: {} {}", Self::NAME, today, now_ms)'}
+    }}
+}}
+
+{chr(10).join(objects)}
+
+ark_ffi::phone_host!(
+    /// What the phone holds: the app host, the first run, every screen.
+    {f['host']}, Phone,
+    native: {crate}::{f['native']} => {twin(f['native'])},
+    route: {crate}::{f['route']} => {twin(f['route'])},
+    screens {{ {hosted} }}
+    beside {{ {beside} }}
+);
+"""
+
+
+def workspace_dirs(root):
+    """Every crate of the workspace by its package's name: its directory,
+    from the repository's root."""
+    ws = load(os.path.join(root, "rust", "Cargo.toml"))["workspace"]["members"]
+    out = {}
+    for m in ws:
+        d = os.path.normpath(os.path.join("rust", m))
+        out[load(os.path.join(root, d, "Cargo.toml"))["package"]["name"]] = d
+    return out
+
+
+def ffi_cargo(root, a):
+    """The library's Cargo.toml, as a member of the workspace at
+    `<app>/.ffi` (the iPhone's cargo build)."""
+    dirs = workspace_dirs(root)
+    here = os.path.join(a["dir"], ".ffi")
+    deps = "".join(f'{c} = {{ path = "{os.path.relpath(dirs[c], here)}" }}\n' for c in ffi_crates(a))
+    feats = ", ".join(json.dumps(f) for f in arkffi_features(root, a))
+    android = ", ".join(json.dumps(f"ark-ffi/{f}") for f in a["ffi"].get("android", []))
+    return f"""# {HEADER.format(app=a['dir'])}
+[package]
+name = "{a['id']}-ffi"
+version = "0.1.0"
+edition = "2021"
+workspace = "{os.path.relpath('rust', here)}"
+
+[lib]
+name = "{ffi_namespace(a)}"
+path = "lib.rs"
+crate-type = ["lib", "cdylib", "staticlib"]
+
+[dependencies]
+{deps}# The devices of the modules {a['crate']} depends on, registered by the app library.
+ark-ffi = {{ path = "{os.path.relpath(dirs['ark-ffi'], here)}", features = [{feats}] }}
+uniffi = {{ version = "0.32.2", default-features = false }}
+
+[features]
+# Android's are its default; the iPhone's build takes none.
+default = [{android}]
+"""
+
+
+def arkffi_features(root, a):
+    """ark-ffi's feature for each module whose device the phone hands the
+    process (module.toml's `[phone]`): `camera` for ark-camera."""
+    return [n.removeprefix("ark-") for n in module_names(root, a) if "phone" in module(root, n)]
 
 
 # ------------------------------------------------------------- writing
@@ -1454,6 +1615,20 @@ def check(root):
                     problems.append(f"{app}/app.toml's view {n} is over no screen of [screens]")
                 if ("view" in v) == ("commands" in v):
                     problems.append(f"{app}/app.toml's view {n} says one of `view` and `commands`")
+        # The phones' library is written from `[ffi]` and `[screens]`
+        # (`ffi_lib`), its crates named by their libs' names with dashes.
+        if a.get("crate") and "ffi" in a:
+            for k in ("host", "app", "route", "native", "domain"):
+                if k not in a["ffi"]:
+                    problems.append(f"{app}/app.toml's [ffi] says no `{k}`")
+            for n, sc in a.get("screens", {}).items():
+                if "app" not in sc:
+                    problems.append(f"{app}/app.toml's screen {n} says no `app`, the type it runs in {a['crate']}")
+            if all(k in a["ffi"] for k in ("route", "native", "domain")) and all("app" in sc for sc in a.get("screens", {}).values()):
+                dirs = workspace_dirs(root)
+                for c in ffi_crates(a):
+                    if c not in dirs:
+                        problems.append(f"{app}/app.toml's [ffi] names {c.replace('-', '_')}, whose package is no {c} of the workspace")
         bg = background(a)
         for k, v in bg.items():
             if k not in BACKGROUND:
@@ -1584,6 +1759,10 @@ def main(argv):
     vm.add_argument("--root", default=REPO)
     vm.add_argument("--out")
     vm.add_argument("--written")
+    ff = sub.add_parser("ffi")
+    ff.add_argument("app")
+    ff.add_argument("--root", default=REPO)
+    ff.add_argument("--out", help="the directory its lib.rs and Cargo.toml are written in (the app's .ffi)")
     fd = sub.add_parser("fdroid")
     fd.add_argument("app")
     fd.add_argument("--root", default=REPO)
@@ -1615,6 +1794,11 @@ def main(argv):
             write_file(args.out, text)
         else:
             sys.stdout.write(text)
+    elif args.cmd == "ffi":
+        a = app_of(args.root, args.app)
+        out = args.out or os.path.join(args.root, args.app, ".ffi")
+        write_file(os.path.join(out, "lib.rs"), ffi_lib(a))
+        write_file(os.path.join(out, "Cargo.toml"), ffi_cargo(args.root, a))
     elif args.cmd == "fdroid":
         text = fdroid_yml(app_of(args.root, args.app))
         if args.out:

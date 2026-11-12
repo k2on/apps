@@ -186,7 +186,7 @@ struct AccountButton: View {
     private enum Then { case page(Route), settings, signOut }
 
     var body: some View {
-        let h = screens.household
+        let h = screens.shell.page.household
         let wanting = Int(h.banksWanting)
         AccountFace(name: h.who, picture: h.picture, attention: wanting > 0 ? "Banks need a look" : nil) { showing = true }
             .sheet(isPresented: $showing, onDismiss: after) {

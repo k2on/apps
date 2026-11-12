@@ -13,7 +13,7 @@
 
 use ark_app::host::{Cx, Has, HostedApp, Link, Running, Screen, Session};
 use money_core::demo::Bank;
-use money_core::{dates, AccountLine, BankLine, BudgetLine, MoneyChange, MoneyView};
+use money_core::{dates, AccountLine, BudgetLine, MoneyChange, MoneyView};
 
 use crate::accounts::Accounts;
 use crate::budget::{Budget, BudgetMsg};
@@ -42,27 +42,6 @@ pub enum Native {
     SignOut,
 }
 
-/// Who is using the budget and where, as the account sheet and a tab's face
-/// say it.
-#[derive(Clone, Debug, Default, PartialEq, Eq, ark::twin::Twin)]
-pub struct Household {
-    /// Their name ("Alex"); empty while it is not known.
-    pub who: String,
-    /// Where their picture is loaded from; empty for none, and the demo's.
-    pub picture: String,
-    /// Under the name: their email or login, or what the demo is.
-    pub detail: String,
-    /// The server as it is shown (`money.example.com`); none for the demo.
-    pub server: Option<String>,
-    /// The link to it: up, down, or not known yet.
-    pub linked: Option<bool>,
-    pub demo: bool,
-    /// The banks that want somebody in Settings.
-    pub banks_wanting: i64,
-    /// The bank is being asked for anything new.
-    pub syncing: bool,
-}
-
 /// money's runtimes over one session.
 pub struct Money {
     pub shell: Screen<MoneyShell>,
@@ -83,7 +62,6 @@ pub struct Money {
     pending: Vec<MoneyRequest>,
     /// The facts last told the shell.
     facts: Option<SessionFacts>,
-    syncing: bool,
 }
 
 /// The time a screen is worked out at: the device's clock on the session's
@@ -100,7 +78,7 @@ pub fn session_now(clock_ms: i64, today: &str) -> i64 {
 }
 
 /// What to call whoever is using the budget: the demo is Alex's.
-fn who(s: &Session) -> String {
+pub(crate) fn who(s: &Session) -> String {
     match () {
         _ if s.demo => "Alex".into(),
         _ if !s.name.is_empty() => s.name.clone(),
@@ -139,26 +117,6 @@ impl Money {
         &self.today
     }
 
-    /// Who is using the budget and where: the account sheet's.
-    pub fn household(&self, cx: &Cx<'_, Money>) -> Household {
-        let s = cx.place.session();
-        let banks: Vec<BankLine> = cx.rows(&MoneyView::Banks);
-        Household {
-            who: who(&s),
-            picture: s.picture.clone(),
-            detail: match () {
-                _ if s.demo => "The demo's household, on this phone alone".into(),
-                _ if !s.email.is_empty() => s.email.clone(),
-                _ => s.user.clone(),
-            },
-            server: (!s.demo && !s.server.is_empty()).then(|| s.server.clone()),
-            linked: s.linked,
-            demo: s.demo,
-            banks_wanting: money_core::words::banks_wanting(&banks),
-            syncing: self.syncing,
-        }
-    }
-
     /// The budget, its spending and the month's figures on `month`, every
     /// runtime that shows a month told.
     fn show_month(&mut self, month: String, cx: &mut Cx<'_, Money>) {
@@ -194,7 +152,6 @@ impl Money {
     /// sync now (`banks.sync`, which any household member may ask), and the
     /// link dialled in case it was resting. What came of it is said.
     fn sync_bank(&mut self, cx: &mut Cx<'_, Money>) {
-        self.syncing = true;
         let said = match &mut self.bank {
             Some(bank) => {
                 let lines: Vec<AccountLine> = cx.rows(&MoneyView::Accounts);
@@ -218,7 +175,6 @@ impl Money {
                 }
             }
         };
-        self.syncing = false;
         cx.place.notice(said)
     }
 
@@ -248,6 +204,20 @@ impl HostedApp for Money {
     type Request = MoneyRequest;
     type Native = Native;
 
+    const KEEPS: &'static str = "your budget";
+
+    fn welcome(scan: bool, demo: bool) -> ark_app::welcome::WelcomeCopy {
+        crate::welcome::copy(scan, demo)
+    }
+
+    fn encode(change: &MoneyChange) -> (&'static str, Vec<u8>) {
+        (change.name(), change.input())
+    }
+
+    fn signs_out(native: &Native) -> bool {
+        matches!(native, Native::SignOut)
+    }
+
     fn open(session: &Session, cx: &mut Cx<'_, Money>) -> Money {
         let today = session.today.clone();
         let mut m = Money {
@@ -262,7 +232,6 @@ impl HostedApp for Money {
             bank: session.demo.then(Bank::default),
             pending: vec![],
             facts: None,
-            syncing: false,
             today: today.clone(),
         };
         cx.now_ms = session_now(cx.place.now_ms(), &today);

@@ -1,6 +1,6 @@
 //! What the views' rows say, decided once for every client: a budget
 //! line's tone, the month's, a transaction's, a bank's and an ask's. The
-//! phones read these through their twins' methods (money/bridge), the
+//! phones read what they say in each screen's page (money-app), the
 //! window calls them as they are; no client works them out again. What is
 //! said with a figure in it — an amount in the client's own number style,
 //! a time ago — is display text, the app's (`money_app::words`).

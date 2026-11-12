@@ -278,6 +278,43 @@ pub struct ShellPage {
     /// name (the demo's Alex), and their picture (empty: their initial).
     pub who: String,
     pub picture: String,
+    /// Who is using the budget and where: the account sheet's.
+    pub household: Household,
+}
+
+/// Who is using the budget and where, as the account sheet and a tab's face
+/// say it.
+#[derive(Clone, Debug, Default, PartialEq, Eq, ark::twin::Twin)]
+pub struct Household {
+    /// Their name ("Alex"); empty while it is not known.
+    pub who: String,
+    /// Where their picture is loaded from; empty for none, and the demo's.
+    pub picture: String,
+    /// Under the name: their email or login, or what the demo is.
+    pub detail: String,
+    /// The server as it is shown (`money.example.com`); none for the demo.
+    pub server: Option<String>,
+    /// The link to it: up, down, or not known yet.
+    pub linked: Option<bool>,
+    pub demo: bool,
+    /// The banks that want somebody in Settings.
+    pub banks_wanting: i64,
+}
+
+/// Who is using the budget and where, of the facts the host told the shell.
+fn household(f: &settings::SessionFacts, banks: &[BankLine]) -> Household {
+    Household {
+        who: if f.demo { "Alex".into() } else { f.who.clone() },
+        picture: f.picture.clone(),
+        detail: match () {
+            _ if f.demo => "The demo's household, on this phone alone".into(),
+            _ => f.login.clone(),
+        },
+        server: (!f.demo && !f.server.is_empty()).then(|| f.server.clone()),
+        linked: f.linked,
+        demo: f.demo,
+        banks_wanting: money_core::words::banks_wanting(banks),
+    }
 }
 
 impl App for MoneyShell {
@@ -479,6 +516,7 @@ impl App for MoneyShell {
                 s.settings.facts.who.clone()
             },
             picture: s.settings.facts.picture.clone(),
+            household: household(&s.settings.facts, data.rows(&MoneyView::Banks)),
         }
     }
 }

@@ -74,6 +74,19 @@ fn parse_day(s: &str) -> Option<i64> {
     (civil(days) == (y, m as usize, d)).then_some(days)
 }
 
+/// The day (`2026-10-26`) the instant `ms` falls on in UTC, as a domain
+/// that reads days in UTC writes today.
+pub fn day_of(ms: i64) -> String {
+    let (y, m, d) = civil(ms.div_euclid(DAY_MS));
+    format!("{y:04}-{m:02}-{d:02}")
+}
+
+/// Noon of `day` (`2026-10-26`) in UTC, in ms: when something said to be
+/// on that day says it is; nothing for what is not a day.
+pub fn noon_of(day: &str) -> Option<i64> {
+    parse_day(day).map(|d| d * DAY_MS + DAY_MS / 2)
+}
+
 /// `2026-10` as its year and month.
 fn parse_month(s: &str) -> Option<(i64, usize)> {
     let (y, m) = s.split_once('-')?;
@@ -197,6 +210,18 @@ mod tests {
     const HOUR: i64 = 60 * MIN;
 
     /// Falsified by counting hours past a day: two days ago is `48 hours ago`.
+    /// An instant's UTC day, and noon of a day back again. Falsified by a
+    /// month counted from zero, or noon at midnight.
+    #[test]
+    fn an_instant_falls_on_its_day() {
+        assert_eq!(day_of(0), "1970-01-01");
+        let noon = noon_of("2026-10-26").unwrap();
+        assert_eq!(day_of(noon), "2026-10-26");
+        assert_eq!(day_of(noon + DAY_MS / 2 - 1), "2026-10-26");
+        assert_eq!(day_of(noon + DAY_MS / 2), "2026-10-27");
+        assert_eq!(noon_of("2026-02-30"), None);
+    }
+
     #[test]
     fn how_long_ago_is_said_in_words() {
         let now = 1_792_324_800_000;

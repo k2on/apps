@@ -361,6 +361,19 @@ pub trait HostedApp: Sized + 'static {
     /// up, signed out), taken after each call ([`Hosting::take_natives`]).
     type Native: Clone + Debug + PartialEq;
 
+    /// What it keeps, as a sentence of its first run says it: `your
+    /// budget`.
+    const KEEPS: &'static str;
+    /// Its words on its first run's pages (`ark_app::welcome`): `scan`
+    /// where a camera can read another device's code, `demo` where another
+    /// server can be chosen.
+    fn welcome(scan: bool, demo: bool) -> crate::welcome::WelcomeCopy;
+    /// A change of its domain's as a peer takes it: its function's name and
+    /// its input's bytes.
+    fn encode(change: &Self::Change) -> (&'static str, Vec<u8>);
+    /// Whether a native is signing out, which every host does itself.
+    fn signs_out(native: &Self::Native) -> bool;
+
     /// Its runtimes made over a session just opened.
     fn open(session: &Session, cx: &mut Cx<'_, Self>) -> Self;
     /// Every runtime it holds, to drain, sum and let go of.

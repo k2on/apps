@@ -27,7 +27,7 @@ mod lengths;
 mod numbers;
 mod words;
 
-pub use days::{ago, ago_alone, day_heading, day_long, month, month_alone, published};
+pub use days::{ago, ago_alone, day_heading, day_long, day_of, month, month_alone, noon_of, published};
 pub use lengths::{clock, clock_secs, length};
 pub use numbers::{amount, amount_editable, amount_or_blank, amount_signed, amount_whole, parse_amount, percent, quantity, NumberStyle};
 pub use words::{count, facts, names, plural, span};

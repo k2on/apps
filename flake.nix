@@ -78,7 +78,7 @@
       arkApp = import ./nix/ark-app.nix { inherit lib self; };
       arkApps = [ "money" "revelation" ];
 
-      rustDirs = [ "rust" "ui/rust" "modules" "harken/domain" "harken/app" "harken/player" "harken/server" "harken/iced" "harken/ffi" "money/core" "money/demo" "money/app" "money/bridge" "money/views" "money/iced" "money/server" "harken/demo" "money/web" ];
+      rustDirs = [ "rust" "ui/rust" "modules" "harken/domain" "harken/app" "harken/player" "harken/server" "harken/iced" "harken/ffi" "money/core" "money/demo" "money/app" "money/iced" "money/server" "harken/demo" "money/web" ];
       # The typed Kotlin and Swift `arkdb gen` writes, which harken/ffi's
       # tests hold to its domain (`tests/gen.rs`).
       genDirs = [
@@ -129,7 +129,7 @@
             # Each Ark app's generated crates (its generator's main), and
             # its entry points built from the app's directory, beside the
             # icon they draw (nix/ark-app.nix's `entrySources`).
-            extraCrates = lib.foldl' (acc: dir: acc // arkApp.crates pkgs dir // arkApp.entrySources cargoNix.internal.crates dir) { } arkApps;
+            extraCrates = lib.foldl' (acc: dir: acc // arkApp.crates pkgs cargoMetadata dir // arkApp.entrySources cargoNix.internal.crates dir) { } arkApps;
           };
           # The root crate `packageId` of the workspace, for the host unless
           # `pkgs` and `rust` say another target; its binaries under `bin/`,
@@ -1012,8 +1012,8 @@
             '') (lib.filter has [ "src/lib.rs" "src/main.rs" "build.rs" ] ++ bins)) dirs;
           # A source of the workspace's manifests and lockfile, the crates in
           # `real` as they are, every other one a stand-in; and an Ark app's
-          # phones' library (`ark`, its app.toml), the shim nix/ark-app.nix
-          # writes, made a member at `<app>/.ffi`.
+          # phones' library (`ark`, its app.toml), the crate ui/prebuild.py
+          # writes (nix/ark-app.nix's `ffiSrc`), made a member at `<app>/.ffi`.
           rustSource = { real, ark ? null }: {
             src = only ([ "rust/Cargo.toml" "rust/Cargo.lock" ] ++ real ++ map (d: "${d}/Cargo.toml") rustMembers);
             sourceRoot = "source/rust";
@@ -1024,15 +1024,18 @@
               (cd source && ${stubs (lib.subtractLists real rustMembers)})
             '' + lib.optionalString (ark != null) ''
               mkdir -p source/${ark.dir}/.ffi
-              cp ${pkgs.writeText "Cargo.toml" (arkApp.ffiCargo ark)} source/${ark.dir}/.ffi/Cargo.toml
-              cp ${pkgs.writeText "lib.rs" (arkApp.ffiSource ark)} source/${ark.dir}/.ffi/lib.rs
+              cp ${arkApp.ffiSrc pkgs cargoMetadata ark}/{Cargo.toml,lib.rs} source/${ark.dir}/.ffi/
               sed -i 's|^members = \[|members = ["../${ark.dir}/.ffi", |' source/rust/Cargo.toml
             '';
           };
-          # The crates a phone's library is built from: an Ark app's crate's,
-          # or the library crate's own.
+          # The crates a phone's library is built from: those its generated
+          # library names and ark-ffi's for an Ark app, or the library
+          # crate's own.
           phoneSource = { crate, ark ? null }:
-            rustSource { real = phoneCrates (if ark == null then crate else ark.ffi.crate); inherit ark; };
+            rustSource {
+              real = lib.unique (lib.concatMap phoneCrates (if ark == null then [ crate ] else arkApp.ffiCrates ark ++ [ "ark-ffi" ]));
+              inherit ark;
+            };
           # The environment each iOS cargo build is in, and its cargo build of
           # `crate` for each of `targets`.
           # An Ark app's shim is no member of the lockfile, which cargo then
@@ -2155,12 +2158,13 @@
             # harken's domain crate builds, and its schema's hash is the one
             # pinned (harken/domain/tests/port.rs).
             inherit harken-domain;
-            # The bridge (§1.16, N3): ark-ffi, harken/ffi and money/bridge build
-            # natively, their tests drive the whole surface in the process (a
-            # server in it, a mutate and its refusal, a view's patches, the
-            # live space, alone and joining, a hall of devices, money's demo)
-            # and hold the generated Kotlin and Swift to the domains; and
-            # UniFFI writes the Kotlin and the Swift for both libraries.
+            # The bridge (§1.16, N3): ark-ffi and harken/ffi build natively,
+            # their tests drive the whole surface in the process (a server in
+            # it, a mutate and its refusal, a view's patches, the live space,
+            # alone and joining, a hall of devices) and hold the generated
+            # Kotlin and Swift to the domains; and UniFFI writes the Kotlin and
+            # the Swift for harken's library and money's generated one (whose
+            # Rust money-app's tests/phone.rs drives).
             ffi =
               let
                 bindings = app: out: ''
@@ -2174,7 +2178,6 @@
                 crates = [
                   { packageId = "ark-ffi"; member = "rust/ark-ffi"; }
                   { packageId = "harken-ffi"; member = "harken/ffi"; }
-                  { packageId = "money-bridge"; member = "money/bridge"; features = [ "default" "model" ]; }
                   # The scanner's corner model (modules/ark-scanner/tests/model.rs).
                   { packageId = "ark-scanner"; member = "modules/ark-scanner"; features = [ "default" "model" ]; }
                 ];
@@ -2185,9 +2188,10 @@
                   grep -q "class Peer" "$TMPDIR/bindings/kotlin/dev/arkdb/ffi/ark_ffi.kt"
                   grep -q "func harkenOpen" "$TMPDIR/bindings/swift/harken_ffi.swift"
                   ${bindings moneyFfi "$TMPDIR/money"}
-                  grep -q 'fun `moneyOpen`' "$TMPDIR/money/kotlin/uniffi/money_bridge/money_bridge.kt"
-                  grep -q "class MoneyChange" "$TMPDIR/money/kotlin/uniffi/money_bridge/money_bridge.kt"
-                  grep -q "func moneyDemo" "$TMPDIR/money/swift/money_bridge.swift"
+                  # money's generated library (nix/ark-app.nix): its host, its twins, its route.
+                  grep -q "class MoneyHost" "$TMPDIR/money/kotlin/uniffi/money_ffi/money_ffi.kt"
+                  grep -q "class MoneyChange" "$TMPDIR/money/kotlin/uniffi/money_ffi/money_ffi.kt"
+                  grep -q "func routeFromUrl" "$TMPDIR/money/swift/money_ffi.swift"
                   # Every client's formatting, linked into each library.
                   grep -q "func formatAmount" "$TMPDIR/money/swift/ark_format.swift"
                   grep -q "func formatLength" "$TMPDIR/bindings/swift/ark_format.swift"

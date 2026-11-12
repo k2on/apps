@@ -54,15 +54,13 @@ struct MoneyScenes: Scene {
 final class MoneyScreens: ObservableObject {
     let app: ArkApp<MoneyHost>
     /// The shell's, for the app's whole life: the Mac's menu bar is made
-    /// before any session is open; it shows Budget until one runs.
-    let shell = MoneyShellScreen(blank: shellBlank())
+    /// before any session is open; it shows its blank page until one runs.
+    let shell: MoneyShellScreen
     @Published private(set) var accounts: AccountsScreen? = nil
     @Published private(set) var budget: BudgetScreen? = nil
     @Published private(set) var transactions: TransactionsScreen? = nil
     @Published private(set) var insights: InsightsScreen? = nil
     @Published private(set) var sheets: SheetsScreen? = nil
-    /// Who is using the budget and where, for the account sheet.
-    @Published private(set) var household = Household(who: "", picture: "", detail: "", server: nil, linked: nil, demo: false, banksWanting: 0, syncing: false)
     /// Settings asked for (the Mac's window, a sheet elsewhere).
     @Published var settings = false
     /// Add a Device's page up, as Settings asked.
@@ -79,6 +77,7 @@ final class MoneyScreens: ObservableObject {
 
     init(_ app: ArkApp<MoneyHost>) {
         self.app = app
+        shell = MoneyShellScreen(app.library.shell())
         Numbers.install()
         watching = app.$moves.sink { [weak self] _ in
             // After the change is published: read on the next turn.
@@ -93,11 +92,12 @@ final class MoneyScreens: ObservableObject {
         if now != session {
             session = now
             shell.attach(lib.shell())
-            accounts = lib.accounts().map { AccountsScreen($0) }
-            budget = lib.budget().map { BudgetScreen($0) }
-            transactions = lib.transactions().map { TransactionsScreen($0) }
-            insights = lib.insights().map { InsightsScreen($0) }
-            sheets = lib.sheets().map { SheetsScreen($0) }
+            let open = now != 0
+            accounts = open ? AccountsScreen(lib.accounts()) : nil
+            budget = open ? BudgetScreen(lib.budget()) : nil
+            transactions = open ? TransactionsScreen(lib.transactions()) : nil
+            insights = open ? InsightsScreen(lib.insights()) : nil
+            sheets = open ? SheetsScreen(lib.sheets()) : nil
         }
         accounts?.reload()
         budget?.reload()
@@ -105,18 +105,19 @@ final class MoneyScreens: ObservableObject {
         insights?.reload()
         sheets?.reload()
         shell.reload()
-        household = lib.household()
         moves &+= 1
         // Where the app is, for a screenshot's ready signal: the section.
         Ready.shared.at(route: shell.page.section)
-        for ask in lib.takeAsks() {
-            switch ask {
+        for native in lib.natives() {
+            switch native {
             case let .open(route): push(route)
             case .settings: settings = true
             case .addDevice: addingDevice = true
             case .reset:
                 settings = false
                 reset()
+            // The app library signs out itself: never handed to a shell.
+            case .signOut: break
             }
         }
     }
@@ -124,6 +125,6 @@ final class MoneyScreens: ObservableObject {
     /// A register's runtime, for as long as it shows: the account of this
     /// hex id's, or every account's for none.
     func register(_ account: String?) -> RegisterScreen? {
-        app.library.register(account: account).map { RegisterScreen($0) }
+        app.library.register(first: .show(account: account)).map { RegisterScreen($0) }
     }
 }

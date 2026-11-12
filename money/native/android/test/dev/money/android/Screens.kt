@@ -18,8 +18,8 @@ import app.cash.paparazzi.Paparazzi
 import dev.arkdb.ffi.HostShell
 import dev.arkdb.ffi.Launch
 import kotlinx.coroutines.flow.MutableStateFlow
-import uniffi.money_bridge.MoneyHost
-import uniffi.money_bridge.WelcomeMsg
+import uniffi.money_ffi.MoneyHost
+import uniffi.money_ffi.WelcomeMsg
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.ViewRootForTest
 import androidx.compose.ui.semantics.Role
@@ -65,7 +65,7 @@ class Screens {
     private val money = host(demo = true).also { m -> until { m.host().showsApp() } }
 
     private fun shot(name: String, content: @Composable () -> Unit) {
-        val shell = Shell(money, SnackbarHostState(), MutableStateFlow(money.household()), {}, {})
+        val shell = Shell(money, SnackbarHostState(), MutableStateFlow(money.shell().page().household), {}, {})
         for (dark in listOf(false, true)) {
             paparazzi.snapshot(if (dark) "$name-dark" else "$name-light") {
                 MoneyTheme(dark = dark, dynamic = false) {
@@ -123,19 +123,19 @@ class Screens {
         }
     }
 
-    @Test fun budget() = shot("budget") { ScreenFrame { BudgetScreen(BudgetHolder(money.budget()!!)) } }
+    @Test fun budget() = shot("budget") { ScreenFrame { BudgetScreen(BudgetHolder(money.budget())) } }
 
-    @Test fun accounts() = shot("accounts") { ScreenFrame { AccountsScreen(AccountsHolder(money.accounts()!!)) } }
+    @Test fun accounts() = shot("accounts") { ScreenFrame { AccountsScreen(AccountsHolder(money.accounts())) } }
 
-    @Test fun review() = shot("transactions") { ScreenFrame { TransactionsScreen(TransactionsHolder(money.transactions()!!)) } }
+    @Test fun review() = shot("transactions") { ScreenFrame { TransactionsScreen(TransactionsHolder(money.transactions())) } }
 
-    @Test fun insights() = shot("insights") { ScreenFrame { InsightsScreen(InsightsHolder(money.insights()!!)) } }
+    @Test fun insights() = shot("insights") { ScreenFrame { InsightsScreen(InsightsHolder(money.insights())) } }
 
     @Test fun register() {
-        val card = money.accounts()!!.page().shelves.flatMap { it.accounts }.first { it.kindKey == "credit" }
-        val holder = RegisterHolder(money.register(card.id)!!)
+        val card = money.accounts().page().shelves.flatMap { it.accounts }.first { it.kindKey == "credit" }
+        val holder = RegisterHolder(money.register(uniffi.money_ffi.RegisterMsg.Show(account = card.id))!!)
         shot("register") { ScreenFrame { RegisterScreen(holder) } }
     }
 
-    @Test fun settings() = shot("settings") { ScreenFrame { MoneySettings(MoneyShellHolder(money.shell()!!)) } }
+    @Test fun settings() = shot("settings") { ScreenFrame { MoneySettings(MoneyShellHolder(money.shell())) } }
 }

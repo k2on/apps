@@ -75,7 +75,7 @@ pub struct Names {
 }
 
 /// An app's every generated screen, and its UniFFI namespace (its
-/// bridge's crate name: `money_bridge`), which the Kotlin imports its
+/// generated library's: `money_ffi`), which the Kotlin imports its
 /// messages from.
 pub struct App {
     pub namespace: &'static str,

@@ -35,6 +35,10 @@ ark-secure-store = { path = "../../modules/ark-secure-store" }
 ark-peer = { path = "../../rust/ark-peer", default-features = false }
 money-core = { path = "../core", features = ["demo"] }
 money-seed = { path = "../demo" }
+# money as its phones run it (tests/phone.rs): its part of its host under
+# ark-ffi's `Hosted`, as its generated library puts them together.
+ark-ffi = { path = "../../rust/ark-ffi" }
+tempfile = "3"
 # Reading money/demo/shots.json: each screen's route the launch its
 # arguments are (src/shell/tests.rs).
 serde_json = { workspace = true }

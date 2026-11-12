@@ -23,7 +23,6 @@ demo with them until its Leptos client exists. What has no UI stays wasm-capable
 ```
  money/core           the domain: its rows, rules and views' keys; no UniFFI, no peer
  money/app            the app: State, Msg, update, screen records, #[view] layouts
- money/bridge         the phones' bridge: the UniFFI twins of the core's and the app's types
  money/demo           the demo's household on a peer and a disk, and `money-seed`
    └ ark-app          the runtime (App, Runtime, Host, Command) and the view vocabulary (ui/rust/app)
    └ ark-module       the device's plumbing (ui/rust/module)
@@ -126,9 +125,46 @@ Each platform has one place and drives the one loop:
 | Desktop | not yet: the iced window still carries its own requests (`money/iced/src/sections.rs`) | |
 | Tests | `money/app/src/host/tests.rs`'s place over the demo household | `Hosting` |
 
-What an app's bridge still names on the phones is only `PhoneApp`: how
-its replica and its demo open, its domain's hash, how a change is encoded,
-which native signs out.
+On the phones an app names no code of its own: its library is generated
+("The Phones' Library", below), and what `Hosted` asks of it beside its
+part (`PhoneApp`) is app.toml's — its name and scheme, the domain its
+replica's log is of, its demo's crate. Its part says the rest
+(`HostedApp`): what it keeps (`KEEPS`), its first run's words
+(`welcome`), how a change is encoded, which native signs out.
+
+### The Phones' Library
+
+Generated, never committed: `ui/prebuild.py ffi <app>` writes `lib.rs`
+and `Cargo.toml` of `<id>-ffi` (lib and UniFFI namespace `<id>_ffi`;
+Kotlin's `uniffi.money_ffi`, Swift's types in the app's module) from
+app.toml's `[ffi]` and `[screens]`, which nix/ark-app.nix builds
+(`ffiSrc`, `crates`) and the iPhone's cargo build adds at `<app>/.ffi`.
+It is, in order:
+
+- the twins of what crosses (`ark::twins!`): `[ffi.twins]` by crate, and
+  without being listed each screen's page and message (beside its `app`
+  type), the app's route and native (`[ffi] route`, `native`) and the
+  first run's records;
+- the first run's object (`ark_ffi::welcome_app!`);
+- `Phone`, its `PhoneApp`: `[ffi] app` (the part), `domain` (a function
+  giving the domain), `demo` (the demo's crate, whose `seeded_disk(today,
+  now_ms)` its `open(disk)` opens), the name and the scheme;
+- one object per `[screens]` entry (`ark_ffi::hosted_screen!`, or
+  `beside_screen!` for one that says `beside`: a register the phone runs
+  for as long as it shows it, made with its first message);
+- the object the phone holds (`ark_ffi::phone_host!`, `[ffi] host`):
+  `new(launch, store)`, `host()`, `welcome()`, each screen by its name
+  (its blank page while no session is open), each beside screen by its
+  name (`register(first:)`), `generation()`, `natives()` (the app's
+  `Native`s, taken), `today()`; and `routeFromUrl` and the route's
+  `url()`.
+
+Its Rust is tested without UniFFI by the app's own tests over the same
+pieces (money/app/tests/phone.rs: a demo launch running every screen, the
+demo remembered and left, a server that is not there, a launch's
+arguments, the replica opened, the demo seeded, a household of two
+devices synced through `ark_ffi::hall::Hall`); `checks.ffi` has UniFFI
+write its Kotlin and Swift.
 
 ### Layout: `#[view]`
 
@@ -669,8 +705,8 @@ library and, with `[background]`, its `BackgroundHooks`) and
 `[android] root`, and the holders); the manifest names the Application.
 The app's own part of its host is its app crate's (`money_app::host`,
 "The App's Part of Its Host"), run under `ArkHost` by ark-ffi's
-`Hosted`; its bridge names only how its replica and its demo open
-(`PhoneApp`). What is left native is what an app draws
+`Hosted`; its library is generated from app.toml ("The Phones'
+Library"). What is left native is what an app draws
 itself beside its generated screens: money's shell host (Shell.swift,
 MoneyApp.kt), its theme and marks.
 
@@ -742,13 +778,12 @@ its own crate: `#[ark(ffi)]` (on a row, an input or a `Describe` type)
 or `#[derive(ark::twin::Twin)]` (on a plain one; `#[ark(ffi_eq)]` for
 one that compares and hashes) writes beside it only its shape — each
 field's type by position (`ark::twin::Field<V, F>`) and a hidden macro.
-The bridge, an adapter, calls them (`ark::twins!(money_core::{…},
-money_app::{…})`, money/bridge/src/lib.rs; harken/ffi for harken) and
-the twins are written there: `AccountLineFfi`, named `AccountLine` in
-Swift and Kotlin, with the conversions both ways (`ark_ffi::Twin`) and
-the rules the phones call as its methods (money/bridge/src/core.rs). So
+The phones' library, generated, calls them (`ark::twins!(money_core::{…},
+money_app::{…})`, from app.toml's `[ffi.twins]`; harken/ffi for harken)
+and the twins are written there: `AccountLineFfi`, named `AccountLine` in
+Swift and Kotlin, with the conversions both ways (`ark_ffi::Twin`). So
 money-core and money-app have no `ffi` feature and no UniFFI; their
-Kotlin package is the bridge's (`uniffi.money_bridge`, harken's
+Kotlin package is the library's (`uniffi.money_ffi`, harken's
 `dev.harken.ffi`).
 
 **The allowlist.** `layers.toml`'s `[allow]` lists today's violations,
@@ -757,7 +792,8 @@ fixes one deletes its line, or the check fails. In order:
 
 Done: who is signed in (`ark::auth`), the view keys and what an app
 reads of them (`ark::views`), harken's routes (harken/app), the phones'
-records (generated in the bridges), the phones' bridge (money/bridge) and
+records (generated in the phones' library), the phones' bridge (gone:
+generated) and
 the demo's peer (money/demo) are out of the core and the app; display
 text with a figure in it is the app's (`money_app::words`), and
 ark-format's UniFFI exports are an adapter's (ark-format-ffi, namespace
@@ -777,26 +813,20 @@ Nothing native of an app is committed. An app is
 ├── icon.svg      its icon, every platform's
 ├── core/         its domain, and (`demo`) its demo's household
 ├── app/          ark-app: its state, messages, update, #[view]s and `commands()`
-├── bridge/       the phones' bridge: the UniFFI twins, how its replica opens (`PhoneApp`), the exports (going: see below)
 ├── server/       when it has one
 ├── demo/         the demo's household (its seed crate), shots.json, server.sh
 └── native/       what is not written in Rust yet (going: see below)
 ```
 
-**`bridge/`, `native/`, `iced/` and `web/` are being removed.**
+**`native/`, `iced/` and `web/` are being removed** (`bridge/` is gone).
 The end state is `app.toml`, `icon.svg`, `core/`, `app/`, `server/` and
 `demo/`, nothing else committed: the layout is this convention, held by
 review, and each of the other directories only shrinks until it is gone.
-`bridge/` is still committed because the phones' bindings are written
-there by hand: the twins of the core's and the app's types, the screens'
-objects (`app.rs`, a line per screen) and how its replica opens
-(`host.rs`); money's part of its host is money-app's; every money
-screen is Rust, and the phones' `Model.swift`, `Bridge.swift`, `Book.kt`
-and `Start.kt` are gone into the app library and the host ("The App
-Library"). Once the twins and the runtimes are generated by
-nix/ark-app.nix from `app/` and `core/`, as the shim crate already is,
-`bridge/` goes (bridge/FFI.md, "Still Here", is what it must carry).
-`iced/` and `web/` become generated entry points the same way. (`views/`
+The phones' library is generated from app.toml ("The Phones' Library");
+money's part of its host is money-app's; every money screen is Rust, and
+the phones' `Model.swift`, `Bridge.swift`, `Book.kt` and `Start.kt` are
+gone into the app library and the host ("The App Library"). `iced/` and
+`web/` become generated entry points the same way. (`views/`
 is gone: the phones' generator's main is written from app.toml's
 `[screens]` and `[views]`.)
 
@@ -804,18 +834,18 @@ If you are an agent, or anyone, about to add to one of these:
 
 - **A screen, or what a screen shows:** write it in `app/` (state,
   message, `update`, a `#[view]` from ArkUI's parts), not as SwiftUI or
-  Compose in `native/`, and not as a record or export in `bridge/` for a
-  native screen to read. A part another app could use goes in ArkUI, in
+  Compose in `native/`, and not as an export of the phones' library for
+  a native screen to read. A part another app could use goes in ArkUI, in
   every toolkit.
 - **A device feature** (camera, keychain, player, sharing…): a port in
   `ark-module`, implemented in a module under `modules/ark-*`, asked for
-  with a `Command`; never a call from `bridge/` or `native/`.
+  with a `Command`; never a call from `native/`.
 - **Domain rules or data:** `core/`, pure.
-- **Something the phones must call that has no other home** (rare): say
-  so in the commit, keep it in `bridge/` as the smallest export that
-  works, and note it in `bridge/FFI.md` under "Still Here", so whoever
-  generates the bindings knows to carry it.
-- **Never** grow `native/`, add a new file to `bridge/`, or
+- **Something the phones must call that has no other home** (rare): a
+  generic export of ark-ffi's (`phone_host!`) every app's library writes,
+  or a key of app.toml's `[ffi]` it reads; never an app's own Rust for
+  its library, which has none.
+- **Never** grow `native/`, or
   copy a screen into `iced/` or `web/`.
 
 and nix generates the rest, from app.toml, each listed module's
@@ -826,7 +856,7 @@ and nix generates the rest, from app.toml, each listed module's
 | XcodeGen's `project.yml` (one multiplatform target for the iPhone, the iPad and the Mac), its Info.plist keys, entitlements, the asset catalog (AccentColor from the theme, AppIcon rendered from icon.svg) | app.toml's `[apple]`, the modules' `[ios]` | `<app>-ios-simulator`, `<app>-ios-archive`, `<app>-macos` |
 | Gradle's project (settings, the app's `build.gradle.kts` with ArkUI's dependencies and the modules'), the AndroidManifest (permissions, the scheme's links, services, meta-data), the launcher's adaptive and themed icon and the mark (vectors from icon.svg), the splash | app.toml's `[android]`, the modules' `[android]` | `<app>-apk`, `<app>-android-tests`, `<app>-android-screens` |
 | The SwiftUI and Compose of every `#[view]` | app.toml's `[screens]` and `[views]`, the app's #[view]s | inside both |
-| The phones' library: a shim crate, `<id>-ffi` (lib `<id>_ffi`), `pub use <bridge>::*` over the app's bridge (app.toml's `[ffi] crate`, money/bridge) as a static library (the iPhone, the Mac) and a shared one (Android) | app.toml's `[ffi]` | `<app>-android-lib`, `<app>-ios-kernel*` |
+| The phones' library: `<id>-ffi` (lib and UniFFI namespace `<id>_ffi`): the twins, the first run, each screen's runtime and the object the phone holds over the app's crate (ui/prebuild.py's `ffi`), as a static library (the iPhone, the Mac) and a shared one (Android) | app.toml's `[ffi]` and `[screens]` | `<app>-android-lib`, `<app>-ios-kernel*` |
 | The entry points over the app library: the `@main`, the Application and the activity, the screens' holders, and — only with `[background]` — the background's hookup ("The App Library") | app.toml's `[ffi] host`, `[screens]`, `[apple] scene`, `[android] root`, `[background]` | inside both |
 | The generator's main (`ui/prebuild.py views`) | app.toml's `[screens]` and `[views]`, linked with the app's crate | `<app>-ui` |
 | F-Droid's metadata (`<bundle id>.yml`) | app.toml's `[store]` (`ui/prebuild.py fdroid`) | `apps-fdroid`, `fdroid-repo` |
@@ -853,7 +883,7 @@ scheme = "money"               # money://auth (the sign-in's return), money://<r
 crate = "money-app"            # the app's crate
 
 [screens]                      # each screen's runtime, holders, #[view] and the names it is written under
-accounts = { runtime = "AccountsApp", page = "AccountsPage", msg = "AccountsMsg", swift = "AccountsScreen", kotlin = "AccountsHolder", view = "accounts::view::accounts", swift-view = "AccountsView", kotlin-view = "AccountsScreen" }
+accounts = { app = "accounts::Accounts", runtime = "AccountsApp", page = "AccountsPage", msg = "AccountsMsg", swift = "AccountsScreen", kotlin = "AccountsHolder", view = "accounts::view::accounts", swift-view = "AccountsView", kotlin-view = "AccountsScreen" }
 [views]                        # a screen's further views, and its menu bar's commands
 settings = { screen = "shell", view = "shell::view::money_settings", swift-view = "MoneySettingsView", kotlin-view = "MoneySettings" }
 
@@ -877,11 +907,17 @@ features = [{ name = "android.hardware.camera", required = false }]
 hosts = ["auth", "join"]       # the scheme's hosts
 dependencies = []              # Maven coordinates its own Kotlin needs
 
-[ffi]
-crate = "money-bridge"         # the phones' bridge: the UniFFI twins and the exports
-dir = "bridge"                 # where it is, beside app.toml
-android = ["model"]            # the bridge's features each phone's library links
+[ffi]                          # the phones' library, generated ("The Phones' Library")
+host = "MoneyHost"             # the object the phone holds
+app = "host::Money"            # its part of its host, in its crate
+route = "routes::Route"        # its routes, and what only the phone's shell does
+native = "host::Native"
+domain = "money_core::shared"  # the domain its replica's log is of
+demo = "money-seed"            # its demo's crate (`seeded_disk`, `open`); none without one
+android = ["model"]            # ark-ffi's features each phone's library links
 apple = []
+[ffi.twins]                    # what else crosses, by crate, as a `use` names it
+money_core = ["changes::MoneyChange", "types::{AccountLine, …}"]
 
 [store]                        # what a store lists: F-Droid's .yml is written from it
 summary = "A household's budget, shared, every dollar given a job"

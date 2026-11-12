@@ -17,27 +17,79 @@ use ark_auth::onboarding::AppInfo;
 
 use crate::{ArkProcess, Handle, Hold, HostApp, Login, Opened, Peer, Refusal, Session};
 
-/// What an app's bridge says of itself on the phones.
+/// What an app is on the phones, beside its part of its host: its name and
+/// scheme (app.toml's), the domain its replica's log is of, and its demo.
+/// What the app's generated library ([`phone_app!`], from app.toml's
+/// `[ffi]`) implements; everything else a phone asks of the app is its
+/// part's ([`HostedApp`]).
 pub trait PhoneApp: Send + Sync + 'static {
     /// The app's part of its host (money's `money_app::host::Money`).
     type App: HostedApp<Route: Send, Request: Send, Native: Send> + Send;
-    /// Who the app is, to the sign-in machine.
-    fn info(&self) -> AppInfo;
-    /// The app's words on its first run's pages.
-    fn copy(&self, scan: bool, demo: bool) -> ark_app::welcome::WelcomeCopy;
-    /// The domain it carries, as a server's `/healthz` names it.
-    fn domain(&self) -> String;
-    /// Its replica on the disk at `dir`, as `login`.
-    fn open(&self, dir: &str, login: Login) -> Result<Arc<Peer>, Refusal>;
-    /// Its demo's household, on `today` (today when none).
-    fn demo(&self, today: Option<String>) -> Result<Arc<Peer>, Refusal>;
-    /// Today, as the domain writes a day (`2026-10-26`).
-    fn today(&self) -> String;
-    /// A change of its domain's, as the peer takes it: its function's name
-    /// and its input's bytes.
-    fn encode(change: &<Self::App as HostedApp>::Change) -> (&'static str, Vec<u8>);
-    /// Whether a native is signing out, which the host does itself.
-    fn signs_out(native: &<Self::App as HostedApp>::Native) -> bool;
+    /// Its name as a person reads it (`Money`), and the scheme its sign-in
+    /// and its links come back on (`money`).
+    const NAME: &'static str;
+    const SCHEME: &'static str;
+    /// Whether it has a demo's household to try with no server.
+    const DEMO: bool;
+    /// The domain its replica's log is of.
+    fn domain() -> Arc<ark::domain::Domain>;
+    /// Its demo's household on a peer of its own, seeded up to `today` at
+    /// `now_ms`; never asked of an app with no demo.
+    fn demo(today: &str, now_ms: i64) -> ark_peer::Peer;
+}
+
+/// Who the app is, to the sign-in machine.
+fn info<P: PhoneApp>() -> AppInfo {
+    AppInfo {
+        name: P::NAME.into(),
+        scheme: P::SCHEME.into(),
+        demo: P::DEMO,
+        what: <P::App as HostedApp>::KEEPS.into(),
+    }
+}
+
+/// The domain the app carries, as a server's `/healthz` names it: its
+/// schema's hash and its version (the server's `domain` line).
+pub fn domain_line<P: PhoneApp>() -> String {
+    let d = P::domain();
+    format!("{} {}", d.schema_hash(), d.version)
+}
+
+/// The app's replica on the disk at `dir`, as whoever last signed in there
+/// or as `login`.
+pub fn open<P: PhoneApp>(dir: &str, login: Option<Login>) -> Result<Arc<Peer>, Refusal> {
+    Peer::open(ark_peer::Config::of(P::domain()), dir, login)
+}
+
+/// The app's replica on the disk at `dir`, as the process's one runtime
+/// ([`ArkProcess::shared`]): opened the first time, the same peer for every
+/// Activity, Scene or window after, and running while none shows; another
+/// `dir` (another server) lets the old one go.
+pub fn process_open<P: PhoneApp>(dir: &str, login: Option<Login>) -> Result<Arc<Peer>, Refusal> {
+    ArkProcess::shared().open(dir, || open::<P>(dir, login))
+}
+
+/// The app's demo's household, seeded up to `today` (`2026-10-26`) — today
+/// when none, and a fixed day is the same household every time, which is
+/// what a screenshot wants — in memory, its own authority. Nothing it does
+/// leaves the process, and opening it again starts from the seed again.
+pub fn demo<P: PhoneApp>(today: Option<String>) -> Result<Arc<Peer>, Refusal> {
+    let (today, now) = match today {
+        Some(t) => {
+            let now = ark_format::noon_of(&t).ok_or_else(|| format!("a day, as 2026-10-26: {t}"))?;
+            (t, now)
+        }
+        None => {
+            let now = ark_peer::now_ms();
+            (ark_format::day_of(now), now)
+        }
+    };
+    Peer::of(P::demo(&today, now))
+}
+
+/// Today, as a domain that reads days in UTC writes it (`2026-10-26`).
+pub fn today() -> String {
+    ark_format::day_of(ark_peer::now_ms())
 }
 
 type Key<P> = <<P as PhoneApp>::App as HostedApp>::Key;
@@ -69,7 +121,7 @@ impl<P: PhoneApp> Place<Key<P>, Change<P>> for PhonePlace<P> {
         ark_peer::now_ms()
     }
     fn send(&mut self, change: Change<P>) -> Result<(), String> {
-        let (name, input) = P::encode(&change);
+        let (name, input) = <P::App as HostedApp>::encode(&change);
         match self.session.send(|p| p.mutate_encoded(name, input)) {
             Ok(_) => Ok(()),
             Err(Refusal::Refused { why }) => Err(why),
@@ -155,7 +207,7 @@ pub struct Open<P: PhoneApp> {
 /// An app's part under the app host every Ark app has: the [`HostApp`] its
 /// bridge hands [`crate::ArkHost::new`].
 pub struct Hosted<P: PhoneApp> {
-    phone: P,
+    phone: std::marker::PhantomData<fn() -> P>,
     open: Mutex<Option<Open<P>>>,
     handle: Mutex<Option<Handle>>,
     /// What only the phone's shell does, taken by it.
@@ -168,9 +220,9 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
 }
 
 impl<P: PhoneApp> Hosted<P> {
-    pub fn new(phone: P) -> Arc<Hosted<P>> {
+    pub fn new() -> Arc<Hosted<P>> {
         Arc::new(Hosted {
-            phone,
+            phone: std::marker::PhantomData,
             open: Mutex::new(None),
             handle: Mutex::new(None),
             natives: Mutex::new(vec![]),
@@ -192,7 +244,7 @@ impl<P: PhoneApp> Hosted<P> {
         let handle = lock(&self.handle).clone();
         let mut asked = false;
         for n in natives {
-            if P::signs_out(&n) {
+            if <P::App as HostedApp>::signs_out(&n) {
                 if let Some(h) = &handle {
                     h.sign_out()
                 }
@@ -314,7 +366,7 @@ impl<P: PhoneApp> Hosted<P> {
 
     /// The session's day (`2026-10-26`).
     pub fn today(&self) -> String {
-        self.read(|_, p| p.today.clone()).unwrap_or_else(|| self.phone.today())
+        self.read(|_, p| p.today.clone()).unwrap_or_else(today)
     }
 }
 
@@ -330,26 +382,26 @@ where
     Key<P>: ViewKey,
 {
     fn info(&self) -> AppInfo {
-        self.phone.info()
+        info::<P>()
     }
     fn copy(&self, scan: bool, demo: bool) -> ark_app::welcome::WelcomeCopy {
-        self.phone.copy(scan, demo)
+        <P::App as HostedApp>::welcome(scan, demo)
     }
     fn domain(&self) -> String {
-        self.phone.domain()
+        domain_line::<P>()
     }
     fn open(&self, dir: &str, login: Login) -> Result<Arc<Peer>, Refusal> {
-        self.phone.open(dir, login)
+        process_open::<P>(dir, Some(login))
     }
     fn demo(&self, today: Option<String>) -> Result<Arc<Peer>, Refusal> {
-        self.phone.demo(today)
+        demo::<P>(today)
     }
 
     fn opened(&self, peer: Arc<Peer>, how: Opened, host: Handle) {
         *lock(&self.handle) = Some(host.clone());
         let today = match &how {
             Opened::Demo { today: Some(t) } => t.clone(),
-            _ => self.phone.today(),
+            _ => today(),
         };
         let session = Arc::new(Session::<Key<P>>::new(peer));
         // Whichever views moved, the screens read again: the shell is told.
@@ -452,6 +504,230 @@ macro_rules! hosted_screen {
             /// Whether something waits for the page to be drawn.
             pub fn awaits_draw(&self) -> bool {
                 self.0.state::<$app>().2
+            }
+        }
+    };
+}
+
+/// A screen the phone runs beside the app's part for as long as it shows
+/// it (a register pushed on a stack): its own runtime over the session,
+/// made with the message that says what it shows. What [`phone_host!`]
+/// hands out for app.toml's `[screens]` entries that say `beside`.
+pub struct Beside<P: PhoneApp, A: App<Key = Key<P>, Change = Change<P>>> {
+    host: Arc<Hosted<P>>,
+    screen: Mutex<Screen<A>>,
+}
+
+impl<P: PhoneApp, A> Beside<P, A>
+where
+    A: App<Key = Key<P>, Change = Change<P>, Route = <P::App as HostedApp>::Route, Request = <P::App as HostedApp>::Request>,
+{
+    /// The screen over `host`'s session, told `first`; none while no
+    /// session is open.
+    pub fn over(host: Arc<Hosted<P>>, first: A::Msg) -> Option<Beside<P, A>> {
+        let mut screen = Screen::new();
+        host.beside(&mut screen, |s, cx| s.send(first, cx))?;
+        Some(Beside {
+            host,
+            screen: Mutex::new(screen),
+        })
+    }
+
+    fn screen(&self) -> MutexGuard<'_, Screen<A>> {
+        lock(&self.screen)
+    }
+
+    pub fn send(&self, msg: A::Msg) {
+        let mut s = self.screen();
+        self.host.beside(&mut s, |s, cx| s.send(msg, cx));
+    }
+
+    pub fn page(&self) -> A::Screen {
+        let s = self.screen();
+        self.host.read_beside(&s, |s, place, now| s.page(place, now)).unwrap_or_else(blank::<A>)
+    }
+
+    pub fn version(&self) -> u64 {
+        self.screen().version()
+    }
+
+    pub fn is_idle(&self) -> bool {
+        let s = self.screen();
+        self.host.read_beside(&s, |s, place, _| s.is_idle(place)).unwrap_or(true)
+    }
+
+    pub fn drawn(&self) -> bool {
+        let mut s = self.screen();
+        self.host.beside(&mut s, |s, cx| s.drawn(cx)).unwrap_or(false)
+    }
+
+    pub fn awaits_draw(&self) -> bool {
+        self.screen().awaits_draw()
+    }
+}
+
+impl<P: PhoneApp, A: App<Key = Key<P>, Change = Change<P>>> Drop for Beside<P, A> {
+    fn drop(&mut self) {
+        let mut s = lock(&self.screen);
+        self.host.close_beside(&mut s);
+    }
+}
+
+/// A screen run beside the app's part as UniFFI exports it: `$name` over
+/// the library's `$phone`, running `$app`, its messages' twin `$msg` and
+/// its page's `$page` ([`Beside`]).
+#[macro_export]
+macro_rules! beside_screen {
+    ($(#[$doc:meta])* $name:ident, $phone:ty, $app:ty, $msg:ty, $page:ty) => {
+        $(#[$doc])*
+        #[derive(uniffi::Object)]
+        pub struct $name($crate::hosted::Beside<$phone, $app>);
+
+        impl $name {
+            /// The screen over `host`'s session, told `first` (twin).
+            pub fn over(host: std::sync::Arc<$crate::hosted::Hosted<$phone>>, first: $msg) -> Option<std::sync::Arc<$name>> {
+                use $crate::Twin;
+                $crate::hosted::Beside::over(host, <<$app as $crate::ark_app::App>::Msg>::from_ffi(first)).map(|b| std::sync::Arc::new($name(b)))
+            }
+        }
+
+        #[uniffi::export]
+        impl $name {
+            /// `msg` taken.
+            pub fn send(&self, msg: $msg) {
+                use $crate::Twin;
+                self.0.send(<<$app as $crate::ark_app::App>::Msg>::from_ffi(msg))
+            }
+
+            /// What the screen shows now.
+            pub fn page(&self) -> $page {
+                use $crate::Twin;
+                self.0.page().ffi()
+            }
+
+            pub fn version(&self) -> u64 {
+                self.0.version()
+            }
+
+            pub fn is_idle(&self) -> bool {
+                self.0.is_idle()
+            }
+
+            /// The page drawn: what waited on it taken; whether any did.
+            pub fn drawn(&self) -> bool {
+                self.0.drawn()
+            }
+
+            pub fn awaits_draw(&self) -> bool {
+                self.0.awaits_draw()
+            }
+        }
+    };
+}
+
+/// An app's library for its phones, as UniFFI exports it: the object the
+/// phone holds (`$host`, app.toml's `[ffi] host`) — the app host every Ark
+/// app has ([`crate::ArkHost`], `host()`), the first run's pages
+/// (`welcome()`, over the library's `WelcomeApp`), each screen's runtime by
+/// its app.toml `[screens]` name (`$screen()`, reading its blank page while
+/// no session is open), each screen run beside it (`$beside(first)`), the
+/// session's generation, what only the phone's shell does (`natives()`,
+/// the app's `Native` twin `$native`) and the session's day — and its
+/// routes read from a link (`route_from_url`, the `Route` twin `$route_ffi`
+/// of `$route`). Written by the app's generated library (ui/prebuild.py's
+/// `ffi`), after its twins.
+#[macro_export]
+// `crate` is the library's on purpose: its UniFFI tag, its twins.
+#[allow(clippy::crate_in_macro_def)]
+macro_rules! phone_host {
+    (
+        $(#[$doc:meta])* $host:ident, $phone:ty,
+        native: $native:ty => $native_ffi:ty,
+        route: $route:ty => $route_ffi:ty,
+        screens { $($screen:ident: $screen_ty:ident),* $(,)? }
+        beside { $($beside:ident: $beside_ty:ident ($beside_msg:ty)),* $(,)? }
+    ) => {
+        $(#[$doc])*
+        #[derive(uniffi::Object)]
+        pub struct $host {
+            host: std::sync::Arc<$crate::ArkHost>,
+            app: std::sync::Arc<$crate::hosted::Hosted<$phone>>,
+        }
+
+        #[uniffi::export]
+        impl $host {
+            /// The app as the phone launched it, its login kept in `store`
+            /// (ark-secure-store's `PhoneSecureStore`; none: for this run
+            /// alone).
+            #[uniffi::constructor]
+            pub fn new(
+                launch: $crate::Launch,
+                store: Option<std::sync::Arc<dyn $crate::ark_secure_store::phone::SecureStore>>,
+            ) -> std::sync::Arc<$host> {
+                let app = $crate::hosted::Hosted::<$phone>::new();
+                let host = $crate::ArkHost::new(app.clone(), launch, store);
+                std::sync::Arc::new($host { host, app })
+            }
+
+            /// The app host every Ark app has: its first run, its link, the
+            /// shell's notices.
+            pub fn host(&self) -> std::sync::Arc<$crate::ArkHost> {
+                self.host.clone()
+            }
+
+            /// The first run's pages, as the generated first run reads them.
+            pub fn welcome(&self) -> std::sync::Arc<WelcomeApp> {
+                WelcomeApp::new(self.host.clone())
+            }
+
+            $(
+                /// The screen's runtime: its blank page while no session is
+                /// open, the session's after.
+                pub fn $screen(&self) -> std::sync::Arc<$screen_ty> {
+                    std::sync::Arc::new($screen_ty(self.app.clone()))
+                }
+            )*
+
+            $(
+                /// A runtime of its own for as long as the phone shows it,
+                /// told `first`; none while no session is open.
+                pub fn $beside(&self, first: $beside_msg) -> Option<std::sync::Arc<$beside_ty>> {
+                    $beside_ty::over(self.app.clone(), first)
+                }
+            )*
+
+            /// The session the screens' runtimes are over: grows with every
+            /// session opened, so the phone makes its holders again; none
+            /// open is zero.
+            pub fn generation(&self) -> u64 {
+                self.app.generation()
+            }
+
+            /// What the phone's shell is asked to do, in order, taken.
+            pub fn natives(&self) -> Vec<$native_ffi> {
+                self.app.take_natives().into_iter().map(<$native as $crate::Twin<crate::UniFfiTag>>::ffi).collect()
+            }
+
+            /// The session's day (`2026-10-26`): the demo's in the demo.
+            pub fn today(&self) -> String {
+                self.app.today()
+            }
+        }
+
+        /// The route a link names (`/budget/`, `<scheme>://account/<id>/`),
+        /// or none.
+        #[uniffi::export]
+        pub fn route_from_url(url: String) -> Option<$route_ffi> {
+            <$route as $crate::ark_router::Routable>::from_url(&url).map(<$route as $crate::Twin<crate::UniFfiTag>>::ffi)
+        }
+
+        #[uniffi::export(name = "Route")]
+        impl $route_ffi {
+            /// The route's link, at the root (`/account/<id>/checking/`).
+            #[uniffi::method(name = "url")]
+            pub fn ffi_url(&self) -> String {
+                use $crate::Twin;
+                <$route as $crate::ark_router::Routable>::url(&<$route>::from_ffi(self.clone()))
             }
         }
     };

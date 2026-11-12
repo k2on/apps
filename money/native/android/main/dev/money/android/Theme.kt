@@ -32,7 +32,7 @@ import uniffi.ark_format.formatAmount
 import uniffi.ark_format.formatAmountEditable
 import uniffi.ark_format.numberStyleUs
 import uniffi.ark_format.parseAmount
-import uniffi.money_bridge.Tone
+import uniffi.money_ffi.Tone
 
 /** money's type scale: arkui's expressive one, tracked for each size. */
 private val MoneyType = expressiveTypography().tracked()

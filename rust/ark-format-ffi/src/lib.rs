@@ -3,7 +3,7 @@
 //! since an app's library puts every exported name in one namespace. Each
 //! is the function of the same name above it, with owned arguments.
 //!
-//! An app's library links it (`money/bridge`, `harken/ffi`); the bindings
+//! An app's library links it (ark-ffi's, `harken/ffi`); the bindings
 //! come with that library's, Kotlin's in `uniffi.ark_format` (this crate's
 //! namespace is `ark_format`). ark-format itself knows nothing of UniFFI:
 //! its `NumberStyle` crosses as a remote record declared here, which a

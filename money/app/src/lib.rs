@@ -1,7 +1,8 @@
 //! money as an Ark app (ui/docs/app.md): a screen's state, the messages
 //! that change it and its update, in Rust, run by `ark_app::Runtime` on
-//! every platform — the phones behind their bridge (money/bridge, which writes the
-//! UniFFI twins of these records and messages), the iced
+//! every platform — the phones behind their generated library (`money-ffi`,
+//! ui/prebuild.py's `ffi`, which writes the UniFFI twins of these records
+//! and messages), the iced
 //! window (money/iced) and the browser (money/web).
 //!
 //! The screens moved here: Accounts ([`accounts`]) — the shelves of

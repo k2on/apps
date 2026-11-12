@@ -407,16 +407,6 @@ rec {
       # File a bug if you depend on any for non-debug work!
       debug = internal.debugCrate { inherit packageId; };
     };
-    "money-bridge" = rec {
-      packageId = "money-bridge";
-      build = internal.buildRustCrateWithFeatures {
-        packageId = "money-bridge";
-      };
-
-      # Debug support which might change between releases.
-      # File a bug if you depend on any for non-debug work!
-      debug = internal.debugCrate { inherit packageId; };
-    };
     "money-core" = rec {
       packageId = "money-core";
       build = internal.buildRustCrateWithFeatures {
@@ -1592,6 +1582,14 @@ rec {
             features = [ "ffi" ];
           }
           {
+            name = "ark-format";
+            packageId = "ark-format";
+          }
+          {
+            name = "ark-format-ffi";
+            packageId = "ark-format-ffi";
+          }
+          {
             name = "ark-haptics";
             packageId = "ark-haptics";
             optional = true;
@@ -1614,6 +1612,10 @@ rec {
           {
             name = "ark-push";
             packageId = "ark-push";
+          }
+          {
+            name = "ark-router";
+            packageId = "ark-router";
           }
           {
             name = "ark-scanner";
@@ -15188,67 +15190,13 @@ rec {
         ];
         devDependencies = [
           {
-            name = "ark-peer";
-            packageId = "ark-peer";
-            usesDefaultFeatures = false;
-          }
-          {
-            name = "money-core";
-            packageId = "money-core";
-            features = [ "demo" ];
-          }
-          {
-            name = "money-seed";
-            packageId = "money-seed";
-          }
-          {
-            name = "serde_json";
-            packageId = "serde_json";
-            features = [ "raw_value" ];
-          }
-        ];
-
-      };
-      "money-bridge" = rec {
-        crateName = "money-bridge";
-        version = "0.1.0";
-        edition = "2021";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../money/bridge; };
-        libName = "money_bridge";
-        dependencies = [
-          {
-            name = "ark";
-            packageId = "ark";
-          }
-          {
-            name = "ark-app";
-            packageId = "ark-app";
-          }
-          {
             name = "ark-ffi";
             packageId = "ark-ffi";
           }
           {
-            name = "ark-format";
-            packageId = "ark-format";
-          }
-          {
-            name = "ark-format-ffi";
-            packageId = "ark-format-ffi";
-          }
-          {
             name = "ark-peer";
             packageId = "ark-peer";
             usesDefaultFeatures = false;
-          }
-          {
-            name = "ark-secure-store";
-            packageId = "ark-secure-store";
-            features = [ "ffi" ];
-          }
-          {
-            name = "money-app";
-            packageId = "money-app";
           }
           {
             name = "money-core";
@@ -15264,22 +15212,12 @@ rec {
             packageId = "serde_json";
             features = [ "raw_value" ];
           }
-          {
-            name = "uniffi";
-            packageId = "uniffi";
-            usesDefaultFeatures = false;
-          }
-        ];
-        devDependencies = [
           {
             name = "tempfile";
             packageId = "tempfile";
           }
         ];
-        features = {
-          "model" = [ "ark-ffi/model" ];
-        };
-        resolvedDefaultFeatures = [ "model" ];
+
       };
       "money-core" = rec {
         crateName = "money-core";
