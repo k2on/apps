@@ -132,10 +132,11 @@ This is a release build signed with a key committed to that repository, so anyon
 host = "MoneyHost"
 # The app's part of its host, in its crate (`ark_app::host::HostedApp`), and
 # where its routes and what only the phone's shell does are (its `Route` and
-# `Native`, each crossing as a twin).
+# `ShellAsk`, each crossing as a twin; a twin is named as its type, so
+# never one a binding names already: `Native` is JNA's in Kotlin).
 app = "host::Money"
 route = "routes::Route"
-native = "host::Native"
+native = "host::ShellAsk"
 # The domain its replica's log is of: a function of a crate's giving it.
 domain = "money_core::shared"
 # The crate of its demo's household (demo/): its `seeded_disk(today,

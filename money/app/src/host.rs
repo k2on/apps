@@ -8,7 +8,7 @@
 //! for anything new (the demo's bank here, a server's importer asked), a
 //! category or a transaction named by a launch, the session's facts kept
 //! in the shell's Settings. What only the toolkit's shell does is a
-//! [`Native`]: a page pushed on a phone's stack, Settings and Add a Device
+//! [`ShellAsk`]: a page pushed on a phone's stack, Settings and Add a Device
 //! put up, what shows put away for a link, signed out.
 
 use ark_app::host::{Cx, Has, HostedApp, Link, Running, Screen, Session};
@@ -27,7 +27,7 @@ use crate::{MoneyRequest, Route};
 
 /// What only the toolkit's shell does, asked of it in order.
 #[derive(Clone, Debug, PartialEq, ark::twin::Twin)]
-pub enum Native {
+pub enum ShellAsk {
     /// A page on the section's stack (a phone): an account's register, All
     /// Accounts, Connected Banks, a bank.
     Open { route: Route },
@@ -202,7 +202,7 @@ impl HostedApp for Money {
     type Change = MoneyChange;
     type Route = Route;
     type Request = MoneyRequest;
-    type Native = Native;
+    type Native = ShellAsk;
 
     const KEEPS: &'static str = "your budget";
 
@@ -214,8 +214,8 @@ impl HostedApp for Money {
         (change.name(), change.input())
     }
 
-    fn signs_out(native: &Native) -> bool {
-        matches!(native, Native::SignOut)
+    fn signs_out(native: &ShellAsk) -> bool {
+        matches!(native, ShellAsk::SignOut)
     }
 
     fn open(session: &Session, cx: &mut Cx<'_, Money>) -> Money {
@@ -287,7 +287,7 @@ impl HostedApp for Money {
             return self.inspect(id, cx);
         }
         if cx.place.stacks() {
-            return cx.native(Native::Open { route: r });
+            return cx.native(ShellAsk::Open { route: r });
         }
         let tag = match r {
             Route::Budget => "budget".to_string(),
@@ -346,10 +346,10 @@ impl HostedApp for Money {
                 if !pane.is_empty() {
                     self.shell.send(ShellMsg::Pane { title: pane.clone() }, cx);
                 }
-                cx.native(Native::Settings { pane })
+                cx.native(ShellAsk::Settings { pane })
             }
-            MoneyRequest::AddDevice => cx.native(Native::AddDevice),
-            MoneyRequest::SignOut => cx.native(Native::SignOut),
+            MoneyRequest::AddDevice => cx.native(ShellAsk::AddDevice),
+            MoneyRequest::SignOut => cx.native(ShellAsk::SignOut),
             // A receipt's photo kept: on the device at once, and sent to the
             // server (which reads it) on this connection or the next. A device
             // whose files cannot be written keeps nothing.
@@ -407,7 +407,7 @@ impl HostedApp for Money {
     fn link(&mut self, link: Link, cx: &mut Cx<'_, Money>) {
         self.sheets.send(SheetsMsg::Dismiss, cx);
         self.pending.clear();
-        cx.native(Native::Reset);
+        cx.native(ShellAsk::Reset);
         match link {
             Link::Launch(args) => self.shell.send(ShellMsg::Launch { args }, cx),
             Link::Address(address) => self.shell.send(ShellMsg::Address { address }, cx),

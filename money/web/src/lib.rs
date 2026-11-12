@@ -30,7 +30,7 @@ use ark_peer::Peer as Replica;
 use arkui_web::{AnyView, WebApp};
 use money_app::accounts::AccountsMsg;
 use money_app::budget::BudgetMsg;
-use money_app::host::{Money, Native};
+use money_app::host::{Money, ShellAsk};
 use money_app::insights::InsightsMsg;
 use money_app::register::RegisterMsg;
 use money_app::sheets::SheetsMsg;
@@ -372,14 +372,14 @@ impl MoneyWeb {
     }
 
     /// What money's host asked of the page itself.
-    fn native(&mut self, n: Native) {
+    fn native(&mut self, n: ShellAsk) {
         match n {
-            Native::Settings { .. } => self.settings = true,
-            Native::Reset => self.settings = false,
+            ShellAsk::Settings { .. } => self.settings = true,
+            ShellAsk::Reset => self.settings = false,
             // Signed out of the page's server: the session revoked, the
             // sign-in machine back to its start. The demo's page has no way
             // out (`SessionFacts::leaves`).
-            Native::SignOut => {
+            ShellAsk::SignOut => {
                 if self.live.is_some() {
                     let _ = self.peer.sign_out();
                     self.onboard(ark_auth::onboarding::Event::SignOut);
@@ -388,7 +388,7 @@ impl MoneyWeb {
             }
             // The page's sections are its places, never a stack; it makes no
             // code for another device (`SessionFacts::adds_devices`).
-            Native::Open { .. } | Native::AddDevice => {}
+            ShellAsk::Open { .. } | ShellAsk::AddDevice => {}
         }
     }
 

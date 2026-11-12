@@ -99,7 +99,7 @@ import uniffi.money_ffi.Household
 import uniffi.money_ffi.Appearance
 import androidx.compose.foundation.isSystemInDarkTheme
 import uniffi.money_ffi.MoneyHost
-import uniffi.money_ffi.Native
+import uniffi.money_ffi.ShellAsk
 
 /** The four tabs. */
 enum class Tab(val route: String, val label: String, val icon: ImageVector, val selected: ImageVector, val section: String) {
@@ -212,7 +212,7 @@ private fun MoneyApp(app: ArkApp, library: MoneyHost, holders: Holders, moves: L
         household.value = holders.shell.page.value.household
         for (ask in library.natives()) {
             when (ask) {
-                is Native.Open ->
+                is ShellAsk.Open ->
                     when (val r = ask.route) {
                         is Route.Banks -> {
                             sections.send(ShellMsg.Pane(title = "Connected Banks"))
@@ -224,18 +224,18 @@ private fun MoneyApp(app: ArkApp, library: MoneyHost, holders: Holders, moves: L
                         }
                         else -> nav.navigate(register(r))
                     }
-                is Native.Settings -> {
+                is ShellAsk.Settings -> {
                     if (ask.pane.isNotEmpty()) sections.send(ShellMsg.Pane(title = ask.pane))
                     shell.onSettings()
                 }
-                is Native.AddDevice -> addingDevice = true
-                is Native.Reset -> {
+                is ShellAsk.AddDevice -> addingDevice = true
+                is ShellAsk.Reset -> {
                     dev.arkui.Ready.changed()
                     account = false
                     nav.popBackStack("shell", inclusive = false)
                 }
                 // The app library signs out itself: never handed to a shell.
-                is Native.SignOut -> {}
+                is ShellAsk.SignOut -> {}
             }
         }
     }

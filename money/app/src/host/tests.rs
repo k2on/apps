@@ -7,7 +7,7 @@ use ark_peer::store::Store;
 use ark_peer::Peer;
 use money_core::{MoneyChange, MoneyView, TxnLine};
 
-use super::{Money, Native};
+use super::{Money, ShellAsk};
 use crate::shell::{MoneyShell, ShellMsg};
 use crate::testing::NOW;
 use crate::MoneyRequest;
@@ -158,7 +158,7 @@ fn a_route_is_pushed_on_a_phone_and_selected_in_a_window() {
     h.take_natives();
     let r = route.clone();
     h.with(&mut place, |m, cx| ark_app::host::HostedApp::route(m, r, cx));
-    assert_eq!(h.take_natives(), vec![Native::Open { route: route.clone() }]);
+    assert_eq!(h.take_natives(), vec![ShellAsk::Open { route: route.clone() }]);
 
     let (mut h, mut place) = open(false);
     h.with(&mut place, |m, cx| ark_app::host::HostedApp::route(m, route, cx));
@@ -200,13 +200,13 @@ fn a_link_puts_away_what_shows_and_natives_are_taken_in_order() {
     let (mut h, mut place) = open(true);
     h.take_natives();
     h.link(Link::Launch(vec!["-screen".into(), "insights".into()]), &mut place);
-    assert_eq!(h.take_natives(), vec![Native::Reset]);
+    assert_eq!(h.take_natives(), vec![ShellAsk::Reset]);
     ask(&mut h, &mut place, MoneyRequest::Settings { pane: "Household".into() });
     ask(&mut h, &mut place, MoneyRequest::AddDevice);
     ask(&mut h, &mut place, MoneyRequest::SignOut);
     assert_eq!(
         h.take_natives(),
-        vec![Native::Settings { pane: "Household".into() }, Native::AddDevice, Native::SignOut]
+        vec![ShellAsk::Settings { pane: "Household".into() }, ShellAsk::AddDevice, ShellAsk::SignOut]
     );
     assert_eq!(h.app().shell.state().pane, "Household");
 }

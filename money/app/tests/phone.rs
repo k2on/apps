@@ -17,7 +17,7 @@ use ark_ffi::hall::Hall;
 use ark_ffi::hosted::{Hosted, PhoneApp};
 use ark_ffi::{ArkHost, HostShell, Launch, Peer, Standing, Taken};
 use money_app::budget::Budget;
-use money_app::host::{Money, Native};
+use money_app::host::{Money, ShellAsk};
 use money_app::shell::{MoneyShell, ShellMsg};
 use money_core::accounts::AccountKind;
 use money_core::{AccountLine, BudgetLine, MoneyChange, OpenAccount, Summary, TxnLine};
@@ -134,7 +134,7 @@ fn a_demo_launch_runs_every_screen() {
     // A link: the shell on Accounts, the phone asked to reset its pages.
     host.open_url("money:///accounts".into());
     until("the shell on Accounts", || app.page::<MoneyShell>().section == "accounts");
-    assert!(app.take_natives().contains(&Native::Reset));
+    assert!(app.take_natives().contains(&ShellAsk::Reset));
 
     // Nothing of a `-demo` launch is remembered.
     assert!(!dir.path().join("money").join("first-run").exists());
@@ -212,7 +212,7 @@ fn a_launch_opens_once_the_window_is_up() {
     assert!(app.take_natives().is_empty(), "nothing asked before the window is up");
     host.shown();
     until("Settings asked", || {
-        app.take_natives().iter().any(|n| matches!(n, Native::Settings { .. }))
+        app.take_natives().iter().any(|n| matches!(n, ShellAsk::Settings { .. }))
     });
     host.shown();
     until("idle", || host.idle());
