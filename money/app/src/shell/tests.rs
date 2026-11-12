@@ -473,3 +473,32 @@ fn every_shot_route_is_its_launch() {
     }
     assert!(n >= 20, "the shots' routes: {n}");
 }
+
+/// The appearance follows the device's by default, everywhere the shell
+/// starts: its page before a session runs it (`shellBlank` on the phones),
+/// a launch that names none (the screenshots' dark pass sets the device's
+/// appearance and names none), and Settings' System after Dark. Settings
+/// says System then. Falsified by a default of Light: app-screens
+/// 43131582873's dark iPhone and iPad shots were their light ones, byte for
+/// byte.
+#[test]
+fn the_appearance_follows_the_system_by_default() {
+    let mut demo = Demo::new();
+    let mut rt = Runtime::<MoneyShell>::new();
+    let page = rt.screen(&demo);
+    assert_eq!(page.appearance, None, "no appearance over the device's");
+    assert_eq!(page.settings.appearance, "system");
+    let launch = |a: &[&str]| ShellMsg::Launch {
+        args: a.iter().map(|s| s.to_string()).collect(),
+    };
+    rt.dispatch(launch(&["-shots", "YES", "-demo", "2026-11-18", "-screen", "budget"]), &mut demo);
+    assert_eq!(rt.screen(&demo).appearance, None, "a launch that names none keeps the device's");
+    rt.dispatch(ShellMsg::AppearanceKey { key: "dark".into() }, &mut demo);
+    assert_eq!(rt.screen(&demo).appearance, Some(Appearance::Dark));
+    rt.dispatch(ShellMsg::AppearanceKey { key: "system".into() }, &mut demo);
+    let page = rt.screen(&demo);
+    assert_eq!((page.appearance, page.settings.appearance.as_str()), (None, "system"));
+    rt.dispatch(launch(&["-appearance", "dark"]), &mut demo);
+    rt.dispatch(launch(&["-screen", "insights"]), &mut demo);
+    assert_eq!(rt.screen(&demo).appearance, None, "another launch puts the last one's appearance back");
+}

@@ -101,6 +101,8 @@ import dev.arkui.app.ArkApp
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import uniffi.money_bridge.Household
+import uniffi.money_bridge.Appearance
+import androidx.compose.foundation.isSystemInDarkTheme
 import uniffi.money_bridge.MoneyHost
 import uniffi.money_bridge.NativeAsk
 
@@ -129,10 +131,13 @@ val LocalShell = staticCompositionLocalOf<Shell> { error("no shell") }
 /** The first run's pages until the app itself shows, then the app: what the activity draws. */
 @Composable
 fun MoneyRoot(app: ArkApp, library: MoneyHost) {
-    MoneyTheme {
+    // The shell's appearance over the device's (a launch's `-appearance`, Settings' Light or
+    // Dark), as on the iPhone; none (System, the default) follows the device.
+    val moves by app.moves.collectAsStateWithLifecycle()
+    val appearance = remember(moves) { library.shell()?.page()?.appearance }
+    MoneyTheme(dark = appearance?.let { it == Appearance.DARK } ?: isSystemInDarkTheme()) {
         Surface(color = MaterialTheme.colorScheme.background, modifier = Modifier.fillMaxSize()) {
             val shows by app.showsApp.collectAsStateWithLifecycle()
-            val moves by app.moves.collectAsStateWithLifecycle()
             // The first run's pages every Ark app shares (generated/WelcomeScreen.kt, from
             // ark_app::welcome, money's words).
             val welcome = remember(library) { FirstRunHolder(library.welcome()) }
