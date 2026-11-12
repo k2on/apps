@@ -843,8 +843,15 @@ def android_manifest(root, a):
     if scheme:
         # The sign-in's return comes back to the same activity.
         activity += '\n            android:launchMode="singleTask"'
-    if andr.get("config-changes"):
-        activity += f'\n            android:configChanges="{"|".join(andr["config-changes"])}"'
+    # An Ark app's activity takes a change of light and dark in place:
+    # Compose reads the theme from its configuration, the state is Rust's,
+    # so nothing is made again for it (a screenshot walk's switch, ui/docs/
+    # shots.md, as a person's from the quick settings).
+    changes = list(andr.get("config-changes", []))
+    if ark_entry(a) and "uiMode" not in changes:
+        changes.append("uiMode")
+    if changes:
+        activity += f'\n            android:configChanges="{"|".join(changes)}"'
     # The app library's Application (ui/kotlin/app), generated beside it.
     application = f'\n        android:name=".{a["name"]}Application"' if ark_entry(a) else ""
     lines.append(f'''

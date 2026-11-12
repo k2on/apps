@@ -157,18 +157,23 @@ ArkUI's `ShotsWalk` (ui/kotlin/shots) take it, then the process ends.
   dialog's dim drawn as the system dims it). The status bar is the
   system's and in neither. Each picture is `<id>.png` under its theme,
   with what a step can name beside it (`<id>.tree.txt`).
-- **Both themes in one walk, and on the iPad both ways up.** At each stop
-  the screen is drawn as the walk stands, one thing switched inside the
-  app (the theme: every window's `overrideUserInterfaceStyle`, Android
-  12's per-app night mode, which makes the activity again and says a newer
-  generation for it; the iPad's way up: `requestGeometryUpdate`), the
-  ready signal waited for, and drawn again, until every one is taken; the
-  next stop starts as this one ended: light, dark, dark on its side, light
-  on its side; then light on its side, dark on its side, dark, light. A
-  picture byte for byte another of the stop fails, unless the plan says
-  the app draws one theme (`"theme": "dark"`). Android's tablet is taken
-  in landscape alone, as before; the Fold's postures are the emulator's,
-  each a walk of its own.
+- **Every way in one launch, a walk a way.** The shots before the
+  sign-in's (`welcome`) are taken every way first, one switch apart. Then
+  the rest of the list is walked whole once a way — light, then dark; on
+  the iPad then dark on its side, then light on its side — each walk after
+  the first begun by a reset inside the app (`ArkHost.shots_reset`: a
+  launch with no arguments taken as a link, which puts away every sheet,
+  dialog, inspector and pushed page and clears search, then the first
+  section's tab; the session and its data kept) and one switch (the theme:
+  every window's `overrideUserInterfaceStyle`, Android 12's per-app night
+  mode, which an Ark app's activity takes in place, `configChanges`
+  `uiMode`; the iPad's way up: `requestGeometryUpdate`). The sign-in's
+  steps (its shot says `signIn`) are the first walk's alone. Within a walk
+  two shots of one picture fail (a step that went nowhere); at the end, so
+  do two ways of one shot that drew the same picture, unless the plan says
+  the app draws one theme (`"theme": "dark"`). The log has each reset and
+  each walk's whole time. Android's tablet is taken in landscape alone, as
+  before; the Fold's postures are the emulator's, each a walk of its own.
 - **The sign-in.** The walk goes through the first run as a new person
   does. The system's browser sheet is not the app's and no step reaches
   it, so a walk's launch reads the dev server's answer to the sign-in

@@ -96,59 +96,103 @@ final class ShotsWalk {
         guard let p = try JSONSerialization.jsonObject(with: data) as? [String: Any], let shots = p["shots"] as? [[String: Any]] else {
             throw Stop(why: "\(plan.path) is no plan")
         }
-        // The first screen ready, light, upright. A plan with `orientations`
-        // (the iPad's: both) takes each stop in every theme and way up, one
-        // thing switched at a time: light upright, dark upright, dark on its
-        // side, light on its side; the next stop from where this one ended,
-        // the other way round. A one-theme app's stop is one picture a way.
+        // The ways a screen is taken, in the order the walks go, each one
+        // switch from the last: light, dark; and on the iPad (`orientations`)
+        // then dark on its side, light on its side. A one-theme app's
+        // (`theme`): one way (a way up each on the iPad).
         let one = p["theme"] as? String
         let turns = (p["orientations"] as? [String] ?? []).count > 1
-        var dark = false
-        var landscape = false
-        ShotsWindow.theme(dark: dark)
+        var ways: [(dark: Bool, landscape: Bool)] = one == nil ? [(false, false), (true, false)] : [(false, false)]
+        if turns { ways = one == nil ? [(false, false), (true, false), (true, true), (false, true)] : [(false, false), (false, true)] }
+        var at = (dark: false, landscape: false)
+        ShotsWindow.theme(dark: false)
         try await settled("the first screen")
-        for shot in shots {
+        // To another way: the one thing that differs switched, the screen waited for.
+        func go(_ to: (dark: Bool, landscape: Bool)) async throws -> String {
+            let t = Date()
+            if to.dark != at.dark { ShotsWindow.theme(dark: to.dark) }
+            if to.landscape != at.landscape { ShotsWindow.orient(landscape: to.landscape) }
+            at = to
+            try await settled("\(name(at))")
+            return ms(t)
+        }
+        var drawn: [String: [String: Data]] = [:]
+        func shoot(_ id: String, _ tree: String) throws -> String {
+            let t = Date()
+            guard let png = ShotsWindow.picture() else { throw Stop(why: "\(id): no window to draw") }
+            let theme = at.dark ? "dark" : "light", way = at.landscape ? "landscape" : "portrait"
+            drawn[id, default: [:]][name(at)] = png
+            for th in one == nil ? [theme] : ["light", "dark"] {
+                let dir = turns ? out.appendingPathComponent(way).appendingPathComponent(th) : out.appendingPathComponent(th)
+                try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+                try png.write(to: dir.appendingPathComponent("\(id).png"))
+                try tree.write(to: dir.appendingPathComponent("\(id).tree.txt"), atomically: true, encoding: .utf8)
+            }
+            return ms(t)
+        }
+        // The shots before the sign-in's (its shot says `signIn`): the first
+        // run's pages, each taken every way at the start, then back to the
+        // first way.
+        let first = shots.firstIndex { $0["signIn"] as? Bool == true } ?? 0
+        for shot in shots[..<first] {
             guard let id = shot["id"] as? String else { throw Stop(why: "a shot with no id") }
-            let steps = shot["steps"] as? [[String: Any]] ?? []
-            var t = Date()
-            var each: [String] = []
-            for step in steps { each.append(try await take(step, id)) }
-            let stepped = Date().timeIntervalSince(t)
+            for step in shot["steps"] as? [[String: Any]] ?? [] { _ = try await take(step, id) }
             let tree = host.shotsTree()
             var times: [String] = []
-            var drawn: [String: Data] = [:]
-            // The switches of this stop, in order: theme, way up, theme.
-            var switches: [String] = one == nil ? ["theme"] : []
-            if turns { switches = one == nil ? ["theme", "turn", "theme"] : ["turn"] }
-            for n in 0...switches.count {
-                if n > 0 {
-                    t = Date()
-                    if switches[n - 1] == "theme" {
-                        dark.toggle()
-                        ShotsWindow.theme(dark: dark)
-                    } else {
-                        landscape.toggle()
-                        ShotsWindow.orient(landscape: landscape)
-                    }
-                    try await settled("\(id) \(dark ? "dark" : "light") \(landscape ? "landscape" : "portrait")")
-                    times.append("\(switches[n - 1]) \(ms(t))")
+            for (k, w) in ways.enumerated() {
+                if k > 0 {
+                    let switched = try await go(w)
+                    times.append("switched \(switched)")
                 }
-                t = Date()
-                guard let png = ShotsWindow.picture() else { throw Stop(why: "\(id): no window to draw") }
-                let theme = dark ? "dark" : "light"
-                let way = landscape ? "landscape" : "portrait"
-                // Another theme the same picture, or another way up: it did not switch.
-                for (k, d) in drawn where d == png { throw Stop(why: "\(id): \(theme) \(way) drew the same picture as \(k)") }
-                drawn["\(theme) \(way)"] = png
-                for th in one == nil ? [theme] : ["light", "dark"] {
-                    let dir = turns ? out.appendingPathComponent(way).appendingPathComponent(th) : out.appendingPathComponent(th)
-                    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-                    try png.write(to: dir.appendingPathComponent("\(id).png"))
-                    try tree.write(to: dir.appendingPathComponent("\(id).tree.txt"), atomically: true, encoding: .utf8)
-                }
-                times.append("\(theme) \(turns ? way + " " : "")picture \(ms(t))")
+                let took = try shoot(id, tree)
+                times.append("\(name(at)) picture \(took)")
             }
-            say("\(id): \(steps.count) steps \(Int(stepped * 1000)) ms [\(each.joined(separator: "; "))], \(times.joined(separator: ", "))")
+            say("\(id): \(times.joined(separator: ", "))")
+        }
+        if at != ways[0] {
+            let back = try await go(ways[0])
+            say("back to \(name(ways[0])) \(back)")
+        }
+        // Then the rest, walked whole once a way: the sign-in's steps on the
+        // first walk alone; before each walk after, the app put back where
+        // the walk starts (`ArkHost.shotsReset`: what shows put away, the
+        // first section), then the next way switched.
+        for (k, w) in ways.enumerated() {
+            let walkBegan = Date()
+            if k > 0 {
+                let r = Date()
+                switch host.shotsReset() {
+                case .done: break
+                case let .failed(why), let .notYet(why): throw Stop(why: "reset: \(why)")
+                }
+                try await settled("reset")
+                let reset = ms(r)
+                let switched = try await go(w)
+                say("reset \(reset), switched \(switched)")
+            }
+            for shot in shots[first...] {
+                guard let id = shot["id"] as? String else { throw Stop(why: "a shot with no id") }
+                let steps = (k > 0 && shot["signIn"] as? Bool == true) ? [] : shot["steps"] as? [[String: Any]] ?? []
+                let t = Date()
+                var each: [String] = []
+                for step in steps { each.append(try await take(step, id)) }
+                let stepped = ms(t)
+                let tree = host.shotsTree()
+                let picture = try shoot(id, tree)
+                say("\(id) \(name(at)): \(steps.count) steps \(stepped) [\(each.joined(separator: "; "))], picture \(picture)")
+                // Within a walk, two shots of one picture: a step that went nowhere.
+                if let same = shots[first...].compactMap({ $0["id"] as? String }).first(where: { $0 != id && drawn[$0]?[name(at)] == drawn[id]?[name(at)] }) {
+                    throw Stop(why: "\(id) and \(same) drew the same picture \(name(at))")
+                }
+            }
+            say("the walk \(name(at)): \(ms(walkBegan))")
+        }
+        // Each screen's ways apart: one the same as another did not switch.
+        for (id, byWay) in drawn {
+            let ws = byWay.keys.sorted()
+            for (a, x) in ws.enumerated() { for y in ws[(a + 1)...] where byWay[x] == byWay[y] {
+                throw Stop(why: "\(id): \(x) and \(y) drew the same picture")
+            } }
         }
         #else
         throw Stop(why: "a walk is the iPhone's and the iPad's")
@@ -196,6 +240,10 @@ final class ShotsWalk {
         }
         let held = Ready.shared.held.map { "\(Int($0.at * 1000)) ms \($0.why)" }
         if !held.isEmpty { say("  \(what): ready in \(ms(t)), held by: \(held.joined(separator: " | "))") }
+    }
+
+    private func name(_ w: (dark: Bool, landscape: Bool)) -> String {
+        "\(w.dark ? "dark" : "light")\(w.landscape ? " landscape" : "")"
     }
 
     private func ms(_ since: Date) -> String { "\(Int(Date().timeIntervalSince(since) * 1000)) ms" }

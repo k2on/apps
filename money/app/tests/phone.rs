@@ -372,3 +372,31 @@ fn a_walk_goes_through_the_first_run() {
     // The server is asked on a thread of the host's: not idle until it answers.
     until("the server's answer", || host.idle());
 }
+
+/// A walk's reset (ui/docs/shots.md, "In the App"): the app put back where
+/// a walk starts — a sheet put away, the platform asked to put away its
+/// own pages — on its first section. Falsified by a sheet left up, or a
+/// section other than Budget's after it.
+#[test]
+fn a_walk_is_reset() {
+    let dir = tempfile::tempdir().unwrap();
+    let (host, app, _) = library(launch(dir.path(), true));
+    // The shell's view, as the generated library's `phone_host!` hands it.
+    let weak = Arc::downgrade(&app);
+    app.set_views(Box::new(move || {
+        let Some(a) = weak.upgrade() else { return vec![] };
+        let view = money_app::shell::view::money_shell::view(&a.page::<MoneyShell>());
+        let to = a.clone();
+        vec![ark_app::shots::Screen {
+            name: "shell".into(),
+            nodes: ark_app::shots::nodes(&view, std::rc::Rc::new(move |m| to.send::<MoneyShell>(m))),
+        }]
+    }));
+    until("the demo shows", || host.shows_app());
+    app.send::<MoneyShell>(ShellMsg::Select { tag: "insights".into() });
+    app.send::<MoneyShell>(ShellMsg::NewTransaction);
+    app.take_natives();
+    assert_eq!(host.shots_reset(), ShotsTook::Done);
+    assert_eq!(app.page::<MoneyShell>().section, "budget");
+    assert!(app.take_natives().contains(&ShellAsk::Reset));
+}

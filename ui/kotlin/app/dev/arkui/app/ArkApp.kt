@@ -171,6 +171,13 @@ public class ArkApp internal constructor(public val host: ArkHost) {
                     }
 
                 override fun tree(): String = host.shotsTree()
+
+                override fun reset(): ShotsWalk.Took =
+                    when (val t = host.shotsReset()) {
+                        is ShotsTook.Done -> ShotsWalk.Took.Done
+                        is ShotsTook.NotYet -> ShotsWalk.Took.NotYet(t.labels)
+                        is ShotsTook.Failed -> ShotsWalk.Took.Failed(t.why)
+                    }
             }
         host.start(shell)
     }

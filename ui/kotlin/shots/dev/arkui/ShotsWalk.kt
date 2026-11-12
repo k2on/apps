@@ -60,6 +60,9 @@ public object ShotsWalk {
 
         /** What is on the screen, as a step names it. */
         public fun tree(): String
+
+        /** The app put back where a walk starts once signed in, for the next walk. */
+        public fun reset(): Took = Took.Done
     }
 
     /** The app's steps, said before its activity's window is watched; none: a walk of no steps. */
@@ -124,44 +127,88 @@ public object ShotsWalk {
 
     private fun walk(plan: File, out: File, ui: UiModeManager, say: (String) -> Unit) {
         val p = JSONObject(plan.readText())
-        val shots = p.getJSONArray("shots")
+        val shots = (0 until p.getJSONArray("shots").length()).map { p.getJSONArray("shots").getJSONObject(it) }
         val one = p.optString("theme").takeIf { it.isNotEmpty() }
+        // The ways a screen is taken, in the order the walks go: light, then dark (a one-theme
+        // app's: one).
+        val ways = if (one != null) listOf(false) else listOf(false, true)
         var dark = false
         theme(ui, dark)
         settled("the first screen")
-        for (i in 0 until shots.length()) {
-            val shot = shots.getJSONObject(i)
+        val go = { to: Boolean ->
+            val t = System.currentTimeMillis()
+            dark = to
+            theme(ui, dark)
+            settled(if (dark) "dark" else "light")
+            System.currentTimeMillis() - t
+        }
+        val drawn = mutableMapOf<String, MutableMap<Boolean, Bitmap>>()
+        val shoot = { id: String, tree: String ->
+            val t = System.currentTimeMillis()
+            val picture = picture() ?: throw Stop("$id: no window to draw")
+            drawn.getOrPut(id) { mutableMapOf() }[dark] = picture
+            for (th in if (one != null) listOf("light", "dark") else listOf(if (dark) "dark" else "light")) {
+                val dir = File(out, th).apply { mkdirs() }
+                File(dir, "$id.png").outputStream().use { picture.compress(Bitmap.CompressFormat.PNG, 100, it) }
+                File(dir, "$id.tree.txt").writeText(tree)
+            }
+            System.currentTimeMillis() - t
+        }
+        // The shots before the sign-in's (its shot says `signIn`): the first run's pages, each
+        // taken every way at the start, then back to the first.
+        val first = shots.indexOfFirst { it.optBoolean("signIn") }.coerceAtLeast(0)
+        for (shot in shots.subList(0, first)) {
             val id = shot.getString("id")
             val steps = shot.optJSONArray("steps")
-            val n = steps?.length() ?: 0
-            var t = System.currentTimeMillis()
-            val each = (0 until n).map { k -> take(steps!!.getJSONObject(k).toString(), id) }
-            val stepped = System.currentTimeMillis() - t
+            for (k in 0 until (steps?.length() ?: 0)) take(steps!!.getJSONObject(k).toString(), id)
             val tree = this.steps?.tree() ?: ""
             val times = mutableListOf<String>()
-            var first: Bitmap? = null
-            for (pass in if (one != null) 0..0 else 0..1) {
-                if (pass == 1) {
-                    // The other theme, as the system's switch would set it: no relaunch.
-                    t = System.currentTimeMillis()
-                    dark = !dark
-                    theme(ui, dark)
-                    settled("$id in ${if (dark) "dark" else "light"}")
-                    times += "switched ${System.currentTimeMillis() - t} ms"
-                }
-                t = System.currentTimeMillis()
-                val picture = picture() ?: throw Stop("$id: no window to draw")
-                if (first != null && first.sameAs(picture)) throw Stop("$id: dark and light drew the same picture")
-                first = picture
-                val theme = if (dark) "dark" else "light"
-                for (t in if (one != null) listOf("light", "dark") else listOf(theme)) {
-                    val dir = File(out, t).apply { mkdirs() }
-                    File(dir, "$id.png").outputStream().use { picture.compress(Bitmap.CompressFormat.PNG, 100, it) }
-                    File(dir, "$id.tree.txt").writeText(tree)
-                }
-                times += "$theme picture ${System.currentTimeMillis() - t} ms"
+            ways.forEachIndexed { k, w ->
+                if (k > 0) times += "switched ${go(w)} ms"
+                times += "${if (dark) "dark" else "light"} picture ${shoot(id, tree)} ms"
             }
-            say("$id: $n steps $stepped ms [${each.joinToString("; ")}], ${times.joinToString(", ")}")
+            say("$id: ${times.joinToString(", ")}")
+        }
+        if (dark != ways[0]) say("back to light ${go(ways[0])} ms")
+        // Then the rest, walked whole once a way: the sign-in's steps on the first walk alone;
+        // before each walk after, the app put back where the walk starts (`ArkHost.shotsReset`),
+        // then the next way switched.
+        ways.forEachIndexed { k, w ->
+            val began = System.currentTimeMillis()
+            if (k > 0) {
+                val r = System.currentTimeMillis()
+                when (val took = this.steps?.reset() ?: Took.Done) {
+                    is Took.Done -> {}
+                    is Took.NotYet -> throw Stop("reset: ${took.labels}")
+                    is Took.Failed -> throw Stop("reset: ${took.why}")
+                }
+                settled("reset")
+                val reset = System.currentTimeMillis() - r
+                say("reset $reset ms, switched ${go(w)} ms")
+            }
+            for (shot in shots.subList(first, shots.size)) {
+                val id = shot.getString("id")
+                val all = shot.optJSONArray("steps")
+                val n = if (k > 0 && shot.optBoolean("signIn")) 0 else all?.length() ?: 0
+                val t = System.currentTimeMillis()
+                val each = (0 until n).map { take(all!!.getJSONObject(it).toString(), id) }
+                val stepped = System.currentTimeMillis() - t
+                val tree = this.steps?.tree() ?: ""
+                val took = shoot(id, tree)
+                val way = if (dark) "dark" else "light"
+                say("$id $way: $n steps $stepped ms [${each.joinToString("; ")}], picture $took ms")
+                // Within a walk, two shots of one picture: a step that went nowhere.
+                val mine = drawn[id]?.get(dark)
+                val same = shots.subList(first, shots.size).map { it.getString("id") }.firstOrNull { it != id && drawn[it]?.get(dark)?.sameAs(mine) == true }
+                if (same != null) throw Stop("$id and $same drew the same picture ($way)")
+            }
+            say("the walk ${if (dark) "dark" else "light"}: ${System.currentTimeMillis() - began} ms")
+        }
+        // Each screen's two themes apart: one the same as the other did not switch.
+        for ((id, by) in drawn) {
+            val l = by[false]
+            val d = by[true]
+            if (l != null && d != null && l.sameAs(d)) throw Stop("$id: light and dark drew the same picture")
         }
     }
 
