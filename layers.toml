@@ -36,7 +36,7 @@ external = ["proc-macro2", "quote", "syn"]
 # How an App Opts In).
 crates = [
   "ark-haptics", "ark-clipboard", "ark-share", "ark-camera", "ark-scanner",
-  "ark-media-player", "ark-notifications", "ark-background", "ark-secure-store",
+  "ark-media-player", "ark-notifications", "ark-background", "ark-secure-store", "ark-dpc",
   # Web Push's keys and sealing: the notifications' on a phone, the server's
   # sender's other end.
   "ark-push",

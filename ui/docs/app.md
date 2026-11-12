@@ -377,6 +377,7 @@ library, so its Kotlin package is `uniffi.ark_<name>`.
 | ark-notifications | `ark-notifications` | `PhoneNotifications` (UNUserNotificationCenter; APNs) | `PhoneNotifications` (NotificationManager, AlarmManager; UnifiedPush) | Unavailable | Unavailable |
 | ark-background | `ark-background` | `PhoneBackground` (BGTaskScheduler; NSBackgroundActivityScheduler) | `PhoneBackground` (JobScheduler) | Unavailable | Unavailable |
 | ark-secure-store | `ark-secure-store` | `PhoneSecureStore` (the keychain: the bundle id's generic passwords, this device only) | `PhoneSecureStore` (an Android keystore AES-GCM key; the ciphertext in private preferences kept out of backups) | `SecretService` (feature `desktop`: the Secret Service over D-Bus; Unavailable without one) | Unavailable |
+| ark-dpc | `ark-dpc` | Unavailable: no app manages an iPhone or a Mac | `PhoneDpc` (DevicePolicyManager, as the device owner `ArkDpcAdmin`) | Unavailable | — |
 
 **MediaPlayer** is one sound at a time, what the system shows of it, its
 controls as events (`Remote`) the app decides, and a browse tree for a car
@@ -401,7 +402,11 @@ projects (below): each module's `swift/` and `kotlin/` among the
 sources; its `[ios.info]` keys (the app's own win), `[ios] entitlements`
 and `background-modes` (`UIBackgroundModes`); its `[android]`
 `permissions`, `services` (a `<service>` with its actions and
-foreground type), `meta-data` and Maven `dependencies`. A device the phone
+foreground type), `receivers` (a `<receiver>` with its actions, the
+permission a sender must hold and meta-data of its own), `meta-data` and
+Maven `dependencies`; and its `res/`, each resource named for the module
+(ark-dpc's `xml/ark_dpc_admin.xml`), which `checks.prebuild` holds, as it
+holds a receiver's meta-data to a resource the module has. A device the phone
 hands the process says how in its module.toml's `[phone]` (the ark-ffi
 method that registers it, and how Swift and Kotlin make it): the generated
 `@main` and activity register each one as the process's
@@ -994,6 +999,7 @@ permissions = ["android.permission.INTERNET"]
 features = [{ name = "android.hardware.camera", required = false }]
 hosts = ["auth", "join"]       # the scheme's hosts
 dependencies = []              # Maven coordinates beyond ArkUI's template (its graph is ui/kotlin/android/deps.json)
+launcher = true                # false: no icon in the launcher (a device owner's, ark-dpc)
 
 [ffi]                          # the phones' library, generated ("The Phones' Library")
 host = "MoneyHost"             # the object the phone holds
@@ -1030,6 +1036,7 @@ permissions = ["android.permission.FOREGROUND_SERVICE"]
 dependencies = ["androidx.media3:media3-session:1.5.1"]
 services = [{ name = "dev.arkui.modules.PlayerService", foreground = "mediaPlayback", actions = ["androidx.media3.session.MediaSessionService"] }]
 meta-data = [{ name = "com.google.android.gms.car.application", resource = "@xml/automotive_app_desc" }]
+receivers = [{ name = "dev.arkui.modules.ArkDpcAdmin", exported = true, permission = "android.permission.BIND_DEVICE_ADMIN", actions = ["android.app.action.DEVICE_ADMIN_ENABLED"], meta-data = [{ name = "android.app.device_admin", resource = "@xml/ark_dpc_admin" }] }]
 ```
 
 `checks.prebuild` holds every app.toml to what it must say, every module

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- ark-dpc's device admin (modules/ark-dpc/README.md): what ArkDpcAdmin is
+     declared able to do. A device owner's powers (the always-on VPN, user
+     restrictions, uninstalls, permissions) need none of these; locking the
+     phone and wiping it do, which an app may ask of its owner later. -->
+<device-admin>
+    <uses-policies>
+        <force-lock />
+        <wipe-data />
+    </uses-policies>
+</device-admin>

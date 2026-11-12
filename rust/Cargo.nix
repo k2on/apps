@@ -97,6 +97,16 @@ rec {
       # File a bug if you depend on any for non-debug work!
       debug = internal.debugCrate { inherit packageId; };
     };
+    "ark-dpc" = rec {
+      packageId = "ark-dpc";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "ark-dpc";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
     "ark-ffi" = rec {
       packageId = "ark-ffi";
       build = internal.buildRustCrateWithFeatures {
@@ -1526,6 +1536,29 @@ rec {
         };
         resolvedDefaultFeatures = [ "desktop" "ffi" "web" ];
       };
+      "ark-dpc" = rec {
+        crateName = "ark-dpc";
+        version = "0.1.0";
+        edition = "2021";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../modules/ark-dpc; };
+        libName = "ark_dpc";
+        dependencies = [
+          {
+            name = "ark-module";
+            packageId = "ark-module";
+          }
+          {
+            name = "uniffi";
+            packageId = "uniffi";
+            optional = true;
+            usesDefaultFeatures = false;
+          }
+        ];
+        features = {
+          "ffi" = [ "dep:uniffi" ];
+        };
+        resolvedDefaultFeatures = [ "ffi" ];
+      };
       "ark-ffi" = rec {
         crateName = "ark-ffi";
         version = "0.1.0";
@@ -1568,6 +1601,12 @@ rec {
           {
             name = "ark-clipboard";
             packageId = "ark-clipboard";
+            optional = true;
+            features = [ "ffi" ];
+          }
+          {
+            name = "ark-dpc";
+            packageId = "ark-dpc";
             optional = true;
             features = [ "ffi" ];
           }
@@ -1659,12 +1698,13 @@ rec {
           "bindgen" = [ "uniffi/cli" "uniffi/cargo-metadata" ];
           "camera" = [ "dep:ark-camera" ];
           "clipboard" = [ "dep:ark-clipboard" ];
+          "dpc" = [ "dep:ark-dpc" ];
           "haptics" = [ "dep:ark-haptics" ];
           "model" = [ "scanner" "ark-scanner/model" ];
           "scanner" = [ "camera" "dep:ark-scanner" ];
           "share" = [ "dep:ark-share" ];
         };
-        resolvedDefaultFeatures = [ "bindgen" "camera" "clipboard" "haptics" "model" "scanner" "share" ];
+        resolvedDefaultFeatures = [ "bindgen" "camera" "clipboard" "dpc" "haptics" "model" "scanner" "share" ];
       };
       "ark-format" = rec {
         crateName = "ark-format";

@@ -56,6 +56,18 @@ impl ArkProcess {
     }
 }
 
+#[cfg(feature = "dpc")]
+#[uniffi::export]
+impl ArkProcess {
+    /// The phone's device owner (ark-dpc): Android's DevicePolicyManager as
+    /// the admin `ArkDpcAdmin`, once the app is made the device owner.
+    pub fn register_dpc(&self, device: Arc<dyn ark_dpc::phone::Dpc>) {
+        self.add_modules(|m| {
+            m.set(Some(ark_dpc::phone::port(device)));
+        })
+    }
+}
+
 #[cfg(feature = "scanner")]
 #[uniffi::export]
 impl ArkProcess {
