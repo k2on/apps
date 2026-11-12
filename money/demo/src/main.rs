@@ -54,9 +54,9 @@ fn seed() -> Result<PathBuf, Failed> {
         return Err(Failed::Usage);
     };
     let now = ark_peer::now_ms();
-    // A day given is the household's today, its clock no later than that
-    // day's noon (UTC) nor than now: written at once, what it holds is the
-    // same household the phones' demo opens on that day.
+    // A day given is the household's today, its clock now on that day, and
+    // that day's noon (UTC) on another (the phones' demo's on a fixed day):
+    // the same household the demo opens on that day.
     let (today, now) = match day.filter(|d| !d.trim().is_empty()) {
         None => (money_core::dates::day_of_ms(now), now),
         Some(d) => {
@@ -64,7 +64,9 @@ fn seed() -> Result<PathBuf, Failed> {
                 return Err(Failed::Usage);
             };
             let noon = money_core::dates::days_from_civil(y, m, dd) * 86_400_000 + 43_200_000;
-            (d.trim().to_string(), noon.min(now))
+            let d = d.trim().to_string();
+            let now = if money_core::dates::day_of_ms(now) == d { now } else { noon };
+            (d, now)
         }
     };
     let data = PathBuf::from(data);
