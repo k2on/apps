@@ -70,16 +70,11 @@ for a in "$@"; do
   first=true
   for k in $kinds; do
     kind=${k%%:*} orientation=${k#*:}
-    # The shots, then each of the `screens` that is `on` this device:
-    # opened by its launch arguments alone, the app launched with
-    # shots.json's `launch.ios` (a demo on a fixed day), in one launch where
-    # the app takes a screen's arguments by a link (`links`). The shots are
-    # launched with it too, so every shot of a pass is of one household:
-    # with none, money's `shots` were the server's household, seeded on
-    # the run's day, and its `screens` the demo's on the reference's day
-    # (app-screens 43131582873: `accounts` -$227,774.43, `03-accounts`
-    # -$225,050.82, the relaunch between them).
-    shots=$(jq -c --arg k "$kind" '(.launch.ios // []) as $l | (.shots | map(.launch //= $l)) + [.screens // [] | .[] | select((.on // []) | index($k)) | {id, launch: $l, args: (.args // []), steps: (.steps // []), route, fresh}] | map(with_entries(select(.value != null)))' "$a/demo/shots.json")
+    # The shots, then each of the `screens` that is `on` this device,
+    # opened by its launch arguments alone, in one launch where the app
+    # takes a screen's arguments by a link (`links`), signed in to the
+    # app's server: the household every phone and tablet is of.
+    shots=$(jq -c --arg k "$kind" '.shots + [.screens // [] | .[] | select((.on // []) | index($k)) | {id, args: (.args // []), steps: (.steps // []), route, fresh}] | map(with_entries(select(.value != null)))' "$a/demo/shots.json")
     links=$(jq '.links == true' "$a/demo/shots.json")
     jq --arg b "$bundle" --arg s "$server" --arg u "$user" --arg sc "$scheme" --arg o "$out/$a/$kind" \
       --arg or "$orientation" --argjson signed "$([ "$first" = true ] && echo false || echo true)" --argjson shots "$shots" \

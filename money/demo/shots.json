@@ -1,5 +1,5 @@
 {
-  "_": "money's screenshots (.github/screens/apps.md; which phones it is on is flake.nix's list, `publish`): its server is server.sh, signed in to as `user`; the app opened once for each device and theme and every shot taken in that one launch, in order: the shots' steps from where the last left it, then each of `screens` by its launch arguments as a launch link (`links`: the shell puts back what it showed, then opens that screen, as a launch would). A screen's `route` is its address, which every shell takes as the same launch (money_app's `ShellMsg::Address`, held to its `args` by `every_shot_route_is_its_launch`): a driver should open the `route` alone where there is one, not the arguments and then the route. `desktop` is the iced window's (ui/rust/shots): its size, and its shots, each clicking what a text on the screen says, in one window. Its accounts are Checking's register, its transactions all accounts'. `welcome`, the first run's pages (its route, welcome/), is the last of `screens`, `fresh`: what it leaves up is no place for a launch link (taken before the screens, on Android the next link was lost under the pages and `a-category-vacation-inspector` came out as `budget`).",
+  "_": "money's screenshots (.github/screens/apps.md; which phones it is on is flake.nix's list, `publish`): its server is server.sh, seeded up to the run's day (DEMO_DAY), signed in to as `user`, who goes by `name`; every phone and tablet signs in to it, so each shows one household on one day. The app opened once for each device and theme and every shot taken in that one launch, in order: each of `screens` that is `on` the device, by its launch arguments as a launch link (`links`: the shell puts back what it showed, then opens that screen, as a launch would). A screen's `route` is its address, which every shell takes as the same launch (money_app's `ShellMsg::Address`, held to its `args` by `every_shot_route_is_its_launch`): a driver should open the `route` alone where there is one, not the arguments and then the route. `desktop` is the iced window's (ui/rust/shots): its size, and its shots, each clicking what a text on the screen says, in one window. Its accounts are Checking's register, its transactions all accounts'. `welcome`, the first run's pages (its route, welcome/), is the last of `screens`, `fresh`: what it leaves up is no place for a launch link (taken before the screens, on Android the next link was lost under the pages and a category came out as `budget`).",
   "server": {
     "port": 8788,
     "user": "alex",
@@ -7,44 +7,7 @@
     "picture": "nix/demo/alex.jpg"
   },
   "links": true,
-  "shots": [
-    {
-      "id": "budget",
-      "steps": [
-        {
-          "tap": "Budget",
-          "role": "tab"
-        }
-      ]
-    },
-    {
-      "id": "accounts",
-      "steps": [
-        {
-          "tap": "Accounts",
-          "role": "tab"
-        }
-      ]
-    },
-    {
-      "id": "transactions",
-      "steps": [
-        {
-          "tap": "Transactions",
-          "role": "tab"
-        }
-      ]
-    },
-    {
-      "id": "insights",
-      "steps": [
-        {
-          "tap": "Insights",
-          "role": "tab"
-        }
-      ]
-    }
-  ],
+  "shots": [],
   "desktop": {
     "window": [
       1440,
@@ -112,7 +75,7 @@
     "logo": "money/icon.svg",
     "screen": "budget"
   },
-  "_screens": "`screens`: each opened by its launch arguments alone (ark_app::shell::Launch, the reference's names: .github/screens/apps.md), on the Apple devices it is `on` (ios, ipad-portrait, ipad-landscape, mac); its id is the reference app's shot's (reference/universal-budget/ci/shots.sh on the design-ref branch), so the two pair. `launch.mac` is the Mac's own arguments before each: the demo's household (no browser signs the Mac in) at 1440x900; `launch.ios` the iPhone's and the iPad's: the same demo, whatever the server signed in, for `shots` as well as `screens`, so a pass's every shot is of one household (apps-ios.sh). Both seed it to the reference's day (its SampleData's `today`), so the month and the household's days are the reference's.",
+  "_screens": "`screens`: one list, each screen opened by its launch arguments alone (ark_app::shell::Launch: .github/screens/apps.md) on the devices it is `on`, under one id on all of them. The phones (`ios`, `android`) and the larger screens (`ipad-portrait`, `ipad-landscape`, `android-tablet`, `fold-unfolded`, `fold-folded`) take the same screens in the same order: the budget, a category, the accounts, an account's register, To Review, a transaction (the newest with a receipt), a new transaction, Insights, Settings, the budget's Auto-Assign menu, then the first run's pages. A category and a transaction are two entries, one id: on the larger screens in the inspector (`-inspector 1`), on a phone as the platform shows them (Category Details, the transaction's form). The Mac (`mac`) takes them too but for the menu and the pages: it has no step driver and no fresh launch, and no browser to sign it in, so `launch.mac` opens the demo's household before each (at 1440x900), on the run's day (app-mac.sh gives `-demo` DEMO_DAY), the same household the server is seeded with.",
   "launch": {
     "mac": [
       "-demo",
@@ -121,15 +84,11 @@
       "1440x900",
       "-ApplePersistenceIgnoreState",
       "YES"
-    ],
-    "ios": [
-      "-demo",
-      "2026-11-18"
     ]
   },
   "screens": [
     {
-      "id": "01-budget",
+      "id": "budget",
       "args": [
         "-screen",
         "budget"
@@ -137,101 +96,29 @@
       "route": "/budget",
       "on": [
         "ios",
-        "ipad-portrait"
+        "android",
+        "ipad-portrait",
+        "ipad-landscape",
+        "android-tablet",
+        "fold-unfolded",
+        "fold-folded",
+        "mac"
       ]
     },
     {
-      "id": "02-category-dining",
+      "id": "category",
       "args": [
         "-screen",
         "category:dining"
       ],
       "route": "/category/dining",
       "on": [
-        "ios"
-      ]
-    },
-    {
-      "id": "03-accounts",
-      "args": [
-        "-screen",
-        "accounts"
-      ],
-      "route": "/accounts",
-      "on": [
-        "ios"
-      ]
-    },
-    {
-      "id": "04-account-visa",
-      "args": [
-        "-screen",
-        "account:sapphire"
-      ],
-      "route": "/account/sapphire",
-      "on": [
-        "ios"
-      ]
-    },
-    {
-      "id": "05-review",
-      "args": [
-        "-screen",
-        "review"
-      ],
-      "route": "/inbox",
-      "on": [
-        "ios"
-      ]
-    },
-    {
-      "id": "06-transaction-receipt",
-      "args": [
-        "-screen",
-        "transaction:receipt"
-      ],
-      "route": "/transaction/receipt",
-      "on": [
-        "ios"
-      ]
-    },
-    {
-      "id": "07-add-transaction",
-      "args": [
-        "-screen",
-        "add-transaction"
-      ],
-      "route": "/transactions?sheet=new-transaction",
-      "on": [
         "ios",
-        "mac"
+        "android"
       ]
     },
     {
-      "id": "08-insights",
-      "args": [
-        "-screen",
-        "insights"
-      ],
-      "route": "/insights",
-      "on": [
-        "ios"
-      ]
-    },
-    {
-      "id": "02-transactions",
-      "args": [
-        "-screen",
-        "transactions"
-      ],
-      "route": "/transactions",
-      "on": [
-        "ipad-portrait",
-        "mac"
-      ]
-    },
-    {
-      "id": "03-category-dining-inspector",
+      "id": "category",
       "args": [
         "-screen",
         "category:dining",
@@ -240,159 +127,82 @@
       ],
       "route": "/category/dining?inspector=1",
       "on": [
-        "ipad-portrait"
-      ]
-    },
-    {
-      "id": "04-review",
-      "args": [
-        "-screen",
-        "review"
-      ],
-      "route": "/inbox",
-      "on": [
-        "ipad-portrait"
-      ]
-    },
-    {
-      "id": "01-category-vacation-inspector",
-      "args": [
-        "-screen",
-        "category:vacation",
-        "-inspector",
-        "1"
-      ],
-      "route": "/category/vacation?inspector=1",
-      "on": [
+        "ipad-portrait",
         "ipad-landscape",
+        "android-tablet",
+        "fold-unfolded",
+        "fold-folded",
         "mac"
       ]
     },
     {
-      "id": "02-transaction-receipt-inspector",
+      "id": "accounts",
       "args": [
         "-screen",
-        "transaction:receipt",
-        "-inspector",
-        "1"
+        "accounts"
       ],
-      "route": "/transaction/receipt?inspector=1",
+      "route": "/accounts",
       "on": [
-        "ipad-landscape"
+        "ios",
+        "android",
+        "ipad-portrait",
+        "ipad-landscape",
+        "android-tablet",
+        "fold-unfolded",
+        "fold-folded",
+        "mac"
       ]
     },
     {
-      "id": "03-account-checking",
+      "id": "account",
       "args": [
         "-screen",
         "account:checking"
       ],
       "route": "/account/checking",
       "on": [
-        "ipad-landscape"
-      ]
-    },
-    {
-      "id": "04-insights",
-      "args": [
-        "-screen",
-        "insights"
-      ],
-      "route": "/insights",
-      "on": [
-        "ipad-landscape"
-      ]
-    },
-    {
-      "id": "06-settings-household",
-      "args": [
-        "-screen",
-        "settings",
-        "-settingsTab",
-        "household"
-      ],
-      "route": "/settings?pane=household",
-      "on": [
-        "ipad-landscape"
-      ]
-    },
-    {
-      "id": "03-transaction-receipt-inspector",
-      "args": [
-        "-screen",
-        "transaction:receipt",
-        "-inspector",
-        "1"
-      ],
-      "route": "/transaction/receipt?inspector=1",
-      "on": [
+        "ios",
+        "android",
+        "ipad-portrait",
+        "ipad-landscape",
+        "android-tablet",
+        "fold-unfolded",
+        "fold-folded",
         "mac"
       ]
     },
     {
-      "id": "04-account-checking",
-      "args": [
-        "-screen",
-        "account:checking"
-      ],
-      "route": "/account/checking",
-      "on": [
-        "mac"
-      ]
-    },
-    {
-      "id": "05-review",
+      "id": "review",
       "args": [
         "-screen",
         "review"
       ],
       "route": "/inbox",
       "on": [
-        "mac"
-      ]
-    },
-    {
-      "id": "06-insights",
-      "args": [
-        "-screen",
-        "insights"
-      ],
-      "route": "/insights",
-      "on": [
-        "mac"
-      ]
-    },
-    {
-      "id": "08-settings-banks",
-      "args": [
-        "-screen",
-        "settings",
-        "-settingsTab",
-        "banks"
-      ],
-      "route": "/settings?pane=banks",
-      "on": [
-        "mac"
-      ]
-    },
-    {
-      "id": "a-category-vacation-inspector",
-      "args": [
-        "-screen",
-        "category:vacation",
-        "-inspector",
-        "1"
-      ],
-      "route": "/category/vacation?inspector=1",
-      "on": [
+        "ios",
         "android",
+        "ipad-portrait",
+        "ipad-landscape",
         "android-tablet",
         "fold-unfolded",
-        "fold-folded"
+        "fold-folded",
+        "mac"
       ]
     },
     {
-      "id": "a-transaction-receipt-inspector",
+      "id": "transaction",
+      "args": [
+        "-screen",
+        "transaction:receipt"
+      ],
+      "route": "/transaction/receipt",
+      "on": [
+        "ios",
+        "android"
+      ]
+    },
+    {
+      "id": "transaction",
       "args": [
         "-screen",
         "transaction:receipt",
@@ -401,42 +211,70 @@
       ],
       "route": "/transaction/receipt?inspector=1",
       "on": [
-        "android",
+        "ipad-portrait",
+        "ipad-landscape",
         "android-tablet",
         "fold-unfolded",
-        "fold-folded"
+        "fold-folded",
+        "mac"
       ]
     },
     {
-      "id": "a-account-checking",
+      "id": "add-transaction",
       "args": [
         "-screen",
-        "account:checking"
+        "add-transaction"
       ],
-      "route": "/account/checking",
+      "route": "/transactions?sheet=new-transaction",
       "on": [
+        "ios",
         "android",
+        "ipad-portrait",
+        "ipad-landscape",
         "android-tablet",
         "fold-unfolded",
-        "fold-folded"
+        "fold-folded",
+        "mac"
       ]
     },
     {
-      "id": "a-settings",
+      "id": "insights",
+      "args": [
+        "-screen",
+        "insights"
+      ],
+      "route": "/insights",
+      "on": [
+        "ios",
+        "android",
+        "ipad-portrait",
+        "ipad-landscape",
+        "android-tablet",
+        "fold-unfolded",
+        "fold-folded",
+        "mac"
+      ]
+    },
+    {
+      "id": "settings",
       "args": [
         "-screen",
         "settings"
       ],
       "route": "/settings",
       "on": [
+        "ios",
         "android",
+        "ipad-portrait",
+        "ipad-landscape",
         "android-tablet",
         "fold-unfolded",
-        "fold-folded"
+        "fold-folded",
+        "mac"
       ]
     },
     {
-      "id": "t-auto-assign-menu",
+      "id": "auto-assign-menu",
       "args": [
         "-screen",
         "budget"
@@ -455,9 +293,12 @@
       ],
       "on": [
         "ios",
-        "ipad-portrait",
         "android",
-        "android-tablet"
+        "ipad-portrait",
+        "ipad-landscape",
+        "android-tablet",
+        "fold-unfolded",
+        "fold-folded"
       ]
     },
     {
@@ -466,9 +307,9 @@
       "route": "welcome/",
       "on": [
         "ios",
+        "android",
         "ipad-portrait",
         "ipad-landscape",
-        "android",
         "android-tablet",
         "fold-unfolded",
         "fold-folded"
@@ -499,15 +340,15 @@
     },
     "shots": [
       {
-        "id": "09-settings-household",
+        "id": "settings-household",
         "query": "screen=settings&pane=household"
       },
       {
-        "id": "10-context-menu",
+        "id": "context-menu",
         "query": "screen=budget&context=Groceries"
       },
       {
-        "id": "11-submenu",
+        "id": "submenu",
         "query": "screen=budget&context=Groceries",
         "steps": [
           {
@@ -522,15 +363,15 @@
         ]
       },
       {
-        "id": "12-auto-assign-menu",
+        "id": "auto-assign-menu",
         "query": "screen=budget&menu=auto-assign"
       },
       {
-        "id": "13-date-picker",
+        "id": "date-picker",
         "query": "screen=add-transaction&popover=date"
       },
       {
-        "id": "14-search-suggestions",
+        "id": "search-suggestions",
         "query": "screen=transactions",
         "steps": [
           {
@@ -546,7 +387,7 @@
         ]
       },
       {
-        "id": "15-approve-all",
+        "id": "approve-all",
         "query": "screen=transactions",
         "steps": [
           {
@@ -555,11 +396,11 @@
         ]
       },
       {
-        "id": "16-command-box",
+        "id": "command-box",
         "query": "command=Month"
       },
       {
-        "id": "17-keys-panel",
+        "id": "keys-panel",
         "query": "screen=budget&keys=1",
         "sizes": [
           "mac",
@@ -567,7 +408,7 @@
         ]
       },
       {
-        "id": "18-categorize-submenu",
+        "id": "categorize-submenu",
         "query": "screen=transactions&context=Target",
         "steps": [
           {
@@ -603,7 +444,7 @@
         ]
       },
       {
-        "id": "19-category-picker",
+        "id": "category-picker",
         "query": "screen=add-transaction&menu=category",
         "steps": [
           {
@@ -621,7 +462,7 @@
         ]
       },
       {
-        "id": "20-keys-cursor",
+        "id": "keys-cursor",
         "query": "screen=budget",
         "steps": [
           {

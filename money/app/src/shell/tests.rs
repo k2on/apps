@@ -471,7 +471,7 @@ fn every_shot_route_is_its_launch() {
         );
         n += 1;
     }
-    assert!(n >= 20, "the shots' routes: {n}");
+    assert!(n >= 12, "the shots' routes: {n}");
 }
 
 /// The appearance follows the device's by default, everywhere the shell

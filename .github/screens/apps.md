@@ -77,8 +77,8 @@ All of it is in `<app>/demo/`:
   in the running app, `<scheme>://?screen=category%3Adining&inspector=1`,
   the browser's spelling of them, which the shell takes as a launch — what
   it showed put back first (its sheets, pages, inspector, search, Settings),
-  then that screen — and the app is opened again only when the launch
-  arguments that must be there from the start change (`launch.ios`'s demo). On the iPhone and the iPad they are the
+  then that screen — and the app is opened again only for a `fresh` shot.
+  On the iPhone and the iPad they are the
   process's launch arguments, which an app reads from UserDefaults'
   argument domain (`UserDefaults.standard.string(forKey: "screen")`); on
   Android each `-<key> <value>` pair is a string extra of the launch
@@ -114,26 +114,36 @@ All of it is in `<app>/demo/`:
   `android`, `android-tablet`, `fold-unfolded`, `fold-folded`):
 
   ```json
-  "launch": { "mac": ["-demo", "YES", "-window", "1440x900"] },
+  "launch": { "mac": ["-demo", "2026-11-18", "-window", "1440x900"] },
   "screens": [
-    { "id": "01-category-vacation-inspector", "args": ["-screen", "category:vacation", "-inspector", "1"], "on": ["ipad-landscape", "mac"] }
+    { "id": "category", "args": ["-screen", "category:dining"], "on": ["ios", "android"] },
+    { "id": "category", "args": ["-screen", "category:dining", "-inspector", "1"], "on": ["ipad-portrait", "ipad-landscape", "android-tablet", "fold-unfolded", "fold-folded", "mac"] }
   ]
   ```
+
+  **One list, one id for a screen on every device.** The phones take the
+  same screens in the same order, and so do the larger screens (the iPad
+  either way up, Android's tablet, the Fold open and folded); a screen
+  that each shows its own way (money's category: Category Details on a
+  phone, the inspector on a larger screen) is two entries under one id,
+  so the same screen is the same file on every device and `compare.py`
+  and the docs hold it against itself. money's: `budget`, `category`,
+  `accounts`, `account` (Checking's register), `review`, `transaction`
+  (the newest with a receipt), `add-transaction`, `insights`, `settings`,
+  `auto-assign-menu`, then `welcome`; the Mac's are the same but the last
+  two.
 
   Every Ark app's shell reads them (`ark_app::shell::Launch`: `-screen
   <place>[:item]`, `-inspector 1`, `-appearance`, `-pane`), the iPhone's
   and the Mac's from the process's arguments (XCUITest's
   `launchArguments`, a Mac app's command line), Android's from the launch
   intent's string array `ark.args` (`am start --esa ark.args
-  -screen,budget`), the desktop's from its command line. `launch.mac` goes
-  before each screen's on the Mac, which no browser signs in for, and
-  `launch.ios` before each on the iPhone and the iPad, and before each of
-  `shots` that has no `launch` of its own, so a pass's every shot is of one
-  household: money's opens its demo household on the reference's day
-  (`-demo 2026-11-18`), for that launch alone, whatever the server signed
-  in. money's ids are the reference app's
-  (`reference/universal-budget` on the design-ref branch), so the two
-  pair.
+  -screen,budget`), the desktop's from its command line. Every phone and
+  tablet is signed in to the app's server as `server.user`, so every shot
+  of a run is of one household, on one day (`DEMO_DAY`, `server.sh`
+  below). `launch.mac` goes before each screen's on the Mac, which no
+  browser signs in for: money's opens its demo household, the one its
+  server is seeded with, and `app-mac.sh` gives its `-demo` the run's day.
 
 - **`server.sh`** (only for an app with a server):
   `server.sh <dir> <listen address>`, run from the repository's root,

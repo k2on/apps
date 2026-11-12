@@ -5,7 +5,7 @@
 //   [{"bundle": …, "server"?: …, "user"?: …, "scheme"?: …, "out": <dir>,
 //     "orientation"?: "portrait"|"landscape", "signedIn"?: true,
 //     "links"?: true,
-//     "shots": [{"id": …, "launch"?: [launch arguments], "args"?: [a screen's],
+//     "shots": [{"id": …, "args"?: [a screen's],
 //                "route"?: <path>, "fresh"?: true,
 //                "steps": [{"tap": label, "role"?: …} | {"type": text} | {"await": label} | …]}]}]
 //
@@ -26,9 +26,8 @@
 // put back first, ui/docs/shots.md) where the app says it takes them
 // (`links`), by its `route` as a link (`<scheme>://<route>`), and by its
 // steps. The app is launched again only for a shot that says it needs a
-// clean start (`fresh`), whose `launch` arguments are not the running
-// app's (money's demo household, `-demo <day>`), or whose `args` the app
-// takes only at launch; `relaunch` in a step starts it again. Every wait
+// clean start (`fresh`), or whose `args` the app takes only at launch;
+// `relaunch` in a step starts it again. Every wait
 // has a limit, which only fails the shot.
 //
 // A tap's label is what the element says or its accessibility identifier;
@@ -85,10 +84,6 @@ struct Shot: Decodable {
 
     var id: String
     var steps: [Step] = []
-    /// What the app must be launched with for this shot (shots.json's
-    /// `launch.ios`, before each of its `screens`): another launch when the
-    /// running app's differ.
-    var launch: [String] = []
     /// The screen's own launch arguments (shots.json's `screens`): a link
     /// in the running app where the app takes them so (`links`).
     var args: [String] = []
@@ -98,13 +93,12 @@ struct Shot: Decodable {
     /// playing, a sheet) would not do.
     var fresh = false
 
-    enum CodingKeys: String, CodingKey { case id, steps, launch, args, route, fresh }
+    enum CodingKeys: String, CodingKey { case id, steps, args, route, fresh }
 
     init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
         id = try c.decode(String.self, forKey: .id)
         steps = try c.decodeIfPresent([Step].self, forKey: .steps) ?? []
-        launch = try c.decodeIfPresent([String].self, forKey: .launch) ?? []
         args = try c.decodeIfPresent([String].self, forKey: .args) ?? []
         route = try c.decodeIfPresent(String.self, forKey: .route)
         fresh = try c.decodeIfPresent(Bool.self, forKey: .fresh) ?? false
@@ -117,8 +111,8 @@ private let readyLimit: TimeInterval = 60
 final class Drive: XCTestCase {
     private let env = ProcessInfo.processInfo.environment
     private let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
-    /// The launch arguments each running app was launched with.
-    private var launched: [String: [String]] = [:]
+    /// The apps launched in this theme's pass.
+    private var launched: Set<String> = []
     /// The screen arguments each running app was last brought to (at its
     /// launch, or by a link since).
     private var screen: [String: [String]] = [:]
@@ -160,12 +154,12 @@ final class Drive: XCTestCase {
         }
         // Signed in once, in the first theme, from a launch with no arguments.
         if theme == "light", entry.signedIn != true, let server = entry.server, !server.isEmpty {
-            launch(app, entry, launch: [], args: [])
+            launch(app, entry, args: [])
             try signedIn(app, server: server, user: entry.user ?? "", out: out)
         }
         // Launched once for this theme: its first shot opens it afresh, as
         // the theme was set with the app wherever another left it.
-        launched[entry.bundle] = nil
+        launched.remove(entry.bundle)
         for shot in entry.shots {
             do {
                 let start = Date()
@@ -191,18 +185,17 @@ final class Drive: XCTestCase {
     }
 
     /// The app at `shot`, in the app as it runs where it can be: launched
-    /// afresh only for the theme's first shot, a `fresh` one, one whose
-    /// `launch` arguments are not the running app's, or one whose screen
-    /// arguments the app takes only at launch; else its screen arguments
+    /// afresh only for the theme's first shot, a `fresh` one, or one whose
+    /// screen arguments the app takes only at launch; else its screen arguments
     /// as a launch link (`links`), its route as a link, or from where the
     /// last shot left it. Then each step, each followed by the app's next
     /// ready moment.
     private func open(_ shot: Shot, in app: XCUIApplication, entry: Entry, out: URL) throws {
         let links = entry.links == true && entry.scheme?.isEmpty == false
-        let relaunch = shot.fresh || launched[entry.bundle] != shot.launch || app.state != .runningForeground
+        let relaunch = shot.fresh || !launched.contains(entry.bundle) || app.state != .runningForeground
             || (!links && !shot.args.isEmpty && screen[entry.bundle] != shot.args)
         if relaunch {
-            launch(app, entry, launch: shot.launch, args: shot.args)
+            launch(app, entry, args: shot.args)
             reached = shot.fresh ? "launched (fresh)" : "launched"
         } else if !shot.args.isEmpty, links, let url = link(query(shot.args), scheme: entry.scheme) {
             // Its screen as a launch link: what the last shot showed put back first.
@@ -238,7 +231,7 @@ final class Drive: XCTestCase {
                 try ready(app, after: g)
             }
             if step.relaunch == true {
-                launch(app, entry, launch: launched[entry.bundle] ?? [], args: screen[entry.bundle] ?? [])
+                launch(app, entry, args: screen[entry.bundle] ?? [])
             }
             if let text = step.type {
                 app.typeText(text)
@@ -365,17 +358,16 @@ final class Drive: XCTestCase {
         return "?" + (c.percentEncodedQuery ?? "").replacingOccurrences(of: ":", with: "%3A")
     }
 
-    /// `app` launched afresh with `launch` and then `args`, in screenshot
-    /// mode, and ready.
-    private func launch(_ app: XCUIApplication, _ entry: Entry, launch: [String], args: [String]) {
+    /// `app` launched afresh with `args`, in screenshot mode, and ready.
+    private func launch(_ app: XCUIApplication, _ entry: Entry, args: [String]) {
         app.terminate()
         // From the home screen, so the status bar has no way back to the app
         // that was in front before (a "◂ Money" over harken's shots, run
         // 43083062235's dark pass, and over each app's first in 42977527249).
         XCUIDevice.shared.press(.home)
-        app.launchArguments = ["-shots", "YES"] + launch + args
+        app.launchArguments = ["-shots", "YES"] + args
         app.launch()
-        launched[entry.bundle] = launch
+        launched.insert(entry.bundle)
         screen[entry.bundle] = args
         _ = try? ready(app)
     }
