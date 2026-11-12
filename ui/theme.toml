@@ -387,6 +387,12 @@ section-gap = 24.0
 # title, its confirm).
 wide-button-height = 50.0
 sheet-bar-height = 56.0
+# A searchable dropdown (a category or an account chosen by typing): as
+# wide as the toolbar's search field, and the tallest its list grows
+# before it scrolls, on every toolkit; the iPhone's and Android's grow
+# with the text size up to the room under the field.
+dropdown-width = 320.0
+dropdown-height = 360.0
 # The type styles a primitive's text is set in (ui/docs/primitives.md): the
 # phones take each by name (SwiftUI's text styles, Material's type roles),
 # so Dynamic Type and the font scale grow them; these are the desktop's

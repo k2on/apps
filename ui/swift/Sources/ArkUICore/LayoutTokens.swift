@@ -57,6 +57,10 @@ public enum LayoutTokens {
     public static let wideButtonHeight: Double = 50.0
     /// A sheet's bar: its close, its title, its confirm.
     public static let sheetBarHeight: Double = 56.0
+    /// A searchable dropdown's panel: its search field over its list.
+    public static let dropdownWidth: Double = 320.0
+    /// The tallest a searchable dropdown's list grows before it scrolls.
+    public static let dropdownHeight: Double = 360.0
     /// The desktop's large title (the phones take the style by name, so Dynamic Type and the font scale grow it).
     public static let typeLargeTitle: Double = 28.0
     /// The desktop's title.

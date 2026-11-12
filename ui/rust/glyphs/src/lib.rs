@@ -234,6 +234,12 @@ pub const KEYBOARD: &[u8] = br##"<svg xmlns="http://www.w3.org/2000/svg" viewBox
 /// `circle-minus`
 pub const CIRCLE_MINUS: &[u8] = br##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="butt" stroke-linejoin="miter"><path d="M2 12a10 10 0 1 0 20 0a10 10 0 1 0-20 0"/><path d="M8 12h8"/></svg>"##;
 
+/// `chevrons-up-down`: a field whose choice is chosen from a list.
+pub const CHOOSE: &[u8] = br##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="butt" stroke-linejoin="miter"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></svg>"##;
+
+/// `circle-help`: a choice still to make.
+pub const UNCHOSEN: &[u8] = br##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="butt" stroke-linejoin="miter"><path d="M2 12a10 10 0 1 0 20 0a10 10 0 1 0-20 0"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></svg>"##;
+
 /// `copy`
 pub const COPY: &[u8] = br##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="butt" stroke-linejoin="miter"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>"##;
 
@@ -444,6 +450,8 @@ pub fn named(name: &str) -> Option<&'static [u8]> {
         "image" => IMAGE,
         "keyboard" => KEYBOARD,
         "circle-minus" => CIRCLE_MINUS,
+        "chevrons-up-down" => CHOOSE,
+        "circle-help" => UNCHOSEN,
         _ => return None,
     })
 }
@@ -485,6 +493,8 @@ mod named_tests {
             "image",
             "keyboard",
             "circle-minus",
+            "chevrons-up-down",
+            "circle-help",
         ] {
             assert!(named(n).is_some(), "{n}");
         }

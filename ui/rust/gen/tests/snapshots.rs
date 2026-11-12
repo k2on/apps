@@ -28,7 +28,21 @@ pub struct Item {
 pub struct Draft {
     pub name: String,
     pub problem: Option<String>,
+    pub kind: String,
+    pub kinds: Vec<Kind>,
     pub can_save: bool,
+}
+
+/// A kind a thing can be, found by typing: under its group, a count at
+/// its end in its tint.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Kind {
+    pub key: String,
+    pub title: String,
+    pub glyph: String,
+    pub group: String,
+    pub count: String,
+    pub tint: String,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -43,6 +57,7 @@ pub enum ListMsg {
     Open { id: String },
     Add,
     Name { name: String },
+    Kind { key: String },
     Save,
     Dismiss,
     Refresh,
@@ -62,7 +77,19 @@ pub fn list(p: &ListPage) -> View<ListMsg> {
                 form_sheet(
                     "Add Thing",
                     ListMsg::Dismiss,
-                    form_section(name_field("Name", draft.name, draft.problem, |name| ListMsg::Name { name })),
+                    form_section((
+                        name_field("Name", draft.name, draft.problem, |name| ListMsg::Name { name }),
+                        search_picker(
+                            "Kind",
+                            draft.kind,
+                            |key| ListMsg::Kind { key },
+                            for k in draft.kinds {
+                                search_choice(k.title, k.glyph, k.key).group(k.group).detail(k.count, k.tint)
+                            },
+                        )
+                        .unset("Needs a Kind")
+                        .prompt("Search Kinds"),
+                    )),
                 )
                 .confirm("Add", draft.can_save, ListMsg::Save)
             },

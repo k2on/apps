@@ -27,6 +27,11 @@ fun ListScreen(screen: ListHolder) {
             FormSheet("Add Thing", onDismiss = { screen.send(ListMsg.Dismiss) }, confirm = "Add", canConfirm = draft.canSave, onConfirm = { screen.send(ListMsg.Save) }) {
                 FormSection {
                     NameField("Name", text = draft.name, problem = draft.problem, onChange = { screen.send(ListMsg.Name(name = it)) })
+                    SearchPicker("Kind", selection = draft.kind, unset = "Needs a Kind", prompt = "Search Kinds", onChange = { screen.send(ListMsg.Kind(key = it)) }) {
+                        for (k in draft.kinds) {
+                            SearchChoice(k.title, glyph = k.glyph, tag = k.key, group = k.group, detail = k.count, tint = k.tint)
+                        }
+                    }
                 }
             }
         }

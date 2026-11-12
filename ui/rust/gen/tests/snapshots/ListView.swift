@@ -21,6 +21,11 @@ struct ListView: View {
                 FormSheet("Add Thing", onDismiss: { screen.send(.dismiss) }, confirm: "Add", canConfirm: draft.canSave, onConfirm: { screen.send(.save) }) {
                     FormSection {
                         NameField("Name", text: draft.name, problem: draft.problem, onChange: { screen.send(.name(name: $0)) })
+                        SearchPicker("Kind", selection: draft.kind, unset: "Needs a Kind", prompt: "Search Kinds", onChange: { screen.send(.kind(key: $0)) }) {
+                            ForEach(draft.kinds, id: \.self) { k in
+                                SearchChoice(k.title, glyph: k.glyph, tag: k.key, group: k.group, detail: k.count, tint: k.tint)
+                            }
+                        }
                     }
                 }
             }

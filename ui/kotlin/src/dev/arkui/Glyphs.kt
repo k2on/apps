@@ -270,6 +270,12 @@ public object ArkGlyphs {
     /** `circle-minus`, Lucide's. */
     public val CircleMinus: ImageVector = glyph("circle-minus", "M2 12a10 10 0 1 0 20 0a10 10 0 1 0-20 0", "M8 12h8")
 
+    /** `chevrons-up-down`, Lucide's: a field whose choice is chosen from a list. */
+    public val Choose: ImageVector = glyph("chevrons-up-down", "m7 15 5 5 5-5", "m7 9 5-5 5 5")
+
+    /** `circle-help`, Lucide's: a choice still to make. */
+    public val Unchosen: ImageVector = glyph("circle-help", "M2 12a10 10 0 1 0 20 0a10 10 0 1 0-20 0", "M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3", "M12 17h.01")
+
     /** Every glyph here by its Lucide name, the name the other toolkits know it by. */
     private val byName: Map<String, ImageVector> by lazy {
         listOf(
@@ -277,7 +283,7 @@ public object ArkGlyphs {
             Untick, Down, Offline, Rename, Copy, Archive, Reopen, Reconcile, Add,
             PanelRight, Wand, Sync, Filter, Mail, Chart, Rows, Inbox, Alert, Clock, Dollar, Banknote, Target, Arrows, Users, House,
             Landmark, Card, Trending, Eye, EyeOff, ArrowUp, ArrowDown, Trash, Lock, Receipt, Crosshair, Folder,
-            ScanLine, Picture, Keyboard, CircleMinus,
+            ScanLine, Picture, Keyboard, CircleMinus, Choose, Unchosen,
         )
             .associateBy { it.name } + ("ellipsis-vertical" to More)
     }

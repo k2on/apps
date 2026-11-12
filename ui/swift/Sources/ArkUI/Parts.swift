@@ -514,6 +514,8 @@ public enum ArkGlyphs {
         case "image": return "photo"
         case "keyboard": return "keyboard"
         case "circle-minus": return "minus.circle"
+        case "chevrons-up-down": return "chevron.up.chevron.down"
+        case "circle-help": return "questionmark.circle"
         case "refresh-cw": return "arrow.triangle.2.circlepath"
         case "list-filter": return "line.3.horizontal.decrease.circle"
         case "mail": return "envelope"

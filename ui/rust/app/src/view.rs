@@ -43,6 +43,7 @@ use std::rc::Rc;
 
 mod components;
 pub mod layout;
+pub mod search;
 
 pub use components::{empty_state, goal_progress, title_stack, TitleStack};
 pub use layout::{
@@ -380,6 +381,35 @@ pub enum Part<M> {
         title: Val<String>,
         glyph: Val<String>,
         tag: Val<String>,
+    },
+    /// One of many, found by typing (a combobox): a form's row saying what
+    /// is chosen; pressed, a dropdown anchored to it — a search field at its
+    /// top with the keys, and under it the choices found, by their groups,
+    /// the chosen one checked. Choosing one sends `pick` with its tag and
+    /// puts it away. While nothing is chosen the row says `unset` after a
+    /// question mark, in the caution tint (a choice still to make). A
+    /// popover on the iPhone, the iPad and the Mac, an anchored menu on
+    /// Android, a dropdown on the desktop and in the browser (an ARIA
+    /// combobox). What is found, and the keys: [`search`].
+    SearchPicker {
+        label: &'static str,
+        selected: Val<String>,
+        unset: Val<String>,
+        /// The search field's placeholder.
+        prompt: &'static str,
+        pick: Input<String, M>,
+        choices: Box<View<M>>,
+    },
+    /// One choice of a search picker: its title, its glyph, the tag
+    /// choosing it sends, the group it is listed under, and words at its
+    /// end (a balance, what is available) in a tint.
+    SearchChoice {
+        title: Val<String>,
+        glyph: Val<String>,
+        tag: Val<String>,
+        group: Val<String>,
+        detail: Val<String>,
+        tint: Val<String>,
     },
     /// An amount entered the app's way: the iPhone's large figure over its
     /// own keypad (ArkUI's `AmountEntry`, in cents, `prompt` under it), a
@@ -1463,6 +1493,111 @@ pub fn picker_choice<M>(title: impl Into<Val<String>>, glyph: impl Into<Val<Stri
     .into()
 }
 
+/// One of `choices` ([`search_choice`]s) found by typing (see
+/// [`Part::SearchPicker`]), the one tagged `selected` chosen; choosing
+/// another sends `pick` with its tag.
+pub fn search_picker<M: 'static>(
+    label: &'static str,
+    selected: impl Into<Val<String>>,
+    pick: fn(String) -> M,
+    choices: impl Into<View<M>>,
+) -> SearchPicker<M> {
+    SearchPicker {
+        label,
+        selected: selected.into(),
+        unset: Val::Is(String::new()),
+        prompt: "Search",
+        pick: Input::new(pick),
+        choices: choices.into(),
+    }
+}
+
+pub struct SearchPicker<M> {
+    label: &'static str,
+    selected: Val<String>,
+    unset: Val<String>,
+    prompt: &'static str,
+    pick: Input<String, M>,
+    choices: View<M>,
+}
+
+impl<M> SearchPicker<M> {
+    /// What the row says while nothing is chosen ("Needs a Category").
+    pub fn unset(mut self, words: impl Into<Val<String>>) -> Self {
+        self.unset = words.into();
+        self
+    }
+    /// The search field's placeholder ("Search Categories"); "Search" else.
+    pub fn prompt(mut self, words: &'static str) -> Self {
+        self.prompt = words;
+        self
+    }
+}
+
+impl<M> From<SearchPicker<M>> for View<M> {
+    fn from(b: SearchPicker<M>) -> View<M> {
+        Part::SearchPicker {
+            label: b.label,
+            selected: b.selected,
+            unset: b.unset,
+            prompt: b.prompt,
+            pick: b.pick,
+            choices: Box::new(b.choices),
+        }
+        .into()
+    }
+}
+
+/// One choice of a [`search_picker`]: ungrouped, nothing at its end until
+/// [`SearchChoice::group`] and [`SearchChoice::detail`] say.
+pub fn search_choice(title: impl Into<Val<String>>, glyph: impl Into<Val<String>>, tag: impl Into<Val<String>>) -> SearchChoice {
+    SearchChoice {
+        title: title.into(),
+        glyph: glyph.into(),
+        tag: tag.into(),
+        group: Val::Is(String::new()),
+        detail: Val::Is(String::new()),
+        tint: Val::Is("neutral".into()),
+    }
+}
+
+pub struct SearchChoice {
+    title: Val<String>,
+    glyph: Val<String>,
+    tag: Val<String>,
+    group: Val<String>,
+    detail: Val<String>,
+    tint: Val<String>,
+}
+
+impl SearchChoice {
+    /// Listed under `name` (a category's group, an account's budget).
+    pub fn group(mut self, name: impl Into<Val<String>>) -> Self {
+        self.group = name.into();
+        self
+    }
+    /// `words` at its end in `tint` (a tint's name: `neutral` is quiet).
+    pub fn detail(mut self, words: impl Into<Val<String>>, tint: impl Into<Val<String>>) -> Self {
+        self.detail = words.into();
+        self.tint = tint.into();
+        self
+    }
+}
+
+impl<M> From<SearchChoice> for View<M> {
+    fn from(c: SearchChoice) -> View<M> {
+        Part::SearchChoice {
+            title: c.title,
+            glyph: c.glyph,
+            tag: c.tag,
+            group: c.group,
+            detail: c.detail,
+            tint: c.tint,
+        }
+        .into()
+    }
+}
+
 /// An amount entered the app's way (see [`Part::AmountEntry`]).
 pub fn amount_entry<M: 'static>(
     label: impl Into<Val<String>>,
@@ -2293,6 +2428,40 @@ impl<M> Part<M> {
                 vec![("glyph", G::Val(lit(glyph))), ("tag", G::Val(lit(tag)))],
                 vec![],
             ),
+            Part::SearchPicker {
+                label,
+                selected,
+                unset,
+                prompt,
+                pick,
+                choices,
+            } => {
+                let mut args = vec![("selection", G::Val(lit(selected)))];
+                if !matches!(unset, Val::Is(u) if u.is_empty()) {
+                    args.push(("unset", G::Val(lit(unset))));
+                }
+                args.push(("prompt", G::Text(prompt)));
+                args.push(("onChange", G::Typed(pick)));
+                c("SearchPicker", Some(G::Text(label)), args, vec![("", &**choices)])
+            }
+            Part::SearchChoice {
+                title,
+                glyph,
+                tag,
+                group,
+                detail,
+                tint,
+            } => {
+                let mut args = vec![("glyph", G::Val(lit(glyph))), ("tag", G::Val(lit(tag)))];
+                if !matches!(group, Val::Is(g) if g.is_empty()) {
+                    args.push(("group", G::Val(lit(group))));
+                }
+                if !matches!(detail, Val::Is(d) if d.is_empty()) {
+                    args.push(("detail", G::Val(lit(detail))));
+                    args.push(("tint", G::Val(lit(tint))));
+                }
+                c("SearchChoice", Some(G::Val(lit(title))), args, vec![])
+            }
             Part::AmountEntry {
                 label,
                 prompt,
@@ -2882,6 +3051,36 @@ impl<M: 'static> Part<M> {
                 choices: b(choices),
             },
             Part::Choice { title, glyph, tag } => Part::Choice { title, glyph, tag },
+            Part::SearchPicker {
+                label,
+                selected,
+                unset,
+                prompt,
+                pick,
+                choices,
+            } => Part::SearchPicker {
+                label,
+                selected,
+                unset,
+                prompt,
+                pick: input(pick, f),
+                choices: b(choices),
+            },
+            Part::SearchChoice {
+                title,
+                glyph,
+                tag,
+                group,
+                detail,
+                tint,
+            } => Part::SearchChoice {
+                title,
+                glyph,
+                tag,
+                group,
+                detail,
+                tint,
+            },
             Part::AmountEntry {
                 label,
                 prompt,

@@ -56,6 +56,10 @@ pub const SECTION_GAP: f32 = 24.0;
 pub const WIDE_BUTTON_HEIGHT: f32 = 50.0;
 /// A sheet's bar: its close, its title, its confirm.
 pub const SHEET_BAR_HEIGHT: f32 = 56.0;
+/// A searchable dropdown's panel: its search field over its list.
+pub const DROPDOWN_WIDTH: f32 = 320.0;
+/// The tallest a searchable dropdown's list grows before it scrolls.
+pub const DROPDOWN_HEIGHT: f32 = 360.0;
 /// The desktop's large title (the phones take the style by name, so Dynamic Type and the font scale grow it).
 pub const TYPE_LARGE_TITLE: f32 = 28.0;
 /// The desktop's title.

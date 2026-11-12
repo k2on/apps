@@ -57,6 +57,10 @@ public object LayoutTokens {
     public const val WIDE_BUTTON_HEIGHT: Float = 50.0f
     /** A sheet's bar: its close, its title, its confirm. */
     public const val SHEET_BAR_HEIGHT: Float = 56.0f
+    /** A searchable dropdown's panel: its search field over its list. */
+    public const val DROPDOWN_WIDTH: Float = 320.0f
+    /** The tallest a searchable dropdown's list grows before it scrolls. */
+    public const val DROPDOWN_HEIGHT: Float = 360.0f
     /** The desktop's large title (the phones take the style by name, so Dynamic Type and the font scale grow it). */
     public const val TYPE_LARGE_TITLE: Float = 28.0f
     /** The desktop's title. */

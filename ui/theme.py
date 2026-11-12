@@ -60,6 +60,8 @@ LAYOUT = {
     "section-gap": "Above a section's heading, from the card before it.",
     "wide-button-height": "A wide button's height: Continue, Sign In, a form's confirm.",
     "sheet-bar-height": "A sheet's bar: its close, its title, its confirm.",
+    "dropdown-width": "A searchable dropdown's panel: its search field over its list.",
+    "dropdown-height": "The tallest a searchable dropdown's list grows before it scrolls.",
     "type-large-title": "The desktop's large title (the phones take the style by name, so Dynamic Type and the font scale grow it).",
     "type-title": "The desktop's title.",
     "type-headline": "The desktop's headline: a card's title, bold.",
