@@ -41,7 +41,7 @@ final class ShotsWalk {
     /// The plan this launch walks: a screenshot's launch, on a simulator,
     /// with a plan in the app's own directory (`root`, Application
     /// Support), which only the app and the simulator's own tools write.
-    static func planned(root: String) -> URL? {
+    nonisolated static func planned(root: String) -> URL? {
         #if targetEnvironment(simulator)
         guard Shots.on else { return nil }
         let plan = URL(fileURLWithPath: root).appendingPathComponent("shots/plan.json")
