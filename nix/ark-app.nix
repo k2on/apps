@@ -132,6 +132,17 @@ rec {
     in
     entry "iced" // entry "web";
 
+  # What else of the app's directory an entry point's build holds beside
+  # its crate (`entrySources`): app.toml and the icon, by their paths in
+  # the repository; none for a member that is not an Ark app's entry point.
+  # For a build that takes the crate's tree by its path (flake.nix's
+  # `crateTests`), so the icon is where `include_str!` looks for it.
+  entryFiles = apps: member:
+    let dir = dirOf member; in
+    if lib.elem dir apps && lib.elem (baseNameOf member) [ "iced" "web" ]
+    then [ "${dir}/app.toml" "${dir}/${(read dir).icon.svg or "icon.svg"}" ]
+    else [ ];
+
   # The app's packages: `build` is flake.nix's `crate` (a crate of the
   # workspace, or of `crates`, for the host); `only` its source filter.
   packages = { pkgs, build, only, bundlePrefix }: dir:

@@ -190,7 +190,9 @@
                 build {
                   inherit packageId features unified;
                   tests = true;
-                  root = { src = only [ member ]; workspace_member = member; };
+                  # An app's entry point with the app's icon and app.toml
+                  # beside it, as `entrySources` builds it.
+                  root = { src = only ([ member ] ++ arkApp.entryFiles arkApps member); workspace_member = member; };
                   # rustdoc compiles and runs the doctests against the
                   # library and its dependencies as the build has them.
                   rootAttrs = old: rootAttrs old // lib.optionalAttrs doctests {

@@ -446,7 +446,10 @@ fn an_address_selects_what_it_names() {
 /// `-screen` (a bank's, a sheet's, To Review's).
 #[test]
 fn every_shot_route_is_its_launch() {
-    let shots: serde_json::Value = serde_json::from_str(include_str!("../../../demo/shots.json")).unwrap();
+    // Read where the run finds it (money/demo beside this crate), not
+    // compiled in: the crate's build holds only its own directory.
+    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../demo/shots.json");
+    let shots: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(path).expect(path)).unwrap();
     let mut n = 0;
     for screen in shots["screens"].as_array().expect("screens") {
         let (Some(route), Some(args)) = (screen["route"].as_str(), screen["args"].as_array()) else {
