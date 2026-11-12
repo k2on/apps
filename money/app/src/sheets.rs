@@ -89,6 +89,10 @@ pub struct State {
     /// The receipt that paid for the transaction in the form, as last read:
     /// its items held.
     pub paid: Option<String>,
+    /// Who is using the budget, by the id their entries carry (`alex`), and
+    /// the name they go by (`Alex`): what "Entered by" says of theirs.
+    pub me: String,
+    pub my_name: String,
 }
 
 /// Everything the sheets can be told. Ids are rows' `Id::hex`.
@@ -98,6 +102,11 @@ pub enum SheetsMsg {
     Month {
         month: String,
         today: String,
+    },
+    /// Who is using the budget: the id their entries carry, and their name.
+    Me {
+        user: String,
+        name: String,
     },
     /// A new transaction, in this account (none: the usual one).
     New {
@@ -450,6 +459,11 @@ impl Sheets {
                 s.today = today;
                 vec![]
             }
+            M::Me { user, name } => {
+                s.me = user;
+                s.my_name = name;
+                vec![]
+            }
             M::New { account } => {
                 s.receipt = Default::default();
                 let account = account.as_deref().and_then(crate::id_of);
@@ -765,9 +779,12 @@ fn txn_sheet(s: &State, f: &TxnForm, data: &Data<'_, MoneyView>) -> TxnSheet {
         None => Some("That isn't an amount.".to_string()),
         Some(d) => d.problem(),
     };
+    // By name where it is who is using the budget (`Alex`), else by the id
+    // the entry carries.
     let by = editing
         .map(|t| t.user_id.clone())
         .filter(|u| !u.is_empty())
+        .map(|u| if u == s.me && !s.my_name.is_empty() { s.my_name.clone() } else { u })
         .map(|u| format!("Entered by {u}"));
     TxnSheet {
         adding: d.editing.is_none(),

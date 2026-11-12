@@ -3,6 +3,7 @@
   "server": {
     "port": 8787,
     "user": "alex",
+    "name": "Alex",
     "picture": "nix/demo/alex.jpg"
   },
   "shots": [

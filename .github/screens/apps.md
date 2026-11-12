@@ -32,7 +32,7 @@ All of it is in `<app>/demo/`:
 
   ```json
   {
-    "server": { "port": 8788, "user": "alex" },
+    "server": { "port": 8788, "user": "alex", "name": "Alex" },
     "shots": [
       { "id": "budget", "steps": [{ "tap": "Budget" }] },
       { "id": "insights", "steps": [{ "tap": "Insights" }, { "wait": 2 }] }
@@ -41,7 +41,10 @@ All of it is in `<app>/demo/`:
   ```
 
   `server` (optional): the port its `server.sh`
-  listens on, and the name the server's dev sign-in is given. **The app is
+  listens on, the id the server's dev sign-in is given (`user`, lowercase:
+  the login and what entries carry), and the name that person goes by
+  (`name`, `ARK_DEV_NAME`: what Settings, the account button and "Entered
+  by" show), and their picture. **The app is
   opened once for each device and theme, and its shots are taken in that
   one launch, in order**: each shot's `steps` done from where the last shot
   left the app, and the screen taken. `"fresh": true` on a shot opens the

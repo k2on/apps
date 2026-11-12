@@ -82,11 +82,16 @@ async fn login(State(auth): State<Arc<Auth>>, headers: HeaderMap, Query(q): Quer
             // ([`dev_account`]), which the announcement says.
             let mut account = dev_account(user.trim());
             // The dev server's own user wears the picture it was given
-            // (`ARK_DEV_PICTURE`, a file on this machine): the demo's and
-            // the screenshots' person has a face, not only initials.
+            // (`ARK_DEV_PICTURE`, a file on this machine) and goes by the
+            // name it was given (`ARK_DEV_NAME`: `Alex` for the id `alex`):
+            // the demo's and the screenshots' person has a face, not only
+            // initials, and a name, not only an id.
             if dev_user().is_some_and(|d| dev_account(d.trim()).id == account.id) {
                 if let Some(p) = dev_picture() {
                     account.picture = p;
+                }
+                if let Some(n) = dev_name() {
+                    account.name = n;
                 }
             }
             finished(auth.clone(), account, device(&headers), q.redirect).await
@@ -253,6 +258,12 @@ fn failed(why: String) -> Response {
 /// A dev server's own name for a login that names nobody (`ARK_DEV_USER`).
 fn dev_user() -> Option<String> {
     std::env::var("ARK_DEV_USER").ok().filter(|u| !u.trim().is_empty())
+}
+
+/// The dev server's own user's display name (`ARK_DEV_NAME`); their id,
+/// `ARK_DEV_USER`, when none is given.
+fn dev_name() -> Option<String> {
+    std::env::var("ARK_DEV_NAME").ok().map(|n| n.trim().to_string()).filter(|n| !n.is_empty())
 }
 
 /// The dev server's own user's picture (`ARK_DEV_PICTURE`): an image file

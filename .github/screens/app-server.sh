@@ -19,6 +19,10 @@ mkdir -p "$dir"
 # to fill in.
 ARK_DEV_USER=$(jq -r '.server.user // empty' "$app/demo/shots.json")
 export ARK_DEV_USER
+# …the name they go by, where shots.json gives one (`Alex` for `alex`): what
+# Settings, the account button and "Entered by" show, the id kept for the login.
+ARK_DEV_NAME=$(jq -r '.server.name // empty' "$app/demo/shots.json")
+export ARK_DEV_NAME
 # …and the picture they wear (a file, from the repository's root): the
 # screens show a face, not only initials (nix/demo/README.md).
 picture=$(jq -r '.server.picture // empty' "$app/demo/shots.json")

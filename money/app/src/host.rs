@@ -404,10 +404,19 @@ impl HostedApp for Money {
             self.transactions.send(TransactionsMsg::Search { text: search }, cx);
         }
         self.follow_register(cx);
-        let facts = facts(&cx.place.session());
+        let session = cx.place.session();
+        let facts = facts(&session);
         if self.facts.as_ref() != Some(&facts) {
             self.facts = Some(facts.clone());
             self.shell.send(ShellMsg::Session { facts }, cx);
+        }
+        // Who is using the budget, for "Entered by": the demo's is Alex,
+        // whose entries carry the demo's id.
+        let user = if session.demo { money_core::demo::ME.to_string() } else { session.user.clone() };
+        let name = who(&session);
+        let sheets = self.sheets.state();
+        if sheets.me != user || sheets.my_name != name {
+            self.sheets.send(SheetsMsg::Me { user, name }, cx);
         }
     }
 

@@ -13,8 +13,8 @@ writeShellApplication {
     dir=$(mktemp -d -t ${name}-demo.XXXXXX)
     ${name}-seed ${seedArgs} "$dir"
     echo "${name}-demo: seeded in $dir" >&2
-    # Signed in as the demo's person, alex, wearing their picture
-    # (nix/demo/README.md), with no page to fill in.
-    ARK_DEV_USER=alex ARK_DEV_PICTURE=${./demo/alex.jpg} ${env} exec ${name}-server "''${1:-${listen}}"
+    # Signed in as the demo's person, Alex (the id alex), wearing their
+    # picture (nix/demo/README.md), with no page to fill in.
+    ARK_DEV_USER=alex ARK_DEV_NAME=Alex ARK_DEV_PICTURE=${./demo/alex.jpg} ${env} exec ${name}-server "''${1:-${listen}}"
   '';
 }

@@ -137,3 +137,26 @@ fn an_account_is_reconciled() {
     let said = a.cleared.abs() + 500;
     assert_eq!(after.cleared, if owes { -said } else { said }, "cleared is what the bank says");
 }
+
+/// One's own transaction says who entered it by their name, another's by
+/// the id it carries. Falsified by "Entered by alex": the id, as the
+/// screenshots had it.
+#[test]
+fn entered_by_says_the_name() {
+    let (mut d, mut rt) = open();
+    d.run(
+        &mut rt,
+        [SheetsMsg::Me {
+            user: money_core::demo::ME.into(),
+            name: "Alex".into(),
+        }],
+    );
+    let lines = register(&d);
+    let mine = lines.iter().find(|t| t.user_id == money_core::demo::ME && !t.transfer).expect("one of Alex's");
+    d.run(&mut rt, [SheetsMsg::Open { key: mine.id.hex() }]);
+    assert_eq!(rt.screen(&d).transaction.unwrap().note, "Entered by Alex");
+    d.run(&mut rt, [SheetsMsg::Dismiss]);
+    let theirs = lines.iter().find(|t| t.user_id == money_core::demo::PARTNER && !t.transfer).expect("one of Sam's");
+    d.run(&mut rt, [SheetsMsg::Open { key: theirs.id.hex() }]);
+    assert_eq!(rt.screen(&d).transaction.unwrap().note, format!("Entered by {}", money_core::demo::PARTNER));
+}
