@@ -99,7 +99,7 @@ public object ShotsWalk {
         out.deleteRecursively()
         out.mkdirs()
         val log = StringBuilder()
-        val say = { line: String ->
+        val say: (String) -> Unit = { line ->
             android.util.Log.i("ArkShots", line)
             log.append(line).append('\n')
         }
