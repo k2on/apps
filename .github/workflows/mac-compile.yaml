@@ -37,7 +37,7 @@ jobs:
           name: ${{ vars.CACHIX_NAME }}
           authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
           pushFilter: "macOS-SDK"
-      - run: bash .github/apple-ahead.sh . "$RUNNER_TEMP/kernels.txt" money-ios-simulator money-macos money-ios-archive harken-ios-simulator
+      - run: bash .github/apple-ahead.sh . "$RUNNER_TEMP/kernels.txt" money-ios-simulator money-macos money-ios-archive harken-ios-simulator ark-app-fixture-ios
 
   compile:
     needs: kernels
@@ -74,7 +74,7 @@ jobs:
           # log kept and its errors said.
           set +e
           status=0
-          for a in money-ios-simulator money-macos money-ios-archive harken-ios-simulator; do
+          for a in money-ios-simulator money-macos money-ios-archive harken-ios-simulator ark-app-fixture-ios; do
             bash .github/nix-xcode.sh . "$XCODE" "$a" > "$RUNNER_TEMP/$a.out" 2> "$RUNNER_TEMP/$a.log"
             r=$?
             echo "== $a: exit $r"

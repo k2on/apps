@@ -167,12 +167,14 @@ something non-trivial gets it in its hand-written file, never in the
 emitter. One small file per language: `ui/rust/gen/src/swift.rs`,
 `kotlin.rs`.
 
-The generated view reads its record from a holder over the runtime
-(`AccountsScreen` in `money/native/ios/Money/Screens.swift`,
-`AccountsHolder` in `money/native/android/.../Screens.kt`): an
+The generated view reads its record from a holder over the runtime: the
+app library's `ArkScreen` (ui/swift's ArkApp, ui/kotlin/app), an
 `ObservableObject` / `StateFlow` of the record, read again after every
-message and whenever the store moved. The holders are the app's
-hand-written native code until the shell's own become ArkUI's.
+message and whenever the store moved, with the after-draw handshake
+(`drawn()`). Each app's holders are generated over it from app.toml's
+`[screens]` (`typealias AccountsScreen = ArkScreen<AccountsApp>`,
+`class AccountsHolder(r: AccountsApp) : ArkScreen<…>`), and the runtimes
+are the app's host's ("The App Library").
 
 ### The Device: `modules/`
 
@@ -252,8 +254,8 @@ and `background-modes` (`UIBackgroundModes`); its `[android]`
 foreground type), `meta-data` and Maven `dependencies`. The app's crate
 depends on each listed module's crate (`checks.prebuild` holds it), and
 the phones' library carries their UniFFI traits; the shell registers what
-it built (`PhoneModules(haptics: PhoneHaptics(), …)` in `MoneyApp.swift`,
-`AccountsHolder(…, PhoneHaptics(view), PhoneClipboard(context))` in
+it built as the process's (`registerDevices(haptics: PhoneHaptics(), …)`
+in money's `MoneyApp.swift`, `registerDevices(PhoneHaptics(view), …)` in
 `MoneyApp.kt`, the `Queued` clipboard in `money/iced/src/overview.rs`).
 
 The iPhone typecheck (`checks.money-ios-typecheck`) compiles the listed
@@ -422,12 +424,11 @@ with every message (and with an answer that runs none). A screenshot
 driver waits until a screen is idle and its version has not moved since
 it last looked. Each shell exposes them:
 
-- **The phones**: `AccountsApp`, `BudgetApp` and `ShellApp` each have
-  `isIdle()` and `version()` over UniFFI (money/bridge/src/app.rs).
-  The holders pass them on: Swift's `AccountsScreen`, `BudgetScreen` and
-  `MoneyShellScreen` have `isIdle` and `version`, Kotlin's
-  `AccountsHolder`, `BudgetHolder` and `MoneyShellHolder` `isIdle()` and
-  `version()`; a driver reads them through a debug hook it adds.
+- **The phones**: every screen's runtime has `isIdle()` and `version()`
+  over UniFFI (money/bridge/src/app.rs), and the app's host sums them
+  (`ArkHost::idle`, `ArkHost::version`, with the session's peer settled);
+  the app library probes that once for a screenshot's ready signal
+  (ArkUI's `Ready`), ready at a version that stood still.
 - **The browser**: the page's root carries `data-ark-idle="1"` and
   `data-ark-version="<n>"` after every draw (`MoneyWeb::say_idle`, over
   `MoneyWeb::is_idle`/`version`, the sum over its three runtimes); a
@@ -545,6 +546,77 @@ about 30 seconds and about 24 MB, and shows what it hands back. It cannot
 reach the app's process, runtime or replica, so it never runs the app's
 `update`; it only swaps words (modules/ark-notifications/README.md).
 
+## The App Library
+
+Everything native that is the same for every Ark app is one shared
+library per toolkit, versioned and tested like arkdb, never generated:
+**ArkApp** (`ui/swift/Sources/ArkApp`, beside ArkUI and ArkUICore; nix
+builds it per app and platform with `swiftModule`, over the app's own
+bindings, and Xcode compiles it into the app's target) and
+**ark-app-android** (`ui/kotlin/app`, package `dev.arkui.app`, the gradle
+project's `:app` beside ArkUI's libraries; nix builds it once,
+`packages.ark-app-android`, compiled against the kernel's Kotlin but
+carrying none of it, and every Ark app links its jar as `-ParkAppLib`).
+Under both is ark-ffi's `ArkHost` (`rust/ark-ffi/src/host.rs`), the part
+written once in Rust: the first run every app shares and its effects (the
+server's `/healthz`, `ark_auth::probe`; the code traded; what is
+remembered — the login in the secure store, the server, the demo and the
+pages seen in a file of the app's), the session opened over the process's
+one runtime (`ArkProcess`), its link watched (a denial told the machine
+once, the server's refusals said, the first sync told), a link taken
+(`<scheme>://auth`, a join, the app's pages, or kept for the app until it
+shows), and "Add a Device".
+
+| | Swift (`ArkApp`) | Kotlin (`dev.arkui.app`) |
+|---|---|---|
+| The process's app host, held for the app's life | `ArkApp<Library>` (an `ObservableObject`: `step`, `showsApp`, `notice`, `moves`), attached to `ArkProcess` while the app runs | `ArkApplication` (makes it at the first launch: `host(launch)`), `ArkApp` (`StateFlow`s: `step`, `showsApp`, `moves`, `notices`) |
+| The root | `ArkRoot(app) { WelcomeView() } content: { … }`: the first run until the app shows, the code scanner, the toast | `ArkActivity`: the splash held until the first screen has what it draws, `Content(app)` |
+| Browser sign-in | `ASWebAuthenticationSession`, `preferredBrowserSession: .shared` | Custom Tabs |
+| Links and the app's phase | `.onOpenURL`, the scene's phase | the launch and new intents (`singleTask`), `ON_START` after `ON_STOP` |
+| The secure store | the app's `PhoneSecureStore()`, handed to its library | the same, `PhoneSecureStore(this)` |
+| The generic screen holder | `ArkScreen<Runtime: ArkRuntime>` (`page`, `send`, `reload`, `attach`, the after-draw `drawn()` handshake) | `ArkScreen<P, M>` (the same over function references) |
+| Background, only with `[background]` | `BackgroundHooks` and `ArkAppDelegate` (the task registered before launch finishes, APNs' token, a remote notification) | `BackgroundHooks` (`ArkNotices` told the process's notices; a notice's tap) |
+| Ready signal | one probe: `ArkHost.idle()` at a `version()` that stood still | the same, `Ready.probe("app")` |
+
+**What is generated per app is tiny** (ui/prebuild.py, from app.toml):
+Swift's `Generated/ArkApp.swift` — a `@main` holding the app's library
+(`[ffi] host`: `ArkApp(MoneyHost(launch: .current(scan:), store:
+PhoneSecureStore()))`), its accent, the scene it draws (`[apple] scene`),
+and a typealias over `ArkScreen` for each of its screens (`[screens]`) —
+and, only for an app that declares `[background]`,
+`Generated/ArkBackground.swift` (`backgroundHooks()`, the modules' parts
+the delegate reaches) with the delegate adaptor in its `@main`; Kotlin's
+`generated/ArkApp.kt` (`class MoneyApplication : ArkApplication()`, its
+library and, with `[background]`, its `BackgroundHooks`) and
+`generated/ArkActivity.kt` (`class MainActivity : ArkActivity()` drawing
+`[android] root`, and the holders); the manifest names the Application.
+The app's own part of its host is its bridge's `HostApp` (money's
+`MoneyHost`, money/bridge/src/host.rs): how its replica and its demo
+open, and what it makes of a session — its screens' runtimes, what one
+asks of another, its month, its session's facts — as the desktop's
+`live.rs` is money's there. What is left native is what an app draws
+itself beside its generated screens: money's shell host (Shell.swift,
+MoneyApp.kt), its theme and marks.
+
+**Background stays off by default.** Nothing of `BackgroundHooks` is
+written, and no delegate adaptor, for an app without `[background]`;
+`checks.prebuild`'s self-test holds it, and its fixture (money's
+app.toml with every key) is compiled: its Kotlin by
+`packages.ark-app-android` (`:fixture`), its Swift by
+`packages.aarch64-darwin.ark-app-fixture-ios` (mac-compile.yaml). Neither
+money nor harken declares any.
+
+**harken, later.** harken is not an Ark app yet (no app.toml). To adopt
+the library it needs: an app.toml (`[ffi] host`, `[screens]`, `[apple]
+scene`, `[android] root`); a `HostApp` in harken/ffi (its replica's
+open, its demo, its screens' runtimes) exporting a `HarkenHost` with
+`host()` and `welcome()`, as `MoneyHost` does; its first run drawn as the
+generated `WelcomeView` over `WelcomeApp` in place of its own onboarding
+(OnboardingViews.swift, OnboardingScreens.kt); and its process player's
+work (`ArkMedia`, `BackgroundWork`) kept as it is, the player being its
+module's. Its Kotlin package (`dev.harken.ffi`) is app.toml's `[ffi]
+kotlin`.
+
 ## Layers
 
 Which crate may depend on which is a table, `layers.toml` at the root,
@@ -628,7 +700,7 @@ Nothing native of an app is committed. An app is
 ├── core/         its domain, and (`demo`) its demo's household
 ├── app/          ark-app: its state, messages, update, #[view]s and `commands()`
 ├── views/        `screens()`: its #[view]s recorded for the phones' generator (going: see below)
-├── bridge/       the phones' bridge: the UniFFI twins, the exports (going: see below)
+├── bridge/       the phones' bridge: the UniFFI twins, its host's part (`HostApp`), the exports (going: see below)
 ├── server/       when it has one
 ├── demo/         the demo's household (its seed crate), shots.json, server.sh
 └── native/       what is not written in Rust yet (going: see below)
@@ -638,12 +710,15 @@ Nothing native of an app is committed. An app is
 The end state is `app.toml`, `icon.svg`, `core/`, `app/`, `server/` and
 `demo/`, nothing else committed: the layout is this convention, held by
 review, and each of the other directories only shrinks until it is gone.
-`bridge/` exists only because some screens are still
-native (money's Receipts and Settings, and the phones' `Model.swift` and
-`Book.kt` that read its records); once they are Rust, the phones' bindings
-are generated by nix/ark-app.nix from `app/` and `core/`, as the shim crate
-already is, and `bridge/` goes. `views/`, `iced/` and `web/` become
-generated entry points the same way.
+`bridge/` is still committed because the phones' bindings are written
+there by hand: the twins of the core's and the app's types, the screens'
+runtimes (`app.rs`) and money's part of its host (`host.rs`); every money
+screen is Rust, and the phones' `Model.swift`, `Bridge.swift`, `Book.kt`
+and `Start.kt` are gone into the app library and the host ("The App
+Library"). Once the twins and the runtimes are generated by
+nix/ark-app.nix from `app/` and `core/`, as the shim crate already is,
+`bridge/` goes (bridge/FFI.md, "Still Here", is what it must carry).
+`views/`, `iced/` and `web/` become generated entry points the same way.
 
 If you are an agent, or anyone, about to add to one of these:
 
@@ -672,6 +747,7 @@ and nix generates the rest, from app.toml, each listed module's
 | Gradle's project (settings, the app's `build.gradle.kts` with ArkUI's dependencies and the modules'), the AndroidManifest (permissions, the scheme's links, services, meta-data), the launcher's adaptive and themed icon and the mark (vectors from icon.svg), the splash | app.toml's `[android]`, the modules' `[android]` | `<app>-apk`, `<app>-android-tests`, `<app>-android-screens` |
 | The SwiftUI and Compose of every `#[view]` | the app's `screens()` | inside both |
 | The phones' library: a shim crate, `<id>-ffi` (lib `<id>_ffi`), `pub use <bridge>::*` over the app's bridge (app.toml's `[ffi] crate`, money/bridge) as a static library (the iPhone, the Mac) and a shared one (Android) | app.toml's `[ffi]` | `<app>-android-lib`, `<app>-ios-kernel*` |
+| The entry points over the app library: the `@main`, the Application and the activity, the screens' holders, and — only with `[background]` — the background's hookup ("The App Library") | app.toml's `[ffi] host`, `[screens]`, `[apple] scene`, `[android] root`, `[background]` | inside both |
 | The generator's main | the app's crate | `<app>-ui` |
 | F-Droid's metadata (`<bundle id>.yml`) | app.toml's `[store]` (`ui/prebuild.py fdroid`) | `apps-fdroid`, `fdroid-repo` |
 
@@ -758,9 +834,11 @@ projects and library go. `checks.money-native` builds the generator and
 the projects.
 
 **What is still committed native, and why** (`<app>/native/`): the
-screens and the shell not yet written in Rust (their holders over the
-runtime, the first run's screens, the receipt camera, the sheets), each
-going as it moves into the app's crate; the hand-written tests over them;
+shell's host that hosts the generated screens by name (money's
+Shell.swift and MoneyApp.kt: the sections' stacks, a register's own
+runtime, the account sheet), the app's theme, marks and glyphs, each
+going as it moves into the app's crate or into ArkUI; the hand-written
+tests over them;
 the Maven graph Gradle replays offline (`native/android/deps.json`); and
 the debug key. Nothing there is a project file.
 

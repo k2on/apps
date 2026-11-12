@@ -1,18 +1,19 @@
 #!/usr/bin/env bash
 # Type-check what of money's iOS app Linux can: every file under Money/ that
-# imports nothing of Apple's but Foundation and Combine — the budget's
-# arithmetic, the first run's machine, the session and the model — with the
-# Swift UniFFI writes for money's
-# library and the bridge's typed half, against the library's C headers, a
-# stand-in for the two things of Combine's that Model.swift names
-# (ObservableObject, @Published) and ArkUI's Foundation half (ArkUICore).
+# imports nothing of Apple's but Foundation and Combine (its rows' and its
+# money's), and the app library's screen holder (ui/swift's ArkApp,
+# ArkScreen.swift) — with the Swift UniFFI writes for money's library and the
+# bridge's typed half, against the library's C headers, a stand-in for the
+# two things of Combine's that ArkScreen names (ObservableObject,
+# @Published) and ArkUI's Foundation half (ArkUICore).
 # The screens (SwiftUI, Charts, AuthenticationServices) are left out: none of
 # those is on Linux. harken's tools/typecheck.sh, for money.
 #
-# Then the tests (MoneyTests/) are compiled against the same sources with a
-# stand-in for XCTest's assertions, and — when `MONEY_FFI_LIB` names money's
-# library built for this machine (`libmoney_ffi.so`) — linked against it and
-# run, over the demo's household.
+# Then the tests (MoneyTests/, when there are any: what the model and the
+# session did is money's host's in Rust now, tested there) are compiled
+# against the same sources with a stand-in for XCTest's assertions, and —
+# when `MONEY_FFI_LIB` names money's library built for this machine
+# (`libmoney_ffi.so`) — linked against it and run.
 #
 #   typecheck.sh BINDINGS   # a directory of `uniffi-bindgen generate --language swift`
 set -eu
@@ -38,6 +39,7 @@ for m in $(sed -n 's/^modules *= *\[\(.*\)\]/\1/p' "$HERE/../../app.toml" | tr -
     [ -e "$f" ] && SOURCES+=("$f")
   done
 done
+SOURCES+=("$HERE/../../../ui/swift/Sources/ArkApp/ArkScreen.swift")
 for f in "$APP"/*.swift; do
   if ! grep -qE '^import (SwiftUI|UIKit|AVFoundation|AVKit|MediaPlayer|AuthenticationServices|ImageIO|CoreGraphics|UniformTypeIdentifiers|Charts)' "$f"; then
     SOURCES+=("$f")
@@ -45,7 +47,7 @@ for f in "$APP"/*.swift; do
 done
 
 cat > "$OUT/Combine.swift" <<'SWIFT'
-// A stand-in for what Model.swift names of Combine, for type-checking on Linux.
+// A stand-in for what ArkScreen.swift names of Combine, for type-checking on Linux.
 public protocol ObservableObject: AnyObject {}
 @propertyWrapper public struct Published<Value> {
     public var wrappedValue: Value
@@ -96,6 +98,7 @@ echo "money/native/ios: $(for f in "${SOURCES[@]}"; do printf '%s ' "${f#$APP/}"
 
 # The tests: one module with the sources, as `@testable import Money` reads
 # them, and a runner calling every `func test…` of every `final class …Tests`.
+[ -d "$TESTS" ] || exit 0
 TESTFILES=("$TESTS"/*.swift)
 mkdir -p "$OUT/tests"
 for f in "${TESTFILES[@]}"; do

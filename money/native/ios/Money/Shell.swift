@@ -1,5 +1,6 @@
 // money, once the first run has handed it a session: the shell written
-// from Rust (Generated/MoneyShellView.swift, ui/docs/apps/money.md) — the
+// from Rust (Generated/MoneyShellView.swift, ui/docs/apps/money.md) over the
+// runtimes money's host made (MoneyApp.swift's `MoneyScreens`) — the
 // sections Budget, Accounts (badged with what needs a look), Transactions
 // and Insights, a tab bar on the iPhone and a sidebar on the iPad and the
 // Mac, each its toolbar, search and inspector — hosting money's own
@@ -24,153 +25,86 @@ extension EnvironmentValues {
 }
 
 struct Shell: View {
-    @EnvironmentObject private var model: Model
-    @EnvironmentObject private var watched: Watched<MoneyView>
+    @EnvironmentObject private var app: ArkApp<MoneyHost>
+    @EnvironmentObject private var screens: MoneyScreens
     /// Each section's back stack, by its tag, of money's routes.
     @State private var paths: [String: NavigationPath] = [:]
-    /// What the launch asked for that the household had not yet synced:
-    /// tried again as the snapshot moves.
-    @State private var pending: [MoneyRequest] = []
-    /// Settings asked for by the launch: the Mac's window, a sheet elsewhere.
-    @State private var settings = false
 
     private func path(_ tag: String) -> Binding<NavigationPath> {
         Binding(get: { paths[tag] ?? NavigationPath() }, set: { paths[tag] = $0 })
     }
 
-    private func push(_ tag: String, _ r: Route) {
-        // A category's month is Category Details, the shell's inspector
-        // (written from Rust): beside the budget when regular, a sheet when
-        // compact. Never a page of this app's own.
-        if case let .category(id, _) = r { return inspect(category: id) }
-        paths[tag, default: NavigationPath()].append(r)
-    }
-
-    /// Category Details shown for the category of this hex id.
-    private func inspect(category id: String) {
-        model.shell.send(.select(tag: "budget"))
-        model.shell.send(.inspectCategory(id: id))
-        model.shell.send(.inspector(shown: true))
+    /// A page on the stack of the section showing (or of `tag`): an
+    /// account's register, All Accounts, Connected Banks, a bank. A
+    /// category's month is the shell's inspector, opened in Rust.
+    private func push(_ r: Route, on tag: String? = nil) {
+        let t = tag ?? String(screens.shell.page.section.split(separator: "/").first ?? "budget")
+        paths[t, default: NavigationPath()].append(r)
     }
 
     var body: some View {
         // Written from Rust (Generated/MoneyShellView.swift), over its
         // runtime: the sections, their toolbars, search and inspectors.
         MoneyShellView()
-            .environmentObject(model.shell)
+            .environmentObject(screens.shell)
             .environment(\.hostedScreens) { name in AnyView(hosted(name)) }
             .environment(\.sectionPath) { tag in path(tag) }
             // The sheets any screen raises, written from Rust (Generated/SheetsView.swift).
             .background {
-                if let s = model.sheets { SheetsView().environmentObject(s) }
+                if let s = screens.sheets { SheetsView().environmentObject(s) }
             }
             .onAppear {
-                model.shell.request = { r in run(r) }
-                model.shell.send(.month(month: model.month))
-                // Where the window opens (ark_app::shell::Launch): once, for the process.
-                if !Launched.done {
-                    Launched.done = true
-                    model.shell.send(.launch(args: ProcessInfo.processInfo.arguments))
-                }
-            }
-            .onChange(of: model.snapshot.moved) {
-                let waiting = pending
-                pending = []
-                for r in waiting { run(r) }
+                // What money's host asks of this shell: a page pushed; a link
+                // taken as a launch puts away what this shows of its own.
+                screens.push = { r in push(r) }
+                screens.reset = { paths = [:] }
             }
             // The launch's `-appearance`, over the system's: the shell's.
-            .preferredColorScheme(model.shell.page.appearance.map { $0 == .dark ? .dark : .light })
-            .settingsShown($settings) {
+            .preferredColorScheme(screens.shell.page.appearance.map { $0 == .dark ? .dark : .light })
+            .settingsShown($screens.settings) {
                 MoneySettingsView()
-                    .moneySettings(model)
-                    .environmentObject(watched)
+                    .moneySettings(app, screens)
             }
-            // Who is signed in where, for Settings (money_app's SessionFacts).
-            .onChange(of: model.facts, initial: true) { model.shell.send(.session(facts: model.facts)) }
-            // The budget's title is its month: the shell is told as it moves.
-            .onChange(of: model.month) { model.shell.send(.month(month: model.month)) }
-            .toast($model.notice)
-            // A link for the app, kept by the first run until the app showed:
-            // taken as the shell appears, and as another comes.
-            .onAppear { takeLink() }
-            .onChange(of: model.links) { takeLink() }
             // Plaid's page, as soon as the server answers with it, wherever the
             // person is; closed by its Done, or once the server is finished
             // (money_app's shell says which: `SettingsPage.plaid`).
-            .safari(model.shell.page.settings.plaid.flatMap { URL(string: $0) }, tint: Color.accent) {
-                if let url = model.shell.page.settings.plaid { model.shell.send(.pageClosed(url: url)) }
+            .safari(screens.shell.page.settings.plaid.flatMap { URL(string: $0) }, tint: Color.accent) {
+                if let url = screens.shell.page.settings.plaid { screens.shell.send(.pageClosed(url: url)) }
             }
     }
 
-    /// The link the first run kept, taken: a launch as the app runs. What
-    /// this shows of its own is put away (a sheet, a section's pages,
-    /// Settings), then the shell is told as a launch tells it, which puts
-    /// back what it showed itself (ark_app's Launch): a launch link
-    /// (`money://?screen=…`) by its arguments, any other by its address
-    /// (`money:///budget` selects the Budget; nothing is pushed). A sign-in
-    /// link is the sign-in machine's, and the shell passes it over.
-    private func takeLink() {
-        guard let url = model.takeLink() else { return }
-        Ready.shared.changed()
-        model.sheets?.send(.dismiss)
-        paths = [:]
-        settings = false
-        pending = []
-        // The shell puts its inspector away first and moves once the page
-        // without it is drawn (money_app's shell, Command::AfterDraw); not
-        // idle meanwhile, so no screenshot is taken between.
-        if let args = Navigator<Route>.launchArgs(of: url, scheme: AppInfo.money.scheme) {
-            model.shell.send(.launch(args: args))
-        } else {
-            model.shell.send(.address(address: url.absoluteString))
-        }
-    }
-
-    /// A screen the shell hosts (ark_app::shell::hosted): money's own,
-    /// until each moves into Rust; each opens what it opens on its
-    /// section's stack.
+    /// A screen the shell hosts (ark_app::shell::hosted): money's runtimes'
+    /// generated views; each opens what it opens on its section's stack.
     @ViewBuilder private func hosted(_ name: String) -> some View {
         let section = String(name.split(separator: ".").first ?? "")
         SwiftUI.Group {
             switch name {
             case "budget":
-                if let b = model.budget {
+                if let b = screens.budget {
                     // Written from Rust (Generated/BudgetView.swift), over its runtime.
                     BudgetView()
                         .environmentObject(b)
                         .environment(\.rowMark) { kind in AnyView(AccountMark(kind: kind, side: 20)) }
-                        .onAppear {
-                            // A category's month: Category Details, the shell's inspector.
-                            b.open = { r in push("budget", r) }
-                        }
                 }
             case "accounts":
-                if let a = model.accounts {
+                if let a = screens.accounts {
                     // Written from Rust (Generated/AccountsView.swift), over its runtime.
                     AccountsView()
                         .environmentObject(a)
                         .environment(\.rowMark) { kind in AnyView(AccountMark(kind: kind)) }
                         .environment(\.choiceSymbol) { kind, _ in Accounts.symbol(kind) }
-                        .onAppear {
-                            a.open = { r in push("accounts", r) }
-                            a.request = { r in run(r) }
-                        }
                 }
             case "transactions":
-                if let t = model.transactions {
-                    // Written from Rust (Generated/TransactionsView.swift), over its runtime.
-                    TransactionsView()
-                        .environmentObject(t)
-                        .onAppear { t.request = { r in run(r) } }
-                        .onChange(of: model.shell.page.search, initial: true) { _, q in t.send(.search(text: q)) }
-                }
+                // Written from Rust (Generated/TransactionsView.swift), over its
+                // runtime; the shell's search is its search (money's host).
+                if let t = screens.transactions { TransactionsView().environmentObject(t) }
             case "insights":
                 // Written from Rust (Generated/InsightsView.swift), over its runtime.
-                if let i = model.insights { InsightsView().environmentObject(i) }
+                if let i = screens.insights { InsightsView().environmentObject(i) }
             case "accounts.register":
                 // The account the shell shows (its place's tag, `accounts/<id>`), under its search field.
-                if model.shell.page.section.hasPrefix("accounts/") {
-                    register(String(model.shell.page.section.dropFirst("accounts/".count)), search: model.shell.page.search)
+                if screens.shell.page.section.hasPrefix("accounts/") {
+                    register(String(screens.shell.page.section.dropFirst("accounts/".count)), search: screens.shell.page.search)
                 } else {
                     ContentUnavailableView("No Account Selected", systemImage: "building.columns")
                 }
@@ -185,86 +119,39 @@ struct Shell: View {
             }
         }
         .navigationDestination(for: Route.self) { r in destination(r) }
-        .environment(\.open) { r in push(section, r) }
+        .environment(\.open) { r in push(r, on: section) }
     }
 
     private var nothingSelected: some View {
         ContentUnavailableView("Nothing Selected", systemImage: "sidebar.trailing", description: Text("Select a row to see its details here."))
     }
 
-    /// What the shell's runtime asks of this app (`MoneyRequest`): what
-    /// only money's own screens do yet, or a message for another runtime.
-    private func run(_ r: MoneyRequest) {
-        switch r {
-        case let .openCategory(key):
-            guard let l = categoryNamed(key) else { pending.append(r); return }
-            inspect(category: l.categoryId.hex)
-        case let .openTransaction(key):
-            // Transaction Details in the inspector while it shows; its form otherwise.
-            if model.shell.page.inspector { return model.shell.send(.inspectTransaction(id: key)) }
-            guard let sheets = model.sheets else { pending.append(r); return }
-            sheets.send(.open(key: key))
-            // Not synced yet: tried again as the household arrives.
-            if sheets.page.transaction == nil { pending.append(r) }
-        case let .sheet(msg): model.sheets?.send(msg)
-        case .settings: settings = true
-        case .signOut: model.signOut()
-        case .addDevice: model.addingDevice = true
-        case let .accounts(msg):
-            model.shell.send(.select(tag: "accounts"))
-            model.accounts?.send(msg)
-        case let .stepMonth(by): model.stepMonth(Int64(by))
-        case .thisMonth: model.showThisMonth()
-        case let .budget(msg): model.budget?.send(msg)
-        case .refresh: Task { await model.refresh() }
-        // What the bank brought, to look over: Transactions' To Review.
-        case .review:
-            model.shell.send(.select(tag: "transactions"))
-            model.transactions?.send(.show(review: true))
-        // A receipt's photo is kept by the bridge (money/bridge's `KeepPhoto`).
-        case .filter, .importReceipt, .keepPhoto: break
-        }
-    }
-
     /// A register, written from Rust (Generated/RegisterView.swift): the
     /// account of this hex id's, or every account's for none.
     @ViewBuilder private func register(_ account: String?, search: String) -> some View {
-        if let s = model.session {
-            let m = model
-            RegisterHost(session: s, account: account, search: search,
-                         refresh: { Task { await m.refresh() } }, today: { m.today }, run: { r in run(r) })
+        if screens.accounts != nil {
+            RegisterHost(screens: screens, account: account, search: search)
                 .id(account ?? "all")
         }
     }
 
-    /// The category a launch names: by its name in any case, or a word of it.
-    private func categoryNamed(_ n: String) -> BudgetLine? {
-        let w = n.lowercased()
-        let lines = model.snapshot.lines
-        return lines.first { $0.name.lowercased() == w } ?? lines.first { $0.name.lowercased().contains(w) }
-    }
-
-    /// What a route on the back stack draws. An account and a category are
-    /// found by the route's id (an older link's by its name, `names`), so a
-    /// renamed one keeps its page; a bank by its name, its key. An account
-    /// that is gone is the route's fallback, All Accounts.
+    /// What a route on the back stack draws. An account is found by the
+    /// route's id, so a renamed one keeps its page; a bank by its name, its
+    /// key. An account that is gone is the route's fallback, All Accounts.
     @ViewBuilder private func destination(_ r: Route) -> some View {
         switch r {
         case .accounts: register(nil, search: "")
         case let .account(id, _): register(id, search: "")
         // Connected Banks, written from Rust (Generated/MoneyBanksView.swift).
         case .banks:
-            MoneyBanksView().environmentObject(model.shell).environment(\.rowMark) { kind in AnyView(AccountMark(kind: kind)) }
+            MoneyBanksView().environmentObject(screens.shell).environment(\.rowMark) { kind in AnyView(AccountMark(kind: kind)) }
         case let .bank(name):
-            MoneyBanksView().environmentObject(model.shell).environment(\.rowMark) { kind in AnyView(AccountMark(kind: kind)) }
-                .onAppear { model.shell.send(.openBank(name: name)) }
+            MoneyBanksView().environmentObject(screens.shell).environment(\.rowMark) { kind in AnyView(AccountMark(kind: kind)) }
+                .onAppear { screens.shell.send(.openBank(name: name)) }
         default: EmptyView()
         }
     }
 }
-
-/// The launch arguments are read once a process.
-@MainActor private enum Launched { static var done = false }
 
 /// The account at the end of every tab's large title (ArkUI's `AccountFace`,
 /// on the title's own line by `largeTitleBar`): who is using the budget, as
@@ -272,25 +159,24 @@ struct Shell: View {
 /// sheet — who and where they are, the banks that want a look, Settings, and
 /// the way out. What its rows open is pushed on the tab once it has gone.
 struct AccountButton: View {
-    @EnvironmentObject private var model: Model
+    @EnvironmentObject private var app: ArkApp<MoneyHost>
+    @EnvironmentObject private var screens: MoneyScreens
     @Environment(\.open) private var open
     @State private var showing = false
     /// What the sheet's row asked for, done once the sheet has gone.
     @State private var then: Then? = nil
 
-    private enum Then { case page(Route), signOut }
+    private enum Then { case page(Route), settings, signOut }
 
     var body: some View {
-        let wanting = Int(banksWanting(banks: model.snapshot.banks))
-        AccountFace(name: model.who, picture: model.picture, attention: wanting > 0 ? "Banks need a look" : nil) { showing = true }
+        let h = screens.household
+        let wanting = Int(h.banksWanting)
+        AccountFace(name: h.who, picture: h.picture, attention: wanting > 0 ? "Banks need a look" : nil) { showing = true }
             .sheet(isPresented: $showing, onDismiss: after) {
-                AccountSheet(name: model.who, picture: model.picture,
-                             detail: model.isDemo ? "The demo's household, on this phone alone" : model.login.map { $0.email.isEmpty ? $0.user : $0.email } ?? "",
-                             server: model.isDemo ? nil : Probe.display(model.server),
-                             linked: model.snapshot.status.map { $0.linked },
-                             signOut: model.isDemo ? "Leave the Demo" : "Sign Out",
-                             confirm: model.isDemo ? "Leave the Demo?" : "Sign Out?",
-                             onSettings: { leave(.page(.settings)) },
+                AccountSheet(name: h.who, picture: h.picture, detail: h.detail, server: h.server, linked: h.linked,
+                             signOut: h.demo ? "Leave the Demo" : "Sign Out",
+                             confirm: h.demo ? "Leave the Demo?" : "Sign Out?",
+                             onSettings: { leave(.settings) },
                              onSignOut: { leave(.signOut) }) {
                     if wanting > 0 {
                         Section {
@@ -323,36 +209,42 @@ struct AccountButton: View {
         let t = then
         then = nil
         switch t {
-        case .page(.settings)?: model.shell.request(.settings(pane: ""))
+        case .settings?: screens.settings = true
         case let .page(r)?: open(r)
-        case .signOut?: model.signOut()
+        case .signOut?: app.signOut()
         case nil: break
         }
     }
 }
 
 /// A register over its runtime: its own for as long as it shows, read
-/// again as the household moves, searched by the shell's field.
+/// again as the household moves, searched by the shell's field, its row the
+/// one the shell's inspector shows.
 struct RegisterHost: View {
-    @StateObject private var screen: RegisterScreen
-    @EnvironmentObject private var model: Model
+    @StateObject private var held: Held
+    @ObservedObject private var screens: MoneyScreens
     let search: String
-    let run: (MoneyRequest) -> Void
 
-    init(session: Session, account: String?, search: String,
-         refresh: @escaping () -> Void, today: @escaping () -> String, run: @escaping (MoneyRequest) -> Void) {
-        _screen = StateObject(wrappedValue: RegisterScreen(session: session, account: account, refresh: refresh, today: today))
+    /// The register's runtime, made once for the view's life.
+    @MainActor final class Held: ObservableObject {
+        let screen: RegisterScreen?
+        init(_ screen: RegisterScreen?) { self.screen = screen }
+    }
+
+    init(screens: MoneyScreens, account: String?, search: String) {
+        _held = StateObject(wrappedValue: Held(screens.register(account)))
+        self.screens = screens
         self.search = search
-        self.run = run
     }
 
     var body: some View {
-        RegisterView()
-            .environmentObject(screen)
-            .onAppear { screen.request = run }
-            .onChange(of: model.moves) { screen.reload() }
-            .onChange(of: search, initial: true) { _, q in screen.send(.search(text: q)) }
-            .onChange(of: model.shell.page.transaction?.id, initial: true) { _, id in screen.send(.select(id: id)) }
+        if let screen = held.screen {
+            RegisterView()
+                .environmentObject(screen)
+                .onChange(of: screens.moves) { screen.reload() }
+                .onChange(of: search, initial: true) { _, q in screen.send(.search(text: q)) }
+                .onChange(of: screens.shell.page.transaction?.id, initial: true) { _, id in screen.send(.select(id: id)) }
+        }
     }
 }
 
@@ -361,24 +253,26 @@ struct RegisterHost: View {
 /// of its own in General (only the desktop adds there), and Add a Device's
 /// shared page when the shell asks for it.
 private struct MoneySettings: ViewModifier {
-    @ObservedObject var model: Model
+    @ObservedObject var app: ArkApp<MoneyHost>
+    @ObservedObject var screens: MoneyScreens
 
     func body(content: Content) -> some View {
         content
-            .environmentObject(model.shell)
-            .environmentObject(model)
+            .environmentObject(screens.shell)
+            .environmentObject(app)
+            .environmentObject(screens)
             .environment(\.rowMark) { kind in AnyView(AccountMark(kind: kind)) }
             .environment(\.hostedScreens) { _ in AnyView(EmptyView()) }
-            .sheet(isPresented: $model.addingDevice) {
-                let (server, login) = (model.server, model.login)
+            .sheet(isPresented: $screens.addingDevice) {
+                let app = app
                 NavigationStack {
-                    AddDeviceView { await addDevice(server: server, login: login) }
-                        .toolbar { Button("Done") { model.addingDevice = false } }
+                    AddDeviceView { await app.deviceLink() }
+                        .toolbar { Button("Done") { screens.addingDevice = false } }
                 }
             }
     }
 }
 
 extension View {
-    func moneySettings(_ model: Model) -> some View { modifier(MoneySettings(model: model)) }
+    func moneySettings(_ app: ArkApp<MoneyHost>, _ screens: MoneyScreens) -> some View { modifier(MoneySettings(app: app, screens: screens)) }
 }

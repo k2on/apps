@@ -11,6 +11,15 @@ mode every app has, Android's framework alone), and its apps are:
 - `revelation` (`shots/` alone);
 - `showcase/android`, the docs' captures of the components.
 
+**The app library** is `app/` (package `dev.arkui.app`, the project's
+`:app`): what every Ark app is underneath its screens — `ArkApplication`,
+`ArkActivity`, `ArkApp`, `ArkScreen`, `BackgroundHooks` (ui/docs/app.md,
+"The App Library"). It is written over the kernel's Kotlin, which every
+app's library carries, so it compiles against one copy (`:bindings`,
+money's as the ffi check writes it) and carries none; nix builds it once
+(`packages.ark-app-android`) with the prebuild self-test's `[background]`
+fixture (`:fixture`), and every Ark app links its jar (`-ParkAppLib`).
+
 **Built once, linked by every app.** `android/` is a Gradle project of two
 Android libraries, `:shots` and `:arkui` (over `:shots`). nix builds each
 as a derivation of its own (flake.nix, `arkuiKotlin`:

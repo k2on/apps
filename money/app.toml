@@ -20,6 +20,18 @@ scheme = "money"
 # `commands()`; its UniFFI namespace is the crate's.
 crate = "money-app"
 
+# Each screen's runtime as the bridge exports it, its page and message, and
+# the holder each toolkit's generated views read it through (ui/prebuild.py
+# writes the holders over the app library's `ArkScreen`).
+[screens]
+accounts = { runtime = "AccountsApp", page = "AccountsPage", msg = "AccountsMsg", swift = "AccountsScreen", kotlin = "AccountsHolder" }
+budget = { runtime = "BudgetApp", page = "BudgetPage", msg = "BudgetMsg", swift = "BudgetScreen", kotlin = "BudgetHolder" }
+transactions = { runtime = "TransactionsApp", page = "TransactionsPage", msg = "TransactionsMsg", swift = "TransactionsScreen", kotlin = "TransactionsHolder" }
+insights = { runtime = "InsightsApp", page = "InsightsPage", msg = "InsightsMsg", swift = "InsightsScreen", kotlin = "InsightsHolder" }
+register = { runtime = "RegisterApp", page = "RegisterPage", msg = "RegisterMsg", swift = "RegisterScreen", kotlin = "RegisterHolder" }
+sheets = { runtime = "SheetsApp", page = "SheetsPage", msg = "SheetsMsg", swift = "SheetsScreen", kotlin = "SheetsHolder" }
+shell = { runtime = "ShellApp", page = "ShellPage", msg = "ShellMsg", swift = "MoneyShellScreen", kotlin = "MoneyShellHolder" }
+
 [icon]
 # icon.svg's full-canvas rectangle is the background; on Android the rest
 # is the adaptive icon's foreground and its themed (monochrome) icon.
@@ -28,6 +40,8 @@ svg = "icon.svg"
 [apple]
 # The scheme and the product: Money.app.
 product = "Money"
+# The scene the generated `@main` draws over the app library (native/ios).
+scene = "MoneyScenes"
 category = "public.app-category.finance"
 deployment = "26.0"
 # The team is CI's secret (ios.yaml), never written here or generated.
@@ -42,6 +56,9 @@ NSPhotoLibraryUsageDescription = "Money reads a photo of a receipt you choose so
 # The Kotlin package of the app's own code (money/native/android) and the
 # generated screens'.
 package = "dev.money.android"
+# The composable the generated activity draws over the app library
+# (native/android).
+root = "MoneyRoot"
 min-sdk = 26
 target-sdk = 35
 # The one key every build is signed with, committed and public on purpose
@@ -97,6 +114,9 @@ crate = "money-views"
 # generated money-ffi links.
 crate = "money-bridge"
 dir = "bridge"                 # beside app.toml
+# The object the bridge exports that the phone holds: the app host's (ark-ffi's
+# ArkHost) and money's screens' runtimes (bridge/src/host.rs).
+host = "MoneyHost"
 # The features of the bridge each phone's library links: Android's camera
 # gives the scanner's eyes a colour square, which the corner model reads
 # (`model`, ark-scanner's); the iPhone and the Mac find the page by its

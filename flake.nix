@@ -655,14 +655,14 @@
           # classes: the library has no BuildConfig and no resources, so
           # the debug builds link the same. Its Maven graph is
           # ui/kotlin/android/deps.json (`nix run .#arkui-kotlin-deps`).
-          arkuiKotlin = { module, dir, shots ? null }:
+          arkuiKotlin = { module, dir, shots ? null, pname ? "arkui-kotlin-${module}", extraSrc ? [ ], flags ? [ ], carryShots ? true, extraTasks ? [ ], preGradle ? "" }:
             pkgs.stdenv.mkDerivation (final: {
-              pname = "arkui-kotlin-${module}";
+              inherit pname;
               version = "0.1.0";
-              src = only [ "ui/kotlin/android" dir ];
+              src = only ([ "ui/kotlin/android" dir ] ++ extraSrc);
               sourceRoot = "source/ui/kotlin/android";
               postUnpack = "chmod -R u+w source";
-              nativeBuildInputs = [ pkgs.gradle pkgs.jdk21 ];
+              nativeBuildInputs = [ pkgs.gradle pkgs.jdk21 ] ++ lib.optional (preGradle != "") pkgs.python3;
               mitmCache = pkgs.gradle.fetchDeps {
                 pkg = final.finalPackage;
                 data = ./ui/kotlin/android/deps.json;
@@ -670,25 +670,49 @@
               __darwinAllowLocalNetworking = true;
               ANDROID_HOME = sdkRoot;
               ANDROID_SDK_ROOT = sdkRoot;
-              gradleFlags = androidGradleFlags ++ lib.optional (shots != null) "-PshotsLib=${shots}";
+              gradleFlags = androidGradleFlags ++ lib.optional (shots != null) "-PshotsLib=${shots}" ++ flags;
               preBuild = ''
                 export HOME="$TMPDIR/home" ANDROID_USER_HOME="$TMPDIR/home/.android"
                 mkdir -p "$ANDROID_USER_HOME"
+              '' + lib.optionalString (preGradle != "") ''
+                ${preGradle}
               '';
               # The library's classes as its consumers' compiler and D8 read
               # them: no AAR (whose bundling runs lint's annotation
               # extraction, which the recorded graph does not hold).
-              gradleBuildTask = ":${module}:bundleLibRuntimeToJarRelease";
+              gradleBuildTask = lib.concatStringsSep " " ([ ":${module}:bundleLibRuntimeToJarRelease" ] ++ extraTasks);
               gradleUpdateTask = ":shots:bundleLibRuntimeToJarRelease :arkui:bundleLibRuntimeToJarRelease";
               doCheck = false;
               installPhase = ''
                 jar=$(find ${module}/build/intermediates/runtime_library_classes_jar/release -name classes.jar | head -1)
                 install -Dm644 "$jar" $out/${module}.jar
-                ${lib.optionalString (shots != null) "cp ${shots}/*.jar $out/"}
+                ${lib.optionalString (shots != null && carryShots) "cp ${shots}/*.jar $out/"}
               '';
             });
           arkui-kotlin-shots = arkuiKotlin { module = "shots"; dir = "ui/kotlin/shots"; };
           arkui-kotlin = arkuiKotlin { module = "arkui"; dir = "ui/kotlin/src"; shots = arkui-kotlin-shots; };
+          # **The shared app library, compiled once** (ui/kotlin/app, the
+          # gradle project's `:app`): what every Ark app is underneath its
+          # screens (ui/docs/app.md, "The App Library"), its classes
+          # `app.jar`, which every Ark app links (`-ParkAppLib`) beside
+          # ArkUI's. Compiled against ArkUI's jars and against the kernel's
+          # Kotlin as the ffi check writes it for an app's library
+          # (`:bindings`, never carried: each app has its own). With it, the
+          # prebuild self-test's fixture that declares `[background]`: its
+          # generated hookup compiled against the library (`:fixture`), so
+          # what only that writes is held to compile.
+          ark-app-android = arkuiKotlin {
+            module = "app";
+            pname = "ark-app-android";
+            dir = "ui/kotlin/app";
+            shots = arkui-kotlin-shots;
+            carryShots = false;
+            extraSrc = [ "rust/ark-ffi/kotlin" "modules" "ui/prebuild.py" "ui/theme.py" "ui/theme.toml" "money/app.toml" "money/icon.svg" ];
+            flags = [ "-ParkuiLib=${arkui-kotlin}" "-ParkBindings=${self.checks.${system}.ffi}/money/kotlin" ];
+            # The fixture's generated Kotlin, written where `:fixture` compiles it.
+            preGradle = "python3 ../../prebuild.py fixture --kotlin fixture/generated";
+            extraTasks = [ ":fixture:compileReleaseKotlin" ];
+          };
 
           # An Android app of this tree (`<name>/android`, a gradle project
           # with one `:app`): gradle over the SDK, assembled offline from a
@@ -834,7 +858,7 @@
             name = "money";
             appid = arkOf.money.a.android.package;
             ark = arkOf.money;
-            flags = [ "-ParkLib=${money-android-lib}" "-ParkuiLib=${arkui-kotlin}" ];
+            flags = [ "-ParkLib=${money-android-lib}" "-ParkuiLib=${arkui-kotlin}" "-ParkAppLib=${ark-app-android}" ];
             # The device modules money lists (money/app.toml), whose kotlin/
             # its generated build.gradle.kts compiles in: each implements an
             # interface UniFFI writes into money's own bindings. ArkUI is
@@ -1510,9 +1534,20 @@
                 # that does not draw with it.
                 deps = [ bindings ] ++ lib.optionals (swiftImportsArkUI "modules/${m}/swift") (arkuiSwift kind);
               }) (lib.filter (m: builtins.pathExists (./modules + "/${m}/swift")) (ark.a.modules or [ ])));
+              # The app library (ui/swift's ArkApp: ui/docs/app.md, "The App
+              # Library"), over the app's own bindings and ArkUI, so a module
+              # of its own per app, as a device module is.
+              arkAppModule = lib.optionals (ark != null) [
+                (swiftModule {
+                  name = "${name}-ios-ark-app"; module = "ArkApp"; inherit kind headers;
+                  src = only [ "ui/swift/Sources/ArkApp" ];
+                  sources = "ui/swift/Sources/ArkApp/*.swift";
+                  deps = [ bindings ] ++ arkuiSwift kind;
+                })
+              ];
               # What the app links prebuilt: ArkUI (`arkuiSwift`), and an Ark
-              # app's bindings and modules.
-              linked = arkuiSwift kind ++ lib.optionals (ark != null) ([ bindings ] ++ deviceModules);
+              # app's bindings, modules and the app library.
+              linked = arkuiSwift kind ++ lib.optionals (ark != null) ([ bindings ] ++ deviceModules ++ arkAppModule);
               # `shared`: the repository's directories a non-Ark app
               # compiles into itself (harken's media player's Swift).
               modules = lib.optionals (ark != null) [ "${name}/modules" ] ++ shared;
@@ -1602,7 +1637,7 @@
                   del(.packages.ArkUI)
                   | (.targets[] | select((.dependencies // []) | any_c(.package == "ArkUI"))) |= (
                       .dependencies |= map(select(.package != "ArkUI"))
-                      ${lib.optionalString (ark != null) "| .sources |= map(select((.path // .) as $p | ($p == \"../ffi/ios/swift\" or ($p | test(\"^(\\\\.\\\\./)+modules/[^/]+/swift$\"))) | not))"}
+                      ${lib.optionalString (ark != null) "| .sources |= map(select((.path // .) as $p | ($p == \"../ffi/ios/swift\" or ($p | test(\"^(\\\\.\\\\./)+(modules/[^/]+/swift|ui/swift/Sources/ArkApp)$\"))) | not))"}
                       | .settings.base.SWIFT_INCLUDE_PATHS = "$(inherited) " + strenv(ARKUI) + "/modules"
                       | .settings.base.LIBRARY_SEARCH_PATHS = "$(inherited) " + strenv(ARKUI) + "/lib"
                       | .settings.base.OTHER_LDFLAGS = "$(inherited) ${lib.concatMapStringsSep " " (d: "-l${d.module}") (lib.reverseList linked)}")' project.yml
@@ -1612,7 +1647,7 @@
                   # And the bindings' types by their names in the app's own
                 # module, as when they were its sources (`aliases`).
                 {
-                  printf '@_exported import %s\n' ${lib.concatMapStringsSep " " (d: d.module) ([ bindings ] ++ deviceModules)}
+                  printf '@_exported import %s\n' ${lib.concatMapStringsSep " " (d: d.module) ([ bindings ] ++ deviceModules ++ arkAppModule)}
                   cat ${bindings}/aliases.swift
                 } > Generated/ArkLinked.swift
                 ''}
@@ -1628,8 +1663,36 @@
               '';
               dontStrip = true;
               dontFixup = true;
-              passthru = { inherit bundle linked; };
+              passthru = { inherit bundle linked bindings headers arkAppModule; };
               meta.platforms = [ "aarch64-darwin" ];
+            };
+          # The prebuild self-test's fixture that declares `[background]`
+          # (ui/prebuild.py `selftest`: money's app.toml with every key), its
+          # generated background hookup compiled for the simulator against
+          # the app library, money's bindings and the two modules only such
+          # an app lists (ark-background's, ark-notifications'): what only
+          # `[background]` writes, held to compile. mac-compile builds it.
+          ark-app-fixture-ios =
+            let
+              app = money-ios-simulator;
+              kind = "simulator";
+              module = m: swiftModule {
+                name = "ark-app-fixture-${m}"; inherit kind; inherit (app) headers;
+                module = "Ark" + lib.concatMapStrings (w: lib.toUpper (lib.substring 0 1 w) + lib.substring 1 (-1) w) (lib.splitString "-" (lib.removePrefix "ark-" m));
+                src = only [ "modules/${m}/swift" ];
+                sources = "modules/${m}/swift/*.swift";
+                deps = [ app.bindings ];
+              };
+              written = pkgs.runCommand "ark-app-fixture-swift" { nativeBuildInputs = [ pkgs.python3 ]; } ''
+                cd ${only [ "ui/prebuild.py" "ui/theme.py" "ui/theme.toml" "modules" "money/app.toml" "money/icon.svg" ]}
+                python3 ui/prebuild.py fixture --swift $out
+              '';
+            in
+            swiftModule {
+              name = "ark-app-fixture"; module = "ArkAppFixture"; inherit kind; inherit (app) headers;
+              src = written;
+              sources = "*.swift";
+              deps = [ app.bindings ] ++ app.arkAppModule ++ arkuiSwift kind ++ [ (module "ark-background") (module "ark-notifications") ];
             };
           # money's generated project is Linux's (`arkOf` there): what the
           # generator writes is text, the same on any machine, and a Mac
@@ -1851,7 +1914,7 @@
             inherit ark vectors fuzz harken-domain trace-corpus harken-android-lib harken-ios-xcframework;
             # The iPhone apps from the pinned Xcode: for the simulator (the
             # screenshots), as the archive TestFlight is sent, and the kernel.
-            inherit money-ios-simulator harken-ios-simulator money-ios-archive harken-ios-archive money-macos;
+            inherit money-ios-simulator harken-ios-simulator money-ios-archive harken-ios-archive money-macos ark-app-fixture-ios;
             inherit money-ios-kernel harken-ios-kernel money-ios-kernel-simulator harken-ios-kernel-simulator;
             # ArkUI for SwiftUI, compiled once per platform for every app.
             inherit arkui-swift-simulator arkui-swift-archive arkui-swift-macos;
@@ -1893,7 +1956,7 @@
             money-apk-deps = money.deps;
             # ArkUI's Kotlin, each library once (`arkuiKotlin`), and
             # `nix run .#arkui-kotlin-deps` re-recording its Maven graph.
-            inherit arkui-kotlin arkui-kotlin-shots;
+            inherit arkui-kotlin arkui-kotlin-shots ark-app-android;
             arkui-kotlin-deps = arkui-kotlin.mitmCache.updateScript;
             # The workflow builds these first and keeps them as gc roots.
             inherit aapt2;

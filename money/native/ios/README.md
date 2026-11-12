@@ -219,35 +219,24 @@ exists.
 
 ## How the pieces meet
 
-Foundation only — type-checked on Linux, tested there and on the simulator:
+The first run, the session and the model are Rust's: the generated
+`@main` (ui/prebuild.py, from money/app.toml) holds money's host
+(`MoneyHost`, money/bridge/src/host.rs, over ark-ffi's `ArkHost`) through
+the app library every Ark app shares (ui/swift's `ArkApp`: `ArkApp`,
+`ArkRoot`, `ArkScreen`) — the first run every app shares, the sign-in in
+`ASWebAuthenticationSession`'s shared session, what is remembered (the
+login in the keychain, the server and the demo in Application Support),
+the session's link watched, and every screen's runtime over the session,
+what one asks of another carried out there. Its tests are Rust's
+(money/bridge/tests/host.rs).
 
-- **`Bridge`** — the session: the peer opened over the replica
-  (`Application Support/money/server-…/replica`, one per server) and
-  dialled, or the demo's household in memory; drained on one queue
-  whenever it says anything moved (`Listener`), its views spliced
-  (accounts, groups, the month's lines, summary and spending, the inbox,
-  payees, banks, their accounts and the reader's asks; a register while a
-  screen holds it), a rejection or a
-  denial said once, and a `Snapshot` sent on. The month's three views are
-  opened again when the month changes. Every write is a domain function;
-  a refusal is said in the domain's words.
-- **`Model`** — the main actor's: the first run's machine run, the session
-  it opens, the month on screen, and every button; an ask for Plaid's page
-  followed until it opens.
-- **`Onboarding`** — the first run as a machine with no network, browser or
-  clock, the demo one of its steps.
-- **`Budget`** — the arithmetic the screens draw: the month under its
-  groups, a figure's tone (credit overspending apart from cash), the cards'
-  payment categories (`Cards`: what each says, what covers it, which
-  categories a transaction may have), which way Move Money goes (from the category
-  chosen into an overspent one, out of any other), the accounts' sections
-  and net worth, the transaction form (`Draft`) and its inputs, payees
-  offered, registers a day at a time, and days as the domain writes them
-  (noon of the day in the phone's calendar, for a picker and a heading).
-- **`Banks`** — the asks followed (open Plaid's page once, the newest ask
-  only), what each ask and bank says, and what a bank's account may feed.
+Foundation only — type-checked on Linux:
 
-Apple's — compiled by CI: `MoneyApp`, `Shell` (the shell's host: routes,
+- **`Budget`** — the rows as SwiftUI lists them, and money written in the
+  phone's locale (`Numbers`); every rule is the core's.
+
+Apple's — compiled by CI: `MoneyApp` (money's scenes and `MoneyScreens`,
+the holders of the host's runtimes), `Shell` (the shell's host: routes,
 the generated screens hosted, a register's own runtime per register shown,
 the generated sheets over it), `InsightsView`, the receipts' views,
 `Theme`. Settings (its General, Household, Connected Banks and Appearance

@@ -1,4 +1,6 @@
-// The app, once there is a budget: four tabs in a navigation bar — Budget,
+// money over the app library (ui/kotlin/app): the generated activity draws [MoneyRoot] — the first
+// run every Ark app shares until a session (or the demo) is open, then the app. The app, once there
+// is a budget: four tabs in a navigation bar — Budget,
 // Accounts, Transactions and Insights — each a page with a large top app bar
 // that collapses as it scrolls, and the pages they open (an account's
 // register, Settings with the banks) pushed over them. Navigation is
@@ -7,10 +9,10 @@
 // Each tab keeps its own place, as Google's apps do, and the tab already
 // showing goes back to its top when it is pressed again.
 //
-// The transaction form is the app's, over whichever page asked for it (the
-// FAB on most of them, a row's tap), as a modal bottom sheet; so are the
-// sheets each page raises. What the book says — a refusal, a sync — is a
-// snackbar on the page showing.
+// Every screen's runtime is money's host's (`MoneyHost`, money/bridge/src/host.rs), which carries
+// out what each asks of another; what it asks of this shell (a page pushed, Settings, Add a Device)
+// comes as its asks. What the app says once — a refusal, a sync — is a snackbar on the page
+// showing.
 package dev.money.android
 
 import android.net.Uri
@@ -72,13 +74,11 @@ import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavHostController
 import dev.arkui.LocalHostedScreens
 import dev.arkui.shellShortcuts
-import uniffi.money_bridge.MoneyRequest
 import uniffi.money_bridge.ShellMsg
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
-import dev.arkdb.ffi.Id
 import dev.arkui.AccountFace
 import dev.arkui.AccountGroup
 import dev.arkui.AccountRow
@@ -86,9 +86,7 @@ import dev.arkui.AccountSheet
 import dev.arkui.ArkGlyphs
 import dev.arkui.TabTitle
 import dev.arkui.LargeTitles
-import dev.arkui.Navigator
 import dev.arkui.RouteArg
-import dev.arkui.SensoryFeedback
 import dev.arkui.Transitions
 import dev.arkui.reducedMotion
 import dev.arkui.modules.CameraPage
@@ -96,11 +94,15 @@ import dev.arkui.modules.PhoneCamera
 import dev.arkui.modules.PhoneClipboard
 import dev.arkui.modules.PhoneHaptics
 import uniffi.money_bridge.registerDevices
-import uniffi.money_bridge.Auto
 import uniffi.money_bridge.Route
-import uniffi.money_bridge.TxnLine
-import uniffi.money_bridge.SheetsMsg
 import uniffi.money_bridge.routeFromUrl
+import androidx.compose.material3.Surface
+import dev.arkui.app.ArkApp
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import uniffi.money_bridge.Household
+import uniffi.money_bridge.MoneyHost
+import uniffi.money_bridge.NativeAsk
 
 /** The four tabs. */
 enum class Tab(val route: String, val label: String, val icon: ImageVector, val selected: ImageVector, val section: String) {
@@ -110,44 +112,77 @@ enum class Tab(val route: String, val label: String, val icon: ImageVector, val 
     Insights("insights", "Insights", Glyphs.Insights, Glyphs.InsightsFilled, "insights"),
 }
 
-/** What a page can ask of the app: a transaction's form, a page, the snackbar. */
+/** What a page can ask of the app: a page, the snackbar, who is using the budget. */
 class Shell(
-    val book: Book,
+    val library: MoneyHost,
     val snackbar: SnackbarHostState,
-    /** An account's register, or every account's (All Accounts) for none. */
-    val onAccount: (Id?) -> Unit,
+    /** Who is using the budget and where (money's host's), for the faces and the account sheet. */
+    val household: StateFlow<Household>,
     val onSettings: () -> Unit,
-    val onTab: (Tab) -> Unit,
     val onSignOut: () -> Unit,
     /** The account sheet: what the face at the end of a tab's title raises. */
     val onAccountSheet: () -> Unit = {},
-    /** "Add a Device": the join link another phone signs in with, made as this login. */
-    val addDevice: suspend () -> dev.arkui.DeviceLinkShown = { dev.arkui.DeviceLinkShown(null, 0, emptyList(), "Sign in first.") },
 )
 
 val LocalShell = staticCompositionLocalOf<Shell> { error("no shell") }
 
-/** The budget, its tabs and its pages; `onSignOut` leaves it. */
+/** The first run's pages until the app itself shows, then the app: what the activity draws. */
 @Composable
-fun MoneyApp(
-    book: Book,
-    onSignOut: () -> Unit,
-    addDevice: suspend () -> dev.arkui.DeviceLinkShown = { dev.arkui.DeviceLinkShown(null, 0, emptyList(), "Sign in first.") },
-    links: kotlinx.coroutines.flow.StateFlow<Int> = kotlinx.coroutines.flow.MutableStateFlow(0),
-    takeLink: () -> String? = { null },
-) {
+fun MoneyRoot(app: ArkApp, library: MoneyHost) {
+    MoneyTheme {
+        Surface(color = MaterialTheme.colorScheme.background, modifier = Modifier.fillMaxSize()) {
+            val shows by app.showsApp.collectAsStateWithLifecycle()
+            val moves by app.moves.collectAsStateWithLifecycle()
+            // The first run's pages every Ark app shares (generated/WelcomeScreen.kt, from
+            // ark_app::welcome, money's words).
+            val welcome = remember(library) { FirstRunHolder(library.welcome()) }
+            LaunchedEffect(moves) { welcome.reload() }
+            val page by welcome.page.collectAsStateWithLifecycle()
+            // money's pages over the app itself when their route asked for them.
+            if (shows && page.intro == null) MoneyApp(app, library) else WelcomeScreen(welcome)
+        }
+    }
+}
+
+/** money's screens' holders over the runtimes its host made for one session. */
+class Holders(library: MoneyHost) {
+    val shell = MoneyShellHolder(library.shell()!!)
+    val budget = BudgetHolder(library.budget()!!)
+    val accounts = AccountsHolder(library.accounts()!!)
+    val transactions = TransactionsHolder(library.transactions()!!)
+    val insights = InsightsHolder(library.insights()!!)
+    val sheets = SheetsHolder(library.sheets()!!)
+
+    /** Every page read again: something moved. */
+    fun reload() {
+        for (h in listOf(shell, budget, accounts, transactions, insights, sheets)) h.reload()
+        // Where the app is, for a screenshot's ready signal: the section.
+        dev.arkui.Ready.at(shell.page.value.section)
+    }
+}
+
+/** The budget, its tabs and its pages, over the runtimes money's host made. */
+@Composable
+fun MoneyApp(app: ArkApp, library: MoneyHost) {
+    val moves by app.moves.collectAsStateWithLifecycle()
+    val generation = remember(moves) { library.generation() }
+    // A session closed between a move and this: nothing to draw until the first run shows.
+    if (generation == 0uL) return
+    val holders = remember(generation) { Holders(library) }
+    MoneyApp(app, library, holders, moves)
+}
+
+@Composable
+private fun MoneyApp(app: ArkApp, library: MoneyHost, holders: Holders, moves: Long) {
     val nav = rememberNavController()
-    val ledger by book.state.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
     var account by remember { mutableStateOf(false) }
-    LaunchedEffect(book) { book.notes.collect { snackbar.showSnackbar(it) } }
-    // What the hand feels of a change the book has taken, on the frame it shows: the iPhone's
-    // `.sensoryFeedback` on the same events (`Book.felt`).
-    val felt by book.felt.collectAsStateWithLifecycle()
-    SensoryFeedback(felt.kind, felt.count)
+    var addingDevice by remember { mutableStateOf(false) }
+    LaunchedEffect(app) { app.notices.collect { snackbar.showSnackbar(it) } }
+    val household = remember(library) { MutableStateFlow(library.household()) }
     val context = LocalContext.current
-    val sections =
-        remember(book) { MoneyShellHolder(book.session, { book.sync() }, { book.state.value.today }) }
+    val sections = holders.shell
+    val sheets = holders.sheets
     val shellPage by sections.page.collectAsStateWithLifecycle()
     // Plaid's page, in a Custom Tab, the moment the server answers a connection asked for here
     // (money_app's shell says which: `SettingsPage.plaid`). A Custom Tab is not followed, so it
@@ -158,127 +193,61 @@ fun MoneyApp(
             .onFailure { snackbar.showSnackbar("Couldn't open Plaid's page: open it from Settings") }
         sections.send(ShellMsg.PageClosed(url = url))
     }
-    // Who is signed in where, for Settings (money_app's SessionFacts).
-    val version = remember(context) {
-        runCatching {
-            val i = context.packageManager.getPackageInfo(context.packageName, 0)
-            @Suppress("DEPRECATION") "${i.versionName} (${i.versionCode})"
-        }.getOrDefault("")
-    }
-    LaunchedEffect(ledger.who, ledger.demo, ledger.server, ledger.link, ledger.ready) {
-        val facts = uniffi.money_bridge.SessionFacts(
-            who = ledger.who,
-            login = "",
-            demo = ledger.demo,
-            server = ledger.server.substringAfter("://"),
-            linked = if (ledger.ready) ledger.link.linked else null,
-            pending = ledger.link.pending.toLong(),
-            version = version,
-            leaves = true,
-            addsDevices = !ledger.demo,
-        )
-        sections.send(ShellMsg.Session(facts = facts))
-    }
-    var addingDevice by remember { mutableStateOf(false) }
     // The device modules (money/app.toml): the camera's page is drawn at the root, below.
     val hapticView = androidx.compose.ui.platform.LocalView.current
     val camera = remember { PhoneCamera() }
     // Registered as the process's (`ArkProcess`'s modules): every screen's runtime asks through them.
     remember(hapticView) { registerDevices(PhoneHaptics(hapticView), PhoneClipboard(hapticView.context), null, camera) }
-    // The sheets over the app, written from Rust (generated/SheetsScreen.kt): its month the book's.
-    val sheets = remember(book) { SheetsHolder(book.session, { book.sync() }, { book.state.value.today }) }
-    camera.onAnswered = { sheets.answered() }
+    camera.onAnswered = { if (library.sheets()?.drain() == true) sheets.reload() }
     val shell =
-        remember(book, nav) {
+        remember(library, nav) {
             Shell(
-                book = book,
+                library = library,
                 snackbar = snackbar,
-                onAccount = { id -> nav.navigate(register(book.state.value.accounts.firstOrNull { it.id == id }?.let { Route.Account(it.id.hex, it.name) } ?: Route.Accounts)) },
+                household = household,
                 onSettings = { nav.navigate("settings") { launchSingleTop = true } },
-                onTab = { t -> sections.send(ShellMsg.Select(tag = t.section)) },
-                onSignOut = onSignOut,
+                onSignOut = { app.signOut() },
                 onAccountSheet = { account = true },
-                addDevice = addDevice,
             )
         }
-
-    // A link the app was opened with or sent, taken as a launch as the app runs: the sheets put
-    // away and the pages popped, then the shell told as a launch tells it, which puts back what
-    // it showed itself — a launch link (`money://?screen=…`, ui/docs/shots.md) by its arguments,
-    // any other by its address (`money:///budget` selects the Budget; nothing is pushed). A
-    // sign-in link is the onboarding's, and the shell passes it over. The first run keeps every
-    // link (`FirstRun::open_link`), so one that came while its pages or the sign-in showed is
-    // taken here, once the app shows.
-    val linked by links.collectAsStateWithLifecycle()
-    LaunchedEffect(linked) {
-        val link = takeLink() ?: return@LaunchedEffect
-        dev.arkui.Ready.changed()
-        sheets.send(SheetsMsg.Dismiss)
-        account = false
-        nav.popBackStack("shell", inclusive = false)
-        sections.send(Navigator.launchArgsOf(link, "money")?.let { ShellMsg.Launch(args = it) } ?: ShellMsg.Address(address = link))
-    }
-
-    val entry by nav.currentBackStackEntryAsState()
-    val route = entry?.destination?.route
-    val tab = Tab.entries.firstOrNull { it.route == route }
-    val reduced = reducedMotion()
-
-    // The shell, written from Rust (generated/MoneyShell.kt, ui/docs/apps/money.md): the sections
-    // Budget, Accounts, Transactions and Insights — a navigation bar, a rail or a drawer by the
-    // window's width — each its top bar, search and inspector, hosting money's own screens.
-    LaunchedEffect(ledger) { sections.reload() }
-    // Budget, written from Rust (generated/BudgetScreen.kt), over its runtime: its month the book's.
-    val budget = remember(book) { BudgetHolder(book.session, { book.sync() }, { book.state.value.today }) }
-    LaunchedEffect(budget, ledger.month) { budget.send(uniffi.money_bridge.BudgetMsg.Month(month = ledger.month)) }
-    LaunchedEffect(ledger) { budget.reload() }
-    // Accounts, written from Rust (generated/AccountsScreen.kt), over its runtime.
-    val accounts = remember(book) { AccountsHolder(book.session, { book.sync() }, { book.state.value.today }) }
-    LaunchedEffect(ledger) { accounts.reload() }
-    // Transactions, written from Rust (generated/TransactionsScreen.kt), over its runtime.
-    val transactions = remember(book) { TransactionsHolder(book.session, { book.sync() }, { book.state.value.today }) }
-    LaunchedEffect(ledger) { sheets.reload() }
-    LaunchedEffect(sheets, ledger.month) { sheets.send(SheetsMsg.Month(month = ledger.month, today = ledger.today)) }
-    // What any screen's runtime asks of the app (`MoneyRequest`).
-    val carry: (MoneyRequest) -> Unit = { r ->
-        when (r) {
-            is MoneyRequest.Sheet -> sheets.send(r.msg)
-            // Transaction Details in the inspector while it shows; its form otherwise.
-            is MoneyRequest.OpenTransaction ->
-                if (sections.page.value.inspector) sections.send(ShellMsg.InspectTransaction(id = r.key)) else sheets.send(SheetsMsg.Open(key = r.key))
-            is MoneyRequest.Accounts -> {
-                sections.send(ShellMsg.Select(tag = "accounts"))
-                accounts.send(r.msg)
+    // Whatever moved, every page read again, and what money's host asks of this shell carried out:
+    // a page pushed, Settings, Add a Device, and a link taken as a launch putting away what this
+    // shows of its own (the shell is told the launch by the host).
+    LaunchedEffect(moves) {
+        holders.reload()
+        household.value = library.household()
+        for (ask in library.takeAsks()) {
+            when (ask) {
+                is NativeAsk.Open ->
+                    when (val r = ask.route) {
+                        is Route.Banks -> {
+                            sections.send(ShellMsg.Pane(title = "Connected Banks"))
+                            shell.onSettings()
+                        }
+                        is Route.Bank -> {
+                            sections.send(ShellMsg.OpenBank(name = r.name))
+                            shell.onSettings()
+                        }
+                        else -> nav.navigate(register(r))
+                    }
+                is NativeAsk.Settings -> {
+                    if (ask.pane.isNotEmpty()) sections.send(ShellMsg.Pane(title = ask.pane))
+                    shell.onSettings()
+                }
+                is NativeAsk.AddDevice -> addingDevice = true
+                is NativeAsk.Reset -> {
+                    dev.arkui.Ready.changed()
+                    account = false
+                    nav.popBackStack("shell", inclusive = false)
+                }
             }
-            // What the bank brought, to look over: Transactions' To Review.
-            is MoneyRequest.Review -> {
-                sections.send(ShellMsg.Select(tag = "transactions"))
-                transactions.send(uniffi.money_bridge.TransactionsMsg.Show(review = true))
-            }
-            is MoneyRequest.StepMonth -> book.stepMonth(r.by)
-            is MoneyRequest.ThisMonth -> book.stepMonth(0)
-            is MoneyRequest.Budget -> budget.send(r.msg)
-            is MoneyRequest.Refresh -> book.sync()
-            is MoneyRequest.Settings -> nav.navigate("settings") { launchSingleTop = true }
-            is MoneyRequest.SignOut -> onSignOut()
-            is MoneyRequest.AddDevice -> addingDevice = true
-            else -> {}
         }
     }
-    sections.request = carry
-    accounts.requested = carry
-    transactions.requested = carry
-    // Where the window opens (ark_app::shell::Launch): the launch intent's `ark.args`
-    // (`am start --esa ark.args -screen,budget`), once for the activity.
-    val launchArgs = (LocalContext.current as? android.app.Activity)?.intent?.getStringArrayExtra("ark.args")
-    LaunchedEffect(sections) {
-        if (launchArgs != null) sections.send(ShellMsg.Launch(args = launchArgs.toList()))
-    }
-    // The month is the budget's title in the shell's top bar.
-    LaunchedEffect(ledger.month) { sections.send(uniffi.money_bridge.ShellMsg.Month(month = ledger.month)) }
-    val hosted: @Composable (String) -> Unit = { name -> Hosted(name, book, ledger, shell, nav, sections, budget, accounts, transactions, sheets, carry) }
 
-    CompositionLocalProvider(LocalShell provides shell, LocalHostedScreens provides hosted) {
+    val reduced = reducedMotion()
+    val hosted: @Composable (String) -> Unit = { name -> Hosted(name, holders, library, shell) }
+
+    CompositionLocalProvider(LocalShell provides shell, LocalHostedScreens provides hosted, LocalMoves provides app.moves) {
         // The camera's page, while a module asks for it (a receipt scanned).
         CameraPage(camera)
         NavHost(
@@ -290,6 +259,10 @@ fun MoneyApp(
             popExitTransition = { popExit(reduced) },
         ) {
             composable("shell") {
+                // The shell, written from Rust (generated/MoneyShell.kt, ui/docs/apps/money.md): the
+                // sections Budget, Accounts, Transactions and Insights — a navigation bar, a rail or a
+                // drawer by the window's width — each its top bar, search and inspector, hosting
+                // money's own screens.
                 ScreenFrame {
                     androidx.compose.foundation.layout.Box(Modifier.shellShortcuts(moneyCommands(sections))) { MoneyShell(sections) }
                 }
@@ -299,7 +272,7 @@ fun MoneyApp(
                 // account's (All Accounts) for any other.
                 val route = RouteArg.path(e.arguments?.getString("arg"))?.let(::routeFromUrl)
                 val id = (route as? Route.Account)?.id
-                RegisterHosted(book, ledger, shell, id, "", carry, title = route?.title() ?: "All Accounts", onBack = { nav.popBackStack() })
+                RegisterHosted(library, moves, id, "", title = route?.title() ?: "All Accounts", onBack = { nav.popBackStack() })
             }
             // Settings, written from Rust (generated/MoneySettings.kt): the shell's panes.
             composable("settings") {
@@ -309,8 +282,8 @@ fun MoneyApp(
             }
         }
         SheetsScreen(sheets)
-        if (addingDevice) dev.arkui.AddDeviceDialog(addDevice, onDismiss = { addingDevice = false })
-        if (account) AccountOf(ledger, shell, onDismiss = { account = false })
+        if (addingDevice) dev.arkui.AddDeviceDialog({ app.deviceLink() }, onDismiss = { addingDevice = false })
+        if (account) AccountOf(shell, onDismiss = { account = false })
     }
 }
 
@@ -319,25 +292,26 @@ fun MoneyApp(
  * want somebody in Settings, Settings, and the way out — arkui's, as harken's is.
  */
 @Composable
-private fun AccountOf(ledger: Ledger, shell: Shell, onDismiss: () -> Unit) {
+private fun AccountOf(shell: Shell, onDismiss: () -> Unit) {
+    val h by shell.household.collectAsStateWithLifecycle()
     AccountSheet(
-        name = ledger.who,
-        picture = ledger.picture,
-        detail = if (ledger.demo) "The demo household, on this phone only" else "",
-        server = if (ledger.demo) null else ledger.server.substringAfter("://"),
-        linked = ledger.link.linked,
+        name = h.who,
+        picture = h.picture,
+        detail = h.detail,
+        server = h.server,
+        linked = h.linked ?: false,
         onSettings = shell.onSettings,
         onSignOut = shell.onSignOut,
         onDismiss = onDismiss,
-        signOut = if (ledger.demo) "Leave the Demo" else "Sign Out",
+        signOut = if (h.demo) "Leave the Demo" else "Sign Out",
     ) { leave ->
-        val wanting = ledger.banksWanting
+        val wanting = h.banksWanting
         if (wanting > 0) {
             AccountGroup {
                 val red = MaterialTheme.colorScheme.error
                 AccountRow(
                     ArkGlyphs.Attention,
-                    if (wanting == 1) "A Bank Needs a Look" else "$wanting Banks Need a Look",
+                    if (wanting == 1L) "A Bank Needs a Look" else "$wanting Banks Need a Look",
                     onClick = { leave(shell.onSettings) },
                     under = "In Settings, under Banks",
                     tint = red,
@@ -350,23 +324,23 @@ private fun AccountOf(ledger: Ledger, shell: Shell, onDismiss: () -> Unit) {
 
 /**
  * A register, written from Rust (generated/RegisterScreen.kt), over a runtime of its own while it
- * shows: the account of this hex id's, or every account's for none, searched by `search`.
+ * shows: the account of this hex id's, or every account's for none, searched by `search`, its row
+ * the one the shell's inspector shows.
  */
 @Composable
 private fun RegisterHosted(
-    book: Book,
-    ledger: Ledger,
-    shell: Shell,
+    library: MoneyHost,
+    moves: Long,
     account: String?,
     search: String,
-    carry: (MoneyRequest) -> Unit,
+    selected: String? = null,
     title: String? = null,
     onBack: (() -> Unit)? = null,
 ) {
-    val holder = remember(book, account) { RegisterHolder(book.session, { book.sync() }, { book.state.value.today }, account) }
-    holder.requested = carry
-    LaunchedEffect(ledger) { holder.reload() }
+    val holder = remember(library, account) { library.register(account)?.let { RegisterHolder(it) } } ?: return
+    LaunchedEffect(moves) { holder.reload() }
     LaunchedEffect(holder, search) { holder.send(uniffi.money_bridge.RegisterMsg.Search(text = search)) }
+    LaunchedEffect(holder, selected) { holder.send(uniffi.money_bridge.RegisterMsg.Select(id = selected)) }
     ScreenFrame(title = title, onBack = onBack) { RegisterScreen(holder) }
 }
 
@@ -430,7 +404,7 @@ fun Page(
     content: @Composable (PaddingValues, TopAppBarScrollBehavior) -> Unit,
 ) {
     val shell = LocalShell.current
-    val ledger by shell.book.state.collectAsStateWithLifecycle()
+    val household by shell.household.collectAsStateWithLifecycle()
     val bar = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
     // Under the shell's top bar (ArkUI's): the bar has the title, the back button and the
     // actions — a pushed page's too, whose bar replaces its section's — so the page draws none.
@@ -464,10 +438,10 @@ fun Page(
                     TabTitle(
                         title,
                         account = {
-                            val wanting = ledger.banksWanting
+                            val wanting = household.banksWanting
                             AccountFace(
-                                ledger.who,
-                                ledger.picture,
+                                household.who,
+                                household.picture,
                                 onClick = shell.onAccountSheet,
                                 attention = if (wanting > 0) "Banks need a look" else null,
                             )
@@ -498,8 +472,8 @@ fun Page(
         val under = if (onBack == null && !hosted) TabTitle.BELOW else 0.dp
         if (refresh) {
             PullToRefreshBox(
-                isRefreshing = ledger.syncing,
-                onRefresh = { shell.book.sync() },
+                isRefreshing = household.syncing,
+                onRefresh = { shell.library.syncBank() },
                 modifier = Modifier.fillMaxSize().padding(top = pad.calculateTopPadding()),
             ) {
                 content(PaddingValues(top = under, bottom = pad.calculateBottomPadding()), bar)
@@ -521,79 +495,39 @@ fun <T : Any> rememberSheet(): androidx.compose.runtime.MutableState<T?> = remem
 fun rememberFlag(initial: Boolean = false): androidx.compose.runtime.MutableState<Boolean> = rememberSaveable { mutableStateOf(initial) }
 
 /**
- * A screen the shell hosts (ark_app::shell::hosted): money's own, until each moves into Rust.
- * Accounts' list is the generated Accounts slice, over its runtime.
+ * A screen the shell hosts (ark_app::shell::hosted): money's runtimes' generated screens. What
+ * each opens is money's host's to carry out, and what of it is this shell's comes as its asks.
  */
 @Composable
-private fun Hosted(
-    name: String,
-    book: Book,
-    ledger: Ledger,
-    shell: Shell,
-    nav: NavHostController,
-    sections: MoneyShellHolder,
-    budget: BudgetHolder,
-    accounts: AccountsHolder,
-    transactions: TransactionsHolder,
-    sheets: SheetsHolder,
-    carry: (MoneyRequest) -> Unit,
-) {
+private fun Hosted(name: String, holders: Holders, library: MoneyHost, shell: Shell) {
+    val moves by LocalMoves.current.collectAsStateWithLifecycle()
     when (name) {
-        "budget" -> {
-            // A category's month: Category Details, the shell's inspector (written from Rust) —
-            // a supporting pane when expanded, a bottom sheet otherwise.
-            budget.opened = { r ->
-                if (r is Route.Category) {
-                    sections.send(ShellMsg.InspectCategory(id = r.id))
-                    sections.send(ShellMsg.Inspector(shown = true))
-                }
-            }
-            ScreenFrame { BudgetScreen(budget) }
-        }
-        "accounts" -> {
-            // Written from Rust (generated/AccountsScreen.kt), over its runtime.
-            accounts.opened = { r ->
-                if (r is Route.Banks) {
-                    sections.send(ShellMsg.Pane(title = "Connected Banks"))
-                    shell.onSettings()
-                } else {
-                    nav.navigate(register(r))
-                }
-            }
-            AccountsScreen(accounts)
-        }
-        "transactions" -> {
-            // Written from Rust (generated/TransactionsScreen.kt), over its runtime: the shell's
-            // search bar is its search, the book's month its categories'.
-            val holder = transactions
-            val page by sections.page.collectAsStateWithLifecycle()
-            LaunchedEffect(ledger) { holder.reload() }
-            LaunchedEffect(ledger.month) { holder.send(uniffi.money_bridge.TransactionsMsg.Month(month = ledger.month)) }
-            LaunchedEffect(page.search) { holder.send(uniffi.money_bridge.TransactionsMsg.Search(text = page.search)) }
-            ScreenFrame { TransactionsScreen(holder) }
-        }
-        "insights" -> {
-            // Written from Rust (generated/InsightsScreen.kt), over its runtime: its month the book's.
-            val holder = remember(book) { InsightsHolder(book.session, { book.sync() }, { book.state.value.today }) }
-            LaunchedEffect(ledger) { holder.reload() }
-            LaunchedEffect(ledger.month) { holder.send(uniffi.money_bridge.InsightsMsg.Month(month = ledger.month)) }
-            ScreenFrame { InsightsScreen(holder) }
-        }
+        // Written from Rust (generated/BudgetScreen.kt), over its runtime.
+        "budget" -> ScreenFrame { BudgetScreen(holders.budget) }
+        // Written from Rust (generated/AccountsScreen.kt), over its runtime.
+        "accounts" -> AccountsScreen(holders.accounts)
+        // Written from Rust (generated/TransactionsScreen.kt), over its runtime: the shell's
+        // search bar is its search (money's host's).
+        "transactions" -> ScreenFrame { TransactionsScreen(holders.transactions) }
+        // Written from Rust (generated/InsightsScreen.kt), over its runtime.
+        "insights" -> ScreenFrame { InsightsScreen(holders.insights) }
         "accounts.register" -> {
             // The account the shell shows (its place's tag, `accounts/<id>`), under the shell's search.
-            val page by sections.page.collectAsStateWithLifecycle()
+            val page by holders.shell.page.collectAsStateWithLifecycle()
             val id = page.section.removePrefix("accounts/").takeIf { page.section.startsWith("accounts/") }
-            if (id != null) RegisterHosted(book, ledger, shell, id, page.search, carry) else Text("No Account Selected", modifier = Modifier.padding(16.dp))
+            if (id != null) RegisterHosted(library, moves, id, page.search, page.transaction?.id)
+            else Text("No Account Selected", modifier = Modifier.padding(16.dp))
         }
         // Who is signed in: their face, as the tabs' own title rows draw it.
-        "household" -> AccountFace(
-            ledger.who,
-            ledger.picture,
-            onClick = shell.onAccountSheet,
-            attention = if (ledger.banksWanting > 0) "Banks need a look" else null,
-        )
+        "household" -> {
+            val h by shell.household.collectAsStateWithLifecycle()
+            AccountFace(h.who, h.picture, onClick = shell.onAccountSheet, attention = if (h.banksWanting > 0) "Banks need a look" else null)
+        }
         // What a platform adds to Settings' General: the desktop's alone.
         "settings.more" -> {}
         else -> Text("Nothing Selected", modifier = Modifier.padding(16.dp))
     }
 }
+
+/** How many times anything moved: what a register hosted in a section reads again on. */
+val LocalMoves = staticCompositionLocalOf<StateFlow<Long>> { MutableStateFlow(0L) }

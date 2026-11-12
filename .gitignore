@@ -10,3 +10,5 @@ docs/perf/
 /money/ffi/android
 __pycache__/
 /target/
+# The prebuild self-test fixture's generated Kotlin (`prebuild.py fixture`).
+/ui/kotlin/android/fixture/generated/

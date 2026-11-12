@@ -1,156 +1,136 @@
-// The iOS app: SwiftUI over money's peer — the Rust kernel with money's
-// domain linked in (`MoneyFFI.xcframework`, `money/ffi`), called through the
-// generated types (`Gen/Money.swift`). One `Model` for the app's life; every
-// screen reads it. The first run until a session (or the demo) is open,
-// then the tabs (Shell.swift); the sign-in's browser sheet run whenever the
-// model asks for one; `money://auth` links handed to the model; and the app
-// coming back to the front said, which dials the server and is when a
-// sign-in that came back empty may go again. One multiplatform target: the
-// iPhone, the iPad and the Mac (its menu bar's commands and its Settings
-// window are the shell's, written from Rust).
+// money's scenes over the app library (ui/swift's ArkApp): the generated
+// `@main` (ui/prebuild.py, from app.toml) holds money's library
+// (`MoneyHost`) and draws these. The window is the first run every Ark app
+// shares until a session (or the demo) is open, then money's shell
+// (Shell.swift); the Mac's menu bar is the shell's commands and its Settings
+// window the shell's panes, written from Rust. What money's own screens
+// read is `MoneyScreens`: the holders of the runtimes money's host made over
+// the session, read again whenever the app says something moved, and what
+// the host asks of this shell (a page pushed, Settings, Add a Device).
 import ArkUI
-import AuthenticationServices
+import Combine
 import SwiftUI
 
-@main
-struct MoneyApp: App {
-    @StateObject private var model: Model
-    /// The views the screens hold (`.holding`), told what moved by the model.
-    @StateObject private var watched: Watched<MoneyView>
-    @Environment(\.scenePhase) private var phase
-    @State private var wasAway = false
+struct MoneyScenes: Scene {
+    @ObservedObject var app: ArkApp<MoneyHost>
+    @StateObject private var screens: MoneyScreens
 
-    init() {
-        // money's accent, the green, before the first view draws it.
-        Accent.use(.green)
-        // Money written as every client writes it, in the phone's locale.
-        Numbers.install()
-        let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        // `-demo YES` (or a day, `-demo 2026-11-18`) at launch: the demo's
-        // household for this launch, whatever sign-in is remembered (the
-        // screenshots': the Mac's, which no browser signs in for, and the
-        // iPhone's and the iPad's reference screens, on the reference's day).
-        let demo = UserDefaults.standard.string(forKey: "demo")
-        let model = Model(shelf: DefaultsShelf(), secure: PhoneSecureStore(), root: support, demoDay: demo.flatMap { $0.count == 10 ? $0 : nil },
-                          demoLaunch: demo != nil, scan: QrScanner.available, intro: !Shots.on)
-        let camera = PhoneCamera()
-        camera.answered = { [weak model] in model?.sheets?.answered() }
-        registerDevices(haptics: PhoneHaptics(), clipboard: PhoneClipboard(), share: PhoneShare(), camera: camera)
-        let watched = Watched<MoneyView> { [weak model] v in model?.hold(v) }
-        model.onMoved = { [weak watched] views in watched?.moved(views) }
-        _model = StateObject(wrappedValue: model)
-        _watched = StateObject(wrappedValue: watched)
-        // A screenshot's (`-shots YES`): ready only once the session has
-        // nothing on its way and the shell's runtime nothing left to come
-        // (`Runtime::is_idle`), at the version drawn: a newer one
-        // (`Runtime::version`) is a newer screen, and waited for again.
-        var drawn: UInt64 = 0
-        Ready.shared.probe { [weak model] in
-            guard let model else { return true }
-            let now = model.shell.version
-            if now != drawn {
-                drawn = now
-                Ready.shared.changed()
-                return false
-            }
-            return model.settled && model.shell.quiet
-        }
+    init(app: ArkApp<MoneyHost>) {
+        self.app = app
+        _screens = StateObject(wrappedValue: MoneyScreens(app))
     }
 
     var body: some Scene {
         WindowGroup {
-            Root()
-                .environmentObject(model)
-                .environmentObject(watched)
+            ArkRoot(app) { WelcomeView() } content: { Shell() }
+                .environmentObject(app)
+                .environmentObject(screens)
                 .tint(Color.accent)
                 // The derived square in the green (ArkUI's are neutral).
                 .environment(\.squares, .green)
-                .onOpenURL { Ready.shared.changed(); model.open(url: $0) }
                 // A screenshot's motion and ready signal (ArkUI's `Shots`).
                 .arkShots()
         }
         // The size the launch asks for (the Mac's screenshots: 1440×900).
         .launchWindowSize()
-        .onChange(of: phase) { _, now in
-            if now == .background { wasAway = true }
-            if now == .active && wasAway {
-                wasAway = false
-                model.send(.foreground)
-            }
-        }
         // The menu bar's commands, written from Rust (Generated/MoneyCommands.swift):
         // the Mac's menus, the iPad's hardware keyboard.
-        .commands { MoneyCommands(screen: model.shell) }
+        .commands { MoneyCommands(screen: screens.shell) }
         // Settings: the Mac's Settings window (⌘,), written from Rust
         // (Generated/MoneySettingsView.swift); on the iPhone and the iPad,
         // the account sheet's Settings.
         ArkSettings {
             MoneySettingsView()
-                .moneySettings(model)
-                .environmentObject(watched)
+                .moneySettings(app, screens)
                 .tint(Color.accent)
         }
     }
 }
 
-/// The first run's step, drawn; the app once it is running.
-struct Root: View {
-    @EnvironmentObject private var model: Model
-    @Environment(\.webAuthenticationSession) private var web
+/// money's screens as SwiftUI holds them: the runtimes its host made over
+/// the session (`MoneyHost`), each in the app library's `ArkScreen`, made
+/// again with each session and read again whenever anything moved.
+@MainActor
+final class MoneyScreens: ObservableObject {
+    let app: ArkApp<MoneyHost>
+    /// The shell's, for the app's whole life: the Mac's menu bar is made
+    /// before any session is open; it shows Budget until one runs.
+    let shell = MoneyShellScreen(blank: shellBlank())
+    @Published private(set) var accounts: AccountsScreen? = nil
+    @Published private(set) var budget: BudgetScreen? = nil
+    @Published private(set) var transactions: TransactionsScreen? = nil
+    @Published private(set) var insights: InsightsScreen? = nil
+    @Published private(set) var sheets: SheetsScreen? = nil
+    /// Who is using the budget and where, for the account sheet.
+    @Published private(set) var household = Household(who: "", picture: "", detail: "", server: nil, linked: nil, demo: false, banksWanting: 0, syncing: false)
+    /// Settings asked for (the Mac's window, a sheet elsewhere).
+    @Published var settings = false
+    /// Add a Device's page up, as Settings asked.
+    @Published var addingDevice = false
+    /// Grows with every reading: a register reads again on it.
+    @Published private(set) var moves: UInt64 = 0
+    /// A page the host asked to push on the section's stack, and the stacks
+    /// put away: Shell.swift's.
+    var push: (Route) -> Void = { _ in }
+    var reset: () -> Void = {}
 
-    var body: some View {
-        SwiftUI.Group {
-            // money's pages over the app itself when their route asked for them.
-            if model.introShown {
-                WelcomeView().environmentObject(model.first)
-            } else {
-                switch model.step {
-                case .running, .demo: Shell()
-                // The first run's pages every Ark app shares (generated from ark_app::welcome).
-                default: WelcomeView().environmentObject(model.first)
-                }
-            }
+    private var session: UInt64 = 0
+    private var watching: AnyCancellable?
+
+    init(_ app: ArkApp<MoneyHost>) {
+        self.app = app
+        Numbers.install()
+        // The device modules money lists (app.toml), registered as the
+        // process's: every screen's runtime asks through them.
+        let camera = PhoneCamera()
+        camera.answered = { [weak self] in
+            if self?.sheets?.runtime?.drain() == true { self?.sheets?.reload() }
         }
-        // "Scan a Code": another device's join code, asked about before it is used.
-        .sheet(isPresented: $model.scanning, onDismiss: { if model.scanning { model.scanned(nil) } }) {
-            QrScanner { text in model.scanned(text) }.ignoresSafeArea()
+        registerDevices(haptics: PhoneHaptics(), clipboard: PhoneClipboard(), share: PhoneShare(), camera: camera)
+        watching = app.$moves.sink { [weak self] _ in
+            // After the change is published: read on the next turn.
+            DispatchQueue.main.async { self?.moved() }
         }
-        .animation(Springs.fade, value: stepKind)
-        .toast(model.step.isRunning ? .constant(nil) : $model.notice)
-        // The sign-in, in the system's browser sheet, back on `money://auth`.
-        .task(id: model.browse) {
-            guard let url = model.browse else { return }
-            do {
-                // The shared session, never an ephemeral one: the provider's cookie is
-                // what makes signing in to the next app one tap.
-                let back = try await web.authenticate(
-                    using: url, callbackURLScheme: AppInfo.money.scheme, preferredBrowserSession: .shared)
-                model.signInReturned(back, error: nil)
-            } catch let e as ASWebAuthenticationSessionError where e.code == .canceledLogin {
-                model.signInReturned(nil, error: nil)
-            } catch {
-                model.signInReturned(nil, error: error.localizedDescription)
+    }
+
+    /// What moved, read again: the holders made again for a new session.
+    func moved() {
+        let lib = app.library
+        let now = lib.generation()
+        if now != session {
+            session = now
+            shell.attach(lib.shell())
+            accounts = lib.accounts().map { AccountsScreen($0) }
+            budget = lib.budget().map { BudgetScreen($0) }
+            transactions = lib.transactions().map { TransactionsScreen($0) }
+            insights = lib.insights().map { InsightsScreen($0) }
+            sheets = lib.sheets().map { SheetsScreen($0) }
+        }
+        accounts?.reload()
+        budget?.reload()
+        transactions?.reload()
+        insights?.reload()
+        sheets?.reload()
+        shell.reload()
+        household = lib.household()
+        moves &+= 1
+        // Where the app is, for a screenshot's ready signal: the section.
+        Ready.shared.at(route: shell.page.section)
+        for ask in lib.takeAsks() {
+            switch ask {
+            case let .open(route): push(route)
+            case .settings: settings = true
+            case .addDevice: addingDevice = true
+            case .reset:
+                settings = false
+                reset()
             }
         }
     }
 
-    private var stepKind: Int {
-        switch model.step {
-        case .server: return 0
-        case .signIn: return 1
-        case .opening: return 2
-        case .running, .demo: return 3
-        case .confirm: return 4
-        }
-    }
-}
-
-extension Step {
-    /// The tabs are up, and say what the app says themselves.
-    var isRunning: Bool {
-        switch self {
-        case .running, .demo: return true
-        default: return false
-        }
+    /// A register's runtime, for as long as it shows: the account of this
+    /// hex id's, or every account's for none.
+    func register(_ account: String?) -> RegisterScreen? {
+        app.library.register(account: account).map { RegisterScreen($0) }
     }
 }

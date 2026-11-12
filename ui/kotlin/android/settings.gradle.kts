@@ -21,4 +21,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "arkui-android"
 
-include(":shots", ":arkui")
+include(":shots", ":arkui", ":bindings", ":app", ":fixture")

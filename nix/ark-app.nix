@@ -13,8 +13,11 @@
 #   native      the app's native projects (ui/prebuild.py): ios/ (XcodeGen's
 #               project, the asset catalog, the icon, the entitlements) and
 #               android/ (Gradle's project, the manifest, the resources), each
-#               with the generated views; laid out under `<app>/.native/`,
-#               where a build of the app's source puts them.
+#               with the generated views and the app's entry points over the
+#               app library (the `@main`, the Application and the activity,
+#               the screens' holders; ui/docs/app.md, "The App Library");
+#               laid out under `<app>/.native/`, where a build of the app's
+#               source puts them.
 #   prebuild    `nix run .#<app>-prebuild`: the same into the working tree,
 #               with the phones' libraries linked beside them, for Xcode and
 #               Android Studio (Expo's `npx expo prebuild`).

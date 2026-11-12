@@ -86,7 +86,7 @@ pub fn screens() -> ark_ui_gen::app::App {
             ),
             Generated::view(money_app::shell::view::money_shell::record, shell),
             // The first run's pages, every Ark app's (ark_app::welcome),
-            // over the model's FirstRunApp.
+            // over its host's `WelcomeApp` (the app library's holder).
             Generated::view(
                 ark_app::welcome::welcome::record,
                 Names {

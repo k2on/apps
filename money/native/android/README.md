@@ -74,31 +74,25 @@ and its icon money/icon.svg).
 
 ## What it does
 
-**The way in** (`Start.kt`). The welcome asks for the server, with
-`money.koon.us` already typed, and **Try the demo** under it. Continue asks
-the address's `/healthz` whether it runs money's domain (arkui's
-`Probe`, `Health` and `Address`, which harken's onboarding uses too); then
-**Sign in** opens the server's own page in a Custom Tab
-(`loginUrl(server, "money://auth")`), the code that comes back is
-exchanged (`exchange`), and the replica opens (`moneyOpen`, one directory
-per server) and dials (`socketUrl`). The server, the login and whether
-this phone runs the demo are remembered, so a launch opens straight onto
-the budget. Signing out and a server's denial come back to Sign in with
-the server and the replica kept; leaving the demo comes back to the
-welcome. The machine (`Starter`) is plain Kotlin over its effects, so
-`StartTests` walks it with no network.
-
-**The model** (`Book.kt`). One thread holds the views — accounts, groups,
-the month's lines, its summary and its spending, the inbox, the payees,
-the banks, the banks' accounts, and each register a screen holds —
-reads each once, and after every change the peer reports asks each what it
-did and splices the patches in. Then it publishes one `Ledger`, an
-immutable snapshot every screen draws from (a `StateFlow`). Every press is
-one of the domain's functions, typed; a refusal, here or from the server
-later, is the domain's own sentence as a snackbar ("Couldn't assign it:
-money is assigned from Ready to Assign, not to it"); a form asks first
-(`peer.check`) and says the sentence under its field. Nothing runs on a
-clock.
+**The way in, and the model, are Rust's.** The app's `Application`, its
+activity and its screens' holders are generated (ui/prebuild.py, from
+money/app.toml) over the app library every Ark app shares (ui/kotlin/app,
+`dev.arkui.app`: `ArkApplication`, `ArkActivity`, `ArkScreen`), and what
+they hold is money's host (`MoneyHost`, money/bridge/src/host.rs, over
+ark-ffi's `ArkHost`): the first run every app shares — the server's
+`/healthz` asked, the server's own page opened in a Custom Tab
+(`loginUrl(server, "money://auth")`), the code that comes back exchanged,
+the replica opened over the process's one runtime (one directory per
+server) and dialled — what is remembered (the login in the secure store,
+the server and the demo in the app's files directory), the session's
+link watched (a denial, the server's refusals, the first sync), and every
+screen's runtime over the session, what one asks of another carried out
+there (the month, the bank asked, a category or a transaction a launch
+names, the session's facts in Settings). What is left here is what this
+app draws itself: `MoneyRoot` and the shell's host (`MoneyApp.kt`: the
+sections' screens, a register's own runtime, the pages pushed, the
+account sheet), its theme and its glyphs. A refusal, or what the bank
+brought, is a snackbar. Nothing runs on a clock.
 
 **The screens**, laid out as Google lays out its own apps: Material 3 in
 the wallpaper's colours (dynamic colour on Android 12 and later; money's
@@ -218,23 +212,11 @@ hundredths).
     gradle :app:testDebugUnitTest      # what money-apk runs
     gradle :app:recordPaparazziDebug   # the screens too (money-android-screens)
 
-- `BookTests` — the model over the demo's household on 2026-10-26:
-  assigning, moving and covering, targets and auto-assign, a refusal in
-  the domain's words, the inbox approved and filed, the demo bank's two
-  syncs and then nothing, a transaction added, corrected, cleared and
-  deleted, a transfer, reconciling (and an adjustment), an account opened
-  after its name is checked, a bank's account followed and not, the month
-  stepped and back, categories added, hidden and deleted; the cards' group
-  first, a card's debt covered in one press, credit overspending as debt,
-  a transaction made a transfer, payment categories kept out of the
-  pickers; connecting a bank followed to Plaid's page, and what Settings
-  says of an ask and of a bank.
 - `ReorderTests` — arkui's Reorder in sections (a section of its own kept
   so); the budget's moves are Rust's (money/app/src/budget/tests.rs).
-- `StartTests` — the way in: the welcome, the demo remembered and left, an
-  address that is not a money server, the sign-in's tab and its code, a
-  code that does not exchange, signing out; and days written in the
-  locale.
+- What the model and the way in did is money's host's, tested in Rust
+  (money/bridge/tests/host.rs: a demo launch running every screen, the
+  demo remembered and left, a server that is not there).
 - `AmountsTests` — arkui's amounts in the US and in Germany, typed and
   written.
 - `Screens` — every page, light and dark, from the demo (Paparazzi). Only

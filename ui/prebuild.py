@@ -344,6 +344,11 @@ def apple_project(root, a, prefix):
                # climb through: laid out in them, XcodeGen put the bindings
                # under the wrong groups, where Xcode then looked for them.
                {"path": "../ffi/ios/swift", "createIntermediateGroups": False}]
+    if ark_entry(a):
+        # The app library (ui/swift's ArkApp): compiled over the app's own
+        # bindings, so as the app's sources here, and a module of its own
+        # under nix, linked prebuilt.
+        sources.append({"path": f"{TO_REPO}/ui/swift/Sources/ArkApp", "createIntermediateGroups": False})
     for name, _ in modules_of(root, a):
         if os.path.isdir(os.path.join(root, "modules", name, "swift")):
             sources.append({"path": f"{TO_REPO}/modules/{name}/swift", "createIntermediateGroups": False})
@@ -531,6 +536,9 @@ def android_gradle(root, a, ffi_lib_name):
     # one that draws nothing of ArkUI's too.
     # Under nix both are linked as its jars instead (`arkuiLib`, below).
     arkui_dirs = [f'"{TO_REPO}/ui/kotlin/shots"'] + ([f'"{TO_REPO}/ui/kotlin/src"'] if ark else [])
+    # The app library (ui/kotlin/app) for an app on it, the same way: its jar
+    # under nix (`arkAppLib`), its sources otherwise.
+    app_dirs = [f'"{TO_REPO}/ui/kotlin/app"'] if ark_entry(a) else []
     kotlin_dirs = [f'"{TO_APP}/native/android/main"'] + (['"generated"', '"$arkLib/kotlin"'] if ark else [])
     for name, _ in modules_of(root, a):
         if os.path.isdir(os.path.join(root, "modules", name, "kotlin")):
@@ -542,6 +550,9 @@ def android_gradle(root, a, ffi_lib_name):
         srcs = '            // The kernel per ABI and the Kotlin over it; the app\'s own\n            // Kotlin and its generated screens; the modules\'.\n            jniLibs.srcDir("$arkLib/jniLibs")\n' + srcs
     srcs += ("\n            // ArkUI from its sources, where it is not linked prebuilt (`arkuiLib`).\n            if (arkuiLib == null) {\n"
              + "\n".join(f"                kotlin.srcDir(rootProject.file({d}))" for d in arkui_dirs) + "\n            }")
+    if app_dirs:
+        srcs += ("\n            // The app library from its sources, where it is not linked prebuilt (`arkAppLib`).\n            if (arkAppLib == null) {\n"
+                 + "\n".join(f"                kotlin.srcDir(rootProject.file({d}))" for d in app_dirs) + "\n            }")
     # The app's own resources and assets, beside the generated ones.
     if os.path.isdir(native_dir(root, a, "res")):
         srcs += f'\n            res.srcDir(rootProject.file("{TO_APP}/native/android/res"))'
@@ -586,7 +597,7 @@ val arkLib: String = providers.gradleProperty("arkLib").getOrElse(rootProject.fi
 // `-ParkuiLib` and linked; a build that says none compiles ui/kotlin's
 // sources as part of the app.
 val arkuiLib: String? = providers.gradleProperty("arkuiLib").orNull
-
+{"// The app library (ui/kotlin/app): under nix its classes compiled once" + chr(10) + "// (`packages.ark-app-android`), a directory with its jar passed as" + chr(10) + "// `-ParkAppLib`; a build that says none compiles its sources as part of the app." + chr(10) + 'val arkAppLib: String? = providers.gradleProperty("arkAppLib").orNull' + chr(10) if ark_entry(a) else ""}
 android {{
     namespace = "{pkg}"
     compileSdk = {andr.get("target-sdk", 35)}
@@ -649,7 +660,7 @@ dependencies {{
 {chr(10).join(dep(d) for d in deps)}
     // ArkUI's jars (`arkuiLib`), when nix built them.
     if (arkuiLib != null) implementation(fileTree(arkuiLib) {{ include("*.jar") }})
-
+{'    // The app library\'s jar (`arkAppLib`), when nix built it.' + chr(10) + '    if (arkAppLib != null) implementation(fileTree(arkAppLib) { include("*.jar") })' + chr(10) if ark_entry(a) else ''}
     constraints {{
         implementation("org.jetbrains.kotlin:kotlin-stdlib-jdk7:2.0.21")
         implementation("org.jetbrains.kotlin:kotlin-stdlib-jdk8:2.0.21")
@@ -808,10 +819,12 @@ def android_manifest(root, a):
         activity += '\n            android:launchMode="singleTask"'
     if andr.get("config-changes"):
         activity += f'\n            android:configChanges="{"|".join(andr["config-changes"])}"'
+    # The app library's Application (ui/kotlin/app), generated beside it.
+    application = f'\n        android:name=".{a["name"]}Application"' if ark_entry(a) else ""
     lines.append(f'''
     <!-- enableOnBackInvokedCallback: the back gesture is predictive (Android 14
          and later). -->
-    <application
+    <application{application}
         android:label="@string/app_name"
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher_round"
@@ -921,6 +934,196 @@ plugins {{
 '''
 
 
+# ------------------------------------------------------------- the app's entry
+
+# The app library (ui/swift's ArkApp, ui/kotlin/app; ui/docs/app.md, "The App
+# Library") is what every Ark app is underneath its screens. What an app adds
+# is this, generated from its app.toml: its entry points naming its library
+# (`[ffi] host`, the object its bridge exports) and the scene or composable it
+# draws (`[apple] scene`, `[android] root`), the holders its generated views
+# read each screen's runtime through (`[screens]`), and — only for an app
+# that declares `[background]` — the background's hookup.
+
+
+def library_host(a):
+    """The object the app's bridge exports that the phone holds: `MoneyHost`."""
+    return a.get("ffi", {}).get("host", f"{a['name']}Host")
+
+
+def kotlin_namespace(a):
+    """The Kotlin package UniFFI writes the app's bridge in."""
+    return a.get("ffi", {}).get("kotlin", "uniffi." + a.get("ffi", {}).get("crate", a["id"]).replace("-", "_"))
+
+
+def app_screens(a):
+    """The app's screens' runtimes, each with its page and message types and
+    the holder each toolkit's generated views read it through; the first
+    run's, every app's, first."""
+    out = {"welcome": {"runtime": "WelcomeApp", "page": "WelcomePage", "msg": "WelcomeMsg", "swift": "FirstRunScreen", "kotlin": "FirstRunHolder"}}
+    out.update(a.get("screens", {}))
+    return out
+
+
+def ark_entry(a):
+    """Whether the app runs on the app library: an Ark app with a bridge."""
+    return kernel(a) and "ffi" in a
+
+
+def swift_main(root, a):
+    """The app's `@main`: its library held by the app library, its accent,
+    the scene it draws; and its screens' holders."""
+    product = a["apple"]["product"]
+    host = library_host(a)
+    bg = background(a)
+    store = "PhoneSecureStore()" if "ark-secure-store" in a.get("modules", []) else "nil"
+    delegate = ""
+    hooks = ""
+    if bg:
+        delegate = """    // It declares `[background]`: the delegate that hands the system's
+    // callbacks to the app library (BackgroundHooks).
+    #if os(iOS)
+    @UIApplicationDelegateAdaptor(ArkAppDelegate.self) private var delegate
+    #elseif os(macOS)
+    @NSApplicationDelegateAdaptor(ArkAppDelegate.self) private var delegate
+    #endif
+"""
+        hooks = "        BackgroundHooks.app = backgroundHooks()\n"
+    holders = []
+    for name, sc in app_screens(a).items():
+        holders.append(f"extension {sc['runtime']}: ArkRuntime {{}}" if sc["runtime"] != "WelcomeApp" else "")
+        holders.append(f"typealias {sc['swift']} = ArkScreen<{sc['runtime']}>")
+    holders = "\n".join(h for h in holders if h)
+    return f"""// {HEADER.format(app=a['dir'])}
+// {a['name']}'s entry point on the app library (ui/swift's ArkApp): its library,
+// its accent and the scene it draws; the holders its generated views read
+// each screen's runtime through.
+import SwiftUI
+
+@main
+struct {product}App: App {{
+{delegate}    @StateObject private var app: ArkApp<{host}>
+
+    init() {{
+        Accent.use(.{a['accent']})
+{hooks}        _app = StateObject(wrappedValue: ArkApp({host}(launch: .current(scan: QrScanner.available), store: {store})))
+    }}
+
+    var body: some Scene {{ {a['apple'].get('scene', product + 'Scenes')}(app: app) }}
+}}
+
+extension {host}: ArkAppHost {{}}
+
+{holders}
+"""
+
+
+def swift_background(root, a):
+    """What an app that declares `[background]` hands the app library: the
+    modules' parts the system's callbacks reach; none for any other app."""
+    bg = background(a)
+    if not bg:
+        return None
+    launched = []
+    if bg.get("sync"):
+        launched.append("            PhoneBackground.shared.register(process: process)")
+    if bg.get("push"):
+        launched.append("            PhoneNotifications.shared.setListener(listener: process.notices())")
+    push = """,
+        token: { PhoneNotifications.shared.registered(token: $0) },
+        failed: { PhoneNotifications.shared.failed(error: $0) },
+        received: { info, done in PhoneNotifications.shared.received(info, done: done) }""" if bg.get("push") else ""
+    body = "\n".join(launched) or "            _ = process"
+    return f"""// {HEADER.format(app=a['dir'])}
+// What {a['name']} declares of the background (app.toml's `[background]`),
+// handed to the app library's delegate: nothing of this is written for an
+// app that declares none. (Its imports are the app's own under nix, which
+// links the library and the modules as modules; Xcode compiles them in.)
+import Foundation
+#if canImport(ArkBindings)
+import ArkBindings
+#endif
+#if canImport(ArkApp)
+import ArkApp
+#endif
+{"#if canImport(ArkBackground)" + chr(10) + "import ArkBackground" + chr(10) + "#endif" + chr(10) if bg.get("sync") else ""}{"#if canImport(ArkNotifications)" + chr(10) + "import ArkNotifications" + chr(10) + "#endif" + chr(10) if bg.get("push") else ""}
+public func backgroundHooks() -> BackgroundHooks {{
+    BackgroundHooks(
+        launched: {{ process in
+{body}
+        }}{push})
+}}
+"""
+
+
+def kotlin_app(root, a):
+    """The app's `Application`: its library made at the first launch with the
+    secure store, and its background's hookup when it declares one."""
+    pkg = a["android"]["package"]
+    host = library_host(a)
+    store = "dev.arkui.modules.PhoneSecureStore(this)" if "ark-secure-store" in a.get("modules", []) else "null"
+    bg = background(a)
+    hooks = ""
+    if bg.get("push"):
+        hooks = """
+
+    // It declares `[background]`: the notifications told to the process.
+    override val background: BackgroundHooks =
+        BackgroundHooks(listen = { dev.arkui.modules.ArkNotices.listen(it) }, opened = { dev.arkui.modules.ArkNotices.opened(it) })"""
+    elif bg:
+        hooks = """
+
+    // It declares `[background]`; its job and receivers are the manifest's.
+    override val background: BackgroundHooks = BackgroundHooks()"""
+    return f"""// {HEADER.format(app=a['dir'])}
+// {a['name']}'s Application on the app library (ui/kotlin/app): its library, made at
+// the first launch and kept for the process.
+package {pkg}
+
+import dev.arkdb.ffi.ArkHost
+import dev.arkdb.ffi.Launch
+import dev.arkui.app.ArkApplication
+{"import dev.arkui.app.BackgroundHooks" + chr(10) if bg else ""}import {kotlin_namespace(a)}.{host}
+
+class {a['name']}Application : ArkApplication() {{
+    /** {a['name']}'s library: its screens' runtimes, what its shell is asked. */
+    lateinit var library: {host}
+
+    override fun host(launch: Launch): ArkHost = {host}(launch, {store}).also {{ library = it }}.host(){hooks}
+}}
+"""
+
+
+def kotlin_activity(root, a):
+    """The app's activity, and its screens' holders."""
+    pkg = a["android"]["package"]
+    ns = kotlin_namespace(a)
+    types = []
+    holders = []
+    for name, sc in app_screens(a).items():
+        types += [sc["runtime"], sc["page"], sc["msg"]]
+        r = "r"
+        holders.append(f"class {sc['kotlin']}(r: {sc['runtime']}) :\n    ArkScreen<{sc['page']}, {sc['msg']}>({r}::page, {r}::send, {r}::version, {r}::isIdle, {r}::drawn, {r}::awaitsDraw)")
+    imports = "\n".join(f"import {ns}.{t}" for t in sorted(set(types)))
+    root_fn = a["android"].get("root", a["name"] + "Root")
+    return f"""// {HEADER.format(app=a['dir'])}
+// {a['name']}'s activity on the app library (ui/kotlin/app), and the holders its
+// generated screens read each screen's runtime through.
+package {pkg}
+
+import androidx.compose.runtime.Composable
+import dev.arkui.app.ArkActivity
+import dev.arkui.app.ArkApp
+import dev.arkui.app.ArkScreen
+{imports}
+
+class MainActivity : ArkActivity() {{
+    @Composable override fun Content(app: ArkApp) = {root_fn}(app, (application as {a['name']}Application).library)
+}}
+
+{chr(10).join(holders)}
+"""
+
+
 # ------------------------------------------------------------- writing
 
 
@@ -958,6 +1161,10 @@ def write(root, app, views=None, icon_png=None, prefix=BUNDLE_PREFIX, out=None):
             subprocess.run(["rsvg-convert", "-w", "1024", "-h", "1024", "-b", "white", "-o", png, svg], check=True)
         copy_views(views, "swift", os.path.join(ios, "Generated"))
         os.makedirs(os.path.join(ios, "Generated"), exist_ok=True)
+        if ark_entry(a):
+            write_file(os.path.join(ios, "Generated", "ArkApp.swift"), swift_main(REPO, a))
+            if swift_background(REPO, a):
+                write_file(os.path.join(ios, "Generated", "ArkBackground.swift"), swift_background(REPO, a))
         written.append(ios)
     if has(a, "android"):
         andr = os.path.join(out, "android")
@@ -973,6 +1180,9 @@ def write(root, app, views=None, icon_png=None, prefix=BUNDLE_PREFIX, out=None):
         android_resources(REPO, a, os.path.join(andr, "app", "src", "main", "res"))
         copy_views(views, "kt", os.path.join(andr, "generated"))
         os.makedirs(os.path.join(andr, "generated"), exist_ok=True)
+        if ark_entry(a):
+            write_file(os.path.join(andr, "generated", "ArkApp.kt"), kotlin_app(REPO, a))
+            write_file(os.path.join(andr, "generated", "ArkActivity.kt"), kotlin_activity(REPO, a))
         written.append(andr)
     return written
 
@@ -1094,7 +1304,9 @@ def check(root):
 # What only `[background]` writes: none of it in an app that declares none.
 BACKGROUND_MARKS = ["ArkSyncJob", "ArkBootReceiver", "ArkPushReceiver", "BOOT_COMPLETED", "BIND_JOB_SERVICE",
                     "fetch", "remote-notification", "BGTaskSchedulerPermittedIdentifiers", "aps-environment",
-                    "application-groups", "app-extension", "usernotifications"]
+                    "application-groups", "app-extension", "usernotifications",
+                    # The app library's hookup (ui/swift's ArkApp, ui/kotlin/app).
+                    "ArkAppDelegate", "backgroundHooks", "PhoneBackground", "PhoneNotifications", "ArkNotices"]
 
 
 def projects_text(root, a):
@@ -1105,6 +1317,9 @@ def projects_text(root, a):
         out += json.dumps(apple_info(root, a, bundle)) + json.dumps(apple_entitlements(root, a)) + apple_project(root, a, BUNDLE_PREFIX)
     if has(a, "android"):
         out += android_manifest(root, a)
+    if ark_entry(a):
+        out += (swift_main(root, a) + (swift_background(root, a) or "") if apple_targets(a) else "")
+        out += (kotlin_app(root, a) if has(a, "android") else "")
     return out
 
 
@@ -1120,14 +1335,32 @@ def selftest(root):
         for mark in BACKGROUND_MARKS:
             if re.search(r"\b" + re.escape(mark) + r"\b", text):
                 problems.append(f"{app} declares no [background], and its projects say {mark}")
-    fixture = app_of(root, "money")
-    fixture["modules"] = list(fixture.get("modules", [])) + ["ark-notifications", "ark-background"]
-    fixture["background"] = {"sync": "30m", "push": True, "boot": True, "service-extension": True}
+    fixture = background_fixture(root)
     text = projects_text(root, fixture)
     for mark in BACKGROUND_MARKS:
         if mark not in text:
             problems.append(f"a fixture declaring every [background] has no {mark} in its projects")
     return problems
+
+
+def background_fixture(root):
+    """money's app.toml declaring every `[background]` key: what the
+    self-test holds the projects to, and what `fixture` writes for the app
+    library's build to compile."""
+    fixture = app_of(root, "money")
+    fixture["modules"] = list(fixture.get("modules", [])) + ["ark-notifications", "ark-background"]
+    fixture["background"] = {"sync": "30m", "push": True, "boot": True, "service-extension": True}
+    return fixture
+
+
+def write_fixture(root, kotlin=None, swift=None):
+    """The fixture's background hookup, for the app library's builds to
+    compile: its Application (Kotlin), its hooks (Swift)."""
+    fixture = background_fixture(root)
+    if kotlin:
+        write_file(os.path.join(kotlin, "ArkApp.kt"), kotlin_app(root, fixture))
+    if swift:
+        write_file(os.path.join(swift, "ArkBackground.swift"), swift_background(root, fixture))
 
 
 def main(argv):
@@ -1144,6 +1377,9 @@ def main(argv):
     f.add_argument("app")
     sub.add_parser("check")
     sub.add_parser("apps")
+    fx = sub.add_parser("fixture")
+    fx.add_argument("--kotlin")
+    fx.add_argument("--swift")
     fd = sub.add_parser("fdroid")
     fd.add_argument("app")
     fd.add_argument("--root", default=REPO)
@@ -1157,6 +1393,8 @@ def main(argv):
         print("\n".join(x for x in (("ios/project.yml" if apple_targets(a) else None), ("android/app/build.gradle.kts" if has(a, "android") else None)) if x))
     elif args.cmd == "check":
         sys.exit(0 if check(REPO) else 1)
+    elif args.cmd == "fixture":
+        write_fixture(REPO, args.kotlin, args.swift)
     elif args.cmd == "apps":
         print("\n".join(apps(REPO)))
     elif args.cmd == "fdroid":

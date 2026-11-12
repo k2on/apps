@@ -1,7 +1,7 @@
 // money's look on the phone, over ArkUI's (ui/swift: the spacing, the
 // springs, the figures, the colours): arkui's theme (ui/theme.toml) — the
 // neutrals every Ark app shares, as `.ink`, `.quiet` and the rest, and
-// money's accent, the green, which `MoneyApp` names (`Accent.use(.green)`)
+// money's accent, the green, which the generated `@main` names (`Accent.use(.green)`, app.toml's accent)
 // and `AccentColor` in the asset catalog holds too. Liquid Glass brings its
 // own materials; what is here is only what a figure is tinted with.
 import ArkUI
@@ -36,8 +36,6 @@ enum Accounts {
 }
 
 /// Now, as the domain counts time: milliseconds since 1970.
-func nowMs(_ date: Date = Date()) -> Int64 { Int64((date.timeIntervalSince1970 * 1000).rounded()) }
-
 extension Summary {
     /// Ready to Assign's tint: green while there is money to give a job,
     /// red when more was assigned than there is, quiet at nothing.

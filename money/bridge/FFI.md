@@ -1,11 +1,13 @@
 # money's library for its phones
 
-> **This crate is being removed.** It is here only while the phones'
-> `Model.swift` / `Book.kt` still own the first run, the session and its
-> screens' runtimes (every screen, Receipts and Settings among them, is
-> Rust now). The end state generates the phones'
-> bindings from `money/app` and `money/core` (nix/ark-app.nix), with no
-> committed `money/bridge`. Don't build on it: a new screen or field goes
+> **This crate is being removed.** Every screen is Rust, and the phones'
+> `Model.swift`, `Bridge.swift`, `Book.kt` and `Start.kt` are gone: the
+> first run, the session and its screens' runtimes are the app host's
+> (ark-ffi's `ArkHost`, `src/host.rs`'s `MoneyHost`) under the app library
+> every Ark app shares (ui/docs/app.md, "The App Library"). It is here
+> because the twins and the runtimes' exports are still written by hand.
+> The end state generates the phones' bindings from `money/app` and
+> `money/core` (nix/ark-app.nix), with no committed `money/bridge`. Don't build on it: a new screen or field goes
 > in `money/app` as a `#[view]`; a device feature is a port in
 > `ark-module` with a module under `modules/ark-*`; domain rules go in
 > `money/core`. ui/docs/app.md, "Generated, Not Committed", says what to
@@ -96,8 +98,10 @@ as the apps write them: `ark_format`'s, linked into the library, as
 
 ## Signing in
 
-As harken's phones do, through the bridge's own functions — nothing of it
-is money's but the scheme:
+The app host every Ark app has walks it (ark-ffi's `ArkHost`, which
+`MoneyHost` hands out): the phone only opens the browser it asks for
+(`HostShell.browse`) and hands back where it came back
+(`ArkHost.returned`). Nothing of it is money's but the scheme:
 
 1. Ask `<server>/healthz`; it is a money server when its `domain <hash>
    <version> current` line has `moneyDomain()`'s hash.
@@ -140,6 +144,20 @@ harken's, untried against money's server.
 ## Still Here
 
 What the phones call through this crate that the generated bindings will
-have to carry when it goes: `moneyOpen`, `moneyDemo` and `DemoBank`, the
-session (`session.rs`), the hall of servers and logins (`hall.rs`), and
-the routes (`routes.rs`). Add to this list only with a reason in the commit.
+have to carry when it goes:
+
+- **The host** (`host.rs`): `MoneyHost` (`new(launch, store)`, `host()`,
+  `welcome()`, each screen's runtime, `register(account)`, `takeAsks()`,
+  `household()`, `generation()`, `syncBank()`), `NativeAsk` and
+  `Household`, over ark-ffi's `ArkHost`; its `HostApp` (how the replica
+  and the demo open, what a session's runtimes are and what one asks of
+  another) is money's, and a generated bridge takes it as written.
+- **The screens' runtimes** (`app.rs`): one object per screen
+  (`AccountsApp` … `ShellApp`), `registerDevices`, `shellBlank`.
+- **The first run's page** (`welcome_app!`): `WelcomeApp`, `addDevicePage`.
+- `moneyOpen`, `moneyProcessOpen`, `moneyDemo` and `DemoBank`, the
+  session (`session.rs`, now only the host's and the tests'), the hall of
+  servers and logins (`hall.rs`, the tests'), and the routes
+  (`routes.rs`).
+
+Add to this list only with a reason in the commit.
