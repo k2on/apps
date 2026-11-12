@@ -39,6 +39,7 @@ fn said<M>(v: &View<M>, out: &mut Vec<String>) {
                 said(slot, out);
             }
         }
+        View::Layout(l) => l.slots().into_iter().for_each(|s| said(s, out)),
         View::Each { .. } | View::When { .. } | View::WhenSome { .. } | View::Empty => {}
     }
 }

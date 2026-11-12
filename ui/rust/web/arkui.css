@@ -351,20 +351,137 @@ button.ark-sidebar-heading:hover, button.ark-sidebar-heading.ark-on { color: var
 .ark-paper-note { color: rgba(0, 0, 0, 0.55); padding-left: 2ch; }
 .ark-paper-total { font-weight: 700; }
 
-/* An inspector's page of cards (`detail_page`) and the card at its top (`header_card`), as iced draws them */
+/* An inspector's page of cards (`detail_page`) */
 .ark-detail { gap: 14px; }
-.ark-header-card { padding: 14px; display: flex; flex-direction: column; gap: 10px; }
-.ark-header-face { display: flex; flex-direction: column; align-items: center; gap: 6px; text-align: center; }
-.ark-header-title { font-size: 15px; font-weight: 700; }
-.ark-header-line { font-size: 12px; }
-.ark-header-line.ark-tint-positive { color: var(--ark-positive); }
-.ark-header-line.ark-tint-negative { color: var(--ark-error); }
-.ark-header-line.ark-tint-caution { color: var(--ark-caution); }
-.ark-header-line.ark-tint-accent { color: var(--ark-accent-text); }
-.ark-header-actions { display: flex; flex-direction: column; }
 .ark-tile-large { width: 36px; height: 36px; border-radius: 9px; }
-.ark-goal-progress { display: flex; flex-direction: column; gap: 4px; padding: 6px 0; }
-.ark-goal-progress .ark-goal { width: 100%; }
+.ark-tile.ark-tint-positive { background: color-mix(in srgb, var(--ark-positive) 16%, transparent); color: var(--ark-positive); }
+.ark-tile.ark-tint-negative { background: color-mix(in srgb, var(--ark-error) 16%, transparent); color: var(--ark-error); }
+.ark-tile.ark-tint-caution { background: color-mix(in srgb, var(--ark-caution) 16%, transparent); color: var(--ark-caution); }
+.ark-tile.ark-tint-accent { background: var(--ark-accent-container); color: var(--ark-accent); }
+.ark-meter .ark-goal { width: 100%; }
+
+/* The layout primitives (ui/docs/primitives.md, `layout.rs`): every gap, inset and corner a
+   `[layout]` token's, every face a `type-*`, every colour a role's. Start and end are the
+   flex box's, so a right-to-left page flips them. */
+.ark-stack { display: flex; min-width: 0; }
+.ark-stack.ark-v { flex-direction: column; }
+.ark-stack.ark-h { flex-direction: row; }
+.ark-stack.ark-z { display: grid; }
+.ark-stack.ark-z > * { grid-area: 1 / 1; }
+.ark-v.ark-align-start { align-items: flex-start; }
+.ark-v.ark-align-center { align-items: center; }
+.ark-v.ark-align-end { align-items: flex-end; }
+.ark-h.ark-align-start { align-items: flex-start; }
+.ark-h.ark-align-center { align-items: center; }
+.ark-h.ark-align-end { align-items: flex-end; }
+.ark-z.ark-align-start { justify-items: start; align-items: center; }
+.ark-z.ark-align-center { place-items: center; }
+.ark-z.ark-align-end { justify-items: end; align-items: center; }
+.ark-scroll.ark-v { overflow-y: auto; }
+.ark-scroll.ark-h { overflow-x: auto; }
+.ark-spacer { flex: 1 1 0; }
+.ark-gap-xs { gap: var(--ark-space-xs); }
+.ark-gap-s { gap: var(--ark-space-s); }
+.ark-gap-m { gap: var(--ark-space-m); }
+.ark-gap-l { gap: var(--ark-space-l); }
+.ark-gap-xl { gap: var(--ark-space-xl); }
+.ark-gap-xxl { gap: var(--ark-space-xxl); }
+.ark-gap-page { gap: var(--ark-page-margin); }
+.ark-gap-section { gap: var(--ark-section-gap); }
+.ark-min-xs { min-width: var(--ark-space-xs); min-height: var(--ark-space-xs); }
+.ark-min-s { min-width: var(--ark-space-s); min-height: var(--ark-space-s); }
+.ark-min-m { min-width: var(--ark-space-m); min-height: var(--ark-space-m); }
+.ark-min-l { min-width: var(--ark-space-l); min-height: var(--ark-space-l); }
+.ark-min-xl { min-width: var(--ark-space-xl); min-height: var(--ark-space-xl); }
+.ark-min-xxl { min-width: var(--ark-space-xxl); min-height: var(--ark-space-xxl); }
+.ark-min-page { min-width: var(--ark-page-margin); min-height: var(--ark-page-margin); }
+.ark-min-section { min-width: var(--ark-section-gap); min-height: var(--ark-section-gap); }
+.ark-pad-all-xs { padding: var(--ark-space-xs); }
+.ark-pad-h-xs { padding-inline: var(--ark-space-xs); }
+.ark-pad-v-xs { padding-block: var(--ark-space-xs); }
+.ark-pad-top-xs { padding-top: var(--ark-space-xs); }
+.ark-pad-bottom-xs { padding-bottom: var(--ark-space-xs); }
+.ark-pad-start-xs { padding-inline-start: var(--ark-space-xs); }
+.ark-pad-end-xs { padding-inline-end: var(--ark-space-xs); }
+.ark-pad-all-s { padding: var(--ark-space-s); }
+.ark-pad-h-s { padding-inline: var(--ark-space-s); }
+.ark-pad-v-s { padding-block: var(--ark-space-s); }
+.ark-pad-top-s { padding-top: var(--ark-space-s); }
+.ark-pad-bottom-s { padding-bottom: var(--ark-space-s); }
+.ark-pad-start-s { padding-inline-start: var(--ark-space-s); }
+.ark-pad-end-s { padding-inline-end: var(--ark-space-s); }
+.ark-pad-all-m { padding: var(--ark-space-m); }
+.ark-pad-h-m { padding-inline: var(--ark-space-m); }
+.ark-pad-v-m { padding-block: var(--ark-space-m); }
+.ark-pad-top-m { padding-top: var(--ark-space-m); }
+.ark-pad-bottom-m { padding-bottom: var(--ark-space-m); }
+.ark-pad-start-m { padding-inline-start: var(--ark-space-m); }
+.ark-pad-end-m { padding-inline-end: var(--ark-space-m); }
+.ark-pad-all-l { padding: var(--ark-space-l); }
+.ark-pad-h-l { padding-inline: var(--ark-space-l); }
+.ark-pad-v-l { padding-block: var(--ark-space-l); }
+.ark-pad-top-l { padding-top: var(--ark-space-l); }
+.ark-pad-bottom-l { padding-bottom: var(--ark-space-l); }
+.ark-pad-start-l { padding-inline-start: var(--ark-space-l); }
+.ark-pad-end-l { padding-inline-end: var(--ark-space-l); }
+.ark-pad-all-xl { padding: var(--ark-space-xl); }
+.ark-pad-h-xl { padding-inline: var(--ark-space-xl); }
+.ark-pad-v-xl { padding-block: var(--ark-space-xl); }
+.ark-pad-top-xl { padding-top: var(--ark-space-xl); }
+.ark-pad-bottom-xl { padding-bottom: var(--ark-space-xl); }
+.ark-pad-start-xl { padding-inline-start: var(--ark-space-xl); }
+.ark-pad-end-xl { padding-inline-end: var(--ark-space-xl); }
+.ark-pad-all-xxl { padding: var(--ark-space-xxl); }
+.ark-pad-h-xxl { padding-inline: var(--ark-space-xxl); }
+.ark-pad-v-xxl { padding-block: var(--ark-space-xxl); }
+.ark-pad-top-xxl { padding-top: var(--ark-space-xxl); }
+.ark-pad-bottom-xxl { padding-bottom: var(--ark-space-xxl); }
+.ark-pad-start-xxl { padding-inline-start: var(--ark-space-xxl); }
+.ark-pad-end-xxl { padding-inline-end: var(--ark-space-xxl); }
+.ark-pad-all-page { padding: var(--ark-page-margin); }
+.ark-pad-h-page { padding-inline: var(--ark-page-margin); }
+.ark-pad-v-page { padding-block: var(--ark-page-margin); }
+.ark-pad-top-page { padding-top: var(--ark-page-margin); }
+.ark-pad-bottom-page { padding-bottom: var(--ark-page-margin); }
+.ark-pad-start-page { padding-inline-start: var(--ark-page-margin); }
+.ark-pad-end-page { padding-inline-end: var(--ark-page-margin); }
+.ark-pad-all-section { padding: var(--ark-section-gap); }
+.ark-pad-h-section { padding-inline: var(--ark-section-gap); }
+.ark-pad-v-section { padding-block: var(--ark-section-gap); }
+.ark-pad-top-section { padding-top: var(--ark-section-gap); }
+.ark-pad-bottom-section { padding-bottom: var(--ark-section-gap); }
+.ark-pad-start-section { padding-inline-start: var(--ark-section-gap); }
+.ark-pad-end-section { padding-inline-end: var(--ark-section-gap); }
+.ark-fill-w { width: 100%; box-sizing: border-box; }
+.ark-fill-w.ark-fill-start { align-self: stretch; }
+.ark-fill-h { height: 100%; }
+.ark-surface-card { background: var(--ark-container-low); }
+.ark-surface-raised { background: var(--ark-container-high); }
+/* The desktop's measures: a card is rounded by `corner` here, as `.ark-card` is. */
+.ark-corner-card, .ark-corner-small { border-radius: var(--ark-corner); overflow: hidden; }
+.ark-text { min-width: 0; overflow-wrap: anywhere; }
+.ark-one-line { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ark-centred { text-align: center; }
+.ark-type-large-title { font-size: var(--ark-type-large-title); font-weight: 700; }
+.ark-type-title { font-size: var(--ark-type-title); font-weight: 700; }
+.ark-type-headline { font-size: var(--ark-type-headline); font-weight: 700; }
+.ark-type-body { font-size: var(--ark-type-body); }
+.ark-type-subheadline { font-size: var(--ark-type-subheadline); }
+.ark-type-footnote { font-size: var(--ark-type-footnote); }
+.ark-type-caption { font-size: var(--ark-type-caption); }
+.ark-type-figure { font-size: var(--ark-type-figure); font-weight: 700; font-variant-numeric: tabular-nums; }
+.ark-glyphed { display: inline-flex; flex: none; }
+.ark-glyphed svg { width: 1em; height: 1em; }
+.ark-ink { color: var(--ark-ink); }
+.ark-ink-quiet { color: var(--ark-quiet); }
+.ark-ink-accent { color: var(--ark-accent-text); }
+.ark-ink-tint.ark-tint-neutral { color: var(--ark-quiet); }
+.ark-ink-figure.ark-tint-neutral { color: var(--ark-ink); }
+.ark-ink-tint.ark-tint-positive, .ark-ink-figure.ark-tint-positive { color: var(--ark-positive); }
+.ark-ink-tint.ark-tint-negative, .ark-ink-figure.ark-tint-negative { color: var(--ark-error); }
+.ark-ink-tint.ark-tint-caution, .ark-ink-figure.ark-tint-caution { color: var(--ark-caution); }
+.ark-ink-tint.ark-tint-accent, .ark-ink-figure.ark-tint-accent { color: var(--ark-accent-text); }
+
 .ark-row-value { font-size: 14px; color: var(--ark-quiet); flex: none; }
 .ark-panel { padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; }
 .ark-panel-title { font-weight: 700; font-size: 14px; }

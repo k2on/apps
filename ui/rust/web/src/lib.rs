@@ -38,6 +38,7 @@ pub use leptos::prelude::AnyView;
 pub mod fields;
 pub mod figures;
 pub mod keys;
+mod layout;
 pub mod menu;
 pub mod page;
 pub mod parts;

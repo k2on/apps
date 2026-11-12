@@ -41,6 +41,15 @@ use std::fmt::Debug;
 use std::marker::PhantomData;
 use std::rc::Rc;
 
+mod components;
+pub mod layout;
+
+pub use components::{empty_state, goal_progress, title_stack, TitleStack};
+pub use layout::{
+    glyph, hstack, image, meter, scroll, scroll_across, spacer, spacer_min, status_badge, text, tile, vstack, zstack, Align, Axis, Corner, Edges,
+    Ink, Layout, Modifier, Modify, Prim, Space, Surface, TextStyle, Words,
+};
+
 /// A value a view reads: plain data.
 pub trait Value: Clone + Debug + 'static {}
 impl<T: Clone + Debug + 'static> Value for T {}
@@ -246,6 +255,9 @@ pub enum View<M> {
         no: Box<View<M>>,
     },
     Part(Part<M>),
+    /// A layout primitive (`layout`, ui/docs/primitives.md): written out as
+    /// each toolkit's own stack, text or glyph.
+    Layout(Box<Layout<M>>),
 }
 
 /// A message a field's input makes: shared, so that a view can be mapped
@@ -309,16 +321,21 @@ pub enum Part<M> {
     Detail {
         content: Box<View<M>>,
     },
-    /// What an inspector or a detail is about, in a card at its top: its
-    /// glyph, its title, its figure (in a `StatusBadge` of its tint, or
-    /// large), a line in the tint saying what needs attention, a quiet
-    /// caption, and its actions under a divider.
-    HeaderCard(Box<HeaderCard<M>>),
-    /// How far toward a goal: a bar in its tint and the words under it.
-    GoalProgress {
+    /// A glyph on a rounded tile of its tint (ArkUI's `Tile`): a leaf the
+    /// primitives hold.
+    Tile {
+        glyph: Val<String>,
+        tint: Val<String>,
+    },
+    /// A figure in a capsule of its tint (ArkUI's `StatusBadge`).
+    StatusBadge {
+        figure: Val<String>,
+        tint: Val<String>,
+    },
+    /// A bar of how far, 0 to 1, in a tint (`neutral` the positive's).
+    Meter {
         fraction: Val<f64>,
         tint: Val<String>,
-        note: Val<String>,
     },
     /// A group of rows in a card, under its heading, a note under it.
     Section(Section<M>),
@@ -894,8 +911,9 @@ impl<M> HeaderCard<M> {
 }
 
 impl<M> From<HeaderCard<M>> for View<M> {
+    /// Laid out of the primitives (`components`).
     fn from(h: HeaderCard<M>) -> View<M> {
-        Part::HeaderCard(Box::new(h)).into()
+        components::header_card(h)
     }
 }
 
@@ -903,16 +921,6 @@ impl<M> From<HeaderCard<M>> for View<M> {
 pub fn detail_page<M>(content: impl Into<View<M>>) -> View<M> {
     Part::Detail {
         content: Box::new(content.into()),
-    }
-    .into()
-}
-
-/// How far toward a goal (`fraction`, 0 to 1), in `tint`, `note` under it.
-pub fn goal_progress<M>(fraction: impl Into<Val<f64>>, tint: impl Into<Val<String>>, note: impl Into<Val<String>>) -> View<M> {
-    Part::GoalProgress {
-        fraction: fraction.into(),
-        tint: tint.into(),
-        note: note.into(),
     }
     .into()
 }
@@ -2120,29 +2128,10 @@ impl<M> Part<M> {
                 vec![("cents", G::Val(lit(cents))), ("note", G::Text(note))],
                 vec![],
             ),
-            Part::HeaderCard(h) => {
-                let mut args = vec![("figure", G::Val(lit(&h.figure))), ("tint", G::Val(lit(&h.tint)))];
-                if let Some(g) = &h.glyph {
-                    args.push(("glyph", G::Val(lit(g))));
-                }
-                if h.badge {
-                    args.push(("badge", G::Val("true".into())));
-                }
-                if let Some(l) = &h.line {
-                    args.push(("line", G::Val(lit(l))));
-                }
-                if let Some(c) = &h.caption {
-                    args.push(("caption", G::Val(lit(c))));
-                }
-                c("HeaderCard", Some(G::Val(lit(&h.title))), args, vec![("", &*h.actions)])
-            }
+            Part::Tile { glyph, tint } => c("Tile", Some(G::Val(lit(glyph))), vec![("tint", G::Val(lit(tint)))], vec![]),
+            Part::StatusBadge { figure, tint } => c("StatusBadge", Some(G::Val(lit(figure))), vec![("tint", G::Val(lit(tint)))], vec![]),
+            Part::Meter { fraction, tint } => c("Meter", Some(G::Val(lit(fraction))), vec![("tint", G::Val(lit(tint)))], vec![]),
             Part::Detail { content } => c("DetailPage", None, vec![], vec![("", &**content)]),
-            Part::GoalProgress { fraction, tint, note } => c(
-                "GoalProgress",
-                Some(G::Val(lit(fraction))),
-                vec![("tint", G::Val(lit(tint))), ("note", G::Val(lit(note)))],
-                vec![],
-            ),
             Part::Section(s) => {
                 let mut args = vec![];
                 if let Some(t) = &s.title {
@@ -2747,6 +2736,7 @@ impl<M: 'static> View<M> {
                 no: b(no),
             },
             View::Part(p) => View::Part(p.map_rc(f)),
+            View::Layout(l) => View::Layout(Box::new(l.map_rc(f))),
         }
     }
 }
@@ -2789,20 +2779,9 @@ impl<M: 'static> Part<M> {
                 second_cents,
                 trend,
             },
-            Part::HeaderCard(h) => {
-                let h = *h;
-                Part::HeaderCard(Box::new(HeaderCard {
-                    title: h.title,
-                    figure: h.figure,
-                    tint: h.tint,
-                    glyph: h.glyph,
-                    badge: h.badge,
-                    line: h.line,
-                    caption: h.caption,
-                    actions: b(h.actions),
-                }))
-            }
-            Part::GoalProgress { fraction, tint, note } => Part::GoalProgress { fraction, tint, note },
+            Part::Tile { glyph, tint } => Part::Tile { glyph, tint },
+            Part::StatusBadge { figure, tint } => Part::StatusBadge { figure, tint },
+            Part::Meter { fraction, tint } => Part::Meter { fraction, tint },
             Part::Detail { content } => Part::Detail { content: b(content) },
             Part::Section(s) => Part::Section(Section {
                 title: s.title,

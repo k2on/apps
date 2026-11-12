@@ -50,10 +50,12 @@ pub(crate) fn page<M: Clone + 'static>(content: View<M>) -> AnyView {
         .into_any()
 }
 
-fn part<M: Clone + 'static>(v: View<M>) -> Option<AnyView> {
-    let View::Part(p) = v else {
+pub(crate) fn part<M: Clone + 'static>(v: View<M>) -> Option<AnyView> {
+    let p = match v {
+        View::Part(p) => p,
+        View::Layout(l) => return crate::layout::layout(*l),
         // A recording's `for` and `if` are the emitters'; a real view has none.
-        return None;
+        _ => return None,
     };
     Some(match p {
         Part::Hero { label, cents, note } => html::div()
@@ -90,14 +92,18 @@ fn part<M: Clone + 'static>(v: View<M>) -> Option<AnyView> {
         // An inspector's page of cards, as iced's `Part::Detail` is: its
         // cards one under another in the pane's own scroll.
         Part::Detail { content } => html::div().class("ark-inspector-body ark-detail").child(nodes(*content)).into_any(),
-        Part::HeaderCard(h) => header_card(*h),
-        Part::GoalProgress { fraction, tint, note } => html::div()
-            .class("ark-goal-progress")
-            .child((
-                crate::figures::goal_bar(fraction.get() as f32, crate::figures::Tint::named(&tint.get())),
-                html::div().class("ark-caption").child(note.get()),
-            ))
-            .into_any(),
+        Part::Tile { glyph, tint } => tile(&glyph.get(), crate::figures::Tint::named(&tint.get()).tile()),
+        Part::StatusBadge { figure, tint } => crate::figures::status_badge(figure.get(), crate::figures::Tint::named(&tint.get())),
+        Part::Meter { fraction, tint } => {
+            let tint = match crate::figures::Tint::named(&tint.get()) {
+                crate::figures::Tint::Neutral => crate::figures::Tint::Positive,
+                t => t,
+            };
+            html::div()
+                .class("ark-meter")
+                .child(crate::figures::goal_bar(fraction.get() as f32, tint))
+                .into_any()
+        }
         Part::Section(s) => section(s),
         Part::Row(r) => list_row(*r),
         Part::MeterRow(r) => meter_row(*r),
@@ -376,46 +382,6 @@ fn part<M: Clone + 'static>(v: View<M>) -> Option<AnyView> {
         // The shell's are `shell`'s.
         _ => return None,
     })
-}
-
-/// What an inspector is about, in a card (iced's `header_card`): its
-/// glyph, its title, its figure in a status badge or large in its tint,
-/// the line in its tint, the caption quiet, centred; its actions under a
-/// rule.
-fn header_card<M: Clone + 'static>(h: ark_app::view::HeaderCard<M>) -> AnyView {
-    use crate::figures::{status_badge, Tint};
-    let tint = Tint::named(&h.tint.get());
-    let title = h.title.get();
-    let figure = match h.badge {
-        true => status_badge(h.figure.get(), tint),
-        false => html::div()
-            .class(format!("ark-headline {}", tint.class()))
-            .child(h.figure.get())
-            .into_any(),
-    };
-    let said = |v: Option<ark_app::view::Val<String>>| v.map(|v| v.get()).filter(|v| !v.is_empty());
-    let line = said(h.line).map(|l| html::div().class(format!("ark-header-line {}", tint.class())).child(l));
-    let caption = said(h.caption).map(|c| html::div().class("ark-caption").child(c));
-    let actions = nodes(*h.actions);
-    let actions = (!actions.is_empty()).then(|| {
-        (
-            html::div().class("ark-row-divider"),
-            html::div().class("ark-header-actions").child(actions),
-        )
-    });
-    html::div()
-        .class("ark-card ark-header-card")
-        .child((
-            html::div().class("ark-header-face").child((
-                h.glyph.map(|g| tile(&g.get(), "ark-tile ark-tile-large")),
-                (!title.is_empty()).then(|| html::div().class("ark-header-title").child(title)),
-                figure,
-                line,
-                caption,
-            )),
-            actions,
-        ))
-        .into_any()
 }
 
 fn fact(label: &'static str, cents: i64) -> AnyView {

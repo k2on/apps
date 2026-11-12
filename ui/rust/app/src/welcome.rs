@@ -325,6 +325,7 @@ mod tests {
                 names(yes, out);
                 names(no, out)
             }
+            View::Layout(l) => l.slots().into_iter().for_each(|s| names(s, out)),
             View::Empty => {}
         }
     }

@@ -20,7 +20,7 @@ pub enum Tint {
 
 impl Tint {
     /// A tint by the name a view gives it (`ark_app::view::HeaderCard`'s
-    /// `tint`), as iced's `Tint::named`: neutral unless it is one of the
+    /// `tint`, an `Ink::Tint`'s), as iced's `Tint::named`: neutral unless it is one of the
     /// others.
     pub fn named(name: &str) -> Tint {
         match name {
@@ -39,6 +39,17 @@ impl Tint {
             Tint::Caution => "ark-tint-caution",
             Tint::Negative => "ark-tint-negative",
             Tint::Accent => "ark-tint-accent",
+        }
+    }
+
+    /// A glyph's tile in this tint (`Part::Tile`).
+    pub fn tile(self) -> &'static str {
+        match self {
+            Tint::Neutral => "ark-tile ark-tile-large ark-tint-neutral",
+            Tint::Positive => "ark-tile ark-tile-large ark-tint-positive",
+            Tint::Caution => "ark-tile ark-tile-large ark-tint-caution",
+            Tint::Negative => "ark-tile ark-tile-large ark-tint-negative",
+            Tint::Accent => "ark-tile ark-tile-large ark-tint-accent",
         }
     }
 }
