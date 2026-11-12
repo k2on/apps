@@ -11,6 +11,11 @@ crate = "ark-scanner"
 ScanPage = "Option<Vec<u8>>"
 PickPhoto = "Option<Vec<u8>>"
 
+# Registered over the camera (ark-ffi's `devices`), after the devices: no
+# device of its own on either phone.
+[phone]
+register = "registerScanner"
+
 [ios.info]
 
 [android]

@@ -90,7 +90,8 @@ pub trait HostApp: Send + Sync + 'static {
     fn opened(&self, peer: Arc<Peer>, how: Opened, host: Handle);
     /// The session closed (signed out, another server): its runtimes let go.
     fn closed(&self);
-    /// The peer said something moved, after the host read its link.
+    /// The peer said something moved, after the host read its link; or a
+    /// device module answered ([`Handle::moved`]): what came is taken.
     fn moved(&self) {}
     /// A link for the app itself, once it shows: a launch's arguments
     /// (`-screen budget`) or an address (`money:///budget`).
@@ -123,6 +124,15 @@ impl Handle {
     pub fn changed(&self) {
         if let Some(h) = self.0.upgrade() {
             h.changed()
+        }
+    }
+    /// Something came to the app from outside a message (a device module
+    /// answered later: the camera, when the person is done): the app's
+    /// [`HostApp::moved`] on the host's thread, as when the peer moved, so
+    /// its runtimes take it with no lock of theirs held.
+    pub fn moved(&self) {
+        if let Some(h) = self.0.upgrade() {
+            let _ = h.teller().send(());
         }
     }
     /// Signed out, or out of the demo.

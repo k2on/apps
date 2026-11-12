@@ -7,6 +7,16 @@ crate = "ark-haptics"
 [ops]
 HapticsOp = "()"
 
+# How the phone makes its device and hands it to the process (ark-ffi's
+# `devices`): the app's generated entry points register it at launch when
+# app.toml lists it, so an app writes nothing native for it. `swift` and
+# `kotlin` make the device (Kotlin's with the activity's `view` at hand);
+# a platform with neither has none.
+[phone]
+register = "registerHaptics"
+swift = "PhoneHaptics()"
+kotlin = "dev.arkui.modules.PhoneHaptics(view)"
+
 [ios.info]
 
 [android]

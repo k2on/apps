@@ -251,12 +251,18 @@ projects (below): each listed module's `swift/` and `kotlin/` among the
 sources; its `[ios.info]` keys (the app's own win), `[ios] entitlements`
 and `background-modes` (`UIBackgroundModes`); its `[android]`
 `permissions`, `services` (a `<service>` with its actions and
-foreground type), `meta-data` and Maven `dependencies`. The app's crate
-depends on each listed module's crate (`checks.prebuild` holds it), and
-the phones' library carries their UniFFI traits; the shell registers what
-it built as the process's (`registerDevices(haptics: PhoneHaptics(), …)`
-in money's `MoneyApp.swift`, `registerDevices(PhoneHaptics(view), …)` in
-`MoneyApp.kt`, the `Queued` clipboard in `money/iced/src/overview.rs`).
+foreground type), `meta-data` and Maven `dependencies`. A device the phone
+hands the process says how in its module.toml's `[phone]` (the ark-ffi
+method that registers it, and how Swift and Kotlin make it): the generated
+`@main` and activity register each listed one as the process's
+(`ArkProcess.registerHaptics(device: PhoneHaptics())`, … ark-ffi's
+`devices`, which links their crates and carries their UniFFI traits), and
+the activity puts a module's page at its root (ark-camera's
+`CameraPage`); an app writes nothing native for its modules. An answer
+that comes later (the camera's) wakes the app's host, which drains its
+runtimes. Any other module's crate is a dependency of the app's own
+(`checks.prebuild` holds both). The desktop registers its own (the
+`Queued` clipboard in `money/iced/src/overview.rs`).
 
 The iPhone typecheck (`checks.money-ios-typecheck`) compiles the listed
 modules' Swift on Linux against the generated bindings, so every name

@@ -1590,6 +1590,21 @@ rec {
             features = [ "ffi" ];
           }
           {
+            name = "ark-camera";
+            packageId = "ark-camera";
+            features = [ "ffi" ];
+          }
+          {
+            name = "ark-clipboard";
+            packageId = "ark-clipboard";
+            features = [ "ffi" ];
+          }
+          {
+            name = "ark-haptics";
+            packageId = "ark-haptics";
+            features = [ "ffi" ];
+          }
+          {
             name = "ark-module";
             packageId = "ark-module";
           }
@@ -1608,8 +1623,17 @@ rec {
             packageId = "ark-push";
           }
           {
+            name = "ark-scanner";
+            packageId = "ark-scanner";
+          }
+          {
             name = "ark-secure-store";
             packageId = "ark-secure-store";
+            features = [ "ffi" ];
+          }
+          {
+            name = "ark-share";
+            packageId = "ark-share";
             features = [ "ffi" ];
           }
           {
@@ -1646,8 +1670,9 @@ rec {
         ];
         features = {
           "bindgen" = [ "uniffi/cli" "uniffi/cargo-metadata" ];
+          "model" = [ "ark-scanner/model" ];
         };
-        resolvedDefaultFeatures = [ "bindgen" ];
+        resolvedDefaultFeatures = [ "bindgen" "model" ];
       };
       "ark-format" = rec {
         crateName = "ark-format";
@@ -15191,16 +15216,6 @@ rec {
             packageId = "ark-app";
           }
           {
-            name = "ark-camera";
-            packageId = "ark-camera";
-            features = [ "ffi" ];
-          }
-          {
-            name = "ark-clipboard";
-            packageId = "ark-clipboard";
-            features = [ "ffi" ];
-          }
-          {
             name = "ark-ffi";
             packageId = "ark-ffi";
           }
@@ -15213,31 +15228,13 @@ rec {
             packageId = "ark-format-ffi";
           }
           {
-            name = "ark-haptics";
-            packageId = "ark-haptics";
-            features = [ "ffi" ];
-          }
-          {
-            name = "ark-module";
-            packageId = "ark-module";
-          }
-          {
             name = "ark-peer";
             packageId = "ark-peer";
             usesDefaultFeatures = false;
           }
           {
-            name = "ark-scanner";
-            packageId = "ark-scanner";
-          }
-          {
             name = "ark-secure-store";
             packageId = "ark-secure-store";
-            features = [ "ffi" ];
-          }
-          {
-            name = "ark-share";
-            packageId = "ark-share";
             features = [ "ffi" ];
           }
           {
@@ -15271,7 +15268,7 @@ rec {
           }
         ];
         features = {
-          "model" = [ "ark-scanner/model" ];
+          "model" = [ "ark-ffi/model" ];
         };
         resolvedDefaultFeatures = [ "model" ];
       };

@@ -9,6 +9,18 @@ ScanQr = "Option<String>"
 TakePhoto = "Option<Vec<u8>>"
 Watch = "Option<Vec<u8>>"
 
+# How the phone makes its device and hands it to the process (ark-ffi's
+# `devices`): the app's generated entry points register it at launch when
+# app.toml lists it, so an app writes nothing native for it. `swift` and
+# `kotlin` make the device (Kotlin's with the activity's `view` at hand);
+# a platform with neither has none.
+[phone]
+register = "registerCamera"
+swift = "PhoneCamera()"
+kotlin = "dev.arkui.modules.PhoneCamera()"
+# Android's page, put once at the activity's root, over the device.
+kotlin-page = "dev.arkui.modules.CameraPage"
+
 [ios.info]
 NSCameraUsageDescription = "Scans a code or takes a photo when you ask."
 

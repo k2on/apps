@@ -80,13 +80,6 @@ final class MoneyScreens: ObservableObject {
     init(_ app: ArkApp<MoneyHost>) {
         self.app = app
         Numbers.install()
-        // The device modules money lists (app.toml), registered as the
-        // process's: every screen's runtime asks through them.
-        let camera = PhoneCamera()
-        camera.answered = { [weak self] in
-            if self?.sheets?.runtime?.drain() == true { self?.sheets?.reload() }
-        }
-        registerDevices(haptics: PhoneHaptics(), clipboard: PhoneClipboard(), share: PhoneShare(), camera: camera)
         watching = app.$moves.sink { [weak self] _ in
             // After the change is published: read on the next turn.
             DispatchQueue.main.async { self?.moved() }

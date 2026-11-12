@@ -5,21 +5,17 @@
 //! app's update runs here, its changes go to the peer, its routes and its
 //! typed requests ([`MoneyRequest`]) to money's host (`host.rs`), which
 //! makes every screen's runtime and carries out what each asks,
-//! its modules' operations to the modules the phone registered
-//! ([`Devices`]: money/app.toml's, each a crate under modules/, a UniFFI
-//! foreign trait its swift/ and kotlin/ implement).
+//! its modules' operations to the modules the phone registered as the
+//! process's (money/app.toml's, each a crate under modules/; the app
+//! library registers them: ark-ffi's `devices`).
 //!
 //! Every screen is the same object over its own app ([`Running`]), written
 //! once by [`screen!`]: UniFFI exports no generic type.
 
 use std::sync::{Arc, Mutex};
 
-use ark_app::{App, Ask, Host, Inbox, Modules, Runtime, Ticket};
-use ark_camera::Camera;
-use ark_clipboard::phone::Clipboard;
+use ark_app::{App, Ask, Host, Inbox, Runtime, Ticket};
 use ark_ffi::Refusal;
-use ark_haptics::phone::Haptics;
-use ark_share::phone::Share;
 use money_app::accounts::{Accounts, AccountsMsg};
 use money_app::budget::{Budget, BudgetMsg};
 use money_app::insights::{Insights, InsightsMsg};
@@ -51,6 +47,9 @@ pub(crate) trait Router: Send + Sync {
     /// What was asked during a message, carried out now that no runtime's
     /// lock is held.
     fn settle(&self);
+    /// A device module answered: taken by the runtime that asked once no
+    /// lock of its is held (the host's thread drains every runtime).
+    fn answered(&self);
 }
 
 /// The time a screen is worked out at: the device's clock on the session's
@@ -64,27 +63,6 @@ pub fn session_now(clock_ms: i64, today: &str) -> i64 {
         Some((y, m, d)) => domain::dates::days_from_civil(y, m, d) * 86_400_000 + 43_200_000,
         None => clock_ms,
     }
-}
-
-/// The phone's device modules, the ones money lists (money/app.toml),
-/// registered once at startup as the process's (`ArkProcess::modules`):
-/// every screen's runtime asks through them. Any may be none. The scanner
-/// is the camera's: its eyes and its warp are Rust's (ark-scanner), its
-/// frames and shutter the camera module's.
-#[uniffi::export]
-pub fn register_devices(
-    haptics: Option<Arc<dyn Haptics>>,
-    clipboard: Option<Arc<dyn Clipboard>>,
-    share: Option<Arc<dyn Share>>,
-    camera: Option<Arc<dyn Camera>>,
-) {
-    let mut m = Modules::new();
-    m.set(haptics.map(ark_haptics::phone::port))
-        .set(clipboard.map(ark_clipboard::phone::port))
-        .set(share.map(ark_share::phone::port))
-        .set(camera.clone())
-        .set(camera.map(ark_scanner::over_camera));
-    ark_ffi::ArkProcess::shared().register_modules(m);
 }
 
 /// One screen's app running over the session: its runtime, the views its
@@ -127,7 +105,10 @@ impl<A: App<Key = domain::MoneyView, Change = MoneyChange, Route = Route, Reques
         self.app.shell.open_route(route)
     }
     fn ask(&mut self, ticket: Ticket, ask: Ask<A::Msg>) {
-        self.app.inbox.ask(&ark_ffi::ArkProcess::shared().modules(), ticket, ask)
+        // An answer that comes later (the camera's) wakes the host, which
+        // drains every runtime on its own thread.
+        let router = self.app.shell.clone();
+        self.app.inbox.ask_telling(&ark_ffi::ArkProcess::shared().modules(), ticket, ask, move || router.answered())
     }
     fn request(&mut self, r: MoneyRequest) {
         match r {
@@ -206,7 +187,7 @@ impl<A: App<Key = domain::MoneyView, Change = MoneyChange, Route = Route, Reques
     }
 
     /// The answers that came since (a camera's, later than its message),
-    /// run; whether any did, so the page is read again.
+    /// run; whether any did. The host's, when a module answered.
     pub(crate) fn drain(&self) -> bool {
         let moved = {
             let mut rt = self.runtime.lock().unwrap_or_else(|e| e.into_inner());
@@ -273,12 +254,6 @@ macro_rules! screen {
             /// screenshot driver waits on, with the version unchanged.
             pub fn is_idle(&self) -> bool {
                 self.0.is_idle()
-            }
-
-            /// What a module answered later (the camera, when the person is
-            /// done) taken; whether the page moved.
-            pub fn drain(&self) -> bool {
-                self.0.drain()
             }
 
             /// The page as last read has been drawn: what waited on that

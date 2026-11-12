@@ -15,6 +15,14 @@ ark-app = { path = "../../ui/rust/app" }
 # foreign trait the keychain and the Android keystore implement.
 ark-module = { path = "../../ui/rust/module" }
 ark-secure-store = { path = "../../modules/ark-secure-store", features = ["ffi"] }
+# The phone's device modules an app lists, registered as the process's
+# (`devices`): each one's foreign trait, which its swift/ and kotlin/
+# implement, and the scanner over the camera.
+ark-haptics = { path = "../../modules/ark-haptics", features = ["ffi"] }
+ark-clipboard = { path = "../../modules/ark-clipboard", features = ["ffi"] }
+ark-share = { path = "../../modules/ark-share", features = ["ffi"] }
+ark-camera = { path = "../../modules/ark-camera", features = ["ffi"] }
+ark-scanner = { path = "../../modules/ark-scanner" }
 # A wake from the notifications (a push, a notice's button) and the
 # endpoint they hand out written as the session's push row (`wake`).
 ark-notifications = { path = "../../modules/ark-notifications", features = ["ffi"] }
@@ -35,6 +43,10 @@ tracing = { version = "0.1", default-features = false, features = ["std"] }
 # flake's is its own crate (nix/uniffi-bindgen), which runs no cargo: it is
 # told the crates' directories (`--config` with `[crate-roots]`).
 [features]
+# The scanner's corner model (ark-scanner's): Android's camera gives its
+# eyes a colour square, which the model reads; the iPhone and the Mac find
+# the page by its bright region, so without it.
+model = ["ark-scanner/model"]
 bindgen = ["uniffi/cli", "uniffi/cargo-metadata"]
 
 [[bin]]

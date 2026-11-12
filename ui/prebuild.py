@@ -969,6 +969,64 @@ def ark_entry(a):
     return kernel(a) and "ffi" in a
 
 
+def devices(root, a):
+    """The device modules the app lists that the phone hands the process
+    (module.toml's `[phone]`, ark-ffi's `devices`): each one's name, how it
+    is registered and how each phone makes it; those with a device first,
+    then those over another's (the scanner, over the camera)."""
+    out = [(n, m["phone"]) for n, m in modules_of(root, a) if "phone" in m]
+    return [d for d in out if "swift" in d[1] or "kotlin" in d[1]] + [d for d in out if "swift" not in d[1] and "kotlin" not in d[1]]
+
+
+def swift_devices(root, a):
+    """The `@main`'s registration of the app's device modules."""
+    lines = []
+    for n, ph in devices(root, a):
+        if "swift" in ph:
+            lines.append(f"        process.{ph['register']}(device: {ph['swift']})")
+        elif "kotlin" not in ph:
+            lines.append(f"        process.{ph['register']}()")
+    if not lines:
+        return ""
+    return ("        // The device modules app.toml lists (module.toml's `[phone]`),\n"
+            "        // the process's: every screen's runtime asks through them.\n"
+            "        let process = ArkProcess.shared()\n" + "\n".join(lines) + "\n")
+
+
+def kotlin_devices(root, a):
+    """The activity's registration of the app's device modules, and the
+    pages a module puts at its root: `(call, function)`, both empty for an
+    app that lists none."""
+    made, calls, pages = [], [], []
+    for n, ph in devices(root, a):
+        if "kotlin" in ph:
+            if "kotlin-page" in ph:
+                v = n.removeprefix("ark-").replace("-", "_")
+                made.append(f"    val {v} = remember {{ {ph['kotlin']} }}")
+                calls.append(f"        process.{ph['register']}({v})")
+                pages.append(f"    {ph['kotlin-page']}({v})")
+            else:
+                calls.append(f"        process.{ph['register']}({ph['kotlin']})")
+        elif "swift" not in ph:
+            calls.append(f"        process.{ph['register']}()")
+    if not calls:
+        return "", ""
+    body = "\n".join(made + ["    remember(view) {", "        val process = ArkProcess.shared()"] + calls + ["    }"] + pages)
+    fn = f"""
+/**
+ * The device modules app.toml lists (module.toml's `[phone]`), registered as the process's while
+ * the activity shows (every screen's runtime asks through them), and the pages a module puts at
+ * the root.
+ */
+@Composable
+private fun Devices() {{
+    val view = LocalView.current
+{body}
+}}
+"""
+    return "        Devices()\n", fn
+
+
 def swift_main(root, a):
     """The app's `@main`: its library held by the app library, its accent,
     the scene it draws; and its screens' holders."""
@@ -1006,7 +1064,7 @@ struct {product}App: App {{
 
     init() {{
         Accent.use(.{a['accent']})
-{hooks}        _app = StateObject(wrappedValue: ArkApp({host}(launch: .current(scan: QrScanner.available), store: {store})))
+{hooks}{swift_devices(root, a)}        _app = StateObject(wrappedValue: ArkApp({host}(launch: .current(scan: QrScanner.available), store: {store})))
     }}
 
     var body: some Scene {{ {a['apple'].get('scene', product + 'Scenes')}(app: app) }}
@@ -1106,21 +1164,25 @@ def kotlin_activity(root, a):
         holders.append(f"class {sc['kotlin']}(r: {sc['runtime']}) :\n    ArkScreen<{sc['page']}, {sc['msg']}>({r}::page, {r}::send, {r}::version, {r}::isIdle, {r}::drawn, {r}::awaitsDraw)")
     imports = "\n".join(f"import {ns}.{t}" for t in sorted(set(types)))
     root_fn = a["android"].get("root", a["name"] + "Root")
+    call, fn = kotlin_devices(root, a)
+    content = f"{root_fn}(app, (application as {a['name']}Application).library)"
+    content = f"{{\n{call}        {content}\n    }}" if call else f"= {content}"
+    extra = "import androidx.compose.runtime.remember\nimport androidx.compose.ui.platform.LocalView\nimport dev.arkdb.ffi.ArkProcess\n" if call else ""
     return f"""// {HEADER.format(app=a['dir'])}
-// {a['name']}'s activity on the app library (ui/kotlin/app), and the holders its
-// generated screens read each screen's runtime through.
+// {a['name']}'s activity on the app library (ui/kotlin/app), its device modules, and
+// the holders its generated screens read each screen's runtime through.
 package {pkg}
 
 import androidx.compose.runtime.Composable
-import dev.arkui.app.ArkActivity
+{extra}import dev.arkui.app.ArkActivity
 import dev.arkui.app.ArkApp
 import dev.arkui.app.ArkScreen
 {imports}
 
 class MainActivity : ArkActivity() {{
-    @Composable override fun Content(app: ArkApp) = {root_fn}(app, (application as {a['name']}Application).library)
+    @Composable override fun Content(app: ArkApp) {content}
 }}
-
+{fn}
 {chr(10).join(holders)}
 """
 
@@ -1286,8 +1348,13 @@ def check(root):
         crate_dir = os.path.join(root, app, bridge or "app")
         if a.get("crate") and os.path.exists(os.path.join(crate_dir, "Cargo.toml")):
             deps = load(os.path.join(crate_dir, "Cargo.toml")).get("dependencies", {})
+            # A device the phone hands the process (module.toml's `[phone]`)
+            # is registered through ark-ffi, which links its crate.
+            ffi = load(os.path.join(root, "rust", "ark-ffi", "Cargo.toml")).get("dependencies", {})
             for n in a.get("modules", []):
-                if n in every and module(root, n)["crate"] not in deps:
+                if n in every and "phone" in module(root, n) and module(root, n)["crate"] not in ffi:
+                    problems.append(f"rust/ark-ffi/Cargo.toml has no dependency on {module(root, n)['crate']}, whose [phone] it registers")
+                elif n in every and "phone" not in module(root, n) and module(root, n)["crate"] not in deps:
                     problems.append(f"{app}/{bridge or 'app'}/Cargo.toml has no dependency on {module(root, n)['crate']}, which app.toml lists")
         # In a checkout (not nix's copy, which has no git): nothing committed
         # where the generated projects and library are.

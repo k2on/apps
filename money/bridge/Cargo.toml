@@ -19,17 +19,10 @@ ark-peer = { path = "../../rust/ark-peer", default-features = false }
 # (its bindings are `ark_format`'s).
 ark-format = { path = "../../rust/ark-format" }
 ark-format-ffi = { path = "../../rust/ark-format-ffi" }
-# The module plumbing, and the modules money lists (money/app.toml) as the
-# phones implement them.
-ark-module = { path = "../../ui/rust/module" }
-ark-haptics = { path = "../../modules/ark-haptics", features = ["ffi"] }
-ark-clipboard = { path = "../../modules/ark-clipboard", features = ["ffi"] }
-ark-share = { path = "../../modules/ark-share", features = ["ffi"] }
-ark-camera = { path = "../../modules/ark-camera", features = ["ffi"] }
 # The login's keychain and keystore (ark-ffi's `LoginKeep` takes them).
+# The other modules money lists are registered by the app library through
+# ark-ffi (its `devices`).
 ark-secure-store = { path = "../../modules/ark-secure-store", features = ["ffi"] }
-# A receipt's page scanned over the camera: its eyes and warp in Rust.
-ark-scanner = { path = "../../modules/ark-scanner" }
 money-core = { path = "../core", features = ["demo"] }
 # The demo's household on a peer (`money_demo`).
 money-seed = { path = "../demo" }
@@ -39,10 +32,10 @@ serde_json = { workspace = true }
 
 [features]
 # Where a receipt is in a camera frame: the scanner's corner model on a
-# runtime in Rust (ark-scanner's `model`), so the phone links none of its
-# own. Android's (money/app.toml's `[ffi]`), whose camera gives the eyes a
-# colour square; the iPhone's finds the page by its bright region.
-model = ["ark-scanner/model"]
+# runtime in Rust (ark-ffi's `model`, ark-scanner's), so the phone links none
+# of its own. Android's (money/app.toml's `[ffi]`), whose camera gives the
+# eyes a colour square; the iPhone's finds the page by its bright region.
+model = ["ark-ffi/model"]
 
 [dev-dependencies]
 tempfile = "3"

@@ -153,7 +153,8 @@ have to carry when it goes:
   and the demo open, what a session's runtimes are and what one asks of
   another) is money's, and a generated bridge takes it as written.
 - **The screens' runtimes** (`app.rs`): one object per screen
-  (`AccountsApp` … `ShellApp`), `registerDevices`, `shellBlank`.
+  (`AccountsApp` … `ShellApp`), `shellBlank`. (The device modules are
+  the app library's: ark-ffi's `devices`, from app.toml.)
 - **The first run's page** (`welcome_app!`): `WelcomeApp`, `addDevicePage`.
 - `moneyOpen`, `moneyProcessOpen`, `moneyDemo` and `DemoBank`, the
   session (`session.rs`, now only the host's and the tests'), the hall of

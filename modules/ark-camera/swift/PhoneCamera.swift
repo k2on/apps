@@ -26,10 +26,6 @@ import UniformTypeIdentifiers
 
 /// The phone's camera, presented over whatever is in front.
 public final class PhoneCamera: Camera, @unchecked Sendable {
-    /// Told on the main queue once a page has answered: an app's runtimes
-    /// take what came of it.
-    public var answered: @MainActor () -> Void = {}
-
     public init() {}
 
     /// Whether there is a camera to hold over a page.
@@ -79,7 +75,7 @@ public final class PhoneCamera: Camera, @unchecked Sendable {
     public func watch(eyes: Eyes, reply: PhotoReply) {
         #if os(iOS)
         DispatchQueue.main.async {
-            let c = WatchController(eyes: eyes, reply: reply, answered: self.answered)
+            let c = WatchController(eyes: eyes, reply: reply)
             c.modalPresentationStyle = .fullScreen
             PhoneCamera.top()?.present(c, animated: true)
         }
@@ -204,7 +200,6 @@ private final class CameraLook: ObservableObject {
 private final class WatchController: UIViewController, AVCaptureVideoDataOutputSampleBufferDelegate, AVCapturePhotoCaptureDelegate, @unchecked Sendable {
     private let eyes: Eyes
     private let reply: PhotoReply
-    private let answered: @MainActor () -> Void
     private let session = AVCaptureSession()
     private let frames = AVCaptureVideoDataOutput()
     private let photos = AVCapturePhotoOutput()
@@ -220,10 +215,9 @@ private final class WatchController: UIViewController, AVCaptureVideoDataOutputS
     /// Quarter turns clockwise that stand the back camera's frames upright, held as a phone is.
     private static let turns: UInt8 = 1
 
-    init(eyes: Eyes, reply: PhotoReply, answered: @escaping @MainActor () -> Void) {
+    init(eyes: Eyes, reply: PhotoReply) {
         self.eyes = eyes
         self.reply = reply
-        self.answered = answered
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -326,7 +320,6 @@ private final class WatchController: UIViewController, AVCaptureVideoDataOutputS
         session.stopRunning()
         dismiss(animated: true)
         reply.failed(why: why)
-        answered()
     }
 
     private func finish(_ jpeg: Data?) {
@@ -335,7 +328,6 @@ private final class WatchController: UIViewController, AVCaptureVideoDataOutputS
         queue.async { self.session.stopRunning() }
         dismiss(animated: true)
         reply.taken(jpeg: jpeg)
-        answered()
     }
 }
 

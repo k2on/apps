@@ -47,9 +47,12 @@ finder is such eyes (modules/ark-scanner).
 | Android (`PhoneCamera`, kotlin/; its page `CameraPage`, put once at the app's root) | fails, said: no decoder yet (one is a new dependency, deps.json regenerated) | the watched page with no eyes | Camera2 (no library): a preview, a YUV stream about 640 wide whose luminance and a 256-pixel colour square go to the eyes on a thread of their own, a frame at a time, and the full JPEG | the system's Photo Picker (`PickVisualMedia`, no permission), stood upright by its EXIF, a JPEG at most 3000 on its long side |
 | Desktop, browser | `Unavailable` | `Unavailable` | `Unavailable` (ark-scanner chooses a file there) | `Unavailable` (ark-scanner chooses a file there) |
 
-An app's runtimes take what came of a page once it answers: the phone's
-`PhoneCamera` says so (`answered`, `onAnswered`), and the app drains its
-runtimes' inboxes (money: `SheetsApp.drain`, a receipt scanned or picked).
+An app's runtimes take what came of a page once it answers, with nothing
+of the app's on the phone: the answer wakes the app's host (ark-app's
+`Inbox::ask_telling`, ark-ffi's `Handle::moved`), which drains every
+runtime on its own thread. The app library registers the camera as the
+process's from app.toml's modules (module.toml's `[phone]`), and on Android
+puts `CameraPage` at the root.
 
 ## Motion
 

@@ -89,11 +89,6 @@ import dev.arkui.LargeTitles
 import dev.arkui.RouteArg
 import dev.arkui.Transitions
 import dev.arkui.reducedMotion
-import dev.arkui.modules.CameraPage
-import dev.arkui.modules.PhoneCamera
-import dev.arkui.modules.PhoneClipboard
-import dev.arkui.modules.PhoneHaptics
-import uniffi.money_bridge.registerDevices
 import uniffi.money_bridge.Route
 import uniffi.money_bridge.routeFromUrl
 import androidx.compose.material3.Surface
@@ -198,12 +193,6 @@ private fun MoneyApp(app: ArkApp, library: MoneyHost, holders: Holders, moves: L
             .onFailure { snackbar.showSnackbar("Couldn't open Plaid's page: open it from Settings") }
         sections.send(ShellMsg.PageClosed(url = url))
     }
-    // The device modules (money/app.toml): the camera's page is drawn at the root, below.
-    val hapticView = androidx.compose.ui.platform.LocalView.current
-    val camera = remember { PhoneCamera() }
-    // Registered as the process's (`ArkProcess`'s modules): every screen's runtime asks through them.
-    remember(hapticView) { registerDevices(PhoneHaptics(hapticView), PhoneClipboard(hapticView.context), null, camera) }
-    camera.onAnswered = { if (library.sheets()?.drain() == true) sheets.reload() }
     val shell =
         remember(library, nav) {
             Shell(
@@ -253,8 +242,6 @@ private fun MoneyApp(app: ArkApp, library: MoneyHost, holders: Holders, moves: L
     val hosted: @Composable (String) -> Unit = { name -> Hosted(name, holders, library, shell) }
 
     CompositionLocalProvider(LocalShell provides shell, LocalHostedScreens provides hosted, LocalMoves provides app.moves) {
-        // The camera's page, while a module asks for it (a receipt scanned).
-        CameraPage(camera)
         NavHost(
             nav,
             startDestination = "shell",

@@ -149,6 +149,11 @@ impl Router for Routes {
             m.settle()
         }
     }
+    fn answered(&self) {
+        if let Some(h) = self.0.upgrade().and_then(|m| m.host()) {
+            h.moved()
+        }
+    }
 }
 
 impl Money {
@@ -484,6 +489,14 @@ impl HostApp for Money {
 
     fn moved(&self) {
         let Some(o) = self.opened() else { return };
+        // What a device module answered since (the camera's photo), taken
+        // by the runtime that asked; the host says the app moved after.
+        o.shell.0.drain();
+        o.accounts.0.drain();
+        o.budget.0.drain();
+        o.transactions.0.drain();
+        o.insights.0.drain();
+        o.sheets.0.drain();
         self.tell_facts(&o);
         // What a launch asked that had not synced yet, asked again.
         let waiting = std::mem::take(&mut *lock(&self.pending));

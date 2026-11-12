@@ -616,8 +616,18 @@ impl<M> Clone for Inbox<M> {
 impl<M: Send + 'static> Inbox<M> {
     /// `ask` carried out by `modules`, the message it became kept for `ticket`.
     pub fn ask(&self, modules: &Modules, ticket: Ticket, ask: Ask<M>) {
+        self.ask_telling(modules, ticket, ask, || {})
+    }
+
+    /// As [`Inbox::ask`], and `told` once the answer is kept, wherever it
+    /// came from: what wakes a host whose module answers later (the
+    /// camera, when the person is done) to drain it.
+    pub fn ask_telling(&self, modules: &Modules, ticket: Ticket, ask: Ask<M>, told: impl FnOnce() + Send + 'static) {
         let answers = self.answers.clone();
-        ask.run(modules, move |m| answers.lock().unwrap_or_else(|e| e.into_inner()).push((ticket, m)));
+        ask.run(modules, move |m| {
+            answers.lock().unwrap_or_else(|e| e.into_inner()).push((ticket, m));
+            told()
+        });
     }
 
     /// The answers that came, oldest first, taken.

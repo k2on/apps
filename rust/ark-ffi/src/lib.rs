@@ -34,6 +34,7 @@ use ark_peer::{monotonic_ms, Config, Files, Update, Watched};
 
 uniffi::setup_scaffolding!();
 
+pub mod devices;
 pub mod host;
 pub mod keep;
 pub mod process;

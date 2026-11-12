@@ -156,6 +156,12 @@ impl ArkProcess {
         self.lock().modules = modules;
     }
 
+    /// Modules added to those registered (`devices.rs`: one device at a
+    /// time, as the app's entry points register them), the rest kept.
+    pub fn add_modules(&self, add: impl FnOnce(&mut ark_app::Modules)) {
+        add(&mut self.lock().modules)
+    }
+
     /// The device modules registered; none before the app registers them.
     pub fn modules(&self) -> ark_app::Modules {
         self.lock().modules.clone()

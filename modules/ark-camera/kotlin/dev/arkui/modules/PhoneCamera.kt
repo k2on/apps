@@ -122,9 +122,6 @@ class PhoneCamera : Camera {
     private val _asked = MutableStateFlow<Asked?>(null)
     val asked: StateFlow<Asked?> = _asked
 
-    /** Told on the main thread once the page has answered: an app's runtimes take what came of it. */
-    var onAnswered: () -> Unit = {}
-
     override fun scanQr(reply: ScanReply) = reply.failed("Scanning a code isn't on Android yet")
 
     override fun takePhoto(reply: PhotoReply) = ask(Asked(null, reply))
@@ -143,13 +140,11 @@ class PhoneCamera : Camera {
     fun answered(jpeg: ByteArray?) {
         _asked.value?.reply?.taken(jpeg)
         _asked.value = null
-        onAnswered()
     }
 
     fun failed(why: String) {
         _asked.value?.reply?.failed(why)
         _asked.value = null
-        onAnswered()
     }
 }
 

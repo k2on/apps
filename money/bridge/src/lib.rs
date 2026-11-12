@@ -90,7 +90,7 @@ mod demo;
 mod hall;
 mod host;
 mod session;
-pub use app::{register_devices, AccountsApp, BudgetApp, InsightsApp, RegisterApp, SheetsApp, ShellApp, TransactionsApp};
+pub use app::{AccountsApp, BudgetApp, InsightsApp, RegisterApp, SheetsApp, ShellApp, TransactionsApp};
 pub use demo::{money_demo, DemoBank, DemoSync};
 pub use hall::Hall;
 pub use host::{Household, MoneyHost, NativeAsk};
