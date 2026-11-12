@@ -412,7 +412,11 @@ impl HostedApp for Money {
         }
         // Who is using the budget, for "Entered by": the demo's is Alex,
         // whose entries carry the demo's id.
-        let user = if session.demo { money_core::demo::ME.to_string() } else { session.user.clone() };
+        let user = if session.demo {
+            money_core::demo::ME.to_string()
+        } else {
+            session.user.clone()
+        };
         let name = who(&session);
         let sheets = self.sheets.state();
         if sheets.me != user || sheets.my_name != name {

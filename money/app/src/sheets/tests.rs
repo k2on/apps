@@ -152,11 +152,20 @@ fn entered_by_says_the_name() {
         }],
     );
     let lines = register(&d);
-    let mine = lines.iter().find(|t| t.user_id == money_core::demo::ME && !t.transfer).expect("one of Alex's");
+    let mine = lines
+        .iter()
+        .find(|t| t.user_id == money_core::demo::ME && !t.transfer)
+        .expect("one of Alex's");
     d.run(&mut rt, [SheetsMsg::Open { key: mine.id.hex() }]);
     assert_eq!(rt.screen(&d).transaction.unwrap().note, "Entered by Alex");
     d.run(&mut rt, [SheetsMsg::Dismiss]);
-    let theirs = lines.iter().find(|t| t.user_id == money_core::demo::PARTNER && !t.transfer).expect("one of Sam's");
+    let theirs = lines
+        .iter()
+        .find(|t| t.user_id == money_core::demo::PARTNER && !t.transfer)
+        .expect("one of Sam's");
     d.run(&mut rt, [SheetsMsg::Open { key: theirs.id.hex() }]);
-    assert_eq!(rt.screen(&d).transaction.unwrap().note, format!("Entered by {}", money_core::demo::PARTNER));
+    assert_eq!(
+        rt.screen(&d).transaction.unwrap().note,
+        format!("Entered by {}", money_core::demo::PARTNER)
+    );
 }
