@@ -54,11 +54,11 @@ pub mod picker;
 pub mod qr;
 pub mod renderer;
 pub mod reorder;
-#[cfg(feature = "app")]
-pub mod search_picker;
 mod root;
 pub mod router;
 pub mod scroll;
+#[cfg(feature = "app")]
+pub mod search_picker;
 pub mod sheet;
 pub mod shell;
 pub mod sidebar;
