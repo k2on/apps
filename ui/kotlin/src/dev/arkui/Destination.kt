@@ -16,7 +16,7 @@
 // first frame, and after the process is killed. What is not a destination —
 // a sheet, a dialog, an onboarding page — opens at its top every time and
 // says so (`rememberTransientListState`, `…ScrollState`). Nothing else in an
-// app makes a scroll state; a source scan in harken's tests holds it to that.
+// app makes a scroll state.
 //
 // And how far on a destination is: its content sees the lifecycle of where
 // it is drawn (`LocalLifecycleOwner`) — resumed in front at rest, started
@@ -196,9 +196,8 @@ internal constructor(
 
 /**
  * Whether a mistake in how an app uses this library — two containers of one destination under one
- * name — throws, or is said once and lived with. On in every build's unit tests (the
- * `dev.arkdb.ui.strict` property their Gradle test tasks set) and in a debuggable app (which turns
- * it on); off in a release, where the one to find it would be a person whose app closed.
+ * name — throws, or is said once and lived with. On where the `dev.arkdb.ui.strict` property says
+ * so and in a debuggable app (which turns it on); off in a release, where the one to find it would be a person whose app closed.
  */
 public object Strict {
     @Volatile public var on: Boolean = System.getProperty("dev.arkdb.ui.strict") == "true"

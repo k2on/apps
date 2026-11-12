@@ -3,7 +3,7 @@
 // `https` server that answers and is the wrong app is not tried again in
 // the clear — and when none answers, the sentence names the host and the
 // last reason. The request is a parameter, so the order and the sentences
-// are held by plain JVM tests; [Probe.http] is `HttpURLConnection`, which
+// need no network to run; [Probe.http] is `HttpURLConnection`, which
 // Android and the JVM both have.
 package dev.arkui.server
 

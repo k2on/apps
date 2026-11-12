@@ -145,10 +145,8 @@ One command holds all of it:
     nix build .#harken-server   # or harken-iced, harken-domain,
                                 # ark, vectors, trace-corpus
     nix run .#money-iced        # money's desktop window
-    nix build .#harken-apk      # the kernel for three ABIs and the APK over it,
-                                # its JVM tests run on the real kernel
-    nix build .#revelation-apk  # Revelation's APK, its JVM tests run first;
-                                # *-android-screens are either app's screens
+    nix build .#harken-apk      # the kernel for three ABIs and the APK over it
+    nix build .#revelation-apk  # Revelation's APK
     nix build .#fdroid-repo     # both APKs as the F-Droid repository, signed
                                 # and checked; apps-fdroid is what CI runs
     nix run .#fuzz -- 1000 1 traces
@@ -158,8 +156,7 @@ One command holds all of it:
 
 What is verified: the kernel, the peer, harken's domain and server by
 their tests and the vectors; the fuzzer's sessions converge and every
-trace replays; the phone library's surface in-process; the APK builds and
-its JVM tests pass over the kernel. What is not: no desktop window has
+trace replays; the phone library's surface in-process; the APKs build. What is not: no desktop window has
 been opened, the browser build has not been drawn on v5, the APK has not
 been installed on a phone, and the iOS app has not been built (it needs a
 Mac; its Swift is type-checked only). Each app's `README.md` says where

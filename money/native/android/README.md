@@ -18,15 +18,11 @@ The installed app is `us.koon.money`; its sign-in comes back on
 another; and with no server at all it runs the demo's household
 (`moneyDemo`) on the phone alone.
 
-**Assembled and tested on the JVM, not run.** `nix build .#money-apk`
-compiles every Kotlin file here and arkui's, runs the app's JVM tests, and
-assembles the release APK with the kernel for `arm64-v8a`, `armeabi-v7a`
-and `x86_64`. The tests are the app's own over the **real kernel**: the
-library built for the machine they run on (`money-android-lib`'s
-`host/`), loaded through the same UniFFI Kotlin and JNA the phone uses —
-the demo's household, seeded to a fixed day, driven by the screens' model
-as the screens drive it, and the way in walked with a server that answers
-as one would. No phone has run this APK: the Custom Tab's redirect, JNA's
+**Assembled, not run.** `nix build .#money-apk` compiles every Kotlin file
+here and arkui's and assembles the release APK with the kernel for
+`arm64-v8a`, `armeabi-v7a` and `x86_64`. The app has no JVM tests of its
+own: what its model and its way in do is money's host's, tested in Rust
+(money/app/tests/phone.rs). No phone has run this APK: the Custom Tab's redirect, JNA's
 loading on a device, dynamic colour and the back gesture's preview are the
 parts only a phone can say anything about.
 
@@ -36,7 +32,6 @@ From the repository root, with nothing but nix:
 
     nix build .#money-apk               # result/money.apk
     adb install result/money.apk
-    nix build .#money-android-screens   # result/index.html and the PNGs
 
 `money-apk` is harken's derivation (`androidApp` in `flake.nix`) over
 `money-android-lib`, with `ui/kotlin` added to its source. **The Maven
@@ -60,7 +55,6 @@ pointed at it:
     nix run .#money-prebuild    # money/.native/android, the kernel linked in at .native/ffi/android
     cd money/.native/android
     gradle assembleDebug
-    gradle :app:testDebugUnitTest
     adb install app/build/outputs/apk/debug/app-debug.apk
 
 **One key, committed, and public on purpose.** `debug.keystore` is the key
@@ -189,8 +183,7 @@ does.
   (modules/ark-camera/kotlin, `CameraPage` at the app's root: Camera2, no
   library); the eyes — DocAligner's corner model on tract, the bright
   region, the sharpness, held still for a second — and the warp are Rust's,
-  in ark-scanner, tested there on the drawn frames the old JVM tests
-  drew.
+  in ark-scanner, tested there on drawn frames.
 
 **Motion.** Between tabs, Material's fade through; into a register or the
 bank's page and back, the shared X axis, which the system's back gesture
@@ -207,29 +200,12 @@ written, and read, in the phone's locale (arkui's `Amounts`: its symbol,
 grouping and decimal mark, in the locale's currency where that counts in
 hundredths).
 
-## Tests
-
-    gradle :app:testDebugUnitTest      # what money-apk runs
-    gradle :app:recordPaparazziDebug   # the screens too (money-android-screens)
-
-- `ReorderTests` — arkui's Reorder in sections (a section of its own kept
-  so); the budget's moves are Rust's (money/app/src/budget/tests.rs).
-- What the model and the way in did is money's host's, tested in Rust
-  (money/app/tests/phone.rs: a demo launch running every screen, the
-  demo remembered and left, a server that is not there).
-- `AmountsTests` — arkui's amounts in the US and in Germany, typed and
-  written.
-- `Screens` — every page, light and dark, from the demo (Paparazzi). Only
-  `recordPaparazziDebug` runs it, so a page layoutlib cannot draw holds
-  back the screenshots and not the APK.
-
 ## Not verified
 
-No phone has run it, and no emulator: everything above is the JVM's.
-Signing in to `money.koon.us` has not been tried (the server must allow
-`money://` as a redirect, as harken's allows `harken://`), nor has a
-server's importer answering `banks.sync` or a connection (the JVM tests
-answer it as the importer would, from the demo, which holds its role).
+No phone has run it, and no emulator. Signing in to `money.koon.us` has
+not been tried (the server must allow `money://` as a redirect, as
+harken's allows `harken://`), nor has a server's importer answering
+`banks.sync` or a connection.
 Dynamic colour, the predictive back gesture, the Custom Tabs (the
 sign-in's return, Plaid's page) and JNA's loading on a device are the
 phone's to say. Splits and scheduled transactions are not in the domain,

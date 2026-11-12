@@ -8,7 +8,7 @@
 // a tailnet uses, and a name with no dot or one under `.local`, `.lan`,
 // `.home.arpa` or `.internal`. A public name is never tried in the clear.
 //
-// Kept free of Android, so that it is held by plain JVM tests.
+// Kept free of Android, so that plain JVM code can run it.
 package dev.arkui.server
 
 /** What the server field came to: the URLs to try, in order, or why there are none. */

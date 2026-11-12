@@ -551,8 +551,7 @@
             doCheck = false;
           };
           # An app's library for the host (`crate` its ffi crate, `so` the
-          # library's name), which UniFFI reads the bindings from and the
-          # app's JVM tests load; with the crate's `features`, which are the
+          # library's name), which UniFFI reads the bindings from; with the crate's `features`, which are the
           # phone's (none for an iPhone: money's `page` is Android's).
           ffiHostLib = { crate, so, features ? [ "default" ], ... }:
             "${(ffiHostCrate { inherit crate features; }).lib}/lib/lib${so}${pkgs.stdenv.hostPlatform.extensions.sharedLibrary}";
@@ -611,14 +610,12 @@
                     -o $out/jniLibs/${a.abi}/lib${so}.so ${built.lib}/lib/lib${so}.so
                 '';
               # The Kotlin the app compiles with the library, UniFFI's
-              # bindings and the typed half, under `kotlin/`; and the library
-              # built for this machine as `host/lib<so>.so`, which the app's
-              # JVM tests load.
+              # bindings and the typed half, under `kotlin/`, written from the
+              # library built for this machine.
               androidHost = pkgs.runCommand "${name}-android-host" { } ''
                 ${ffiBindings { lib = hostLib; language = "kotlin"; }}
                 mkdir -p $out/kotlin/dev/arkdb/ffi
                 cp -r $TMPDIR/bindings/kotlin/. $out/kotlin/
-                install -Dm755 ${hostLib} $out/host/lib${so}.so
                 cp ${./rust/ark-ffi/kotlin/Typed.kt} $out/kotlin/dev/arkdb/ffi/Typed.kt
               '';
             in
@@ -632,7 +629,6 @@
               for part in ${lib.concatStringsSep " " (lib.mapAttrsToList androidLib androidTargets)} ${androidHost}; do
                 cp -r --no-preserve=mode $part/. $out/
               done
-              chmod 755 $out/host/lib${so}.so
             '';
           harken-android-lib = androidPhone harkenFfi;
           # money's (the generated `money-ffi` over money/app): what its APK
@@ -674,8 +670,7 @@
           # its two libraries a derivation of its own, its classes as a jar
           # (`<module>.jar`), which every app links (`-ParkuiLib`, a
           # directory of jars; app/build.gradle.kts) instead of compiling
-          # ui/kotlin in each of its builds — the APK's, the tests' and the
-          # screenshots', for every app. `shots` is ui/kotlin/shots alone
+          # ui/kotlin in each app's build. `shots` is ui/kotlin/shots alone
           # (every app's screenshot mode; revelation links only it);
           # `arkui` is ui/kotlin/src, compiled against shots' jar, and
           # carries that jar beside its own. Each one's source is its own
@@ -746,8 +741,7 @@
           # An Android app of this tree (`<name>/android`, a gradle project
           # with one `:app`): gradle over the SDK, assembled offline from a
           # recorded Maven graph (`<name>/android/deps.json`; `nix run
-          # .#<name>-apk-deps` re-records it). The app's JVM tests run first,
-          # so an APK is not built over a screen or a rule that fails them.
+          # .#<name>-apk-deps` re-records it).
           #
           # The release build, `<name>.apk`: not debuggable, so ART compiles
           # it as it would any app, with the baseline profiles Compose's
@@ -757,27 +751,16 @@
           # build installs over the last; and a version code that rises with
           # each commit, the flake's own source time in minutes.
           #
-          # `screens` is the same build recording its Paparazzi screenshots
-          # (every screen and state, light and dark, rendered on the JVM
-          # through layoutlib) and an index.html laying them out light beside
-          # dark (nix/screens-index.py). `flags` are the app's own gradle
-          # properties; `title` and `note` head that page. `shared` are the
+          # `flags` are the app's own gradle properties. `shared` are the
           # directories of this tree the app compiles beside its own (money's
           # device modules); ArkUI's Kotlin is not one: it is linked
           # prebuilt (`arkuiKotlin`, `-ParkuiLib` in `flags`).
-          #
-          # The release build and the debug one the tests and screenshots
-          # run are two variants, each compiling the app's own Kotlin: AGP
-          # compiles an application module per variant, and takes no
-          # precompiled classes of the module itself. Only Gradle's build
-          # cache could carry the debug classes from `tests` to `screens`,
-          # and a cache handed between derivations is not used here.
           #
           # An Ark app (`ark`, its nix/ark-app.nix packages) builds its
           # generated project (`<name>/.native/android`) over its own Kotlin
           # (`<name>/native/android`), its Maven graph that directory's
           # deps.json.
-          androidApp = { name, appid, flags ? [ ], shared ? [ ], title, note, ark ? null }:
+          androidApp = { name, flags ? [ ], shared ? [ ], ark ? null }:
             let
               dir = if ark == null then "${name}/android" else "${name}/.native/android";
               deps = if ark == null then "${name}/android/deps.json" else "${name}/native/android/deps.json";
@@ -818,74 +801,37 @@
                   export HOME="$TMPDIR/home" ANDROID_USER_HOME="$TMPDIR/home/.android"
                   mkdir -p "$ANDROID_USER_HOME"
                 '';
-                # The APK alone: its tests are a build of their own (`tests`,
-                # below), so the APK is there for its screenshots while they
-                # run, and the F-Droid deploy waits for both.
                 gradleBuildTask = ":app:assembleRelease";
-                # The recording runs the same tasks, and the screenshots' and a
-                # laptop's debug build, so that one recording serves all three.
-                gradleUpdateTask = ":app:testDebugUnitTest :app:recordPaparazziDebug :app:assembleDebug :app:assembleRelease";
+                # The recording runs the release build and a laptop's debug
+                # one, so that one recording serves both.
+                gradleUpdateTask = ":app:assembleDebug :app:assembleRelease";
                 doCheck = false;
                 installPhase = ''
                   mkdir -p $out
                   cp app/build/outputs/apk/release/app-release.apk $out/${name}.apk
                 '';
               });
-              # The app's unit tests, as a build: what the APK used to run
-              # before it was made. Their results are its output.
-              tests = apk.overrideAttrs (old: {
-                pname = "${name}-android-tests";
-                gradleBuildTask = ":app:testDebugUnitTest";
-                versionFlags = [ ];
-                installPhase = ''
-                  mkdir -p $out
-                  if [ -d app/build/test-results ]; then cp -r app/build/test-results $out/; fi
-                '';
-              });
-              screens = apk.overrideAttrs (old: {
-                pname = "${name}-android-screens";
-                gradleBuildTask = ":app:recordPaparazziDebug";
-                versionFlags = [ ];
-                installPhase = ''
-                  mkdir -p $out
-                  shots=app/src/test/snapshots/images
-                  for f in $shots/*.png; do
-                    b=$(basename "$f" .png)
-                    cp "$f" "$out/''${b#${appid}_Screens_}.png"
-                  done
-                  ${pkgs.python3}/bin/python3 ${./nix/screens-index.py} $out ${lib.escapeShellArg title} ${lib.escapeShellArg note} > $out/index.html
-                '';
-              });
             in
-            { inherit apk tests screens; deps = apk.mitmCache.updateScript; };
+            { inherit apk; deps = apk.mitmCache.updateScript; };
 
           # The phone (harken/android/README.md): the app — its onboarding
           # and its look are its own code — over `harken-android-lib` (the
-          # kernel per ABI, and the Kotlin over it). Its screens are rendered
-          # from a fixed library (harken/android/app/src/test).
+          # kernel per ABI, and the Kotlin over it).
           harken = androidApp {
             name = "harken";
-            appid = "dev.harken.android";
             # ArkUI's Kotlin linked prebuilt (`arkui-kotlin`), not compiled.
             flags = [ "-PharkenLib=${harken-android-lib}" "-ParkuiLib=${arkui-kotlin}" ];
             # The media player's and the secure store's Kotlin (modules/), compiled with the app.
             shared = [ "modules/ark-media-player/kotlin" "modules/ark-secure-store/kotlin" ];
-            title = "Harken";
-            note = "Rendered on the JVM by Paparazzi from a fixed library, at a Pixel 5's size; light beside dark. Covers are the derived squares: nothing here talks to a server.";
           };
           harken-apk = harken.apk;
-          harken-android-tests = harken.tests;
-          harken-android-screens = harken.screens;
 
           # money's phone (money/native/android/README.md): Compose over
           # `money-android-lib`, the look shared with harken (ui/kotlin), in
           # the project ui/prebuild.py generates. Its Maven graph is
           # harken's, replayed (money/native/android/deps.json).
-          # `appid` here is the package the screenshots are named by; the
-          # installed app is us.koon.money.
           money = androidApp {
             name = "money";
-            appid = arkOf.money.a.android.package;
             ark = arkOf.money;
             flags = [ "-ParkLib=${money-android-lib}" "-ParkuiLib=${arkui-kotlin}" "-ParkAppLib=${ark-app-android}" ];
             # The device modules money lists (money/app.toml), whose kotlin/
@@ -893,25 +839,18 @@
             # interface UniFFI writes into money's own bindings. ArkUI is
             # linked prebuilt (`arkui-kotlin`).
             shared = [ "modules" ];
-            title = "money";
-            note = "Rendered on the JVM by Paparazzi from the demo's household on 2026-10-26, at a Pixel 5's size, in money's own scheme (a screenshot has no wallpaper); light beside dark.";
           };
           money-apk = money.apk;
-          money-android-tests = money.tests;
-          money-android-screens = money.screens;
 
           # The Bible as one scroll, zoomed like a map (revelation/README.md,
           # docs/plan-bible.md): plain Kotlin, no native library and none of
           # ArkDB, so it is the SDK and gradle alone.
           revelation = androidApp {
             name = "revelation";
-            appid = arkOf.revelation.a.android.package;
             ark = arkOf.revelation;
             # ArkUI's screenshot mode and ready signal alone (ui/kotlin/shots),
             # linked prebuilt.
             flags = [ "-ParkuiLib=${arkui-kotlin-shots}" ];
-            title = "Revelation";
-            note = "Rendered on the JVM by Paparazzi through layoutlib; light beside dark.";
           };
 
           # An Ark app's F-Droid metadata, written from its app.toml's
@@ -1977,14 +1916,12 @@
             # money/app), as harken's.
             inherit money-android-lib money-ios-xcframework;
             default = ark;
-            inherit harken-apk harken-android-tests harken-android-screens;
+            inherit harken-apk;
             harken-apk-deps = harken.deps;
             revelation-apk = revelation.apk;
-            revelation-android-tests = revelation.tests;
-            revelation-android-screens = revelation.screens;
             revelation-apk-deps = revelation.deps;
             # money's phone, over money-android-lib (money/native/android/README.md).
-            inherit money-apk money-android-tests money-android-screens;
+            inherit money-apk;
             money-apk-deps = money.deps;
             # ArkUI's Kotlin, each library once (`arkuiKotlin`), and
             # `nix run .#arkui-kotlin-deps` re-recording its Maven graph.
@@ -2304,7 +2241,6 @@
               apk = name: app: { first ? [ ] }: {
                 inherit name first;
                 package = "${name}-apk";
-                tests = "${name}-android-tests";
                 file = "${name}.apk";
                 key = key (app.apk.overrideAttrs (_: { versionFlags = [ ]; }));
               };

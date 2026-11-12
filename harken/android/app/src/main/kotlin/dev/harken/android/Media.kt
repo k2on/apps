@@ -6,8 +6,7 @@
 // device joins it to its own server, as the desktop's `media_url` does
 // (`harken::listening::url`): each segment percent-encoded, because a `#` or
 // a `?` in a file name would otherwise end the path mid-name. A whole URL
-// is already an answer and passes through. Kept free of Android, and held
-// by `MediaTests`.
+// is already an answer and passes through. Kept free of Android.
 package dev.harken.android
 
 object Media {

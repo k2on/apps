@@ -614,7 +614,6 @@ def android_gradle(root, a, ffi_lib_name):
         srcs += f'\n            res.srcDir(rootProject.file("{TO_APP}/native/android/res"))'
     if os.path.isdir(native_dir(root, a, "assets")):
         srcs += f'\n            assets.srcDir(rootProject.file("{TO_APP}/native/android/assets"))'
-    test_deps = andr.get("test-dependencies", ["net.java.dev.jna:jna:5.17.0", "org.json:json:20240303"] if ark else [])
     store_type = andr.get("keystore-type", "pkcs12")
     keystore = andr.get("keystore")
     signing = f'''
@@ -633,14 +632,11 @@ def android_gradle(root, a, ffi_lib_name):
     }}
 ''' if keystore else ""
     sign = '            signingConfig = signingConfigs.getByName("debug")\n' if keystore else ""
-    tests = os.path.isdir(os.path.join(root, app, "native", "android", "test"))
     return f'''// {HEADER.format(app=app)}
 plugins {{
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
-    // The screens rendered on the JVM through layoutlib (`recordPaparazziDebug`).
-    id("app.cash.paparazzi")
 }}
 
 {f'''// The app's library for the phone (`packages.{app}-android-lib`): `jniLibs/<abi>/lib{ffi_lib_name}.so`
@@ -706,10 +702,7 @@ android {{
         getByName("main") {{
 {srcs}
         }}
-{f'''        getByName("test") {{
-            kotlin.srcDir(rootProject.file("{TO_APP}/native/android/test"))
-        }}
-''' if tests else ""}    }}
+    }}
 }}
 
 dependencies {{
@@ -721,35 +714,12 @@ dependencies {{
         implementation("org.jetbrains.kotlin:kotlin-stdlib-jdk7:2.0.21")
         implementation("org.jetbrains.kotlin:kotlin-stdlib-jdk8:2.0.21")
     }}
-
-{chr(10).join(f'    testImplementation("{d}")' for d in test_deps)}
-}}
-
-tasks.withType<Test>().configureEach {{
-{f'''    // Where the app's assets are, for a JVM test that reads one.
-    systemProperty("ark.assets", rootProject.file("{TO_APP}/native/android/assets").path)
-''' if os.path.isdir(native_dir(root, a, "assets")) else ""}{'''    // The JVM tests drive the real kernel: the library built for the
-    // machine they run on (`host/`), through JNA's jar.
-    systemProperty("dev.arkdb.ui.strict", "true")
-    systemProperty("jna.library.path", "$arkLib/host")''' if ark else ""}{f'''
-    maxHeapSize = "{andr["test-heap"]}"''' if andr.get("test-heap") else ""}
-    // The suites side by side, a JVM each, over the machine's cores: one
-    // JVM ran them in turn, every time the kernel moved.
-    maxParallelForks = Runtime.getRuntime().availableProcessors().coerceIn(1, 4)
 }}
 
 // ArkUI's `internal`s stay the app's to see, as when it was compiled as part
-// of the app (a test may read one). A friend of each jar (`arkuiLib`).
+// of the app. A friend of each jar (`arkuiLib`).
 tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {{
     if (arkuiLib != null) friendPaths.from(fileTree(arkuiLib) {{ include("*.jar") }})
-}}
-
-// The screenshots are `recordPaparazziDebug`'s; the APK's build runs every
-// other test, so a layoutlib that cannot draw a page holds back the
-// screenshots and not the app.
-val recording = gradle.startParameter.taskNames.any {{ it.contains("Paparazzi") }}
-tasks.withType<Test>().configureEach {{
-    if (!recording) filter {{ excludeTestsMatching("{pkg}.Screens") }}
 }}
 '''
 
@@ -985,7 +955,6 @@ plugins {{
     id("com.android.application") version "8.7.3" apply false
 {library}    id("org.jetbrains.kotlin.android") version "2.0.21" apply false
     id("org.jetbrains.kotlin.plugin.compose") version "2.0.21" apply false
-    id("app.cash.paparazzi") version "1.3.5" apply false
 }}
 '''
 

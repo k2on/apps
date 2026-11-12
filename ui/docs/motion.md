@@ -545,10 +545,9 @@ While true, the system's setting is not consulted at all (iced's
 motion). Do not flip any of them as part of an unrelated change, and flip
 all three together when the owner says the motion is done. Because the
 gentle path is never seen on these devices, every change that adds motion
-must also exercise its reduced path: a test with `LocalReducedMotion
-provides true` (as `ReducedMotionTests` does for the card and the
-settle), `ARK_REDUCE_MOTION=1` on the desktop, or a SwiftUI preview with
-the view's `still` forced.
+must also exercise its reduced path: a Compose preview with
+`LocalReducedMotion provides true`, `ARK_REDUCE_MOTION=1` on the desktop,
+or a SwiftUI preview with the view's `still` forced.
 
 **Screenshots move nothing** (ui/docs/shots.md). Launched for one
 (`-shots YES`, `-shots 1`, `ARK_SHOTS=1`, `?shots=1`), every shared spring

@@ -288,7 +288,7 @@ Everything is `nix`, from the repository root:
 options). The phones:
 
     nix build .#harken-android-lib # the kernel for three Android ABIs, and its Kotlin
-    nix build .#harken-apk         # the APK, its JVM tests run first (android/README.md)
+    nix build .#harken-apk         # the APK (android/README.md)
     nix build .#harken-ios-xcframework  # a Mac only: HarkenFFI.xcframework (ios/README.md)
 
 One workflow builds from `main` (`.github/workflows/build.yaml`). The
@@ -491,10 +491,8 @@ shipped v5 revision.
 
 ## Not verified
 
-No phone has run either app. The APK is assembled for three ABIs and its
-JVM tests drive the real kernel — the library built for the machine they
-run on, through the same UniFFI Kotlin — alone and in a Hall; it has not
-been installed. The iOS app has not been built: the xcframework needs a
+No phone has run either app. The APK is assembled for three ABIs; it has
+not been installed. The iOS app has not been built: the xcframework needs a
 Mac, and its Swift has not met a compiler (android/README.md,
 ios/README.md say what was checked).
 No desktop window has been opened: the desktop is only driven through its

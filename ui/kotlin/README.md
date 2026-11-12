@@ -51,7 +51,7 @@ the splash's keeping (`holdSplashUntil`).
 **Finding a server** (`server/`): what an address could mean (`Address`),
 whether a `/healthz` is an Ark server running this app's domain
 (`Health`), and asking each URL in order (`Probe`). Plain Kotlin over
-`HttpURLConnection`, held by JVM tests (harken's `ServerTests`).
+`HttpURLConnection`.
 
 **Material You** (`MaterialYou.kt`, added for money): `MaterialYou`, the
 wallpaper's scheme on Android 12 and later or the app's own; the
@@ -110,9 +110,9 @@ SwiftUI's twin is ArkUI's `.inlineHeader` (`InlineHeader.swift`).
 
 ## Verified
 
-The pieces harken uses are its tests' and screenshots' (`harken/android`).
-The Material You pieces are money's tests' (`AmountsTests`) and its
-screenshots'; none has been seen on a phone.
+The pieces the apps use are seen in their screenshots (app-screens);
+none has been seen on a phone, and the apps have no Kotlin tests of their
+own.
 
 ## Motion
 

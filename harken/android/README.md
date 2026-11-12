@@ -19,16 +19,10 @@ no JSON per row, while every mutation, query and live call goes by name
 with JSON through the generated stubs.
 What it looks like and how it behaves is `docs/plan-android.md`.
 
-**Assembled and tested on the JVM, not run.** `nix build .#harken-apk`
-compiles every Kotlin file here, runs the app's JVM tests, and assembles
-the release APK with the kernel for `arm64-v8a`, `armeabi-v7a` and
-`x86_64`. The tests are the app's own over the **real kernel**: the
-library built for the machine they run on (`harken-android-lib`'s
-`host/`), loaded through the same UniFFI Kotlin and JNA the phone uses —
-a library seeded through `add_song` and read by the screens' `Library`,
-the reconciler and the lock screen's player against a listening session
-in a `Hall` (a harken server in the process, `../ffi`), the onboarding's
-machine, and the screens drawn by layoutlib. Nothing in the container this
+**Assembled, not run.** `nix build .#harken-apk` compiles every Kotlin
+file here and assembles the release APK with the kernel for `arm64-v8a`,
+`armeabi-v7a` and `x86_64`. The app has no JVM tests of its own; the
+kernel's are Rust's. Nothing in the container this
 was written in can install or run an APK, and no phone has run this one:
 the media session, the Custom Tab's redirect, JNA's loading on a device and
 the notification permission are the parts only a phone can say anything
@@ -40,29 +34,27 @@ From the repository root, with nothing but nix:
 
     nix build .#harken-apk              # result/harken.apk
     adb install result/harken.apk
-    nix build .#harken-android-screens  # result/index.html and the PNGs
 
 `harken-apk` is gradle over two things the flake builds. **The kernel**,
 `harken-android-lib`: `harken/ffi` compiled by cargo for each ABI against
 API 26 with the NDK nixpkgs packages (`aarch64-linux-android`,
 `armv7-linux-androideabi`, `x86_64-linux-android`, linked by the NDK's
 clang, which also compiles ring's C), stripped, as `jniLibs/<abi>/`;
-UniFFI's Kotlin for it and the typed half as `kotlin/`; and the library
-for the build machine as `host/`, which the JVM tests load
-(`jna.library.path`). **An SDK** the flake assembles itself
+and UniFFI's Kotlin for it and the typed half as `kotlin/`. **An SDK** the flake assembles itself
 (`nix/android-sdk.nix`): the platform 35 and build-tools 35.0.0 zips from
 Google, which are jars and scripts, and `aapt2` — the one native program
 AGP runs to assemble an APK — compiled from the Android sources for
 whatever machine is building (`nix/aapt2.nix`). The app's whole Maven graph
-— AGP, Compose, the Kotlin plugins, Media3, the browser library, JNA,
-Paparazzi and the layoutlib it renders with — is recorded in `deps.json`
+— AGP, Compose, the Kotlin plugins, Media3, the browser library and
+JNA — is recorded in `deps.json`
 and replayed offline, the way nixpkgs builds every gradle project. A new
 dependency moves that file:
 
     $(nix build .#harken-apk-deps --print-out-paths)   # from the repository root; needs the network
 
-(JNA 5.17.0 and `org.json` were added to it by hand, their hashes those of
-Maven Central's files.) Maven Central rate-limits a cold fetch of the graph
+(JNA 5.17.0 was added to it by hand, its hashes those of Maven Central's
+files; the graph may still hold jars only the app's removed tests used,
+which are fetched and never read.) Maven Central rate-limits a cold fetch of the graph
 (HTTP 429); a fetch that fails is retried after a pause, and the artifacts
 already fetched stay in the store.
 
@@ -73,7 +65,6 @@ pointed at it:
     nix build .#harken-android-lib -o harken/ffi/android   # what -PharkenLib defaults to
     cd harken/android
     gradle assembleDebug
-    gradle :app:testDebugUnitTest
     adb install app/build/outputs/apk/debug/app-debug.apk
 
 **Why aapt2 is compiled here, and how.** Google ships the SDK's native tools
@@ -287,22 +278,3 @@ so steps 3 to 5 are as the option is commonly described for current
 versions of Android Auto, and the wording may differ on yours. The setting
 applies to media apps like this one; it does nothing for apps built with
 the Car App Library.
-
-## The screens as images
-
-    nix build .#harken-android-screens     # result/index.html
-
-Paparazzi (1.3.5) renders every screen and state on the JVM through
-layoutlib — the onboarding's three steps and their errors, Home (full,
-offline, empty, loading), Search (recent, nothing yet, typing, results,
-none), each Library tab, an album, an artist (a composer, one under a banner, one of songs), a work, a performance, a playlist (and an empty
-and a missing one), the mini player, the full player, the player held at
-each quarter of the way up, the queue, an episode's transcript, a song's
-menu, adding to a playlist, naming one (and a name refused), Settings and
-diagnostics — in light and dark, at a Pixel 5's 1080×2340, from
-`app/src/test/.../Demo.kt`: rows taken from harken's demo seed
-(`harken/demo`). `index.html` lays them out light beside dark.
-A bottom sheet and a dialog are windows of their own, which layoutlib does
-not draw, so the screenshots frame the same composables over a scrim
-instead. Nothing behind them talks to a server, so every cover is the
-derived square.

@@ -309,7 +309,7 @@ fun HarkenApp(
     // Each reads the state above through its delegate when it is called, so it never goes stale —
     // and making a fresh one per composition is what made every screen, every lazy list and every
     // visible row recompose on each of the player's position ticks: an anonymous object is a new
-    // value to Compose every time, and every row's `onClick` captured it (`ScrollTests`).
+    // value to Compose every time, and every row's `onClick` captured it.
     //
     // The albums by key are made when the albums change, and only then: every row entering a list
     // asks for its album, and a scan of every album per row was a cost that grew with the library.
