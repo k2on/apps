@@ -16,6 +16,7 @@
 package dev.arkui
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -588,8 +589,13 @@ public fun PanesScope.SettingsPane(title: String, glyph: String, content: @Compo
     panes += SettingsPaneItem(title, glyph, content)
 }
 
-/** A tab's inset on each side of its title (Material's own). */
+/** A tab's inset on each side of its title: Material's own, and a scrolling row's tighter one. */
 private val TAB_INSET = 16.dp
+private val TAB_INSET_TIGHT = 8.dp
+
+/** A tab's height with its glyph over its title (Material's), and the glyph's gap to the title. */
+private val TAB_HEIGHT = 72.dp
+private val TAB_GAP = 2.dp
 
 /**
  * Settings: its panes' tabs across the top, the one titled `selection`
@@ -601,29 +607,42 @@ public fun SettingsPanes(selection: String, onSelect: (String) -> Unit, panes: P
     val all = PanesScope().apply(panes).panes
     val lookup = LocalGlyphs.current
     val shown = all.firstOrNull { it.title == selection } ?: all.firstOrNull() ?: return
-    // A title is never broken: the tabs share the width when the widest
-    // title fits its share on one line, and scroll at their own widths
-    // when it would not (a phone's four panes).
+    // A title is never broken: the tabs share the width when the widest title fits its share on
+    // one line (Material's tabs); short of that each is as wide as its title with a tighter inset,
+    // which a phone's four panes fit in a row, scrolling only on a row narrower still.
     val measurer = rememberTextMeasurer()
     val style = MaterialTheme.typography.titleSmall
-    val tabs: @Composable () -> Unit = {
-        all.forEach { p ->
-            Tab(
-                selected = p == shown,
-                onClick = { onSelect(p.title) },
-                text = { Text(p.title, maxLines = 1, softWrap = false) },
-                icon = { Icon(shellGlyph(p.glyph, lookup), contentDescription = null) },
-            )
-        }
-    }
     Column(Modifier.fillMaxSize()) {
         BoxWithConstraints(Modifier.fillMaxWidth()) {
             val inset = with(LocalDensity.current) { (TAB_INSET * 2).roundToPx() }
             val widest = all.maxOf { measurer.measure(it.title, style, maxLines = 1, softWrap = false).size.width }
+            val at = all.indexOf(shown)
             if ((widest + inset) * all.size <= constraints.maxWidth) {
-                PrimaryTabRow(selectedTabIndex = all.indexOf(shown)) { tabs() }
+                PrimaryTabRow(selectedTabIndex = at) {
+                    all.forEach { p ->
+                        Tab(
+                            selected = p == shown,
+                            onClick = { onSelect(p.title) },
+                            text = { Text(p.title, maxLines = 1, softWrap = false) },
+                            icon = { Icon(shellGlyph(p.glyph, lookup), contentDescription = null) },
+                        )
+                    }
+                }
             } else {
-                PrimaryScrollableTabRow(selectedTabIndex = all.indexOf(shown), edgePadding = 0.dp) { tabs() }
+                PrimaryScrollableTabRow(selectedTabIndex = at, edgePadding = 0.dp) {
+                    all.forEach { p ->
+                        Tab(selected = p == shown, onClick = { onSelect(p.title) }, modifier = Modifier.height(TAB_HEIGHT)) {
+                            Column(
+                                Modifier.padding(horizontal = TAB_INSET_TIGHT),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(TAB_GAP),
+                            ) {
+                                Icon(shellGlyph(p.glyph, lookup), contentDescription = null)
+                                Text(p.title, style = style, maxLines = 1, softWrap = false)
+                            }
+                        }
+                    }
+                }
             }
         }
         Box(Modifier.weight(1f)) { shown.content() }
