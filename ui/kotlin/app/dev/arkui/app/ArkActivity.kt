@@ -37,12 +37,15 @@ public abstract class ArkActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         // Whether this is a screenshot's launch, before the app is made: it goes past the app's pages.
         Shots.read(intent)
+        // Its screens attached to the process's runtime while it lives (across a rotation), before
+        // the app's host opens the session, as the iPhone's app attaches before its host starts: a
+        // runtime opened with nothing attached is said offline, and that offline raced the attach's
+        // online (ArkProcess::open).
+        ViewModelProvider(viewModelStore, ViewModelProvider.NewInstanceFactory())[Attachment::class.java]
         val ark = application as ArkApplication
         val app = ark.launch(intent)
         holdSplashUntil { app.ready() }
         super.onCreate(savedInstanceState)
-        // Its screens attached to the process's runtime while it lives (across a rotation).
-        ViewModelProvider(this)[Attachment::class.java]
         enableEdgeToEdge()
         ark.background?.opened(intent)
         intent?.data?.let { app.open(it.toString()) }

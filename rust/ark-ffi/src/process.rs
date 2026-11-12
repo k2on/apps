@@ -29,6 +29,9 @@ use crate::{Peer, Refusal};
 #[derive(uniffi::Object, Default)]
 pub struct ArkProcess {
     inner: Mutex<Inner>,
+    /// Held while online or offline is said to the link, the state read
+    /// under it: so what is said last is what is wanted last.
+    saying: Mutex<()>,
 }
 
 #[derive(Default)]
@@ -82,6 +85,7 @@ impl ArkProcess {
     /// Online while a UI is attached or work runs, offline when neither:
     /// told to the link only when it changes.
     fn follow(&self) {
+        let _saying = self.saying.lock().unwrap_or_else(|e| e.into_inner());
         let (link, online) = {
             let mut i = self.lock();
             let want = i.attached > 0 || i.working > 0;
@@ -125,11 +129,21 @@ impl ArkProcess {
         let wanted = i.attached > 0 || i.working > 0;
         i.online = wanted;
         if !wanted {
-            let link = i.link.clone();
             drop(i);
+            // Said with the state read again under `saying`: a UI that
+            // attached since this let go of the lock was told online
+            // already, and an offline said after it would leave the peer
+            // offline for good (money's Android app, which attaches after
+            // its host opens the session: app-screens 43175998411, "not
+            // ready" after signing in, the peer never linked).
+            let _saying = self.saying.lock().unwrap_or_else(|e| e.into_inner());
+            let (link, online) = {
+                let i = self.lock();
+                (i.link.clone(), i.online)
+            };
             match link {
-                Some(link) => link(false),
-                None => p.set_online(false),
+                Some(link) => link(online),
+                None => p.set_online(online),
             }
         }
         Ok(p)

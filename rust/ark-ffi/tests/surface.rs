@@ -419,6 +419,38 @@ fn two_attaches_share_one_runtime_and_detaching_leaves_it_running() {
     );
 }
 
+/// A UI that attaches while the runtime is being opened with none attached
+/// (Android's activity, after its app host opened the session off the main
+/// thread) leaves it online: what is said to the link last is what is
+/// wanted last. Falsified by saying offline after letting go of the lock
+/// unguarded: the attach's online came first, then the open's offline, and
+/// the peer never dialled (app-screens 43175998411).
+#[test]
+fn an_attach_while_opening_leaves_it_online() {
+    use std::sync::Mutex;
+    let dir = tempfile::tempdir().unwrap();
+    let process = ark_ffi::ArkProcess::apart();
+    let said = Arc::new(Mutex::new(Vec::<bool>::new()));
+    let attaching = Arc::new(Mutex::new(None::<std::thread::JoinHandle<Arc<ark_ffi::Attached>>>));
+    let (s, p, a) = (said.clone(), process.clone(), attaching.clone());
+    process.with_link(move |on| {
+        // The first offline: a UI attaches meanwhile, on its own thread,
+        // given the time to; what is said is recorded once it is said.
+        if !on && a.lock().unwrap().is_none() {
+            let p = p.clone();
+            *a.lock().unwrap() = Some(std::thread::spawn(move || p.attach()));
+            std::thread::sleep(std::time::Duration::from_millis(200));
+        }
+        s.lock().unwrap().push(on);
+    });
+    process.open("one", || Peer::open(config(), dir.path().to_str().unwrap(), None)).unwrap();
+    let ui = attaching.lock().unwrap().take().expect("attached while opening").join().unwrap();
+    assert!(process.online());
+    let said = said.lock().unwrap().clone();
+    assert_eq!(said.last(), Some(&true), "said last: online ({said:?})");
+    drop(ui);
+}
+
 /// A wake: the app's runtime hears it, the process is online for it, and
 /// the woken component is told to finish once the runtime is idle — not
 /// before — then the process goes offline again with no UI attached.
