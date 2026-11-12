@@ -6,7 +6,8 @@
 //! What iced has no twin for is said here, not left out silently: a row's
 //! menu is ArkUI's own menu at the pointer ([`crate::context_menu`]:
 //! right click, a long press, or the menu key), a sheet or a prompt is a
-//! dialog over the page, a picker is a row of chips, and an amount is typed.
+//! dialog over the page, a picker is a row of chips, a search picker a
+//! dropdown under its field ([`crate::search_picker`]), and an amount is typed.
 
 use crate::text::{self, text};
 use crate::text_input::text_input;
@@ -192,7 +193,15 @@ fn part<M: Clone + 'static>(v: View<M>) -> Option<Element<'static, M>> {
             });
             row(chips).spacing(4).wrap().into()
         }
-        Part::Choice { .. } => return None,
+        Part::Choice { .. } | Part::SearchChoice { .. } => return None,
+        Part::SearchPicker {
+            label,
+            selected,
+            unset,
+            prompt,
+            pick,
+            choices,
+        } => crate::search_picker::search_picker(label, selected.get(), unset.get(), prompt, ark_app::view::search::choices(&choices), pick),
         Part::AmountEntry {
             label,
             typed,

@@ -106,6 +106,8 @@ pub struct Ui {
     /// The popover open, by its part's id (a date field's calendar, a
     /// search field's suggestions) and where it is (a day, a lit row).
     pub popover: Option<(String, i64)>,
+    /// A search picker open, by its part's id: what is typed and lit.
+    pub combo: Option<(String, ark_app::view::search::Searching)>,
     /// Where the pointer has been in each menu written open
     /// ([`menu::written`]), by its id: the entry lit at each level.
     pub written: Vec<(String, Vec<usize>)>,

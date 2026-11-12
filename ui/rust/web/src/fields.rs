@@ -1,7 +1,9 @@
 //! A form's fields in the DOM, and the popovers they open: a search
 //! field and its suggestions (as SwiftUI's `.searchSuggestions`, a list
 //! under the field), a date field and its calendar (the Mac's graphical
-//! `DatePicker` in a popover), a text field.
+//! `DatePicker` in a popover), a search picker and its searchable list (an
+//! ARIA combobox: anchored under its field on a wide window, a sheet from
+//! the foot on a compact one), a text field.
 //!
 //! A popover belongs to its control: it hangs under it, a press outside
 //! or `Esc` puts it away, and the keys walk it — `↑`/`↓` a suggestion,
@@ -419,6 +421,261 @@ pub fn picker(id: &'static str, label: &'static str, chosen: String, choices: Ve
         .child((
             html::span().class("ark-caption").child(label),
             crate::menu::button(id, label, face, "ark-picker", entries),
+        ))
+        .into_any()
+}
+
+// * A search picker (`ark_app::view::search_picker`, ui/docs/parts.md)
+
+/// One of many, found by typing: the field says `label` and the chosen
+/// one (or `unset` after a question mark in the caution colour); pressed,
+/// the list — anchored under the field on a wide window, a sheet from the
+/// foot under its title and Close when compact —
+/// its search field (`role=combobox`) with the keys, the choices found by
+/// their groups (`role=listbox`, `role=group`, `role=option`), the chosen
+/// one checked. What is found and the keys are `ark_app::view::search`'s.
+/// Opened, it is there at once (a control's popover, tens of times a day).
+/// Compact is the shell's size class (`compact-width`), as the phones'.
+pub fn search_picker(
+    id: &'static str,
+    selected: String,
+    unset_words: String,
+    prompt: &'static str,
+    choices: Vec<ark_app::view::search::Choice>,
+    pick: Typed,
+) -> AnyView {
+    use ark_app::view::search::Searching;
+    let open = ui(|u| u.combo.as_ref().filter(|(i, _)| i == id).map(|(_, s)| s.clone()));
+    let chosen = choices.iter().find(|c| c.tag == selected).cloned();
+    let choices = Rc::new(choices);
+    let value = chosen.as_ref().map_or(unset_words.clone(), |c| c.title.clone());
+    let face_glyph = chosen.as_ref().map_or("circle-help".to_string(), |c| c.glyph.clone());
+    let face = {
+        let choices = choices.clone();
+        let selected = selected.clone();
+        html::button()
+            .class(if chosen.is_some() {
+                "ark-combo-face"
+            } else {
+                "ark-combo-face ark-unset"
+            })
+            .attr("type", "button")
+            .attr("aria-haspopup", "listbox")
+            .attr("aria-expanded", if open.is_some() { "true" } else { "false" })
+            .attr("aria-label", format!("{id}, {value}"))
+            .on(leptos::ev::click, move |_| {
+                ui_mut(|u| {
+                    u.combo = match &u.combo {
+                        Some((i, _)) if i == id => None,
+                        _ => Some((id.into(), Searching::open(&choices, &selected))),
+                    }
+                })
+            })
+            .child((
+                glyph(&face_glyph, 14),
+                html::span().class("ark-combo-value").child(value),
+                glyph("chevrons-up-down", 12),
+            ))
+    };
+    let list = open.map(|s| combo_list(id, prompt, choices.clone(), &selected, s, pick));
+    html::div()
+        .class("ark-field")
+        .child((
+            html::span().class("ark-caption").child(id),
+            html::div().class("ark-popover-anchor ark-combo-anchor").child((face, list)),
+        ))
+        .into_any()
+}
+
+/// The open list: what is typed, and what it finds.
+fn combo_list(
+    id: &'static str,
+    prompt: &'static str,
+    choices: Rc<Vec<ark_app::view::search::Choice>>,
+    selected: &str,
+    s: ark_app::view::search::Searching,
+    pick: Typed,
+) -> AnyView {
+    use ark_app::view::search::{Done, Key};
+    let close = || ui_mut(|u| u.combo = None);
+    let slug: String = id.chars().filter(|c| c.is_ascii_alphanumeric()).collect::<String>().to_lowercase();
+    let list_id = format!("ark-combo-{slug}");
+    let option_id = move |i: usize| format!("ark-combo-{slug}-{i}");
+    let choose = {
+        let pick = pick.clone();
+        Rc::new(move |tag: String| {
+            ui_mut(|u| u.combo = None);
+            pick(tag);
+        })
+    };
+    let keys = {
+        let choices = choices.clone();
+        let choose = choose.clone();
+        move |e: web_sys::KeyboardEvent| {
+            let key = match e.key().as_str() {
+                "ArrowDown" => Key::Down,
+                "ArrowUp" => Key::Up,
+                "Enter" => Key::Choose,
+                "Escape" => Key::Close,
+                _ => return,
+            };
+            e.prevent_default();
+            e.stop_propagation();
+            let done = ui_mut(|u| u.combo.as_mut().and_then(|(_, s)| s.key(&choices, key)));
+            match done {
+                Some(Done::Chose(tag)) => choose(tag),
+                Some(Done::Closed) => ui_mut(|u| u.combo = None),
+                None => {}
+            }
+        }
+    };
+    let typed = {
+        let choices = choices.clone();
+        move |e: leptos::ev::Event| {
+            let q = event_target_value(&e);
+            ui_mut(|u| {
+                if let Some((_, s)) = &mut u.combo {
+                    s.typed(&choices, q)
+                }
+            })
+        }
+    };
+    let input = html::input()
+        .class("ark-search-input")
+        .attr("type", "search")
+        .role("combobox")
+        .attr("aria-expanded", "true")
+        .attr("aria-controls", list_id.clone())
+        .attr("aria-autocomplete", "list")
+        .attr("aria-activedescendant", s.at.map(option_id.clone()))
+        .attr("aria-label", prompt)
+        .attr("placeholder", prompt)
+        .attr("autocomplete", "off")
+        .attr("data-autofocus", "true")
+        .prop("value", s.query.clone())
+        .on(leptos::ev::input, typed)
+        .on(leptos::ev::keydown, keys);
+    let groups = s.found(&choices);
+    let body: AnyView = match groups.is_empty() {
+        true => html::div().class("ark-combo-empty").role("status").child("No Matches").into_any(),
+        false => {
+            let gs: Vec<AnyView> = groups
+                .into_iter()
+                .enumerate()
+                .map(|(k, g)| {
+                    let heading_id = format!("{list_id}-group-{k}");
+                    let rows: Vec<AnyView> = g
+                        .choices
+                        .iter()
+                        .map(|&i| {
+                            let c = &choices[i];
+                            let on = c.tag == selected;
+                            let mut class = String::from("ark-combo-option");
+                            if s.at == Some(i) {
+                                class.push_str(" ark-lit");
+                            }
+                            let choose = choose.clone();
+                            let tag = c.tag.clone();
+                            html::div()
+                                .class(class)
+                                .id(option_id(i))
+                                .role("option")
+                                .attr("aria-selected", if on { "true" } else { "false" })
+                                .attr("data-cursor", (s.at == Some(i)).then_some("true"))
+                                .on(leptos::ev::mousedown, move |e: web_sys::MouseEvent| {
+                                    e.prevent_default();
+                                    choose(tag.clone());
+                                })
+                                .on(leptos::ev::mouseenter, move |_| {
+                                    ui_mut(|u| {
+                                        if let Some((_, s)) = &mut u.combo {
+                                            s.land(i)
+                                        }
+                                    })
+                                })
+                                .child((
+                                    glyph(&c.glyph, 14),
+                                    html::span().class("ark-combo-title").child(c.title.clone()),
+                                    (!c.detail.is_empty()).then(|| {
+                                        html::span()
+                                            .class(format!(
+                                                "ark-amount ark-ink-tint ark-tint-{}",
+                                                if c.tint.is_empty() { "neutral" } else { &c.tint }
+                                            ))
+                                            .child(c.detail.clone())
+                                    }),
+                                    html::span()
+                                        .class(if on { "ark-combo-check ark-on" } else { "ark-combo-check" })
+                                        .child(glyph("check", 12)),
+                                ))
+                                .into_any()
+                        })
+                        .collect();
+                    let named = !g.name.is_empty();
+                    html::div()
+                        .role("group")
+                        .attr("aria-labelledby", named.then(|| heading_id.clone()))
+                        .child((
+                            named.then(|| {
+                                html::div()
+                                    .class("ark-combo-heading")
+                                    .id(heading_id)
+                                    .attr("aria-hidden", "true")
+                                    .child(g.name.clone())
+                            }),
+                            rows,
+                        ))
+                        .into_any()
+                })
+                .collect();
+            html::div()
+                .class("ark-combo-list")
+                .id(list_id.clone())
+                .role("listbox")
+                .attr("aria-label", id)
+                .child(gs)
+                .into_any()
+        }
+    };
+    let search = html::div().class("ark-search").child((glyph("search", 14), input));
+    // Compact, a sheet from the foot under its title and Close, as the
+    // phones' is; else anchored under its field. Either is there at once,
+    // with nothing moving in: the page is drawn again on every key typed
+    // into it, and an entrance would play again with each.
+    if crate::shell::size_class() == crate::shell::SizeClass::Compact {
+        return html::div()
+            .class("ark-modal-layer ark-combo-layer")
+            .child((
+                html::div().class("ark-scrim").on(leptos::ev::mousedown, move |_| close()),
+                html::div()
+                    .class("ark-combo ark-combo-sheet")
+                    .role("dialog")
+                    .attr("aria-label", id)
+                    .child((
+                        html::div().class("ark-combo-head").child((
+                            html::span().class("ark-combo-name").child(id),
+                            html::button()
+                                .class("ark-bar-button")
+                                .attr("type", "button")
+                                .attr("aria-label", "Close")
+                                .on(leptos::ev::click, move |_| close())
+                                .child(glyph("x", 14)),
+                        )),
+                        search,
+                        body,
+                    )),
+            ))
+            .into_any();
+    }
+    html::div()
+        .class("ark-popover-layer ark-combo-layer")
+        .child((
+            html::div().class("ark-popover-catch").on(leptos::ev::mousedown, move |_| close()),
+            html::div()
+                .class("ark-popover ark-combo")
+                .role("dialog")
+                .attr("aria-label", id)
+                .child((search, body)),
         ))
         .into_any()
 }

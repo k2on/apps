@@ -166,7 +166,22 @@ pub(crate) fn part<M: Clone + 'static>(v: View<M>) -> Option<AnyView> {
                 .child(chips)
                 .into_any()
         }
-        Part::Choice { .. } => return None,
+        Part::Choice { .. } | Part::SearchChoice { .. } => return None,
+        Part::SearchPicker {
+            label,
+            selected,
+            unset,
+            prompt,
+            pick,
+            choices,
+        } => crate::fields::search_picker(
+            label,
+            selected.get(),
+            unset.get(),
+            prompt,
+            ark_app::view::search::choices(&choices),
+            Rc::new(move |s| send(pick.call(s))),
+        ),
         Part::Toggle { title, note, on, change } => {
             let on = on.get();
             html::label()

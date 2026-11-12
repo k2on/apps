@@ -238,6 +238,35 @@ button.ark-sidebar-heading:hover, button.ark-sidebar-heading.ark-on { color: var
 }
 .ark-picker-face { display: inline-flex; align-items: center; gap: 6px; }
 
+/* * A search picker (fields.rs): its field, and its list anchored under it
+   on a wide window or a sheet from the foot on a compact one. */
+.ark-combo-anchor { display: block; }
+.ark-combo-face {
+  display: flex; align-items: center; gap: var(--ark-space-s); width: 100%; padding: 4px 10px; border-radius: 6px; text-align: start;
+  border: 1px solid var(--ark-hairline); background: var(--ark-surface); box-shadow: 0 1px 1px rgb(0 0 0 / 0.06);
+}
+.ark-combo-face > .ark-glyph { color: var(--ark-quiet); }
+.ark-combo-face.ark-unset, .ark-combo-face.ark-unset > .ark-glyph:first-child { color: var(--ark-caution); }
+.ark-combo-value { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ark-combo { display: flex; flex-direction: column; gap: var(--ark-space-xs); width: var(--ark-dropdown-width); max-width: calc(100vw - 2 * var(--ark-space-s)); padding: var(--ark-space-xs); }
+.ark-combo-list { max-height: var(--ark-dropdown-height); overflow-y: auto; }
+.ark-combo-heading { height: 24px; padding: 0 10px; display: flex; align-items: center; font-size: 11px; font-weight: 600; color: var(--ark-quiet); }
+.ark-combo-option { height: 27px; padding: 0 10px; display: flex; align-items: center; gap: var(--ark-space-s); border-radius: 4px; cursor: default; }
+.ark-combo-option > .ark-glyph { color: var(--ark-quiet); }
+.ark-combo-option.ark-lit { background: var(--ark-container); }
+.ark-combo-title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ark-combo-check { visibility: hidden; color: var(--ark-accent-text); display: inline-flex; }
+.ark-combo-check.ark-on { visibility: visible; }
+.ark-combo-empty { padding: var(--ark-space-m); text-align: center; color: var(--ark-quiet); }
+.ark-combo-head { display: flex; align-items: center; justify-content: space-between; padding: var(--ark-space-s) var(--ark-space-s) 0 var(--ark-space-l); font-weight: 600; }
+.ark-combo-sheet {
+  position: absolute; left: 0; right: 0; bottom: 0; width: auto; max-width: none; max-height: 85vh;
+  padding: var(--ark-space-s) var(--ark-space-l) var(--ark-space-xl); background: var(--ark-surface);
+  border-radius: var(--ark-card-corner) var(--ark-card-corner) 0 0;
+}
+.ark-combo-sheet .ark-combo-list { max-height: none; flex: 1; min-height: 0; }
+.ark-combo-sheet .ark-combo-option { height: auto; min-height: var(--ark-row-height); }
+
 /* * Dialogs and sheets: centred, the page dimmed */
 .ark-modal-layer { position: fixed; inset: 0; z-index: 45; display: flex; align-items: center; justify-content: center; }
 .ark-scrim { position: absolute; inset: 0; background: color-mix(in srgb, var(--ark-scrim) 32%, transparent); animation: ark-fade var(--ark-fade-ms) var(--ark-fade); }
