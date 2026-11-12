@@ -286,17 +286,37 @@
           # The server (harken/server: the server and harken-peer): its
           # crate and what it reaches, under the features it asks for, and
           # none of the GUI the workspace's other members link.
-          harken-server = crate { packageId = "harken-server"; };
+          # The servers and their seeds resolved as one cargo invocation over
+          # them all resolves them (`unify`): a crate any two of them reach is
+          # one build, with the union of what they ask of it, rather than a
+          # build per server (ark-auth, ark-peer and ark-app were four builds
+          # each, and syn's features alone made every crate over a proc macro
+          # one per server). The seeds and arkdb so link what the servers
+          # ask of the crates they share (ark-peer's and ark-auth's `server`,
+          # and ark-auth's `ffi`, which harken-peer's ark-ffi turns on): no
+          # crate more is compiled, as the servers compile those anyway. Only
+          # the servers' group: no app is resolved with them, so nothing
+          # here turns a feature on in a phone's or a window's crates.
+          serverRoots = [
+            { packageId = "harken-server"; }
+            { packageId = "money-server"; }
+            { packageId = "harken-seed"; }
+            { packageId = "money-seed"; features = [ "cli" ]; }
+            { packageId = "arkdb"; }
+          ];
+          serversUnified = rustCrates.unify { inherit pkgs; roots = serverRoots; };
+          serverCrate = packageId: crate { inherit packageId; unified = serversUnified; };
+          harken-server = serverCrate "harken-server";
           # `arkdb` for a server to read its system's events with
           # (docs/plan-observe.md): no GUI stack.
-          arkdb = crate { packageId = "arkdb"; };
+          arkdb = serverCrate "arkdb";
           # money's server (money/server: the hub and the bank importer), the
           # same way: no GUI stack under a server.
           # money's server is one process for everything the household
           # reaches: the sync socket, sign-in, the importer and the browser
           # client, whose build it carries (MONEY_WEB, unless the
           # environment names another).
-          money-server-bin = crate { packageId = "money-server"; };
+          money-server-bin = serverCrate "money-server";
           # Its browser client is static files, the same from any machine:
           # on a Mac, Linux's (built ahead there and fetched), rather than
           # the Mac compiling the client's wasm itself.
@@ -306,7 +326,7 @@
           '';
           # Each app's demo data (docs/seed.md): `<app>-seed DATA` writes what
           # that app's server boots seeded from; money's is money/demo.
-          money-seed = crate { packageId = "money-seed"; features = [ "cli" ]; };
+          money-seed = serverCrate "money-seed";
           # Each Ark app's generated pieces (nix/ark-app.nix): its
           # generator, the SwiftUI and Compose of its #[view]s (`<app>-ui`),
           # its native projects (`<app>-native`) and its prebuild.
@@ -319,7 +339,7 @@
             export CARGO_HOME=$TMPDIR/cargo
             cargo metadata --no-deps --offline --format-version 1 > $out
           '';
-          harken-seed = crate { packageId = "harken-seed"; };
+          harken-seed = serverCrate "harken-seed";
           # The catalogue's covers, kept in the repository (harken/demo/covers,
           # each 600 pixels at most, named as harken-seed's `media::key` names
           # them: the first sixteen hex digits of the address's SHA-256), so
