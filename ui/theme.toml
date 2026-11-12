@@ -387,3 +387,15 @@ section-gap = 24.0
 # title, its confirm).
 wide-button-height = 50.0
 sheet-bar-height = 56.0
+# The type styles a primitive's text is set in (ui/docs/primitives.md): the
+# phones take each by name (SwiftUI's text styles, Material's type roles),
+# so Dynamic Type and the font scale grow them; these are the desktop's
+# and the browser's sizes, which do not grow.
+type-large-title = 28.0
+type-title = 20.0
+type-headline = 15.0
+type-body = 13.0
+type-subheadline = 12.0
+type-footnote = 12.0
+type-caption = 11.0
+type-figure = 28.0

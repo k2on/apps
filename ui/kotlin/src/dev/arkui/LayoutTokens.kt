@@ -57,4 +57,20 @@ public object LayoutTokens {
     public const val WIDE_BUTTON_HEIGHT: Float = 50.0f
     /** A sheet's bar: its close, its title, its confirm. */
     public const val SHEET_BAR_HEIGHT: Float = 56.0f
+    /** The desktop's large title (the phones take the style by name, so Dynamic Type and the font scale grow it). */
+    public const val TYPE_LARGE_TITLE: Float = 28.0f
+    /** The desktop's title. */
+    public const val TYPE_TITLE: Float = 20.0f
+    /** The desktop's headline: a card's title, bold. */
+    public const val TYPE_HEADLINE: Float = 15.0f
+    /** The desktop's body text. */
+    public const val TYPE_BODY: Float = 13.0f
+    /** The desktop's subheadline: a line under a title. */
+    public const val TYPE_SUBHEADLINE: Float = 12.0f
+    /** The desktop's footnote: a note under a part. */
+    public const val TYPE_FOOTNOTE: Float = 12.0f
+    /** The desktop's caption: the smallest words. */
+    public const val TYPE_CAPTION: Float = 11.0f
+    /** The desktop's large figure: a card's amount, bold. */
+    public const val TYPE_FIGURE: Float = 28.0f
 }

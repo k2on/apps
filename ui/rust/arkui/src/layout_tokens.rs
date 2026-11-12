@@ -56,3 +56,19 @@ pub const SECTION_GAP: f32 = 24.0;
 pub const WIDE_BUTTON_HEIGHT: f32 = 50.0;
 /// A sheet's bar: its close, its title, its confirm.
 pub const SHEET_BAR_HEIGHT: f32 = 56.0;
+/// The desktop's large title (the phones take the style by name, so Dynamic Type and the font scale grow it).
+pub const TYPE_LARGE_TITLE: f32 = 28.0;
+/// The desktop's title.
+pub const TYPE_TITLE: f32 = 20.0;
+/// The desktop's headline: a card's title, bold.
+pub const TYPE_HEADLINE: f32 = 15.0;
+/// The desktop's body text.
+pub const TYPE_BODY: f32 = 13.0;
+/// The desktop's subheadline: a line under a title.
+pub const TYPE_SUBHEADLINE: f32 = 12.0;
+/// The desktop's footnote: a note under a part.
+pub const TYPE_FOOTNOTE: f32 = 12.0;
+/// The desktop's caption: the smallest words.
+pub const TYPE_CAPTION: f32 = 11.0;
+/// The desktop's large figure: a card's amount, bold.
+pub const TYPE_FIGURE: f32 = 28.0;

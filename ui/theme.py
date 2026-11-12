@@ -60,6 +60,14 @@ LAYOUT = {
     "section-gap": "Above a section's heading, from the card before it.",
     "wide-button-height": "A wide button's height: Continue, Sign In, a form's confirm.",
     "sheet-bar-height": "A sheet's bar: its close, its title, its confirm.",
+    "type-large-title": "The desktop's large title (the phones take the style by name, so Dynamic Type and the font scale grow it).",
+    "type-title": "The desktop's title.",
+    "type-headline": "The desktop's headline: a card's title, bold.",
+    "type-body": "The desktop's body text.",
+    "type-subheadline": "The desktop's subheadline: a line under a title.",
+    "type-footnote": "The desktop's footnote: a note under a part.",
+    "type-caption": "The desktop's caption: the smallest words.",
+    "type-figure": "The desktop's large figure: a card's amount, bold.",
 }
 
 # The motion tokens, in the order they are written, and each one's sentence.

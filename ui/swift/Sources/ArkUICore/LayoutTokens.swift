@@ -57,4 +57,20 @@ public enum LayoutTokens {
     public static let wideButtonHeight: Double = 50.0
     /// A sheet's bar: its close, its title, its confirm.
     public static let sheetBarHeight: Double = 56.0
+    /// The desktop's large title (the phones take the style by name, so Dynamic Type and the font scale grow it).
+    public static let typeLargeTitle: Double = 28.0
+    /// The desktop's title.
+    public static let typeTitle: Double = 20.0
+    /// The desktop's headline: a card's title, bold.
+    public static let typeHeadline: Double = 15.0
+    /// The desktop's body text.
+    public static let typeBody: Double = 13.0
+    /// The desktop's subheadline: a line under a title.
+    public static let typeSubheadline: Double = 12.0
+    /// The desktop's footnote: a note under a part.
+    public static let typeFootnote: Double = 12.0
+    /// The desktop's caption: the smallest words.
+    public static let typeCaption: Double = 11.0
+    /// The desktop's large figure: a card's amount, bold.
+    public static let typeFigure: Double = 28.0
 }

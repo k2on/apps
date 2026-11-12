@@ -34,6 +34,14 @@
   --ark-section-gap: 24px;
   --ark-wide-button-height: 50px;
   --ark-sheet-bar-height: 56px;
+  --ark-type-large-title: 28px;
+  --ark-type-title: 20px;
+  --ark-type-headline: 15px;
+  --ark-type-body: 13px;
+  --ark-type-subheadline: 12px;
+  --ark-type-footnote: 12px;
+  --ark-type-caption: 11px;
+  --ark-type-figure: 28px;
   --ark-move-ms: 378ms;
   --ark-move: linear(0.0000, 0.0661, 0.2033, 0.3554, 0.4964, 0.6161, 0.7128, 0.7881, 0.8454, 0.8883, 0.9199, 0.9430, 0.9596, 0.9715, 0.9800, 0.9860, 0.9902, 0.9932, 0.9953, 0.9968, 0.9978, 0.9985, 0.9989, 0.9993, 1);
   --ark-size-ms: 378ms;
