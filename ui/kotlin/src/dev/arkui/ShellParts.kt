@@ -421,6 +421,10 @@ public fun WithToolbar(title: String, items: ToolbarScope.() -> Unit, content: @
                 },
                 actions = {
                     all.filter { it.placement == BarPlacement.Primary }.forEach { button(it) }
+                    // Who is signed in, after the bar's own items, as the iPhone's toolbar has it:
+                    // before the inspector's toggle and the overflow menu, which SwiftUI keeps at
+                    // the end.
+                    LocalShellAccount.current?.invoke()
                     LocalInspectorToggle.current?.let { t ->
                         IconButton(onClick = t.second) { Icon(ArkGlyphs.PanelRight, contentDescription = t.first) }
                     }
@@ -437,8 +441,6 @@ public fun WithToolbar(title: String, items: ToolbarScope.() -> Unit, content: @
                             }
                         }
                     }
-                    // Who is signed in, last, at every width.
-                    LocalShellAccount.current?.invoke()
                 },
                 // The status bar's inset is the column's, kept while the large title goes.
                 windowInsets = WindowInsets(0),

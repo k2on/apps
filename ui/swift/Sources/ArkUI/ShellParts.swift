@@ -331,7 +331,9 @@ public struct WithToolbar<Content: View, Items: ToolbarContent>: View {
                 if let footer {
                     ToolbarItem(placement: .secondaryAction) { footer }
                 }
-                // Who is signed in, last, at every width.
+                // Who is signed in, after the section's own items, at every
+                // width (the overflow menu and an inspector's toggle stay
+                // at the end, as SwiftUI places them; Android's bar the same).
                 if let account {
                     ToolbarItem(placement: .primaryAction) { account }
                 }
