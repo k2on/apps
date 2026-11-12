@@ -7,7 +7,7 @@
 #   modules/<name>/module.toml  what each module it lists asks of each
 #                             platform (Info.plist keys, entitlements,
 #                             background modes; permissions, services,
-#                             Maven dependencies)
+#                             receivers, Maven dependencies) and its res/
 #   <app>/icon.svg            its icon
 #   ui/theme.toml             its accent's colours
 #   the generated views       ark-ui-gen's SwiftUI and Compose of its #[view]s
@@ -543,6 +543,11 @@ def android_gradle(root, a, ffi_lib_name):
     srcs += ("\n            // ArkUI from its sources, where it is not linked prebuilt (`arkuiLib`).\n            if (arkuiLib == null) {\n"
              + "\n".join(f"                kotlin.srcDir(rootProject.file({d}))" for d in arkui_dirs) + "\n            }")
     # The app's own resources and assets, beside the generated ones.
+    # The modules' own resources (a device admin's policies, ark-dpc's),
+    # each named for its module, beside the generated ones and the app's.
+    for name, _ in modules_of(root, a):
+        if os.path.isdir(os.path.join(root, "modules", name, "res")):
+            srcs += f'\n            res.srcDir(rootProject.file("{TO_REPO}/modules/{name}/res"))'
     if os.path.isdir(native_dir(root, a, "res")):
         srcs += f'\n            res.srcDir(rootProject.file("{TO_APP}/native/android/res"))'
     if os.path.isdir(native_dir(root, a, "assets")):
@@ -767,10 +772,17 @@ def android_manifest(root, a):
         </service>'''
     for r in receivers:
         # One reached by its name alone has no filter and is not exported;
-        # one the system or another app broadcasts to has its actions.
+        # one the system or another app broadcasts to has its actions. A
+        # receiver only the system may send to names the permission a
+        # sender must hold, and one may carry meta-data of its own (a device
+        # admin's policies: ark-dpc's BIND_DEVICE_ADMIN and
+        # `android.app.device_admin`).
         actions = "".join(f'\n                <action android:name="{x}" />' for x in r.get("actions", []))
-        body = f"\n            <intent-filter>{actions}\n            </intent-filter>\n        " if actions else ""
-        extra += f'\n        <receiver android:name="{r["name"]}" android:exported="{str(r.get("exported", False)).lower()}">{body}</receiver>'
+        body = f"\n            <intent-filter>{actions}\n            </intent-filter>" if actions else ""
+        body += "".join(f'\n            <meta-data android:name="{d["name"]}" android:resource="{d["resource"]}" />' for d in r.get("meta-data", []))
+        body += "\n        " if body else ""
+        perm = f' android:permission="{r["permission"]}"' if r.get("permission") else ""
+        extra += f'\n        <receiver android:name="{r["name"]}" android:exported="{str(r.get("exported", False)).lower()}"{perm}>{body}</receiver>'
     for d in meta:
         extra += f'\n        <meta-data android:name="{d["name"]}" android:resource="{d["resource"]}" />'
     bg = background(a)
@@ -789,6 +801,10 @@ def android_manifest(root, a):
         # The scheme, for what opens a route through the app's links from
         # outside an activity (a notice's tap: ark-notifications).
         extra += f'\n        <meta-data android:name="dev.arkui.scheme" android:value="{scheme}" />'
+    # In the launcher, unless app.toml says `launcher = false`: an app that
+    # is the phone's device owner (ark-dpc) is reached some other way, and on
+    # a fully managed phone Android draws no icon for an app with none.
+    launcher = '\n                <category android:name="android.intent.category.LAUNCHER" />' if andr.get("launcher", True) else ""
     theme = andr.get("theme")
     # Kept out of backups (allowBackup is false) and, on Android 12 and
     # later, out of a device-to-device transfer, which allowBackup alone
@@ -823,8 +839,7 @@ def android_manifest(root, a):
             android:exported="true"{activity}
             android:windowSoftInputMode="adjustResize">
             <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
+                <action android:name="android.intent.action.MAIN" />{launcher}
             </intent-filter>{links}
         </activity>{extra}
     </application>
@@ -1035,6 +1050,20 @@ def check(root):
         for op in re.findall(r"impl Op for (\w+)", text):
             if op not in ops:
                 problems.append(f"modules/{n}'s port implements the op {op}, which its module.toml's [ops] does not list")
+        # A module's Android resources are compiled into every app that
+        # lists it, beside the generated ones and the other modules': each
+        # is named for the module (ark-dpc's `xml/ark_dpc_admin.xml`), and a
+        # receiver's meta-data names one the module has.
+        prefix = n.replace("-", "_") + "_"
+        res = os.path.join(root, "modules", n, "res")
+        for f in sorted(glob.glob(os.path.join(res, "*", "*"))):
+            if not os.path.basename(f).startswith(prefix):
+                problems.append(f"modules/{n}/res/{os.path.relpath(f, res)} is not named {prefix}…: a module's resources are named for it")
+        for r in m.get("android", {}).get("receivers", []):
+            for d in r.get("meta-data", []):
+                found = re.fullmatch(r"@(\w+)/(\w+)", d.get("resource", ""))
+                if found and not glob.glob(os.path.join(res, f"{found.group(1)}*", f"{found.group(2)}.*")):
+                    problems.append(f"modules/{n}/module.toml's receiver {r.get('name')} names {d['resource']}, which modules/{n}/res does not have")
     for app in apps(root):
         a = app_of(root, app)
         for k in ("name", "id", "accent", "platforms"):

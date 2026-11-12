@@ -97,6 +97,16 @@ rec {
       # File a bug if you depend on any for non-debug work!
       debug = internal.debugCrate { inherit packageId; };
     };
+    "ark-dpc" = rec {
+      packageId = "ark-dpc";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "ark-dpc";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
     "ark-ffi" = rec {
       packageId = "ark-ffi";
       build = internal.buildRustCrateWithFeatures {
@@ -1555,6 +1565,29 @@ rec {
           "web" = [ "dep:web-sys" ];
         };
         resolvedDefaultFeatures = [ "desktop" "ffi" "web" ];
+      };
+      "ark-dpc" = rec {
+        crateName = "ark-dpc";
+        version = "0.1.0";
+        edition = "2021";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../modules/ark-dpc; };
+        libName = "ark_dpc";
+        dependencies = [
+          {
+            name = "ark-module";
+            packageId = "ark-module";
+          }
+          {
+            name = "uniffi";
+            packageId = "uniffi";
+            optional = true;
+            usesDefaultFeatures = false;
+          }
+        ];
+        features = {
+          "ffi" = [ "dep:uniffi" ];
+        };
+        resolvedDefaultFeatures = [ "ffi" ];
       };
       "ark-ffi" = rec {
         crateName = "ark-ffi";
