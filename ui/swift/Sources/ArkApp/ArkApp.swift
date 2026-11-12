@@ -41,7 +41,7 @@ extension Launch {
         let i = Bundle.main.infoDictionary
         let version = "\(i?["CFBundleShortVersionString"] as? String ?? "?") (\(i?["CFBundleVersion"] as? String ?? "?"))"
         return Launch(root: support.path, version: version, demo: demo != nil, demoDay: demo.flatMap { $0.count == 10 ? $0 : nil },
-                      shots: Shots.on, scan: scan, args: ProcessInfo.processInfo.arguments)
+                      shots: Shots.on, walk: ShotsWalk.planned(root: support.path) != nil, scan: scan, args: ProcessInfo.processInfo.arguments)
     }
 }
 
@@ -68,6 +68,9 @@ public final class ArkApp<Library: ArkAppHost>: ObservableObject {
     @Published public private(set) var moves: UInt64 = 0
 
     private let teller = Teller()
+    /// A screenshot walk this launch takes inside the app, when it is one
+    /// (`ShotsWalk`), started once the root is up.
+    private var walk: ShotsWalk?
     /// This app's UI attached to the process's runtime: online while it runs.
     private let attached = ArkProcess.shared().attach()
 
@@ -91,6 +94,16 @@ public final class ArkApp<Library: ArkAppHost>: ObservableObject {
             return host.idle()
         }
         host.start(shell: teller)
+        let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        walk = ShotsWalk.planned(root: support.path).map { ShotsWalk(host: host, plan: $0) }
+    }
+
+    /// The screenshot walk, when this launch is one: taken once, and the
+    /// process ends with it.
+    func walkOnce() async {
+        guard let w = walk else { return }
+        walk = nil
+        await w.run()
     }
 
     private func refresh() {
@@ -215,6 +228,8 @@ public struct ArkRoot<Library: ArkAppHost, Welcome: View, Content: View>: View {
             QrScanner { text in app.scanned(text) }.ignoresSafeArea()
         }
         .toast($app.notice)
+        // A screenshot walk's launch walks itself (ShotsWalk.swift).
+        .task { await app.walkOnce() }
         .onOpenURL { app.open(url: $0) }
         .onChange(of: phase) { _, now in
             if now == .background { away = true }

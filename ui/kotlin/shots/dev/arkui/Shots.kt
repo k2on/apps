@@ -26,7 +26,9 @@ package dev.arkui
 
 import androidx.activity.ComponentActivity
 
+import android.content.ComponentCallbacks
 import android.content.Intent
+import android.content.res.Configuration
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
@@ -63,6 +65,12 @@ public object Ready {
     private var quiet = 0
     private var ticking = false
     private var view: View? = null
+    /** Whether configuration changes are listened for (once a process). */
+    private var listening = false
+    /** The generation the screen was last ready at, and whose window it was. */
+    @Volatile private var readyAt = -1
+    @Volatile internal var window: Window? = null
+    private val readyLock = Object()
     /** Whether the window has drawn since the last frame ([attach]'s draw listener). */
     @Volatile private var drawn = false
     /** Frames running in which the window drew with nothing waited for. */
@@ -157,11 +165,40 @@ public object Ready {
         }
         ticking = false
         say(label)
+        synchronized(readyLock) {
+            readyAt = synchronized(lock) { generation }
+            readyLock.notifyAll()
+        }
     }
+
+    /** The generation now: a walk's step waits for the screen to be ready after it. */
+    public fun generation(): Int = synchronized(lock) { generation }
+
+    /**
+     * Off the main thread: until the screen is ready at a generation after [after] (true), or
+     * [millis] pass first (false). A screenshot walk's wait (ShotsWalk): a guard, never a wait.
+     */
+    public fun awaitReady(after: Int, millis: Long): Boolean {
+        val until = System.currentTimeMillis() + millis
+        synchronized(readyLock) {
+            while (readyAt <= after) {
+                val left = until - System.currentTimeMillis()
+                if (left <= 0) return false
+                readyLock.wait(left)
+            }
+        }
+        return true
+    }
+
+    /** What the screen still waits for, as said last ("busy …"), for a walk that gives up. */
+    @Volatile public var why: String = ""
+        private set
 
     private fun say(label: String?) {
         // Said to the log too, which the driver reads as it comes (`adb logcat -s ArkReady`).
-        android.util.Log.i("ArkReady", label?.removePrefix("ark.ready ") ?: "busy $generation $route")
+        val said = label?.removePrefix("ark.ready ") ?: "busy $generation $route ${synchronized(lock) { waiting.keys.toList() }}"
+        why = said
+        android.util.Log.i("ArkReady", said)
         val v = view ?: return
         v.contentDescription = label
         v.importantForAccessibility = if (label == null) View.IMPORTANT_FOR_ACCESSIBILITY_NO else View.IMPORTANT_FOR_ACCESSIBILITY_YES
@@ -177,6 +214,21 @@ public object Ready {
         val v = View(decor.context)
         decor.addView(v, FrameLayout.LayoutParams(1, 1))
         view = v
+        this.window = window
+        // The system's theme (or size) changed under the app: a newer generation, whether the
+        // activity is made again for it or takes the change itself, so a walk's switch of light
+        // and dark waits for the screen drawn in the new one.
+        if (!listening) {
+            listening = true
+            decor.context.applicationContext.registerComponentCallbacks(
+                object : ComponentCallbacks {
+                    override fun onConfigurationChanged(newConfig: Configuration) = changed()
+
+                    @Suppress("OVERRIDE_DEPRECATION")
+                    override fun onLowMemory() {}
+                }
+            )
+        }
         decor.viewTreeObserver.addOnDrawListener { drawn = true }
         // The system's navigation hidden (the gesture handle; on a tablet or an open Fold, the
         // launcher's taskbar): neither is the app's, and both differed between two runs' shots,
@@ -212,4 +264,5 @@ private fun hideNavigation(window: Window) {
 public fun ComponentActivity.watchForShots() {
     Shots.read(intent)
     Ready.attach(window)
+    ShotsWalk.start(this)
 }

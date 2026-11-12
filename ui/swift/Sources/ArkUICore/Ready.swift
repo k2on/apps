@@ -45,8 +45,38 @@ public final class Ready {
     /// layer's animation, named): nil when nothing is.
     public var moving: () -> String? = { nil }
     private var ticks = false
+    /// What waits for the screen to be ready (`untilReady(after:within:)`), by
+    /// its id: the generation it waits past, and its answer.
+    private var waiters: [Int: (after: Int, answer: CheckedContinuation<Bool, Never>)] = [:]
+    private var waited = 0
 
     private init() {}
+
+    /// Once the screen is ready at a generation after `after`: true; false
+    /// once `seconds` pass first. What a screenshot walk inside the app
+    /// waits on after each step (ui/docs/shots.md): the limit only guards,
+    /// and is never how long a walk waits when all is well.
+    public func untilReady(after: Int, within seconds: Double) async -> Bool {
+        if ready && generation > after { return true }
+        waited += 1
+        let id = waited
+        return await withCheckedContinuation { c in
+            waiters[id] = (after, c)
+            DispatchQueue.main.asyncAfter(deadline: .now() + seconds) { [weak self] in
+                MainActor.assumeIsolated {
+                    if let w = self?.waiters.removeValue(forKey: id) { w.answer.resume(returning: false) }
+                }
+            }
+        }
+    }
+
+    /// The waiters whose generation has come, answered.
+    private func answer() {
+        for (id, w) in waiters where generation > w.after {
+            waiters.removeValue(forKey: id)
+            w.answer.resume(returning: true)
+        }
+    }
 
     /// `what` is on its way: not ready until as many `end(what)`.
     public func begin(_ what: String) {
@@ -118,6 +148,7 @@ public final class Ready {
         ticks = false
         ticking?(false)
         onChange?()
+        answer()
     }
 
     /// What it says to the driver: `ready <generation> <route>`, or while

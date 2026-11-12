@@ -223,3 +223,53 @@ private struct ReadyWhile: ViewModifier {
         if now { Ready.shared.begin(what) } else { Ready.shared.end(what) }
     }
 }
+
+#if canImport(UIKit)
+/// The app's own windows, as a screenshot walk inside the app takes them
+/// (ui/docs/shots.md, "In the App"): drawn by the app itself, every window
+/// of its scenes in their order (what a sheet, a menu or a popover is up
+/// in), at the screen's scale. The status bar is the system's, not the
+/// app's, and is not in it, as Android's walk leaves it out too.
+@MainActor
+public enum ShotsWindow {
+    private static var windows: [UIWindow] {
+        UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+            .flatMap(\.windows)
+            .filter { !$0.isHidden && $0.alpha > 0 }
+            .sorted { $0.windowLevel < $1.windowLevel }
+    }
+
+    /// The windows drawn as the screen shows them, as a PNG.
+    public static func picture() -> Data? {
+        let ws = windows
+        guard let main = ws.first(where: \.isKeyWindow) ?? ws.first else { return nil }
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = main.screen.scale
+        format.opaque = true
+        let size = main.windowScene?.coordinateSpace.bounds.size ?? main.bounds.size
+        return UIGraphicsImageRenderer(size: size, format: format).pngData { ctx in
+            UIColor.black.setFill()
+            ctx.fill(CGRect(origin: .zero, size: size))
+            for w in ws { w.drawHierarchy(in: w.frame, afterScreenUpdates: true) }
+        }
+    }
+
+    /// Every window drawn dark, or light, whatever the device's appearance:
+    /// what the system's switch does to an app, and what follows it (a
+    /// sheet, a menu, the system's own controls).
+    public static func theme(dark: Bool) {
+        for w in windows { w.overrideUserInterfaceStyle = dark ? .dark : .light }
+        Ready.shared.changed()
+    }
+
+    /// Every scene turned on its side (`landscape`), or upright: as the
+    /// device turned.
+    public static func orient(landscape: Bool) {
+        for scene in UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }) {
+            scene.windows.first?.rootViewController?.setNeedsUpdateOfSupportedInterfaceOrientations()
+            scene.requestGeometryUpdate(.iOS(interfaceOrientations: landscape ? .landscapeRight : .portrait)) { _ in }
+        }
+        Ready.shared.changed()
+    }
+}
+#endif

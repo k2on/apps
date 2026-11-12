@@ -44,7 +44,7 @@ private object Quiet : HostShell {
 private fun host(demo: Boolean, kept: String = ""): MoneyHost {
     val root = Files.createTempDirectory("money-screens").toFile()
     if (kept.isNotEmpty()) File(root, "money").apply { mkdirs() }.resolve("first-run").writeText(kept)
-    val m = MoneyHost(Launch(root.path, "0.1", demo, if (demo) "2026-10-26" else null, false, false, emptyList()), null)
+    val m = MoneyHost(Launch(root.path, "0.1", demo, if (demo) "2026-10-26" else null, false, false, false, emptyList()), null)
     m.host().start(Quiet)
     return m
 }

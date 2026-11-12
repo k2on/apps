@@ -29,9 +29,11 @@ import dev.arkdb.ffi.ArkHost
 import dev.arkdb.ffi.HostShell
 import dev.arkdb.ffi.Launch
 import dev.arkdb.ffi.Refusal
+import dev.arkdb.ffi.ShotsTook
 import dev.arkui.DeviceLinkShown
 import dev.arkui.Ready
 import dev.arkui.Shots
+import dev.arkui.ShotsWalk
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -97,6 +99,8 @@ public abstract class ArkApplication : Application() {
             demo = demo != null,
             demoDay = demo?.takeIf { it.length == 10 },
             shots = Shots.on,
+            // A screenshot walk's launch: a plan in the app's own directory, on an emulator.
+            walk = ShotsWalk.planned(this) != null,
             // No code is scanned here yet: ark-camera has no QR decoder on Android.
             scan = false,
             args = args,
@@ -155,6 +159,19 @@ public class ArkApp internal constructor(public val host: ArkHost) {
                 false
             } else host.idle()
         }
+        // A screenshot walk's steps, Rust's: each reaches what it names in the views on the screen
+        // and sends the message a tap on it sends (ark_app::shots).
+        ShotsWalk.steps =
+            object : ShotsWalk.Steps {
+                override fun step(json: String): ShotsWalk.Took =
+                    when (val t = host.shotsStep(json)) {
+                        is ShotsTook.Done -> ShotsWalk.Took.Done
+                        is ShotsTook.NotYet -> ShotsWalk.Took.NotYet(t.labels)
+                        is ShotsTook.Failed -> ShotsWalk.Took.Failed(t.why)
+                    }
+
+                override fun tree(): String = host.shotsTree()
+            }
         host.start(shell)
     }
 
