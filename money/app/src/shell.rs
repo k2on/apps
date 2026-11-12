@@ -129,6 +129,8 @@ pub enum ShellMsg {
     Pane {
         title: String,
     },
+    /// The toolbar's account item: Settings, on General.
+    Account,
     /// The menu bar's and the toolbars' commands ([`view::commands`]):
     /// the shell's own, or the hosted screens', which the platform's host
     /// carries out ([`MoneyRequest`]).
@@ -272,6 +274,10 @@ pub struct ShellPage {
     /// The open accounts on the budget, then those only tracked.
     pub budget_accounts: Vec<AccountPlace>,
     pub tracking_accounts: Vec<AccountPlace>,
+    /// Who is signed in, as the toolbar's account item draws them: their
+    /// name (the demo's Alex), and their picture (empty: their initial).
+    pub who: String,
+    pub picture: String,
 }
 
 impl App for MoneyShell {
@@ -327,6 +333,10 @@ impl App for MoneyShell {
                     s.pane = title;
                 }
                 vec![]
+            }
+            ShellMsg::Account => {
+                s.pane = PANES[0].into();
+                vec![Command::Request(MoneyRequest::Settings { pane: PANES[0].into() })]
             }
             // The inspector put away first, the launch once the screen
             // without it is drawn: on the iPhone it is a sheet of the
@@ -463,6 +473,12 @@ impl App for MoneyShell {
             to_review: (unapproved > 0).then_some(unapproved),
             budget_accounts: open.iter().filter(|a| a.on_budget).map(place).collect(),
             tracking_accounts: open.iter().filter(|a| !a.on_budget).map(place).collect(),
+            who: if s.settings.facts.demo {
+                "Alex".into()
+            } else {
+                s.settings.facts.who.clone()
+            },
+            picture: s.settings.facts.picture.clone(),
         }
     }
 }

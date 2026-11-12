@@ -39,6 +39,7 @@ pub fn adaptive_tabs<M: 'static>(selected: impl Into<Val<String>>, select: fn(St
         select: Input::new(select),
         tabs: tabs.into(),
         footer: View::Empty,
+        account: View::Empty,
     }
 }
 
@@ -47,6 +48,7 @@ pub struct Tabs<M> {
     select: Input<String, M>,
     tabs: View<M>,
     footer: View<M>,
+    account: View<M>,
 }
 
 impl<M> Tabs<M> {
@@ -54,6 +56,13 @@ impl<M> Tabs<M> {
     /// (`.tabViewSidebarBottomBar`). Never on a compact tab bar.
     pub fn footer(mut self, footer: impl Into<View<M>>) -> Self {
         self.footer = footer.into();
+        self
+    }
+
+    /// Who is signed in ([`account_item`]): the last item of every
+    /// section's toolbar, on every platform and at every width.
+    pub fn account(mut self, account: impl Into<View<M>>) -> Self {
+        self.account = account.into();
         self
     }
 }
@@ -65,6 +74,7 @@ impl<M> From<Tabs<M>> for View<M> {
             select: t.select,
             tabs: Box::new(t.tabs),
             footer: Box::new(t.footer),
+            account: Box::new(t.account),
         }
         .into()
     }
@@ -183,6 +193,32 @@ pub fn toolbar<M>(title: impl Into<Val<String>>, content: impl Into<View<M>>, it
         content: Box::new(content.into()),
     }
     .into()
+}
+
+/// Who is signed in, as the toolbar's last item ([`Tabs::account`]): their
+/// picture at `picture` (a whole URL; empty, their initial on a tinted
+/// circle), said as "Account" and `name`; `tap` opens their account.
+pub fn account_item<M>(name: impl Into<Val<String>>, picture: impl Into<Val<String>>, tap: M) -> View<M> {
+    Part::Account {
+        name: name.into(),
+        picture: picture.into(),
+        tap,
+    }
+    .into()
+}
+
+/// What a screen reader hears of the account item: "Account" and the name.
+pub fn account_label(name: &str) -> String {
+    match name.is_empty() {
+        true => "Account".into(),
+        false => format!("Account, {name}"),
+    }
+}
+
+/// The initial the account item shows with no picture: the name's first
+/// letter, capitalized; `?` for none.
+pub fn account_initial(name: &str) -> String {
+    name.chars().find(|c| c.is_alphanumeric()).map(|c| c.to_uppercase().collect()).unwrap_or_else(|| "?".into())
 }
 
 /// A toolbar's button, where `placement` puts it.

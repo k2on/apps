@@ -330,6 +330,10 @@ impl Money {
                 .as_ref()
                 .map(|l| if l.email.is_empty() { l.user.clone() } else { l.email.clone() })
                 .unwrap_or_default(),
+            picture: match (&login, server_of(o)) {
+                (Some(l), Some(s)) => ark_ffi::ark_auth::picture_url(&s, &l.user, &l.picture).unwrap_or_default(),
+                _ => String::new(),
+            },
             demo,
             server: server_of(o)
                 .map(|s| ark_ffi::ark_auth::probe::display(&s).to_string())

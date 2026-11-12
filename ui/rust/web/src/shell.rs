@@ -126,6 +126,9 @@ struct Ctx<'h> {
     /// heading, as an iPhone's Back says the page it returns to).
     back_label: Option<String>,
     top_tabs: Option<AnyView>,
+    /// Who is signed in (`Part::Account`), drawn as every toolbar's last
+    /// item.
+    account: Option<Rc<dyn Fn() -> AnyView>>,
     hosts: &'h dyn Fn(&'static str) -> AnyView,
 }
 
@@ -136,6 +139,7 @@ pub fn shell<M: Clone + 'static>(view: View<M>, hosts: &dyn Fn(&'static str) -> 
         back: None,
         back_label: None,
         top_tabs: None,
+        account: None,
         hosts,
     };
     html::div().class("ark-shell-root").child(draw(view, &mut ctx)).into_any()
@@ -222,7 +226,12 @@ fn shell_part<M: Clone + 'static>(p: Part<M>, ctx: &mut Ctx<'_>) -> AnyView {
             select,
             tabs,
             footer,
+            account,
         } => {
+            if let View::Part(Part::Account { name, picture, tap }) = *account {
+                let (name, picture) = (name.get(), picture.get());
+                ctx.account = Some(Rc::new(move || account_button(&name, &picture, tap.clone())));
+            }
             let chosen = selected.get();
             let mut all = vec![];
             let mut groups = vec![];
@@ -562,6 +571,9 @@ fn toolbar<M: Clone + 'static>(title: String, items: View<M>, content: View<M>, 
                 .into_any(),
         );
     }
+    if let Some(account) = &ctx.account {
+        trailing.push(account());
+    }
     let inline = how == Sections::Sidebar;
     let middle = match ctx.top_tabs.take() {
         Some(tabs) => vec![tabs],
@@ -639,6 +651,24 @@ fn peel<M: Clone + 'static>(v: View<M>) -> (Option<Found<M>>, Option<(&'static s
 
 /// A toolbar's button: its glyph alone, as a Mac toolbar draws one, its
 /// title said when the pointer rests on it.
+/// Who is signed in, the toolbar's last item: their picture, round, or
+/// their initial on a tinted circle when there is none; said as "Account"
+/// and their name; opening their account.
+fn account_button<M: Clone + 'static>(name: &str, picture: &str, tap: M) -> AnyView {
+    let said = ark_app::shell::account_label(name);
+    let face = match picture.is_empty() {
+        true => html::span().class("ark-account-initial").attr("aria-hidden", "true").child(ark_app::shell::account_initial(name)).into_any(),
+        false => html::img().class("ark-account-picture").attr("src", picture.to_string()).attr("alt", "").into_any(),
+    };
+    crate::wired!(html::button(), crate::tapped("Account", &tap))
+        .class("ark-bar-button ark-account")
+        .attr("title", said.clone())
+        .attr("aria-label", said)
+        .on(leptos::ev::click, move |_| send(tap.clone()))
+        .child(face)
+        .into_any()
+}
+
 pub fn bar_button<M: Clone + 'static>(title: &'static str, g: &'static str, enabled: bool, tap: M) -> AnyView {
     crate::wired!(html::button(), crate::tapped(title, &tap))
         .class("ark-bar-button")

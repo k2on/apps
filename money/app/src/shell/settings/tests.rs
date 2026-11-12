@@ -9,6 +9,7 @@ fn facts(demo: bool) -> SessionFacts {
     SessionFacts {
         who: "Alex Rivera".into(),
         login: "alex@example.com".into(),
+        picture: String::new(),
         demo,
         server: "money.example.com".into(),
         linked: Some(true),

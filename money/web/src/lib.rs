@@ -374,6 +374,11 @@ impl MoneyWeb {
                     }
                 })
                 .unwrap_or_default(),
+            picture: live
+                .login
+                .as_ref()
+                .and_then(|l| ark_auth::picture_url(&live.server, &l.user.id, &l.user.picture))
+                .unwrap_or_default(),
             demo: false,
             server: ark_auth::onboarding::display(&live.server),
             linked: Some(status.linked),

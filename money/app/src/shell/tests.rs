@@ -502,3 +502,44 @@ fn the_appearance_follows_the_system_by_default() {
     rt.dispatch(launch(&["-screen", "insights"]), &mut demo);
     assert_eq!(rt.screen(&demo).appearance, None, "another launch puts the last one's appearance back");
 }
+
+/// Every section's toolbar ends with who is signed in: the shell's tabs
+/// carry an account item with their name and picture, and tapping it opens
+/// Settings on General — on every platform, the same item (the phones'
+/// generated `ToolbarAccount`). Falsified by leaving the item out, by the
+/// demo's household going nameless, or by the tap opening another pane.
+#[test]
+fn the_toolbars_end_with_the_account() {
+    let mut demo = Demo::new();
+    let mut rt = Runtime::<MoneyShell>::new();
+    fn account<M: Clone>(v: &View<M>) -> Option<(String, String, M)> {
+        match v {
+            View::List(vs) => vs.iter().find_map(account),
+            View::Part(Part::Account { name, picture, tap }) => Some((name.get(), picture.get(), tap.clone())),
+            View::Part(p) => p.call().slots.into_iter().find_map(|(_, s)| account(s)),
+            _ => None,
+        }
+    }
+    let facts = |demo: bool, picture: &str| ShellMsg::Session {
+        facts: SessionFacts {
+            who: "Sam Lee".into(),
+            picture: picture.into(),
+            demo,
+            ..SessionFacts::default()
+        },
+    };
+    rt.dispatch(facts(true, ""), &mut demo);
+    let (name, picture, tap) = account(&money_shell::view(&rt.screen(&demo))).expect("the shell's account item");
+    assert_eq!((name.as_str(), picture.as_str()), ("Alex", ""), "the demo's household is Alex's, with no picture");
+    assert_eq!(tap, ShellMsg::Account);
+    rt.dispatch(facts(false, "https://money.example.com/auth/picture/sam"), &mut demo);
+    let (name, picture, _) = account(&money_shell::view(&rt.screen(&demo))).unwrap();
+    assert_eq!((name.as_str(), picture.as_str()), ("Sam Lee", "https://money.example.com/auth/picture/sam"));
+    rt.dispatch(ShellMsg::Pane { title: "Appearance".into() }, &mut demo);
+    rt.dispatch(ShellMsg::Account, &mut demo);
+    assert_eq!(rt.screen(&demo).pane, "General");
+    assert_eq!(demo.requests.last(), Some(&MoneyRequest::Settings { pane: "General".into() }));
+    assert_eq!(ark_app::shell::account_label("Sam Lee"), "Account, Sam Lee");
+    assert_eq!(ark_app::shell::account_initial("sam"), "S");
+    assert_eq!(ark_app::shell::account_initial(""), "?");
+}

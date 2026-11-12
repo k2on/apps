@@ -193,6 +193,7 @@ pub fn money_shell(p: &ShellPage) -> View<ShellMsg> {
         ),
     )
     .footer(hosted("household"))
+    .account(account_item(p.who, p.picture, ShellMsg::Account))
     .into()
 }
 

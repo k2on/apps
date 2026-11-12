@@ -535,6 +535,9 @@ pub enum Part<M> {
         /// At the sidebar's foot (`.tabViewSidebarBottomBar`): who is signed
         /// in, the household. Not on a compact tab bar.
         footer: Box<View<M>>,
+        /// Who is signed in ([`Part::Account`]): the last item of every
+        /// section's toolbar, at every width; empty for none.
+        account: Box<View<M>>,
     },
     /// One section: its title, glyph and tag, a count at its end, what it
     /// shows. A tag `parent/child` is a child of the section tagged
@@ -581,6 +584,15 @@ pub enum Part<M> {
         title: Val<String>,
         items: Box<View<M>>,
         content: Box<View<M>>,
+    },
+    /// Who is signed in, as a toolbar's last item: their picture (`picture`,
+    /// a whole URL), or their initial on a tinted circle when there is none;
+    /// said as "Account" and their name; `tap` opens their account (money's
+    /// Settings › General).
+    Account {
+        name: Val<String>,
+        picture: Val<String>,
+        tap: M,
     },
     /// A toolbar's button.
     BarItem {
@@ -2553,11 +2565,18 @@ impl<M> Part<M> {
                 select,
                 tabs,
                 footer,
+                account,
             } => c(
                 "AdaptiveTabs",
                 None,
                 vec![("selection", G::Val(lit(selected))), ("onSelect", G::Typed(select))],
-                vec![("", &**tabs), ("footer", &**footer)],
+                vec![("", &**tabs), ("footer", &**footer), ("account", &**account)],
+            ),
+            Part::Account { name, picture, tap } => c(
+                "ToolbarAccount",
+                None,
+                vec![("name", G::Val(lit(name))), ("picture", G::Val(lit(picture))), ("onTap", G::Act(tap))],
+                vec![],
             ),
             Part::SectionTab {
                 title,
@@ -3034,12 +3053,15 @@ impl<M: 'static> Part<M> {
                 select,
                 tabs,
                 footer,
+                account,
             } => Part::Tabs {
                 selected,
                 select: input(select, f),
                 tabs: b(tabs),
                 footer: b(footer),
+                account: b(account),
             },
+            Part::Account { name, picture, tap } => Part::Account { name, picture, tap: f(tap) },
             Part::TabGroup { title, tabs, place } => Part::TabGroup {
                 title,
                 tabs: b(tabs),

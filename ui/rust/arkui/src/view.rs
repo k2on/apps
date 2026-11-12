@@ -354,6 +354,7 @@ fn part<M: Clone + 'static>(v: View<M>) -> Option<Element<'static, M>> {
         | Part::Push { .. }
         | Part::Split { .. }
         | Part::Toolbar { .. }
+        | Part::Account { .. }
         | Part::Searchable { .. }
         | Part::Inspector { .. }
         | Part::Hosted { .. }
@@ -409,6 +410,8 @@ struct Ctx<'a, 'h, M> {
     frame: Frame,
     back: Option<M>,
     top_tabs: Option<Element<'a, M>>,
+    /// Who is signed in (`Part::Account`): every toolbar's last item.
+    account: Option<(String, M)>,
     hosts: &'h mut dyn FnMut(&'static str) -> Element<'a, M>,
 }
 
@@ -427,6 +430,7 @@ pub fn shell<'a, M: Clone + 'static>(view: View<M>, frame: Frame, hosts: &mut dy
         frame,
         back: None,
         top_tabs: None,
+        account: None,
         hosts,
     };
     draw(view, &mut ctx)
@@ -481,7 +485,11 @@ fn shell_part<'a, M: Clone + 'static>(p: Part<M>, ctx: &mut Ctx<'a, '_, M>) -> E
             select,
             tabs,
             footer,
+            account,
         } => {
+            if let View::Part(Part::Account { name, tap, .. }) = *account {
+                ctx.account = Some((name.get(), tap));
+            }
             let chosen = selected.get();
             let mut all = vec![];
             tabs_of(*tabs, None, &mut all);
@@ -739,6 +747,9 @@ fn toolbar<'a, M: Clone + 'static>(title: String, items: View<M>, content: View<
     if let Some((title, shown, tap)) = toggle {
         trailing.push(toggle_button(title, shown, tap));
     }
+    if let Some((name, tap)) = ctx.account.clone() {
+        trailing.push(account_button(name, tap));
+    }
     let inline = how == Sections::Sidebar;
     let mut line = row![lead].spacing(8).align_y(Alignment::Center);
     if inline {
@@ -838,6 +849,19 @@ fn bar_button<'a, M: Clone + 'a>(title: &'static str, glyph: &'static str, _plac
     tip(b, title)
 }
 
+/// Who is signed in, the toolbar's last item: their initial on their
+/// colour (the desktop's window draws their picture at the sidebar's foot,
+/// from its own cache), opening their account; said as "Account" and their
+/// name.
+fn account_button<'a, M: Clone + 'a>(name: String, tap: M) -> Element<'a, M> {
+    let who = crate::account::Who { name: name.clone(), id: name.clone() };
+    let b = button(container(crate::account::face(Some(&who), None, BAR_GLYPH + 4.0)).center(BAR_BUTTON))
+        .padding(0)
+        .style(style::quiet)
+        .on_press(tap);
+    tip(b, ark_app::shell::account_label(&name))
+}
+
 /// The inspector's toggle at the toolbar's trailing end: the trailing
 /// pane's glyph, lit while it shows.
 fn toggle_button<'a, M: Clone + 'a>(title: &'static str, shown: bool, tap: M) -> Element<'a, M> {
@@ -855,10 +879,10 @@ fn toggle_button<'a, M: Clone + 'a>(title: &'static str, shown: bool, tap: M) ->
 }
 
 /// `content` with `words` said by it while the pointer rests on it.
-fn tip<'a, M: 'a>(content: impl Into<Element<'a, M>>, words: &'static str) -> Element<'a, M> {
+fn tip<'a, M: 'a>(content: impl Into<Element<'a, M>>, words: impl Into<String>) -> Element<'a, M> {
     tooltip(
         content,
-        container(text(words).size(12)).padding([3, 8]).style(style::card),
+        container(text(words.into()).size(12)).padding([3, 8]).style(style::card),
         tooltip::Position::Bottom,
     )
     .gap(4)

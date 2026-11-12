@@ -94,6 +94,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.foundation.layout.size
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 
 // * What the app provides
@@ -173,10 +175,17 @@ public fun compactTag(tag: String): String = tag.substringBefore('/')
 /**
  * The app's sections: a navigation bar when compact, a rail when medium, a
  * permanent drawer when expanded (NavigationSuiteScaffold's choice, by the
- * theme's widths).
+ * theme's widths). [footer] is the drawer's foot; [account] (a [ToolbarAccount])
+ * the last item of every section's toolbar, at every width.
  */
 @Composable
-public fun AdaptiveTabs(selection: String, onSelect: (String) -> Unit, footer: @Composable () -> Unit = {}, tabs: TabsScope.() -> Unit) {
+public fun AdaptiveTabs(
+    selection: String,
+    onSelect: (String) -> Unit,
+    footer: @Composable () -> Unit = {},
+    account: (@Composable () -> Unit)? = null,
+    tabs: TabsScope.() -> Unit,
+) {
     val items = TabsScope().apply(tabs).tabs
     val lookup = LocalGlyphs.current
     BoxWithConstraints(Modifier.fillMaxSize()) {
@@ -191,7 +200,12 @@ public fun AdaptiveTabs(selection: String, onSelect: (String) -> Unit, footer: @
                 Icon(shellGlyph(t.glyph, lookup), contentDescription = null)
             }
         }
-        CompositionLocalProvider(LocalSizeClass provides size, LocalShellFooter provides if (drawer) null else footer) {
+        CompositionLocalProvider(
+            LocalSizeClass provides size,
+            // With an account item the toolbars carry who is signed in; the footer stays the drawer's.
+            LocalShellFooter provides if (drawer || account != null) null else footer,
+            LocalShellAccount provides account,
+        ) {
             when {
                 // The bar at the foot keeps the navigation bar clear itself; the top is the
                 // section's toolbar's, which keeps the status bar clear: this one asks for no
@@ -247,6 +261,29 @@ public fun AdaptiveTabs(selection: String, onSelect: (String) -> Unit, footer: @
 
 /** The drawer's foot, which a top app bar carries at its end where there is no drawer. */
 private val LocalShellFooter = compositionLocalOf<(@Composable () -> Unit)?> { null }
+
+/** Who is signed in ([ToolbarAccount]): every section's top app bar's last item. */
+private val LocalShellAccount = compositionLocalOf<(@Composable () -> Unit)?> { null }
+
+/**
+ * Who is signed in, a toolbar's last item ([AdaptiveTabs]' `account`): their [Face] — [picture]
+ * (a whole URL) once it has loaded through the faces' cache, their initial on the accent until
+ * then or with none — opening their account ([onTap]: money's Settings › General). A screen reader
+ * hears "Account" and their name.
+ */
+@Composable
+public fun ToolbarAccount(name: String, picture: String, onTap: () -> Unit) {
+    val said = if (name.isEmpty()) "Account" else "Account, $name"
+    Box(
+        Modifier.size(Account.Target).pressable(onClick = onTap, role = Role.Button),
+        contentAlignment = Alignment.Center,
+    ) {
+        Face(name.ifEmpty { "?" }, picture, ToolbarAccountSide, description = said)
+    }
+}
+
+/** The account item's face in a top app bar: as tall as a bar button's glyph's target. */
+public val ToolbarAccountSide: Dp = 28.dp
 
 // * Columns
 
@@ -399,6 +436,8 @@ public fun WithToolbar(title: String, items: ToolbarScope.() -> Unit, content: @
                             }
                         }
                     }
+                    // Who is signed in, last, at every width.
+                    LocalShellAccount.current?.invoke()
                 },
                 // The status bar's inset is the column's, kept while the large title goes.
                 windowInsets = WindowInsets(0),

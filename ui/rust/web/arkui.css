@@ -75,6 +75,10 @@ button.ark-sidebar-heading:hover, button.ark-sidebar-heading.ark-on { color: var
 .ark-bar-button:hover { background: var(--ark-container); }
 .ark-bar-button:active { background: var(--ark-container-highest); transition: none; }
 .ark-bar-button.ark-on { color: var(--ark-accent); }
+/* Who is signed in, the toolbar's last item: their picture, or their initial on the accent's tint. */
+.ark-account { border-radius: 50%; }
+.ark-account-picture { width: 24px; height: 24px; border-radius: 50%; object-fit: cover; }
+.ark-account-initial { width: 24px; height: 24px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 600; background: var(--ark-container-highest); color: var(--ark-accent); }
 .ark-bar-button:disabled:not([data-ark-off]) { color: color-mix(in srgb, var(--ark-ink) 30%, transparent); background: none; }
 /* Short of a sidebar, the title is the page's own, large under the bar
    (an iPhone's large title), and the bar over it has no rule of its own:

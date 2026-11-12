@@ -109,6 +109,7 @@ impl App {
         money_app::shell::SessionFacts {
             who: s.login.as_ref().map(live::who).unwrap_or_default(),
             login: s.login.as_ref().map(|l| l.user.email.clone()).unwrap_or_default(),
+            picture: self.account_picture_url().unwrap_or_default(),
             demo: false,
             server: ark_auth::onboarding::display(&s.url),
             linked: Some(status.linked),

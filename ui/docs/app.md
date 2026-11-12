@@ -1231,7 +1231,10 @@ ui/docs/apps/money.md for money):
    back named for the group — so far arkui-web's alone, for the docs),
    `pushes` (`navigationDestination`),
    `split_view`, `toolbar`
-   with `bar_item`s by `Placement`, `searchable`, `inspector`, `hosted`,
+   with `bar_item`s by `Placement`, `Tabs::account` (an `account_item`:
+   who is signed in, their picture or their initial, every section's
+   toolbar's last item at every width, said "Account" and their name:
+   `ToolbarAccount` on the phones and the Mac), `searchable`, `inspector`, `hosted`,
    `confirmation_dialog`, `alert`, `settings_panes` (one shown, by title),
    and the menu bar's
    `CommandMenu`s; `View::map` hosts a shell in another app's messages.

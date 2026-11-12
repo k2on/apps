@@ -35,6 +35,10 @@ pub struct SessionFacts {
     pub who: String,
     /// Their email or login, under the name.
     pub login: String,
+    /// Where their picture is loaded from (the provider's `picture`, as the
+    /// server keeps it: ark-auth's `picture_url`); empty for none, and the
+    /// demo's.
+    pub picture: String,
     /// The demo's household, on this device alone.
     pub demo: bool,
     /// The server, as it is shown (`money.example.com`).

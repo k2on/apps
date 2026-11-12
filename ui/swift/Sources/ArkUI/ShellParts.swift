@@ -28,6 +28,10 @@ private struct ShellFooterKey: EnvironmentKey {
     static let defaultValue: AnyView? = nil
 }
 
+private struct ShellAccountKey: EnvironmentKey {
+    static let defaultValue: AnyView? = nil
+}
+
 extension EnvironmentValues {
     /// The screens a shell hosts, by name: the app's own (hand-written, or
     /// generated apart), until they move into Rust.
@@ -48,6 +52,13 @@ extension EnvironmentValues {
     var shellFooter: AnyView? {
         get { self[ShellFooterKey.self] }
         set { self[ShellFooterKey.self] = newValue }
+    }
+
+    /// Who is signed in (`ToolbarAccount`): every section's toolbar's last
+    /// item, at every width.
+    var shellAccount: AnyView? {
+        get { self[ShellAccountKey.self] }
+        set { self[ShellAccountKey.self] = newValue }
     }
 }
 
@@ -77,14 +88,17 @@ public struct HostedScreen: View {
 
 /// The app's sections: a tab bar on the iPhone, a sidebar on the iPad
 /// (the person can turn it into the tab bar) and on the Mac, with
-/// `footer` (who is signed in) at the sidebar's foot. A tag `parent/child`
-/// is a child of `parent` (an account of Accounts): a place of its own in
-/// the sidebar; on a compact width the parent's tab, which pushes it.
-public struct AdaptiveTabs<Tabs: TabContent<String>, Footer: View>: View {
+/// `footer` (who is signed in) at the sidebar's foot, and `account` (an
+/// `ToolbarAccount`) the last item of every section's toolbar. A tag
+/// `parent/child` is a child of `parent` (an account of Accounts): a place
+/// of its own in the sidebar; on a compact width the parent's tab, which
+/// pushes it.
+public struct AdaptiveTabs<Tabs: TabContent<String>, Footer: View, Account: View>: View {
     let selection: String
     let onSelect: (String) -> Void
     let tabs: Tabs
     let footer: Footer
+    let account: Account
     #if os(iOS)
     @Environment(\.horizontalSizeClass) private var size
     #endif
@@ -93,13 +107,19 @@ public struct AdaptiveTabs<Tabs: TabContent<String>, Footer: View>: View {
         selection: String,
         onSelect: @escaping (String) -> Void,
         @TabContentBuilder<String> _ tabs: () -> Tabs,
-        @ViewBuilder footer: () -> Footer
+        @ViewBuilder footer: () -> Footer,
+        @ViewBuilder account: () -> Account
     ) {
         self.selection = selection
         self.onSelect = onSelect
         self.tabs = tabs()
         self.footer = footer()
+        self.account = account()
     }
+
+    /// Whether an account item was given: the toolbars carry it, and the
+    /// footer stays at the sidebar's foot.
+    private var hasAccount: Bool { Account.self != EmptyView.self }
 
     private var compact: Bool {
         #if os(iOS)
@@ -119,8 +139,48 @@ public struct AdaptiveTabs<Tabs: TabContent<String>, Footer: View>: View {
         TabView(selection: Binding(get: { shown }, set: onSelect)) { tabs }
             .tabViewStyle(.sidebarAdaptable)
             .tabViewSidebarBottomBar { footer }
-            .environment(\.shellFooter, compact ? AnyView(footer) : nil)
+            .environment(\.shellFooter, compact && !hasAccount ? AnyView(footer) : nil)
+            .environment(\.shellAccount, hasAccount ? AnyView(account) : nil)
     }
+}
+
+extension AdaptiveTabs where Account == EmptyView {
+    /// The sections with no account item in their toolbars.
+    public init(
+        selection: String,
+        onSelect: @escaping (String) -> Void,
+        @TabContentBuilder<String> _ tabs: () -> Tabs,
+        @ViewBuilder footer: () -> Footer
+    ) {
+        self.init(selection: selection, onSelect: onSelect, tabs, footer: footer, account: { EmptyView() })
+    }
+}
+
+/// Who is signed in, a toolbar's last item (`AdaptiveTabs`' `account`): their
+/// picture (`picture`, a whole URL), or their initial on the accent while
+/// there is none (`Face`, through the shared URL cache), opening their
+/// account (`onTap`: money's Settings › General). VoiceOver hears "Account"
+/// and their name.
+public struct ToolbarAccount: View {
+    let name: String
+    let picture: String
+    let onTap: () -> Void
+
+    public init(name: String, picture: String, onTap: @escaping () -> Void) {
+        self.name = name
+        self.picture = picture
+        self.onTap = onTap
+    }
+
+    public var body: some View {
+        Button(action: onTap) {
+            Face(name: name.isEmpty ? "?" : name, picture: picture, side: ToolbarAccount.side)
+        }
+        .accessibilityLabel(name.isEmpty ? "Account" : "Account, \(name)")
+    }
+
+    /// The face's side in a toolbar: a bar button's glyph's height.
+    public static let side: CGFloat = 28
 }
 
 /// One section: its title and glyph, its tag, what waits there, what it shows.
@@ -254,6 +314,7 @@ public struct WithToolbar<Content: View, Items: ToolbarContent>: View {
     }
 
     @Environment(\.shellFooter) private var footer
+    @Environment(\.shellAccount) private var account
 
     public var body: some View {
         content
@@ -269,6 +330,10 @@ public struct WithToolbar<Content: View, Items: ToolbarContent>: View {
                 // at the toolbar's end, never over its title.
                 if let footer {
                     ToolbarItem(placement: .secondaryAction) { footer }
+                }
+                // Who is signed in, last, at every width.
+                if let account {
+                    ToolbarItem(placement: .primaryAction) { account }
                 }
             }
     }
