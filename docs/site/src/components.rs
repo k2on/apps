@@ -541,7 +541,7 @@ pub const COMPONENTS: &[Component] = &[
         summary: "An app's routes as URLs, one spelling on every shell, kept in step with the address bar or the back stack.",
         desktop: &["router", "url"],
         android: Some(Mobile {
-            at: &["ui/Destination.kt: Destination, Destinations", "Router.kt: RouteArg"],
+            at: &["ui/Destination.kt: Destination", "Router.kt: RouteArg"],
             how: &[
                 "Destination(owner, name) { content }: a page's own ViewModel store, kept while it is on the stack.",
                 "RouteArg.of(route.url()) / RouteArg.path(arg): a route's URL as a destination's argument, and back.",

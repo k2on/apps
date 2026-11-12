@@ -20,9 +20,8 @@ another; and with no server at all it runs the demo's household
 
 **Assembled, not run.** `nix build .#money-apk` compiles every Kotlin file
 here and arkui's and assembles the release APK with the kernel for
-`arm64-v8a`, `armeabi-v7a` and `x86_64`. The app has no JVM tests of its
-own: what its model and its way in do is money's host's, tested in Rust
-(money/app/tests/phone.rs). No phone has run this APK: the Custom Tab's redirect, JNA's
+`arm64-v8a`, `armeabi-v7a` and `x86_64`. What its model and its way in
+do is money's host's, tested in Rust (money/app/tests/phone.rs). No phone has run this APK: the Custom Tab's redirect, JNA's
 loading on a device, dynamic colour and the back gesture's preview are the
 parts only a phone can say anything about.
 

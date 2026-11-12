@@ -247,7 +247,6 @@ public fun CoverCard(
     round: Boolean = false,
     opens: Boolean = false
 ) {
-    Recompositions.hit("CoverCard")
     val hero = if (opens) rememberHero(Space.corner, round = round) else null
     Column(
         Modifier.width(side)

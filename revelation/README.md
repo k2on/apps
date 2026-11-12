@@ -64,11 +64,10 @@ to `signingConfigs` in `app/build.gradle.kts`. Anyone can read the key, so
 anyone can sign an APK as this app. It must never sign anything published
 as trusted.
 
-## Not tested
+## Built, not run
 
-The app has no automated tests: its JVM tests and Paparazzi screens were
-removed. `nix build .#revelation-apk` compiles it and assembles the APK,
-and nothing more is checked by a build.
+`nix build .#revelation-apk` compiles it and assembles the APK, and
+nothing more is checked by a build.
 
 ## What only a phone can show
 

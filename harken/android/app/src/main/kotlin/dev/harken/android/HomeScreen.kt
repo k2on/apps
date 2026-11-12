@@ -40,7 +40,6 @@ import dev.arkui.FETCHING_DELAY_MS
 import dev.arkui.Fetching
 import dev.arkui.Glyph
 import dev.arkui.Heading
-import dev.arkui.Recompositions
 import dev.arkui.ScrollsToTop
 import dev.arkui.Shelf
 import dev.arkui.Space
@@ -101,7 +100,6 @@ const val RECENT = 12
 
 @Composable
 fun HomeScreen(data: HomeData, albumOf: (Track) -> Album?, act: Do, placeholderDelayMs: Long = FETCHING_DELAY_MS) {
-    Recompositions.hit("HomeScreen")
     // Derived once per library, not once per composition: the shelf's cards skip only while the
     // list they were given is the same one.
     val recent = remember(data.tracks) { data.tracks.takeLast(RECENT).reversed() }

@@ -3,8 +3,8 @@
 //! domain's transitions and hooks), harken's one reconciler behind the
 //! phone's FFI ([`Player`]) over the phone's own queue (`MediaSound`), and
 //! a stand-in media player ([`Fake`], what AVPlayer and ExoPlayer are to
-//! the phones, through `ark-media-player`'s `NativeMediaPlayer`). The phone's reconciler tests
-//! (`RemoteTests.kt`), moved here with the reconciler: the output obeying
+//! the phones, through `ark-media-player`'s `NativeMediaPlayer`). The phone's reconciler,
+//! case by case: the output obeying
 //! and nobody else sounding, a track's end said once, the session following
 //! the phone and the phone following a seek, a play recorded once by the
 //! output alone, both branches of coming back, a phone unlinked being its

@@ -111,8 +111,7 @@ SwiftUI's twin is ArkUI's `.inlineHeader` (`InlineHeader.swift`).
 ## Verified
 
 The pieces the apps use are seen in their screenshots (app-screens);
-none has been seen on a phone, and the apps have no Kotlin tests of their
-own.
+none has been seen on a phone.
 
 ## Motion
 

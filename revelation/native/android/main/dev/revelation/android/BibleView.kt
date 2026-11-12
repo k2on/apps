@@ -139,7 +139,7 @@ class BibleView @JvmOverloads constructor(context: Context, attrs: AttributeSet?
         isFocusable = true
     }
 
-    /** The face the text is set in: the system serif. The screenshots may set another if layoutlib lacks it. */
+    /** The face the text is set in: the system serif. */
     fun typefaceFor(face: Typeface) {
         for (p in listOf(textPaint, numberPaint, titlePaint, chapterPaint, bookLabelPaint, chapterLabelPaint)) p.typeface = face
         textPaint.textSize = 18f

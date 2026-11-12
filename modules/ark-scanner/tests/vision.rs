@@ -3,7 +3,7 @@
 //! a quad that turns with its frame; steady only once it has held still;
 //! sharp text sharper than blurred; a page made flat lands on its
 //! rectangle; and the whole scan over the camera's fake, from frames to a
-//! flat JPEG. (Moved from money's Android scanner, Vision.kt's JVM tests.)
+//! flat JPEG.
 
 use std::sync::{Arc, Mutex};
 
@@ -13,7 +13,7 @@ use ark_scanner::eyes::{self, PageEyes};
 use ark_scanner::vision::{self, Luma, Pt, Quad, Steady};
 use ark_scanner::{page, scan_page, warp};
 
-/// `java.util.Random`, so the frames are the JVM tests' own, pixel for pixel.
+/// `java.util.Random`, so the frames are Java's, pixel for pixel.
 struct JavaRandom(u64);
 
 impl JavaRandom {

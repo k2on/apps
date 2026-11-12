@@ -36,7 +36,6 @@ import dev.arkui.Empty
 import dev.arkui.Glyph
 import dev.arkui.Heading
 import dev.arkui.Press
-import dev.arkui.Recompositions
 import dev.arkui.ScrollsToTop
 import dev.arkui.Shelf
 import dev.arkui.Space
@@ -79,7 +78,6 @@ fun SearchScreen(
     /** Who is signed in: the face at the end of the title, which raises the account sheet. */
     who: Who = Who(""),
 ) {
-    Recompositions.hit("SearchScreen")
     val list = rememberDestinationListState("search")
     ScrollsToTop(list)
     LazyColumn(Modifier.fillMaxSize(), state = list) {

@@ -67,7 +67,6 @@ import dev.arkui.HeroMore
 import dev.arkui.MoreButton
 import dev.arkui.PinnedBar
 import dev.arkui.PinnedPage
-import dev.arkui.Recompositions
 import dev.arkui.Shelf
 import dev.arkui.Space
 import dev.arkui.UnderStatusBar
@@ -150,7 +149,6 @@ private fun songUnder(t: Track, d: TrackDetail?, creator: String): String =
  */
 @Composable
 fun AlbumPage(id: String, album: Album?, tracks: List<Track>, details: Map<Id, TrackDetail>, playing: String?, act: Do, list: LazyListState = rememberDestinationListState("album")) {
-    Recompositions.hit("AlbumPage")
     val page = Page.ForAlbum(id)
     // Its name: its row's, or — the albums not caught up — what its tracks call it.
     val name = album?.name ?: tracks.firstNotNullOfOrNull { details[it.id]?.album } ?: ""
@@ -205,7 +203,6 @@ fun ArtistPage(
     person: OnEpisode? = null,
     mine: Map<Id, Listened> = emptyMap(),
 ) {
-    Recompositions.hit("ArtistPage")
     val page = Page.ForArtist(name)
     val counts =
         facts(
@@ -358,7 +355,6 @@ private fun WebLink(link: String) {
  */
 @Composable
 fun WorkPage(id: String, work: WorkSummary?, recordings: List<RecordingsEntry>, act: Do) {
-    Recompositions.hit("WorkPage")
     val composer = work?.composer.orEmpty()
     PinnedPage(rememberDestinationListState("work"), work?.title.orEmpty(), act::back, art = null) {
         item {
@@ -425,7 +421,6 @@ fun RecordingPage(
     playing: String?,
     act: Do,
 ) {
-    Recompositions.hit("RecordingPage")
     val page = Page.ForRecording(id)
     val composer = work?.composer.orEmpty()
     val who = take?.let(Catalogue::who).orEmpty()
@@ -506,7 +501,6 @@ fun ShowPage(
     /** Who is on each episode, by its media id: the show's, read once (`Library.showPeople`). */
     people: Map<Id, List<OnEpisode>> = emptyMap(),
 ) {
-    Recompositions.hit("ShowPage")
     val page = Page.ForShow(id)
     val title = show?.title ?: "Show"
     // What "Today" is counted from: the page's opening, not every frame.
@@ -710,7 +704,6 @@ fun EpisodeRow(
     onPerson: (OnEpisode) -> Unit = {},
     show: String = "",
 ) {
-    Recompositions.hit("EpisodeRow")
     val dated = facts(show, formatPublished(detail?.publishedMs ?: 0, now, java.util.TimeZone.getDefault().getOffset(now) / 60_000))
     val about = detail?.description.orEmpty()
     val progress = Episodes.progress(track, mine)
@@ -768,7 +761,6 @@ fun EpisodeRow(
 
 @Composable
 fun PlaylistPage(id: Id, playlist: Playlist?, tracks: List<Track>, albumOf: (Track) -> Album?, playing: String?, act: Do) {
-    Recompositions.hit("PlaylistPage")
     val page = Page.ForPlaylist(id)
     val name = playlist?.name ?: "Playlist"
     PinnedPage(rememberDestinationListState("playlist"), name, act::back, art = { side -> Cover(name, "", side, Modifier.size(side), corner = PinnedBar.CORNER) }) {

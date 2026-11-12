@@ -788,8 +788,7 @@ fresh and compiles only harken's. Host: `arkdb-deps` → `arkdb-kernel`
 `arkdb-tests`; wasm: `arkdb-wasm-deps` → `arkdb-wasm-kernel` → the pages;
 each Android ABI `harken-android-<abi>-deps` → `-kernel` → the library;
 iOS `harken-ios-deps` → `harken-ios-kernel` → the xcframework. The APK's
-host part (the Kotlin bindings and the host library its JVM tests load)
-is a chain of its own, `harken-android-host-deps` → `-kernel` →
+host part (the Kotlin bindings and the host library) is a chain of its own, `harken-android-host-deps` → `-kernel` →
 `harken-android-host`, built as an ABI is (`-p harken-ffi`, without the
 workspace's feature unification, under which ark-explorer's `ui` — and so
 iced — is on for harken-ffi too); UniFFI's bindgen binary is built over
@@ -1045,8 +1044,7 @@ generated `of`) against 2.2–2.5 µs typed — 5× (one machine, three rounds,
 the rows equal either way; not a phone, not ART's `org.json`). Tests: the
 view objects over harken's views, a wrong row type refused, nested twins,
 the reset fix (`ark-ffi`), and the pin with `Playlist` left out of the
-typed — each falsified once; the app's JVM tests 99 (one skipped) over the host
-library, by the throwaway expression of S3b. The iOS type-check passes over
+typed — each falsified once. The iOS type-check passes over
 the new bindings (run by hand with `typecheck.sh`; it found `Rows.swift`'s
 own `Hashable` redundant). Not verified: an APK, a phone, an iPhone; a
 typed sum in Kotlin (UniFFI writes an all-unit enum as an `enum class`,
@@ -1222,13 +1220,9 @@ domain change.
 *Measured*: hand-written Swift 4,911 lines in `Harken/` (the Foundation-only
 half — rows, session, what plays, onboarding, the player's core, bridge,
 model — 2,782; the SwiftUI, AVFoundation, MediaPlayer, ImageIO and
-AuthenticationServices half 2,129), 705 in `HarkenTests/`, against
-Android's 11,800 and 5,265. `checks.harken-ios-typecheck` now picks every
-file whose imports are Foundation and Combine only and type-checks
-HarkenTests with them; handed the host library it runs them: 32 passed on
-Linux (Swift 5.8, a stand-in XCTest), two of them the player end to end
-against a `Hall` — the real reconciler driving `SoundCore` over a stand-in
-engine — each new test falsified once. Not verified: everything that needs
+AuthenticationServices half 2,129), against Android's 11,800.
+`checks.harken-ios-typecheck` now picks every file whose imports are
+Foundation and Combine only and type-checks them (Swift 5.8). Not verified: everything that needs
 Xcode — the SwiftUI, the engine, the lock screen, the sign-in sheet, the
 covers, the project, the xcframework's link, an archive, a device, a real
 server (`harken/ios/README.md`, "First build").
@@ -1378,14 +1372,13 @@ change instead. Source: `harken-player` 884 (+405 tests), `harken-server`
 4,787 → 4,517 (its in-file tests 1,095 → 887 lines; the shipped adapter
 1,936 → ~1,875: the speaker's reading is most of what the bridge was),
 `harken/ffi` 123 → 274 (+523 tests), domain, `ark-peer`, `ark-ffi`
-unchanged; hand-written Kotlin main 12,269 → 11,800 (`Remote.kt`'s 757 gone, `Session.kt` 319 in), tests
-5,699 → 5,265; so the default Rust grows by 765 and Kotlin falls by 903,
+unchanged; hand-written Kotlin main 12,269 → 11,800 (`Remote.kt`'s 757 gone, `Session.kt` 319 in);
+so the default Rust grows by 765 and Kotlin's main falls by 469,
 for one reconciler where there were two (three with the desktop's, which
-is `harken-iced`'s and untouched). Tests: Rust 445 passed (`RemoteTests`'s
-ten in `harken/ffi/tests/player.rs`, one more for a step told of its own
+is `harken-iced`'s and untouched). Tests: Rust 445 passed (ten for the
+reconciler in `harken/ffi/tests/player.rs`, one more for a step told of its own
 change; the bridge's session rules as eight in `harken/player/tests`; its
-reading of the house as nineteen beside it), each new one falsified once;
-the app's JVM tests 99 (one skipped), run over a host-only library. Not
+reading of the house as nineteen beside it), each new one falsified once. Not
 verified: a phone or an iPhone running it (`Player.swift` not
 type-checked here), a real Home Assistant and Sonos.
 
@@ -1574,7 +1567,7 @@ own driver in the sandbox, pumps by hand); fuzz 1,000 sessions with traces,
 of `values-json` is not held to the vectors (its tests skip them, saying
 so); a non-canonical postcard frame decodes (only rows are held to their
 one encoding, by re-encoding); the phones' JSON crossing on a device
-(the JVM tests and the iOS type-check only); the perf numbers are one
+(the iOS type-check only); the perf numbers are one
 machine's, noisy at 20–50% on the smallest shapes.
 
 **N1** (`1e60dda`…`b3da7f4`): **one runtime; the domain is Rust** (§1.16).

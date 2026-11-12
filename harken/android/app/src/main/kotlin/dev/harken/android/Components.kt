@@ -59,7 +59,6 @@ import dev.arkui.Glyph
 import dev.arkui.LocalPageFrame
 import dev.arkui.MoreButton
 import dev.arkui.Origin
-import dev.arkui.Recompositions
 import dev.arkui.RowOrigin
 import dev.arkui.Space
 import dev.arkui.Tapped
@@ -139,7 +138,6 @@ fun TrackRow(
     art: Boolean = true,
     leading: @Composable () -> Unit,
 ) {
-    Recompositions.hit("TrackRow")
     Row(
         Modifier.fillMaxWidth().pressable(onClick = onClick, press = Press.Highlight).padding(start = Space.page, end = Space.xs).height(ROW),
         verticalAlignment = Alignment.CenterVertically,

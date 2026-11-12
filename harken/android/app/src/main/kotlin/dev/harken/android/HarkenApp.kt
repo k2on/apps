@@ -76,7 +76,6 @@ import dev.arkui.LocalPageMotion
 import dev.arkui.Origin
 import dev.arkui.PageBack
 import dev.arkui.PageMotion
-import dev.arkui.Recompositions
 import dev.arkui.Links
 import dev.arkui.Navigator
 import dev.arkui.Reselect
@@ -124,7 +123,6 @@ fun Chrome(
     sheet: PlayerSheet = rememberPlayerSheet(),
     page: @Composable () -> Unit,
 ) {
-    Recompositions.hit("Chrome")
     // The tab bar's height, which the player's bar stands on: Material's 80 and the system's bar.
     val tabs = 80.dp + WindowInsets.systemBars.asPaddingValues().calculateBottomPadding()
     Box(Modifier.fillMaxSize()) {
@@ -225,7 +223,6 @@ fun HarkenApp(
     /** Told each tab's stack once: a test's way to reach a destination, and to read the graphs back. */
     onNavs: (Map<Tab, NavHostController>) -> Unit = {},
 ) {
-    Recompositions.hit("HarkenApp")
     val context = LocalContext.current.applicationContext
     // The library and the listening session live as long as the session does, not as long as
     // this composition (Kept.kt): the media service holds them too, and the activity going is
@@ -922,8 +919,7 @@ fun HarkenApp(
 /**
  * Every destination: the tabs' roots and every page. Each tab's NavHost is built from this list
  * (`ark-ui`'s `destinations`), so nothing is drawn on a stack without being one — keeping its
- * places, seeing its own lifecycle — and the restoration tests walk the same list, so a new route
- * is covered the day it is added.
+ * places, seeing its own lifecycle.
  */
 enum class Destination(val pattern: String, val tab: Tab?) {
     Home("home", Tab.Home),

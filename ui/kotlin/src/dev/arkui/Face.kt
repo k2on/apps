@@ -90,7 +90,7 @@ public fun Face(
 /** Faces: their letters, and the pictures already fetched. */
 public object Faces {
     // A few faces is all an app ever shows: whoever is signed in, and whoever was before. Made
-    // when a picture is first asked for, so the JVM's tests of the rest need no Android.
+    // when a picture is first asked for.
     private val memory by lazy { LruCache<String, ImageBitmap>(8) }
 
     /**

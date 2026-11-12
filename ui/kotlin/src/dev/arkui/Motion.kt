@@ -193,26 +193,6 @@ public class PageMotion(private val tabs: Set<String> = emptySet()) {
      */
     public var reduced: Boolean = false
 
-    /** Frames drawn with a page part-way through a move: a test's measure of "no transition". */
-    public var movingFrames: Int = 0
-
-    /**
-     * How open the moving page was last drawn, 1 when none is moving: a test's view of the move.
-     */
-    public var drawnAt: Float = 1f
-        internal set
-
-    /** How far the back preview had shrunk the page when it was last drawn: a test's view of it. */
-    public var previewDrawn: Float = 0f
-        internal set
-
-    /** Frames drawn of a page rising with nothing to grow from: a test's view of it. */
-    public var rose: Int = 0
-
-    /** What the last page to open grew from: a test's view of it. */
-    public var taken: Origin? = null
-        private set
-
     /** What the last row whose menu opened was, and where: set by the row, read by its menu. */
     public var tapped: Tapped? = null
 
@@ -236,10 +216,7 @@ public class PageMotion(private val tabs: Set<String> = emptySet()) {
 
     internal fun originOf(id: String): Origin? =
         origins.getOrPut(id) {
-            pending.also {
-                pending = null
-                taken = it
-            }
+            pending.also { pending = null }
         }
 
     /** A push: a page grows over whatever it came from; a tab arrives at once. */
@@ -336,13 +313,6 @@ public class PageMotion(private val tabs: Set<String> = emptySet()) {
 
     /** The spring back from a cancelled tab back. */
     internal var tabSpringing: Job? = null
-
-    /** The scale the leaving tab was last drawn at, 1 when none is: a test's view of it. */
-    public var tabDrawnScale: Float = 1f
-        internal set
-
-    /** Frames drawn of a tab leaving for the first: a test's view of it. */
-    public var tabFrames: Int = 0
 
     /**
      * The preview for page `id` drawn now: the live one while the gesture is held, its release
@@ -605,7 +575,6 @@ internal constructor(
                     -(outer.coords?.takeIf { it.isAttached }?.positionInRoot() ?: Offset.Zero))
         // Nothing to grow from: the page rises a little way and fades in.
         if (from == null) {
-            motion.rose++
             return Placing(
                 1f, 0f, rise * (1f - p), page, 0f, (e / PageMotion.RISE_FADE).coerceIn(0f, 1f), 0f)
         }
@@ -690,17 +659,12 @@ internal constructor(
         scrim: Color
     ) =
         with(d) {
-            if (motion.top == id) {
-                motion.drawnAt = shown.coerceIn(0f, 1f)
-                motion.previewDrawn = motion.previewOf(id, shown)
-            }
             // A tab left at once is not drawn for the frame it is still there: what arrives is.
             if (motion.move == Move.Cut && leaving) return
             val m = placing(size, shown, placed)
             atBar(m, shown, size.width)
             if (m == null) drawContent()
             else {
-                motion.movingFrames++
                 withTransform({
                     translate(m.dx, m.dy)
                     scale(m.s, m.s, Offset.Zero)
@@ -712,10 +676,7 @@ internal constructor(
                 }
             }
             val dim = dim(shown)
-            if (dim > 0f) {
-                motion.movingFrames++
-                drawRect(scrim, alpha = dim)
-            }
+            if (dim > 0f) drawRect(scrim, alpha = dim)
         }
 
     // What the status bar is over. Drawn in order, the page under a moving one first: it says what
@@ -903,7 +864,6 @@ private suspend fun PageMotion.backToFirst(
             scope.launch {
                 animate(tabPreview, 0f, animationSpec = Springs.size()) { v, _ -> tabPreview = v }
                 tabBacking = false
-                tabDrawnScale = 1f
             }
         throw c
     }
@@ -914,7 +874,6 @@ private suspend fun PageMotion.backToFirst(
         tabBacking = false
         tabPreview = 0f
         tabGone = 0f
-        tabDrawnScale = 1f
     }
 }
 

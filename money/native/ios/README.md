@@ -16,8 +16,8 @@ app (`harken/ios`) is the template: its session, its model, its first run
 and its checks, said again for a budget.
 
 **Built by CI, never run on a device.** It was written on Linux with no
-Mac; `.github/workflows/ios.yaml` (its `money` job, after the `kernel` job shared with harken) is where it is compiled, its tests
-run on a simulator, and it is archived.
+Mac; `.github/workflows/ios.yaml` (its `money` job, after the `kernel` job shared with harken) is where it is compiled and
+archived.
 
 ## The app
 
@@ -194,7 +194,6 @@ Rust views, which this directory's Swift is compiled beside.
 nix run .#money-prebuild          # on a Mac with Xcode: money/.native/{ios,android}, the kernel linked in
 cd money/.native/ios
 xcodegen generate                 # nix build .#xcodegen, or Homebrew's
-xcodebuild test -scheme Money -destination 'platform=iOS Simulator,name=iPhone 17'
 xcodebuild archive -scheme Money -configuration Release -destination 'generic/platform=iOS'
 ```
 
@@ -205,14 +204,12 @@ Info.plist keys and its modules', the asset catalog with the accent from
 the theme and the icon rendered from money/icon.svg, automatic signing,
 bundle id `us.koon.money`) over `../ffi/ios/MoneyFFI.xcframework` (the
 generated `money-ffi` shim over money/app) and `../ffi/ios/swift`, this
-directory's `Money/` beside the generated views (`Generated/`), and the
-`MoneyTests` unit tests, in the one scheme `Money`.
+directory's `Money/` beside the generated views (`Generated/`), in the one scheme `Money`.
 
 CI (`.github/workflows/ios.yaml`) does the same on `macos-15` for
 every push touching `money/native/ios`, `money/app.toml`, `money/app`,
 `money/core`, `rust/`, `ui/prebuild.py` or `ui/swift`, and on demand: the kernel for the phone, the simulator and
-the Mac, the bindings, the xcframework, the project, the archive, then the
-tests on the newest iOS 26 iPhone simulator. The upload to TestFlight runs
+the Mac, the bindings, the xcframework, the project and the archive. The upload to TestFlight runs
 only on `main` and only when the repository variable `MONEY_IOS_UPLOAD` is
 `true`: set it once the App Store Connect record for `us.koon.money`
 exists.
@@ -257,39 +254,7 @@ harken's onboarding still keeps its own copy of; in ArkUI, `CentsText`,
 `checks.money-ios-typecheck` (`tools/typecheck.sh`, harken's for money):
 every file under `Money/` whose imports are Foundation and Combine only,
 with the generated types, against UniFFI's Swift for money's library, its
-headers, ArkUICore and a stand-in for Combine; then MoneyTests type-check
-against a stand-in for XCTest's assertions, and, handed the library built
-for this machine, run:
-
-```
-cargo build -p money-ffi --lib          # rust/
-MONEY_FFI_LIB=$PWD/rust/target/debug/libmoney_ffi.so \
-  bash money/native/ios/typecheck.sh <uniffi swift bindings>
-```
-
-The tests (`MoneyTests`) hold the first run's machine, the form's inputs,
-amounts and days with no session, and over the demo's household for
-2026-10-26: the month under its groups, covering Dining Out's overspending
-from Groceries, assigning against Ready to Assign, Auto-Assign meeting
-every target, the month paged, the accounts shelved, a register held,
-spliced with a new transaction and let go, the inbox emptied, the demo
-bank's three syncs and what it brought opened with its bank description,
-a refusal said once in the domain's words, and Edit's drops: a category
-dragged under another group joining it, either end of the list, a group
-taking its categories past others, a drop that moves nothing asking
-nothing, and each drawn ahead as the budget comes back — the cards' group
-first and its payment kept there. The cards (`CardTests`): credit
-overspending told from cash, the demo's card payment short until one tap
-covers it out of Ready to Assign, payments kept out of a transaction's
-categories, and a typed payment made a transfer to the card from its
-form. The banks (`BankTests`, rows made by hand): an ask followed until
-its page arrives and only its own, what asks and banks say, and what a
-bank's account may feed.
-The rules (`RuleTests`): only a month by hand is editable, Move Money
-passes a ruled category by, and the demo with a rule set on Gifts
-assigned 10% of Acme's paydays, read-only, its hand assignment refused
-in the domain's words, Auto-Assign passing it by, and the month before
-the rule still by hand.
+headers, ArkUICore and a stand-in for Combine.
 
 ## Not built
 

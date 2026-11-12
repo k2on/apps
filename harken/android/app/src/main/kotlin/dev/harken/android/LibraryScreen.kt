@@ -47,7 +47,6 @@ import dev.arkui.Chip
 import dev.arkui.Cover
 import dev.arkui.Empty
 import dev.arkui.ListRow
-import dev.arkui.Recompositions
 import dev.arkui.ScrollsToTop
 import dev.arkui.Space
 import dev.arkui.TabTitle
@@ -95,7 +94,6 @@ data class LibraryData(
 
 @Composable
 fun LibraryScreen(tab: LibraryTab, onTab: (LibraryTab) -> Unit, data: LibraryData, albumOf: (Track) -> Album?, playing: String?, act: Do) {
-    Recompositions.hit("LibraryScreen")
     Column(Modifier.fillMaxSize()) {
         // The face alone at the end of the line: what the list makes is its own first row.
         TabTitle("Library", account = { AccountFace(data.who.name, data.who.picture, onClick = act::account) })

@@ -520,7 +520,7 @@ to one: that is the finger's motion, not the app's.
 **Ask the library, never the system.** Every animation reads the shared
 switch and takes its gentle path through the shared helpers:
 
-- Compose: `reducedMotion()` (or `LocalReducedMotion` in a test or a
+- Compose: `reducedMotion()` (or `LocalReducedMotion` in a preview or a
   screenshot); `unlessReduced(spec)` for what only travels; `Springs.fade()`
   for the cross-fade; `Springs.settle(…, reduced)` for a release. The
   activity calls `keepMotion()` before `setContent`, so Android's "Remove
@@ -583,8 +583,7 @@ seen on one.
   inside a fixed frame instead. `animateContentSize` is tolerated on a
   small, leaf container whose height genuinely changes, never on a list.
 - No state written per frame from a gesture or a scroll that recomposes a
-  list. `Recompositions.hit` counts recompositions of hot rows in tests;
-  keep it flat while something moves.
+  list: keep a hot row's recompositions flat while something moves.
 - Lazy rows never carry an entrance (`AnimatedVisibility` on enter): rows
   are recycled, and the entrance replays every time one scrolls back. List
   reflow is `animateItem(fadeInSpec = null, fadeOutSpec = null,

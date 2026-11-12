@@ -62,8 +62,7 @@ None of its own (`module.toml`): the camera's.
 
 ## Verified
 
-`cargo test -p ark-scanner` (the JVM tests of money's old Vision.kt, on
-the same drawn frames, `java.util.Random(7)` and all: a page found where
+`cargo test -p ark-scanner` (on drawn frames, `java.util.Random(7)` and all: a page found where
 it was drawn, upright and tilted twenty degrees; none without one, nor a
 sliver; corners in order; a quad turned with its frame; steady only once
 held; sharp text over blurred; a quad flattened onto its rectangle; and the

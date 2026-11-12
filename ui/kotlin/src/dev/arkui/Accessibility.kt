@@ -25,7 +25,7 @@
 // the phone this is written on has animations removed, and its owner wants
 // to see them. Flip the constant and the system's switch is obeyed again.
 //
-// A test or a screenshot forces either path with [LocalReducedMotion].
+// A screenshot forces either path with [LocalReducedMotion].
 //
 // Reduce Transparency and Increase Contrast have no clean equivalent on
 // Android (high-contrast text is only reachable by reflection), so there is
@@ -49,9 +49,10 @@ import android.view.ViewGroup
 public object ReducedMotion {
     /**
      * Animate whatever the system says. While true, "Remove animations" is ignored: every
-     * animation runs as it would with the setting off, and [reducedMotion] is false unless a test
-     * says otherwise. The owner's phone has the setting on and they want to see the motion for
-     * now; set this to false to obey the setting again, and the gentle paths take over.
+     * animation runs as it would with the setting off, and [reducedMotion] is false unless
+     * [LocalReducedMotion] says otherwise. The owner's phone has the setting on and they want to
+     * see the motion for now; set this to false to obey the setting again, and the gentle paths
+     * take over.
      */
     public const val ALWAYS_ANIMATE: Boolean = true
 
@@ -75,7 +76,7 @@ public object ReducedMotion {
 }
 
 /**
- * Whether motion is reduced here: what a test or screenshot provides, or null for the system's
+ * Whether motion is reduced here: what a screenshot provides, or null for the system's
  * setting as [ReducedMotion.isOn] counts it.
  */
 public val LocalReducedMotion: ProvidableCompositionLocal<Boolean?> = staticCompositionLocalOf {

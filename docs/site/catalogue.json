@@ -628,7 +628,7 @@
       ],
       "android": {
         "at": [
-          "ui/Destination.kt: Destination, Destinations",
+          "ui/Destination.kt: Destination",
           "Router.kt: RouteArg"
         ],
         "how": [

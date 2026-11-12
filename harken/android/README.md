@@ -21,8 +21,8 @@ What it looks like and how it behaves is `docs/plan-android.md`.
 
 **Assembled, not run.** `nix build .#harken-apk` compiles every Kotlin
 file here and assembles the release APK with the kernel for `arm64-v8a`,
-`armeabi-v7a` and `x86_64`. The app has no JVM tests of its own; the
-kernel's are Rust's. Nothing in the container this
+`armeabi-v7a` and `x86_64`. The kernel's tests are Rust's. Nothing in
+the container this
 was written in can install or run an APK, and no phone has run this one:
 the media session, the Custom Tab's redirect, JNA's loading on a device and
 the notification permission are the parts only a phone can say anything

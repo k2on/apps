@@ -38,7 +38,6 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.ProvidableCompositionLocal
-import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -58,7 +57,6 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.createSavedStateHandle
 import androidx.lifecycle.viewmodel.CreationExtras
 import androidx.navigation.NavBackStackEntry
-import androidx.navigation.NavGraph
 import androidx.navigation.NavGraphBuilder
 import androidx.navigation.compose.composable
 import java.util.IdentityHashMap
@@ -93,16 +91,6 @@ internal constructor(
         internal set
 
     /**
-     * How many times a composition of it has begun: a test's view of "drawn again, from scratch".
-     */
-    public var entered: Int = 0
-        internal set
-
-    /** The lifecycle its content sees, as it was last composed: a test's view of it. */
-    public var lifecycle: Lifecycle? = null
-        internal set
-
-    /**
      * Whether it was left somewhere other than the top of every container: what a destination whose
      * rows are not there yet asks before drawing a list that would lose that place to its top.
      */
@@ -115,9 +103,6 @@ internal constructor(
      */
     public fun places(): Map<String, List<Int>> =
         (kept.mapValues { it.value.toList() } + live.mapValues { placeOf(it.value).toList() })
-
-    /** The state drawing `key` now, while it is drawn: a test's view of what is on screen. */
-    public fun drawn(key: String): Any? = live[key]
 
     /** Every name drawn now. */
     public val drawnKeys: Set<String>
@@ -196,20 +181,18 @@ internal constructor(
 
 /**
  * Whether a mistake in how an app uses this library — two containers of one destination under one
- * name — throws, or is said once and lived with. On where the `dev.arkdb.ui.strict` property says
- * so and in a debuggable app (which turns it on); off in a release, where the one to find it would be a person whose app closed.
+ * name — throws, or is said once and lived with. On in a debuggable app (which turns it on); off in
+ * a release, where the one to find it would be a person whose app closed.
  */
 public object Strict {
-    @Volatile public var on: Boolean = System.getProperty("dev.arkdb.ui.strict") == "true"
-
-    /** Where a mistake is said while [on] is off, each once: the log, or a test listening. */
-    @Volatile public var say: (String) -> Unit = { Log.w("ark-ui", it) }
+    @Volatile public var on: Boolean = false
 
     private val said = ConcurrentHashMap.newKeySet<String>()
 
+    /** Said once in the log while [on] is off. */
     internal fun mistake(message: String) {
         check(!on) { message }
-        if (said.add(message)) say(message)
+        if (said.add(message)) Log.w("ark-ui", message)
     }
 }
 
@@ -220,26 +203,14 @@ public val LocalDestination: ProvidableCompositionLocal<DestinationState?> =
     }
 
 /**
- * Every destination as it enters composition, while a test listens; null, always, in the app. What
- * the restoration tests read every container's place from.
- */
-public object Destinations {
-    @Volatile public var sink: ((DestinationState) -> Unit)? = null
-}
-
-/**
  * Draw `content` as the destination `owner` is — a back stack entry, which keeps its places, saved
  * with its own state. [destinations] puts every route of a graph in one.
  */
 @Composable
 public fun Destination(owner: ViewModelStoreOwner, name: String, content: @Composable () -> Unit) {
     val state = remember(owner) { holderOf(owner, name).state }
-    val life = LocalLifecycleOwner.current.lifecycle
-    SideEffect { state.lifecycle = life }
     DisposableEffect(state) {
         state.composed++
-        state.entered++
-        Destinations.sink?.invoke(state)
         onDispose { state.composed-- }
     }
     CompositionLocalProvider(LocalDestination provides state, content = content)
@@ -248,8 +219,7 @@ public fun Destination(owner: ViewModelStoreOwner, name: String, content: @Compo
 /**
  * Every route of `all` as a destination of the graph: each drawn in the navigation's motion
  * ([Moving]) and keeping its places ([Destination]). The app's list of routes is the graph, so a
- * route cannot be drawn without being one; [routes] reads a built graph back, for a test to hold
- * the list and the graph to each other.
+ * route cannot be drawn without being one.
  */
 public fun <D> NavGraphBuilder.destinations(
     all: Iterable<D>,
@@ -264,10 +234,6 @@ public fun <D> NavGraphBuilder.destinations(
         }
     }
 }
-
-/** Every route a graph can show, its nested graphs' included. */
-public fun NavGraph.routes(): Set<String> =
-    flatMap { d -> if (d is NavGraph) d.routes() else listOfNotNull(d.route) }.toSet()
 
 /**
  * A vertical or horizontal list's state, kept by the destination it is in as `key`: where it was

@@ -193,7 +193,7 @@ nothing re-evaluated per position tick — is then the same assertion.
 - **Velocity units** are distance-relative in SwiftUI; the conversion is in
   one function, not at every call site.
 - **No predictive back for the expanding card**; its dismiss is a drag.
-- **Measurement.** The Kotlin numbers are HotSpot and layoutlib's; the
+- **Measurement.** The Kotlin numbers are HotSpot's; the
   Swift ones will be Instruments' on a device. Neither phone has been timed.
 
 ## Tests
@@ -202,6 +202,5 @@ nothing re-evaluated per position tick — is then the same assertion.
 cap, the splash's four cases — the Kotlin `ArtTests`, `SpringsTests` and
 `SplashTests` value for value. The views: snapshot tests in `harken/ios`
 (rendered on macOS by `ImageRenderer`, light and dark), and the motion
-tests driven by a `UIHostingController` with a stepped clock, the iOS
-counterpart of `MotionTests` — written when there is a macOS runner to
+tests driven by a `UIHostingController` with a stepped clock — written when there is a macOS runner to
 build them on, which this repository does not have today.
