@@ -207,10 +207,12 @@ which nix builds at the commit (see below).
 - **`apps-ios.sh`**, **`driver-ios.sh`** and the UI test in
   **`drive-ios/`**: an XCUITest bundle of its own, built once for any
   simulator, which drives the installed apps by their bundle ids (the
-  apps' projects are untouched). One run of it per device takes every app
-  in both themes (the simulator's appearance set from the test), from a
-  plan apps-ios.sh writes, so xcodebuild's first-run cost is paid once per
-  device. Each app is launched with `-shots YES` (ArkUI's `Shots`: no
+  apps' projects are untouched). One run of it per device and theme takes
+  every app, from a plan apps-ios.sh writes, the simulator's appearance
+  set by `simctl ui` before it (set from the test alone, every dark pass
+  drew light), so xcodebuild's first-run cost is paid once per device and
+  theme. Each shot fails unless the app says its window draws in the
+  pass's theme (the value of its `ark.ready`). Each app is launched with `-shots YES` (ArkUI's `Shots`: no
   motion, and the ready signal, ui/docs/shots.md): after every launch,
   link and step the driver waits for the app's `ark.ready` at a newer
   generation, then takes the screen. Nothing waits for a time. It signs in

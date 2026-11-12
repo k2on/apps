@@ -55,7 +55,7 @@ What an app waits for is said to the library:
 
 | Toolkit | Where the signal is | How the driver waits |
 |---|---|---|
-| iPhone, iPad | an accessibility element `ark.ready`, labelled `ready <generation> <route>`, only while ready | `Drive.swift` waits for it at a newer generation (`waitForExistence` and a predicate, a minute at most, which only fails) |
+| iPhone, iPad | an accessibility element `ark.ready`, labelled `ready <generation> <route>`, only while ready, its value the theme the window draws in (`light`, `dark`) | `Drive.swift` waits for it at a newer generation (`waitForExistence` and a predicate, a minute at most, which only fails), and fails a shot drawn in the other theme |
 | Android | the log, tag `ArkReady`: `ready <generation> <route>` or `busy …`; and a 1 px view whose content description says the same | `app-android.sh` reads `adb logcat -s ArkReady` as it comes |
 | Browser | the root's `data-ark-idle` and `data-ark-version` | `web-shots.js`, after every step: idle at one version over two frames, the fonts loaded, every image decoded, no animation with an end running |
 | Desktop (iced) | the app's `is_idle`/`version`, handed to arkui-shots | `Window::until_ready`: idle at one version over two frames drawn with nothing else to do |

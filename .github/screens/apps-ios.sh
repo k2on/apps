@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Every app's iOS screenshots on the simulator that is booted (apps.md): each
-# app installed, then one run of the driver (drive-ios/) for all of them and
-# both themes, so xcodebuild's first run is paid once for the device, not
-# once for each app and theme. What is each app's is its
+# app installed, then a run of the driver (drive-ios/) for all of them in
+# each theme, the simulator's appearance set between them, so xcodebuild's
+# first run is paid once for the device and theme, not once for each app. What is each app's is its
 # <app>/demo/shots.json; nothing in the app knows, but for `-shots YES`,
 # which ArkUI reads (ui/docs/shots.md): no motion, and the ready signal the
 # driver waits on instead of any time. Fails, once all are taken, if any
@@ -94,55 +94,78 @@ done
 
 [ -f "$derived/built" ] || bash "$here/driver-ios.sh" "$derived"
 
-# One run: every app, both themes. Its own lines, and why it failed if it
-# did; its whole log beside its results.
+# A run a theme: every app, in the simulator's appearance set first, as
+# the simulator says it back (`simctl ui`; just booted, it can take the
+# setting and not yet have it). Set by the driver alone (XCUIDevice), every
+# dark pass drew light, byte for byte (43131582873 to 43159033586); the
+# driver now also fails a shot the app says it drew in the other theme.
+# Each run's own lines, and why it failed if it did; its whole log beside
+# its results, and every run's in <family>.log.
 echo "the $family's plan: $(jq -c 'map({bundle, out, shots: (.shots | length)})' "$plan")"
 status=0
 start=$(date +%s)
+appearance() {
+  for _ in $(seq 1 30); do
+    xcrun simctl ui "$udid" appearance "$1"
+    [ "$(xcrun simctl ui "$udid" appearance)" = "$1" ] && return 0
+    sleep 2
+  done
+  echo "::error::the simulator would not be $1"
+  return 1
+}
 drive() {
-  TEST_RUNNER_APP_PLAN="${DRIVE_PLAN:-$plan}" \
+  TEST_RUNNER_APP_PLAN="${DRIVE_PLAN:-$plan}" TEST_RUNNER_THEME="$2" \
     xcodebuild test-without-building -project "$here/drive-ios/Drive.xcodeproj" -scheme Drive \
       -destination "id=$udid" -derivedDataPath "$derived" -resultBundlePath "$results/$1.xcresult" \
       > "$results/$1.log" 2>&1
 }
-# Of the plan $1, the entries any of whose shots are not there in either
-# theme, as a plan of their own.
+# Of the plan $1, the entries any of whose shots in theme $2 are not
+# there, as a plan of their own.
 missing() {
-  local keep='[]' n i out want have theme
+  local keep='[]' n i out want have
   n=$(jq length "$1")
   for ((i = 0; i < n; i++)); do
     out=$(jq -r ".[$i].out" "$1")
     want=$(jq ".[$i].shots | length" "$1")
-    for theme in light dark; do
-      have=$(find "$out/$theme" -maxdepth 1 -name '*.png' ! -name 'stuck.png' 2> /dev/null | wc -l | tr -d ' ')
-      if [ "$have" -lt "$want" ]; then
-        keep=$(jq -c --argjson e "$(jq -c ".[$i]" "$1")" '. + [$e]' <<< "$keep")
-        break
-      fi
-    done
+    have=$(find "$out/$2" -maxdepth 1 -name '*.png' ! -name 'stuck.png' 2> /dev/null | wc -l | tr -d ' ')
+    if [ "$have" -lt "$want" ]; then
+      keep=$(jq -c --argjson e "$(jq -c ".[$i]" "$1")" '. + [$e]' <<< "$keep")
+    fi
   done
   printf '%s\n' "$keep"
 }
 
-drive "$family" || status=$?
-grep -E "^Drive: |error:|failed|passed|Test Case|XCTAssert|\*\* TEST" "$results/$family.log" || true
-# A run that ended early, once, run again on what it did not take: an app
-# the simulator would not launch in time, or XCUITest losing the app
-# ("Failed to get matching snapshots: … kAXErrorServerNotFound", "Timed out
-# while evaluating UI query", app-screens 43113069044), which ends the test
-# and every shot after it. Each entry left whole is taken whole again, in
-# both themes; one already signed in passes over its sign-in.
-if [ "$status" != 0 ]; then
-  again=$results/plan-$family-again.json
-  missing "$plan" > "$again"
-  if [ "$(jq length "$again")" -gt 0 ]; then
-    echo "the driver ended early; run again on $(jq -c 'map(.out | split("/") | .[-2:] | join("/"))' "$again")"
-    status=0
-    DRIVE_PLAN="$again" drive "$family-again" || status=$?
-    grep -E "^Drive: |error:|failed|passed|Test Case|XCTAssert|\*\* TEST" "$results/$family-again.log" || true
-    cat "$results/$family-again.log" >> "$results/$family.log"
+: > "$results/$family.log"
+for theme in light dark; do
+  run=0
+  if appearance "$theme"; then
+    drive "$family-$theme" "$theme" || run=$?
+  else
+    run=1
+    : > "$results/$family-$theme.log"
   fi
-fi
+  grep -E "^Drive: |error:|failed|passed|Test Case|XCTAssert|\*\* TEST" "$results/$family-$theme.log" || true
+  # A run that ended early, once, run again on what it did not take: an app
+  # the simulator would not launch in time, or XCUITest losing the app
+  # ("Failed to get matching snapshots: … kAXErrorServerNotFound", "Timed out
+  # while evaluating UI query", app-screens 43113069044), which ends the test
+  # and every shot after it. Each entry left whole is taken whole again in
+  # this theme; signed in already in the light one, it is not signed in again.
+  if [ "$run" != 0 ]; then
+    again=$results/plan-$family-$theme-again.json
+    missing "$plan" "$theme" > "$again"
+    if [ "$(jq length "$again")" -gt 0 ] && appearance "$theme"; then
+      echo "the driver ended early; run again on $(jq -c 'map(.out | split("/") | .[-2:] | join("/"))' "$again") ($theme)"
+      run=0
+      DRIVE_PLAN="$again" drive "$family-$theme-again" "$theme" || run=$?
+      grep -E "^Drive: |error:|failed|passed|Test Case|XCTAssert|\*\* TEST" "$results/$family-$theme-again.log" || true
+      cat "$results/$family-$theme-again.log" >> "$results/$family-$theme.log"
+    fi
+  fi
+  cat "$results/$family-$theme.log" >> "$results/$family.log"
+  [ "$run" = 0 ] || status=$run
+done
+xcrun simctl ui "$udid" appearance light || true
 echo "the driver ran for $(( $(date +%s) - start ))s (status $status)"
 
 # Each shot's size, as it was drawn.

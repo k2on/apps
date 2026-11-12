@@ -173,6 +173,9 @@ private struct ShotsRoot: ViewModifier {
                             .allowsHitTesting(false)
                             .accessibilityIdentifier(signal.ready ? "ark.ready" : "ark.busy")
                             .accessibilityLabel(label)
+                            // The theme it draws in, as the window has it: the
+                            // driver's dark pass checks it is dark.
+                            .accessibilityValue(scheme == .dark ? "dark" : "light")
                     }
                 }
                 .onAppear(perform: ShotsRoot.still)

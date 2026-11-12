@@ -9,7 +9,8 @@
 //                "route"?: <path>, "fresh"?: true,
 //                "steps": [{"tap": label, "role"?: …} | {"type": text} | {"await": label} | …]}]}]
 //
-// For each theme (the simulator's own appearance, set from here), each
+// For each theme (the simulator's own appearance, which apps-ios.sh sets
+// for a run of its own, `TEST_RUNNER_THEME`; both when none is said), each
 // app in turn: launched once with `-shots YES` (ArkUI's `Shots`: no
 // motion, and the ready signal), signed in through arkui's onboarding to
 // the server CI started, if it is not already, then its shots one after
@@ -128,7 +129,13 @@ final class Drive: XCTestCase {
     func testShots() throws {
         let plan = try JSONDecoder().decode([Entry].self, from: Data(contentsOf: URL(fileURLWithPath: try value("APP_PLAN"))))
         var failed: [String] = []
-        for (theme, appearance) in [("light", XCUIDevice.Appearance.light), ("dark", .dark)] {
+        // The simulator's appearance is set by apps-ios.sh (`simctl ui`),
+        // one run of this test a theme (`TEST_RUNNER_THEME`): set from here
+        // alone, every app's dark pass drew light, byte for byte (money's
+        // and harken's iPhone and iPad shots in 43131582873 through
+        // 43159033586). Set here too; each shot checks the app drew in it.
+        let only = env["THEME"].flatMap { $0.isEmpty ? nil : $0 }
+        for (theme, appearance) in [("light", XCUIDevice.Appearance.light), ("dark", .dark)] where only == nil || only == theme {
             XCUIDevice.shared.appearance = appearance
             for entry in plan {
                 do {
@@ -165,6 +172,7 @@ final class Drive: XCTestCase {
                 try open(shot, in: app, entry: entry, out: out)
                 let opened = Date()
                 try ready(app)
+                try drawn(app, in: theme, id: shot.id)
                 try noBanner(shot.id)
                 let isReady = Date()
                 try picture(app, landscape: entry.orientation == "landscape", id: shot.id)
@@ -370,6 +378,15 @@ final class Drive: XCTestCase {
         launched[entry.bundle] = launch
         screen[entry.bundle] = args
         _ = try? ready(app)
+    }
+
+    /// The theme the app says its window draws in (its ready signal's
+    /// value, ArkUI's `Shots`) is the pass's: a dark pass that drew light
+    /// fails here, not in a picture that looks like the light one.
+    private func drawn(_ app: XCUIApplication, in theme: String, id: String) throws {
+        let said = app.descendants(matching: .any)["ark.ready"].value as? String
+        guard said != theme else { return }
+        throw NSError(domain: "Drive", code: 4, userInfo: [NSLocalizedDescriptionKey: "\(id) is drawn in \(said ?? "no theme it says"), not \(theme)"])
     }
 
     /// The app's ready signal at a generation after `after` (any, if nil),
