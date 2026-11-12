@@ -864,8 +864,17 @@ jobs:
           # money's was evaluated again in 156s in 42965705977 all the same.
           start=$(date +%s)
           : > "$RUNNER_TEMP/drvs"
+          # Only what the commit has: an app with no Mac build (harken's)
+          # is not asked for one. nix's refusal of a missing attribute lists
+          # every path it tried, `packages.aarch64-darwin.` put before the
+          # one given among them, which read as a doubled path in the log.
+          names=$(nix eval --json "git+file://$PWD/src#packages.aarch64-darwin" --apply builtins.attrNames 2> /dev/null || echo '[]')
           for a in $APPS; do
             for p in "$a-ios-simulator" "$a-macos"; do
+              if [ "$names" != '[]' ] && ! jq -e --arg p "$p" 'index($p) != null' <<< "$names" > /dev/null; then
+                echo "$p: the commit has none"
+                continue
+              fi
               t=$(date +%s)
               if drv=$(nix eval --raw "git+file://$PWD/src#packages.aarch64-darwin.$p.drvPath" 2> "$RUNNER_TEMP/eval.err"); then
                 echo "$p $drv" >> "$RUNNER_TEMP/drvs"

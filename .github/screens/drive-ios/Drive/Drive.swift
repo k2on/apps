@@ -186,18 +186,23 @@ final class Drive: XCTestCase {
 
     /// The app at `shot`, in the app as it runs where it can be: launched
     /// afresh only for the theme's first shot, a `fresh` one, or one whose
-    /// screen arguments the app takes only at launch; else its screen arguments
-    /// as a launch link (`links`), its route as a link, or from where the
-    /// last shot left it. Then each step, each followed by the app's next
-    /// ready moment.
+    /// screen arguments the app takes only at launch; else its route as a
+    /// link where it has one (the same launch as its arguments, which the
+    /// shell takes as one: shots.json's note), its screen arguments as a
+    /// launch link (`links`) where it has none, or from where the last shot
+    /// left it. One link, one wait: opening both the arguments and then the
+    /// route was two links and two waits a shot (7 to 15 s of "open" in
+    /// app-screens 43258586746, where its "ready" was 1.5). Then each step,
+    /// each followed by the app's next ready moment.
     private func open(_ shot: Shot, in app: XCUIApplication, entry: Entry, out: URL) throws {
         let links = entry.links == true && entry.scheme?.isEmpty == false
         let relaunch = shot.fresh || !launched.contains(entry.bundle) || app.state != .runningForeground
             || (!links && !shot.args.isEmpty && screen[entry.bundle] != shot.args)
+        let routed = shot.route.flatMap { link($0, scheme: entry.scheme) }
         if relaunch {
             launch(app, entry, args: shot.args)
             reached = shot.fresh ? "launched (fresh)" : "launched"
-        } else if !shot.args.isEmpty, links, let url = link(query(shot.args), scheme: entry.scheme) {
+        } else if !shot.args.isEmpty, routed == nil, links, let url = link(query(shot.args), scheme: entry.scheme) {
             // Its screen as a launch link: what the last shot showed put back first.
             let g = try ready(app)
             app.open(url)
@@ -207,11 +212,13 @@ final class Drive: XCTestCase {
         } else {
             reached = "continued"
         }
-        if let route = shot.route, let url = link(route, scheme: entry.scheme) {
-            // Where the router can take it: in the app as it runs, no relaunch.
+        // Where the router can take it: in the app as it runs, no relaunch;
+        // not again after a launch that took its arguments already.
+        if let url = routed, let route = shot.route, !(relaunch && !shot.args.isEmpty) {
             let g = try ready(app)
             app.open(url)
             try ready(app, after: g)
+            if !shot.args.isEmpty { screen[entry.bundle] = shot.args }
             reached += ", routed \(route)"
         }
         for step in shot.steps {
@@ -360,11 +367,18 @@ final class Drive: XCTestCase {
 
     /// `app` launched afresh with `args`, in screenshot mode, and ready.
     private func launch(_ app: XCUIApplication, _ entry: Entry, args: [String]) {
-        app.terminate()
         // From the home screen, so the status bar has no way back to the app
         // that was in front before (a "◂ Money" over harken's shots, run
         // 43083062235's dark pass, and over each app's first in 42977527249).
+        // Home first, then the app stopped: a menu a shot left open (money's
+        // Auto-Assign) or a song playing goes with the app to the
+        // background, where the system puts the menu away and nothing is
+        // drawn, rather than the app being stopped from the middle of it
+        // (XCUITest's "Failed to get matching snapshots: Timed out while
+        // evaluating UI query" ended a pass at the launch after each in
+        // app-screens 43258586746).
         XCUIDevice.shared.press(.home)
+        app.terminate()
         app.launchArguments = ["-shots", "YES"] + args
         app.launch()
         launched.insert(entry.bundle)
@@ -376,7 +390,7 @@ final class Drive: XCTestCase {
     /// value, ArkUI's `Shots`) is the pass's: a dark pass that drew light
     /// fails here, not in a picture that looks like the light one.
     private func drawn(_ app: XCUIApplication, in theme: String, id: String) throws {
-        let said = app.descendants(matching: .any)["ark.ready"].value as? String
+        let said = signal(app).value as? String
         guard said != theme else { return }
         throw NSError(domain: "Drive", code: 4, userInfo: [NSLocalizedDescriptionKey: "\(id) is drawn in \(said ?? "no theme it says"), not \(theme)"])
     }
@@ -386,18 +400,26 @@ final class Drive: XCTestCase {
     /// element, up to `readyLimit`, which only fails.
     @discardableResult
     private func ready(_ app: XCUIApplication, after: Int? = nil) throws -> Int {
-        let signal = app.descendants(matching: .any)["ark.ready"]
+        let mark = signal(app)
         let until = Date().addingTimeInterval(readyLimit)
         while Date() < until {
-            guard signal.waitForExistence(timeout: until.timeIntervalSinceNow) else { break }
-            let label = signal.label
+            guard mark.waitForExistence(timeout: until.timeIntervalSinceNow) else { break }
+            let label = mark.label
             let g = Int(label.split(separator: " ").dropFirst().first ?? "") ?? -1
             if g > (after ?? -1) { return g }
             // Ready, but at the generation before: wait for it to change.
-            let changed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false OR label != %@", label), object: signal)
+            let changed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false OR label != %@", label), object: mark)
             _ = XCTWaiter.wait(for: [changed], timeout: max(until.timeIntervalSinceNow, 0))
         }
         throw NSError(domain: "Drive", code: 3, userInfo: [NSLocalizedDescriptionKey: "the app did not say it was ready (after generation \(after ?? -1)) within \(Int(readyLimit)) s"])
+    }
+
+    /// The app's ready signal: ArkUI's `Shots` draws it as a `Text`
+    /// (ui/swift/Sources/ArkUI/Shots.swift), so a static text by its
+    /// identifier, not every element of the tree searched for it, as
+    /// `descendants(matching: .any)` did several times a shot.
+    private func signal(_ app: XCUIApplication) -> XCUIElement {
+        app.staticTexts.matching(identifier: "ark.ready").firstMatch
     }
 
     /// What says `label` (`a|b`: either), or has it as its identifier.
