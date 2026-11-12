@@ -101,6 +101,7 @@ impl App {
         let Some(s) = &self.server else {
             return money_app::shell::SessionFacts {
                 demo: true,
+                today: self.today.clone(),
                 version,
                 ..Default::default()
             };
@@ -111,6 +112,7 @@ impl App {
             login: s.login.as_ref().map(|l| l.user.email.clone()).unwrap_or_default(),
             picture: self.account_picture_url().unwrap_or_default(),
             demo: false,
+            today: self.today.clone(),
             server: ark_auth::onboarding::display(&s.url),
             linked: Some(status.linked),
             pending: status.pending as i64,
