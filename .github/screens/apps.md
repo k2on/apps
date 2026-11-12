@@ -124,9 +124,11 @@ All of it is in `<app>/demo/`:
   intent's string array `ark.args` (`am start --esa ark.args
   -screen,budget`), the desktop's from its command line. `launch.mac` goes
   before each screen's on the Mac, which no browser signs in for, and
-  `launch.ios` before each on the iPhone and the iPad: money's opens its
-  demo household on the reference's day (`-demo 2026-11-18`), for that
-  launch alone, whatever the server signed in. money's ids are the reference app's
+  `launch.ios` before each on the iPhone and the iPad, and before each of
+  `shots` that has no `launch` of its own, so a pass's every shot is of one
+  household: money's opens its demo household on the reference's day
+  (`-demo 2026-11-18`), for that launch alone, whatever the server signed
+  in. money's ids are the reference app's
   (`reference/universal-budget` on the design-ref branch), so the two
   pair.
 

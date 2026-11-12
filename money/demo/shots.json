@@ -111,7 +111,7 @@
     "logo": "money/icon.svg",
     "screen": "budget"
   },
-  "_screens": "`screens`: each opened by its launch arguments alone (ark_app::shell::Launch, the reference's names: .github/screens/apps.md), on the Apple devices it is `on` (ios, ipad-portrait, ipad-landscape, mac); its id is the reference app's shot's (reference/universal-budget/ci/shots.sh on the design-ref branch), so the two pair. `launch.mac` is the Mac's own arguments before each: the demo's household (no browser signs the Mac in) at 1440x900; `launch.ios` the iPhone's and the iPad's: the same demo, whatever the server signed in. Both seed it to the reference's day (its SampleData's `today`), so the month and the household's days are the reference's.",
+  "_screens": "`screens`: each opened by its launch arguments alone (ark_app::shell::Launch, the reference's names: .github/screens/apps.md), on the Apple devices it is `on` (ios, ipad-portrait, ipad-landscape, mac); its id is the reference app's shot's (reference/universal-budget/ci/shots.sh on the design-ref branch), so the two pair. `launch.mac` is the Mac's own arguments before each: the demo's household (no browser signs the Mac in) at 1440x900; `launch.ios` the iPhone's and the iPad's: the same demo, whatever the server signed in, for `shots` as well as `screens`, so a pass's every shot is of one household (apps-ios.sh). Both seed it to the reference's day (its SampleData's `today`), so the month and the household's days are the reference's.",
   "launch": {
     "mac": [
       "-demo",

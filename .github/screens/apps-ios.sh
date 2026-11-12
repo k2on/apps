@@ -73,8 +73,13 @@ for a in "$@"; do
     # The shots, then each of the `screens` that is `on` this device:
     # opened by its launch arguments alone, the app launched with
     # shots.json's `launch.ios` (a demo on a fixed day), in one launch where
-    # the app takes a screen's arguments by a link (`links`).
-    shots=$(jq -c --arg k "$kind" '(.launch.ios // []) as $l | .shots + [.screens // [] | .[] | select((.on // []) | index($k)) | {id, launch: $l, args: (.args // []), steps: (.steps // []), route, fresh}] | map(with_entries(select(.value != null)))' "$a/demo/shots.json")
+    # the app takes a screen's arguments by a link (`links`). The shots are
+    # launched with it too, so every shot of a pass is of one household:
+    # with none, money's `shots` were the server's household, seeded on
+    # the run's day, and its `screens` the demo's on the reference's day
+    # (app-screens 43131582873: `accounts` -$227,774.43, `03-accounts`
+    # -$225,050.82, the relaunch between them).
+    shots=$(jq -c --arg k "$kind" '(.launch.ios // []) as $l | (.shots | map(.launch //= $l)) + [.screens // [] | .[] | select((.on // []) | index($k)) | {id, launch: $l, args: (.args // []), steps: (.steps // []), route, fresh}] | map(with_entries(select(.value != null)))' "$a/demo/shots.json")
     links=$(jq '.links == true' "$a/demo/shots.json")
     jq --arg b "$bundle" --arg s "$server" --arg u "$user" --arg sc "$scheme" --arg o "$out/$a/$kind" \
       --arg or "$orientation" --argjson signed "$([ "$first" = true ] && echo false || echo true)" --argjson shots "$shots" \
@@ -157,13 +162,19 @@ for t in "${taken[@]}"; do
     fi
   done
   # On its side: each picture turned upright by the driver (Drive.swift's
-  # `upright`), so wider than tall; one that is not fails the app.
+  # `picture`, which checks its pixels too), so wider than tall, and the
+  # app laid out so: its window, in the tree taken with it, wider than
+  # tall. A wide canvas alone let a portrait picture with a black band
+  # beside it through (43131582873). One that is not fails the app.
   if [ "$orientation" = landscape ]; then
     for png in "$dir"/*/*.png; do
       [ -f "$png" ] || continue
+      [ "$(basename "$png")" = stuck.png ] && continue
       read -r w h < <(dims "$png")
-      if [ "$h" -gt "$w" ]; then
-        echo "::error::$a's $kind: $(basename "$png") is ${w}x${h}, not on its side"
+      win=$(grep -m1 -E '^ *Window' "${png%.png}.tree.txt" 2> /dev/null | grep -oE '\{[0-9.]+, [0-9.]+\}\}' | tr -d '{}' || true)
+      ww=${win%%,*} wh=${win#*, }
+      if [ "$h" -ge "$w" ] || [ -z "$win" ] || ! awk -v a="$ww" -v b="$wh" 'BEGIN {exit !(a > b)}'; then
+        echo "::error::$a's $kind: $(basename "$png") is ${w}x${h}, its window ${win:-not in its tree}: not on its side"
         echo "$a" >> "$partial"
         failed=1
       fi

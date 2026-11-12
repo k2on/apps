@@ -167,7 +167,7 @@ final class Drive: XCTestCase {
                 try ready(app)
                 try noBanner(shot.id)
                 let isReady = Date()
-                try upright(app.screenshot().pngRepresentation, landscape: entry.orientation == "landscape")
+                try picture(app, landscape: entry.orientation == "landscape", id: shot.id)
                     .write(to: out.appendingPathComponent("\(shot.id).png"))
                 let pictured = Date()
                 try app.debugDescription.write(to: out.appendingPathComponent("\(shot.id).tree.txt"), atomically: true, encoding: .utf8)
@@ -175,7 +175,8 @@ final class Drive: XCTestCase {
                 print("Drive: \(entry.bundle) \(URL(fileURLWithPath: entry.out).lastPathComponent) \(theme) \(shot.id): \(reached), \(shot.steps.count) steps; open \(s(start, opened)), ready \(s(opened, isReady)), picture \(s(isReady, pictured)), tree \(s(pictured, Date())), all \(s(start, Date()))")
             } catch {
                 try? app.debugDescription.write(to: out.appendingPathComponent("stuck.tree.txt"), atomically: true, encoding: .utf8)
-                try? app.screenshot().pngRepresentation.write(to: out.appendingPathComponent("stuck.png"))
+                try? upright(XCUIScreen.main.screenshot().pngRepresentation, landscape: entry.orientation == "landscape")
+                    .write(to: out.appendingPathComponent("stuck.png"))
                 throw error
             }
         }
@@ -238,13 +239,65 @@ final class Drive: XCTestCase {
         }
     }
 
-    /// The picture the way the device is held: on its side (landscape
-    /// left), XCUITest gives the screen in its own portrait frame, the app
-    /// drawn a quarter turn round, and it is turned a quarter turn
-    /// counter-clockwise here. Not by `sips -r`, which swapped the canvas's
-    /// sides and left the pixels as they were (every iPad landscape PNG of
-    /// 42977527249 and 43083062235: the portrait picture in a landscape
-    /// canvas, cropped, its last 688 columns black).
+    /// The screen as the app is laid out, checked. On its side, not the
+    /// app's own screenshot: XCUITest crops that from the screen's picture,
+    /// which the simulator gives in its own portrait frame with the app
+    /// drawn a quarter turn round, by the app's landscape frame, so it was a
+    /// landscape canvas holding the turned picture's first 2064 rows and
+    /// 688 black columns (every iPad landscape PNG of 43131582873, which
+    /// the canvas's width let through). The whole screen is taken and
+    /// turned upright instead, and the shot fails unless the app's window
+    /// is wider than tall, the picture is too and of the window's shape, and
+    /// what is past the picture's height is not all black.
+    private func picture(_ app: XCUIApplication, landscape: Bool, id: String) throws -> Data {
+        guard landscape else { return app.screenshot().pngRepresentation }
+        // The turn XCUIDevice was asked for, waited for (a guard, not a pace).
+        var window = app.windows.firstMatch.frame
+        let turnBy = Date().addingTimeInterval(10)
+        while window.width <= window.height, Date() < turnBy {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+            window = app.windows.firstMatch.frame
+        }
+        let png = upright(XCUIScreen.main.screenshot().pngRepresentation, landscape: true)
+        func fail(_ why: String) -> NSError {
+            NSError(domain: "Drive", code: 7, userInfo: [NSLocalizedDescriptionKey: "\(id) is not on its side: \(why)"])
+        }
+        guard window.width > window.height else {
+            throw fail("the app's window is \(window.width)x\(window.height)")
+        }
+        guard let cg = UIImage(data: png)?.cgImage else { throw fail("no picture") }
+        let (w, h) = (cg.width, cg.height)
+        guard w > h else { throw fail("the picture is \(w)x\(h)") }
+        guard abs(CGFloat(w) * window.height - CGFloat(h) * window.width) <= CGFloat(h) * window.width * 0.01 else {
+            throw fail("the picture is \(w)x\(h), the window \(window.width)x\(window.height)")
+        }
+        if allBlack(cg, from: h) { throw fail("its columns past \(h) are all black, a portrait picture in a landscape canvas") }
+        return png
+    }
+
+    /// Whether every pixel of `cg` from column `x` on is black: the band a
+    /// portrait picture leaves in a landscape canvas. A shot on its side
+    /// has the status bar's battery there, in either theme.
+    private func allBlack(_ cg: CGImage, from x: Int) -> Bool {
+        let (w, h) = (cg.width - x, cg.height)
+        guard w > 0, let strip = cg.cropping(to: CGRect(x: x, y: 0, width: w, height: h)) else { return false }
+        var px = [UInt8](repeating: 0, count: w * h * 4)
+        let drawn = px.withUnsafeMutableBytes { buf -> Bool in
+            guard let ctx = CGContext(data: buf.baseAddress, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w * 4,
+                                      space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue) else { return false }
+            ctx.draw(strip, in: CGRect(x: 0, y: 0, width: w, height: h))
+            return true
+        }
+        guard drawn else { return false }
+        for i in stride(from: 0, to: px.count, by: 4) where px[i] > 8 || px[i + 1] > 8 || px[i + 2] > 8 { return false }
+        return true
+    }
+
+    /// The screen's picture turned the way the device is held: on its side
+    /// (landscape left), the simulator's screen is in its own portrait
+    /// frame with the app drawn a quarter turn round, and it is turned a
+    /// quarter turn counter-clockwise here (the direction checked on
+    /// 43131582873's PNGs: their status bar reads upright so).
     private func upright(_ png: Data, landscape: Bool) -> Data {
         guard landscape, let cg = UIImage(data: png)?.cgImage, cg.height > cg.width else { return png }
         let (w, h) = (CGFloat(cg.width), CGFloat(cg.height))
