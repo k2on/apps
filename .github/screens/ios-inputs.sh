@@ -19,8 +19,8 @@
 #   shots are of the same simulator build);
 # - of the scripts' checkout (main's, which a workflow_run runs), what the
 #   shots are taken by: each package its <app>/demo/server.sh builds
-#   (`.#<name>`, the server and its seed), its screens/ (shots.json and the
-#   server's script), the picture its sign-in wears, and the iPhone's, the
+#   (`.#<name>`, the server and its seed), its demo/ (shots.json, the
+#   server's script and the seed's source), the picture its sign-in wears, and the iPhone's, the
 #   iPad's and the Mac's own scripts here. Not the workflow, nor Android's or the desktop's scripts:
 #   moving those takes no iPhone shots again.
 set -uo pipefail
@@ -61,7 +61,7 @@ for a in "$@"; do
   # takes its window.
   mac=$(out "$src" "$a-macos" 2> /dev/null)
   if [ "$mac" != none ]; then said="${said}mac $mac"$'\n'; fi
-  said="$said$a/screens $(object "$a/screens")"$'\n'
+  said="$said$a/demo $(object "$a/demo")"$'\n'
   picture=$(jq -r '.server.picture // empty' "$scripts/$a/demo/shots.json" 2>/dev/null)
   if [ -n "$picture" ]; then said="$said$picture $(object "$picture")"$'\n'; fi
   if [ -f "$scripts/$a/demo/server.sh" ]; then

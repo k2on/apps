@@ -305,7 +305,7 @@ desktop, the system image and the emulator's boot on Android.
 are taken from is hashed on Linux, before any Mac is asked for
 (`ios-inputs.sh`, in `which`): the app's `<app>-ios-simulator` store path,
 evaluated at the commit and not built (it moves only with what it is built
-from), the packages its `server.sh` builds, its `screens/`, its sign-in's
+from), the packages its `server.sh` builds, its `demo/` (shots.json, server.sh), its sign-in's
 picture, and the iPhone's scripts here. Each app taken whole keeps the hash
 beside its shots, `<app>/ios/inputs`; the next run with the same one, on
 main against what is published, on a PR against its own last shots or
@@ -347,7 +347,7 @@ waited an hour for a Mac), then does nothing, and nothing is compared.
   that can only read: a fork's PR gets its Android shots only.
 
 - **When only the screenshots' scripts change** (`.github/screens/`, an
-  app's `screens/`, the workflow) on main, every app is taken again: each
+  app's `demo/`, the workflow) on main, every app is taken again: each
   APK as the F-Droid repository's index offers it (`published.sh`), and
   each desktop window as nix builds main, which, as its inputs have not
   moved, is the cache's; each iPhone app whose hash moved (a change to
