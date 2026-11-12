@@ -161,17 +161,6 @@ class BookTests {
         assertTrue(a.onBudget)
     }
 
-    @Test fun theBanksAccountsAreFollowedOrNot() {
-        // The demo's Chase is fed through Plaid: its accounts are listed with the one they feed.
-        val card = l.linked.firstOrNull()
-        assertNotNull("the demo's Chase card is linked", card)
-        assertEquals(card!!.account, l.accounts.first { it.id == card.accountId }.name)
-        book.ignore(card.plaidAccountId, true)
-        assertTrue(l.linked.first { it.plaidAccountId == card.plaidAccountId }.ignored)
-        book.ignore(card.plaidAccountId, false)
-        assertFalse(l.linked.first { it.plaidAccountId == card.plaidAccountId }.ignored)
-    }
-
     @Test fun theMonthStepsAndComesBack() {
         val october = l.lines.map { it.categoryId to it.assigned }
         book.stepMonth(-1)

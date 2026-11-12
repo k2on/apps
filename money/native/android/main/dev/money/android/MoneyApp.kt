@@ -147,17 +147,41 @@ fun MoneyApp(
     // `.sensoryFeedback` on the same events (`Book.felt`).
     val felt by book.felt.collectAsStateWithLifecycle()
     SensoryFeedback(felt.kind, felt.count)
-    // Plaid's page, in a Custom Tab, the moment the server answers a connection asked for here.
     val context = LocalContext.current
-    LaunchedEffect(book) {
-        book.pages.collect { url ->
-            runCatching { CustomTabsIntent.Builder().setShowTitle(true).build().launchUrl(context, Uri.parse(url)) }
-                .onFailure { snackbar.showSnackbar("Couldn't open Plaid's page: open it from Settings") }
-        }
-    }
-
     val sections =
         remember(book) { MoneyShellHolder(book.session, { book.sync() }, { book.state.value.today }) }
+    val shellPage by sections.page.collectAsStateWithLifecycle()
+    // Plaid's page, in a Custom Tab, the moment the server answers a connection asked for here
+    // (money_app's shell says which: `SettingsPage.plaid`). A Custom Tab is not followed, so it
+    // is taken as closed once opened.
+    LaunchedEffect(shellPage.settings.plaid) {
+        val url = shellPage.settings.plaid ?: return@LaunchedEffect
+        runCatching { CustomTabsIntent.Builder().setShowTitle(true).build().launchUrl(context, Uri.parse(url)) }
+            .onFailure { snackbar.showSnackbar("Couldn't open Plaid's page: open it from Settings") }
+        sections.send(ShellMsg.PageClosed(url = url))
+    }
+    // Who is signed in where, for Settings (money_app's SessionFacts).
+    val version = remember(context) {
+        runCatching {
+            val i = context.packageManager.getPackageInfo(context.packageName, 0)
+            @Suppress("DEPRECATION") "${i.versionName} (${i.versionCode})"
+        }.getOrDefault("")
+    }
+    LaunchedEffect(ledger.who, ledger.demo, ledger.server, ledger.link, ledger.ready) {
+        val facts = uniffi.money_bridge.SessionFacts(
+            who = ledger.who,
+            login = "",
+            demo = ledger.demo,
+            server = ledger.server.substringAfter("://"),
+            linked = if (ledger.ready) ledger.link.linked else null,
+            pending = ledger.link.pending.toLong(),
+            version = version,
+            leaves = true,
+            addsDevices = !ledger.demo,
+        )
+        sections.send(ShellMsg.Session(facts = facts))
+    }
+    var addingDevice by remember { mutableStateOf(false) }
     // The device modules (money/app.toml): the camera's page is drawn at the root, below.
     val hapticView = androidx.compose.ui.platform.LocalView.current
     val camera = remember { PhoneCamera() }
@@ -238,6 +262,8 @@ fun MoneyApp(
             is MoneyRequest.Budget -> budget.send(r.msg)
             is MoneyRequest.Refresh -> book.sync()
             is MoneyRequest.Settings -> nav.navigate("settings") { launchSingleTop = true }
+            is MoneyRequest.SignOut -> onSignOut()
+            is MoneyRequest.AddDevice -> addingDevice = true
             else -> {}
         }
     }
@@ -277,9 +303,15 @@ fun MoneyApp(
                 val id = (route as? Route.Account)?.id
                 RegisterHosted(book, ledger, shell, id, "", carry, title = route?.title() ?: "All Accounts", onBack = { nav.popBackStack() })
             }
-            composable("settings") { SettingsScreen(ledger, onBack = { nav.popBackStack() }) }
+            // Settings, written from Rust (generated/MoneySettings.kt): the shell's panes.
+            composable("settings") {
+                Page(title = "Settings", onBack = { nav.popBackStack() }) { pad, _ ->
+                    Box(Modifier.padding(top = pad.calculateTopPadding())) { MoneySettings(sections) }
+                }
+            }
         }
         SheetsScreen(sheets)
+        if (addingDevice) dev.arkui.AddDeviceDialog(addDevice, onDismiss = { addingDevice = false })
         if (account) AccountOf(ledger, shell, onDismiss = { account = false })
     }
 }
@@ -522,7 +554,14 @@ private fun Hosted(
         }
         "accounts" -> {
             // Written from Rust (generated/AccountsScreen.kt), over its runtime.
-            accounts.opened = { r -> if (r is Route.Banks) shell.onSettings() else nav.navigate(register(r)) }
+            accounts.opened = { r ->
+                if (r is Route.Banks) {
+                    sections.send(ShellMsg.Pane(title = "Connected Banks"))
+                    shell.onSettings()
+                } else {
+                    nav.navigate(register(r))
+                }
+            }
             AccountsScreen(accounts)
         }
         "transactions" -> {
@@ -555,7 +594,8 @@ private fun Hosted(
             onClick = shell.onAccountSheet,
             attention = if (ledger.banksWanting > 0) "Banks need a look" else null,
         )
-        "settings.general" -> SettingsScreen(ledger, onBack = {})
+        // What a platform adds to Settings' General: the desktop's alone.
+        "settings.more" -> {}
         else -> Text("Nothing Selected", modifier = Modifier.padding(16.dp))
     }
 }

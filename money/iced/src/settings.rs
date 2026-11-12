@@ -4,12 +4,10 @@
 //! banks (`crate::banks`), and Amazon and Costco (`crate::stores`).
 
 use arkui::account::{Account, Who};
-use arkui::text::text;
-use arkui::{hero, style};
-use iced::widget::{column, container, scrollable};
+use arkui::hero;
+use iced::widget::column;
 use iced::{Element, Length, Task};
 
-use crate::view::{dim, quiet, PAD};
 use crate::{live, App, Message, Page};
 
 impl App {
@@ -96,35 +94,49 @@ impl App {
         s.device = Some(made.map(|code| ark_auth::onboarding::join_link(app.scheme, s.url.clone(), Some(code))));
     }
 
+    /// Who is signed in where, as Settings says it (`ShellMsg::Session`):
+    /// this window's server and login, or the demo in the window alone.
+    pub fn facts(&self) -> money_app::shell::SessionFacts {
+        let version = env!("CARGO_PKG_VERSION").to_string();
+        let Some(s) = &self.server else {
+            return money_app::shell::SessionFacts {
+                demo: true,
+                version,
+                ..Default::default()
+            };
+        };
+        let status = self.peer.client.status();
+        money_app::shell::SessionFacts {
+            who: s.login.as_ref().map(live::who).unwrap_or_default(),
+            login: s.login.as_ref().map(|l| l.user.email.clone()).unwrap_or_default(),
+            demo: false,
+            server: ark_auth::onboarding::display(&s.url),
+            linked: Some(status.linked),
+            pending: status.pending as i64,
+            version,
+            leaves: s.login.is_some(),
+            adds_devices: s.login.is_some(),
+        }
+    }
+
+    /// What the desktop adds to Settings' General (`hosted("settings.more")`):
+    /// Add a Device's code once asked for — the shared page
+    /// (`ark_app::welcome::add_device`) — its store logins, and how it draws.
     pub fn view_settings(&self) -> Element<'_, Message> {
-        let account: Element<'_, Message> = match &self.server {
-            None => dim("A demo: no server, no sign-in. Nothing here leaves this window.", 13).into(),
-            Some(s) => {
-                let who = match &s.login {
-                    Some(l) => format!("Signed in as {} on {}", live::who(l), s.url),
-                    None => format!("Not signed in to {}", s.url),
-                };
-                let mut c = column![text(who).size(14).style(style::faint(0.8))].spacing(12);
-                if s.login.is_some() {
-                    c = c.push(quiet("Sign Out", Message::SignOut));
-                    c = c.push(quiet("Add a Device", Message::AddDevice));
-                }
-                match &s.device {
-                    Some(Ok(link)) => {
-                        if let Some(q) = ark_auth::onboarding::qr_code(link.clone()) {
-                            c = c.push(arkui::qr::qr_code(q.size as usize, q.dark, 220.0));
-                        }
-                        c = c.push(dim(
-                            "Scan this with the other device, or open the link there. It works once, for ten minutes.",
-                            13,
-                        ));
-                        c = c.push(text(link.clone()).size(12).style(style::faint(0.7)));
-                        c = c.push(quiet("Copy Link", Message::CopyLink(link.clone())));
-                    }
-                    Some(Err(why)) => c = c.push(dim(format!("Couldn't make a code: {why}."), 13)),
-                    None => {}
-                }
-                c.into()
+        let account: Element<'_, Message> = match self.server.as_ref().and_then(|s| s.device.clone()) {
+            None => column![].into(),
+            Some(made) => {
+                let link = made.as_ref().ok().cloned().unwrap_or_default();
+                let made = made.and_then(|l| {
+                    ark_auth::onboarding::qr_code(l.clone())
+                        .map(|q| (l, q))
+                        .ok_or_else(|| "the link is too long for a code".to_string())
+                });
+                let page = ark_auth::first_run::add_device_page(Some(made));
+                arkui::view::element(ark_app::welcome::add_device::view(&page).map(move |m| match m {
+                    ark_app::welcome::AddDeviceMsg::Share => Message::CopyLink(link.clone()),
+                    ark_app::welcome::AddDeviceMsg::Again => Message::AddDevice,
+                }))
             }
         };
         let page = column![
@@ -132,28 +144,12 @@ impl App {
             self.amazon_section(),
             hero::heading("Costco"),
             self.costco_section(),
-            hero::heading("Account"),
             account,
             hero::heading("Display"),
             arkui::renderer::about(),
         ]
         .width(Length::Fill);
-        settings_scroll(page)
+        // Inside the pane's own page, which scrolls.
+        page.into()
     }
-
-    /// Settings' Connected Banks: each bank, what it feeds, its sync.
-    pub fn view_banks_pane(&self) -> Element<'_, Message> {
-        settings_scroll(column![self.banks_section()].width(Length::Fill))
-    }
-}
-
-/// A pane of Settings, scrolled, at a readable width.
-fn settings_scroll<'a>(page: iced::widget::Column<'a, Message>) -> Element<'a, Message> {
-    arkui::scroll::elastic(
-        scrollable(container(page).padding(PAD).max_width(760))
-            .id(crate::look::PAGE_TOP)
-            .on_scroll(|v| Message::TopScrolled(v.absolute_offset().y))
-            .height(Length::Fill)
-            .style(style::bars),
-    )
 }

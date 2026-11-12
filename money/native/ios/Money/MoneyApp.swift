@@ -86,10 +86,8 @@ struct MoneyApp: App {
         // the account sheet's Settings.
         ArkSettings {
             MoneySettingsView()
-                .environmentObject(model.shell)
-                .environmentObject(model)
+                .moneySettings(model)
                 .environmentObject(watched)
-                .environment(\.hostedScreens) { name in AnyView(SettingsHosted(name: name)) }
                 .tint(Color.accent)
         }
     }

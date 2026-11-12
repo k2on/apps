@@ -160,6 +160,8 @@ impl App {
             MoneyRequest::OpenTransaction { key } => self.txn_named(&key).map(Message::EditTxn),
             MoneyRequest::Review => Some(Message::Go(Page::Ledger(Ledger::Inbox))),
             MoneyRequest::Settings { .. } => Some(Message::Go(Page::Settings)),
+            MoneyRequest::SignOut => Some(Message::SignOut),
+            MoneyRequest::AddDevice => Some(Message::AddDevice),
         }
     }
 
@@ -359,9 +361,7 @@ impl App {
             ("transactions.inspector", _) => self.view_receipt_side(),
             ("insights", _) => self.view_insights(),
             ("household", _) => self.view_household(),
-            ("settings.general", _) => self.view_settings(),
-            ("settings.banks", _) => self.view_banks_pane(),
-            ("settings.household", _) => quiet("Who shares this budget, and their roles."),
+            ("settings.more", _) => self.view_settings(),
             ("accounts.register", _) => quiet("Select an Account"),
             _ => quiet("Nothing Selected"),
         }

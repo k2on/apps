@@ -481,7 +481,9 @@ public struct SettingsPane<Content: View>: View {
 
     public var body: some View {
         #if os(macOS)
-        content
+        // A stack of its own, so a pane's page can push another (a
+        // connected bank's, from Connected Banks) as it does elsewhere.
+        NavigationStack { content }
             .padding()
             .tabItem { Label(title, systemImage: ArkGlyphs.sf(glyph)) }
             .tag(title)

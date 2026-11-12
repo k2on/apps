@@ -335,6 +335,15 @@ screen!(
     SheetsApp, Sheets, SheetsMsg, SheetsMsgFfi, SheetsPageFfi
 );
 
+/// The shell's page before a session runs it: on Budget, nothing held,
+/// nobody signed in — what a phone draws until its session opens.
+#[uniffi::export]
+pub fn shell_blank() -> ShellPageFfi {
+    let store = ark_peer::store::Store::<domain::MoneyView>::new();
+    let data = ark_app::Data { store: &store, now_ms: 0 };
+    <MoneyShell as App>::screen(&Default::default(), &data).ffi()
+}
+
 #[cfg(test)]
 mod tests {
     use super::session_now;

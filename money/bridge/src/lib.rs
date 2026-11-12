@@ -66,6 +66,7 @@ ark::twins!(
         transactions::{CategorizeForm, CategoryChoice, DeleteQuestion, TransactionsMsg, TransactionsPage, TxnDay, TxnItem},
         routes::Route,
         shell::{AccountPlace, Appearance, ShellMsg, ShellPage},
+        shell::settings::{AskItem, BankItem, BankPage, FeedChoice, FeedItem, FeedTarget, SessionFacts, SettingsPage},
         shell::inspect::{CategoryInspector, DetailLine, TransactionInspector},
         words::{BankStatus, Captions},
     },

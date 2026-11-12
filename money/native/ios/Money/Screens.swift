@@ -246,7 +246,7 @@ final class SheetsScreen: ObservableObject {
 /// screen can carry out comes back typed (`request`).
 @MainActor
 final class MoneyShellScreen: ObservableObject {
-    @Published private(set) var page = ShellPage(section: "budget", inspector: false, search: "", showing: false, monthTitle: "", accountTitle: "", pane: "General", appearance: nil, category: nil, transaction: nil, toReview: nil, budgetAccounts: [], trackingAccounts: [])
+    @Published private(set) var page = shellBlank()
     {
         // Where the app is, for a screenshot's ready signal: the section.
         didSet { Ready.shared.at(route: page.section) }

@@ -813,6 +813,24 @@ impl App {
             Some(msg) => Task::batch([task, self.update(Message::Shell(msg))]),
             None => task,
         };
+        // Who is signed in where, for Settings; Plaid's page in the
+        // system's browser once the server has answered an ask with it,
+        // which this window cannot follow, so it is taken as closed.
+        let facts = self.facts();
+        let task = match self.shell.state().settings.facts != facts {
+            true => Task::batch([task, self.update(Message::Shell(ShellMsg::Session { facts }))]),
+            false => task,
+        };
+        let task = match self.shell_page().settings.plaid {
+            Some(url) => {
+                self.note = match browser::open(&url) {
+                    true => "Plaid's page is open in your browser".into(),
+                    false => "open Plaid's page from Settings".into(),
+                };
+                Task::batch([task, self.update(Message::Shell(ShellMsg::PageClosed { url }))])
+            }
+            None => task,
+        };
         // Whatever the message came to is said for a moment over the page
         // (`arkui::toast`), heard here once rather than wherever a note is
         // written.

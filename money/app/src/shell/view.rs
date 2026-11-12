@@ -7,7 +7,7 @@ use ark_app::shell::*;
 use ark_app::view;
 use ark_app::view::*;
 
-use super::{CategoryInspector, ShellMsg, ShellPage, TransactionInspector};
+use super::{AskItem, BankPage, CategoryInspector, ShellMsg, ShellPage, TransactionInspector};
 
 /// The main window: the four sections, then each account in the sidebar
 /// under Budget Accounts or Tracking Accounts; each its toolbar — what
@@ -279,10 +279,227 @@ pub fn money_settings(p: &ShellPage) -> View<ShellMsg> {
         p.pane,
         |title| ShellMsg::Pane { title },
         (
-            settings_pane("General", "settings", hosted("settings.general")),
-            settings_pane("Household", "users", hosted("settings.household")),
-            settings_pane("Connected Banks", "landmark", hosted("settings.banks")),
+            settings_pane("General", "settings", settings_general(p)),
+            settings_pane("Household", "users", settings_household(p)),
+            settings_pane("Connected Banks", "landmark", settings_banks(p)),
+            settings_pane("Appearance", "eye", settings_appearance(p)),
         ),
+    )
+}
+
+/// General: who is using the budget, the server and whether it can be
+/// reached, what waits to sync, Add a Device, the way out (asked about
+/// first) and what the app is.
+#[view]
+pub fn settings_general(p: &ShellPage) -> View<ShellMsg> {
+    detail_page((
+        card_section(list_row(p.settings.who).subtitle(p.settings.login).tile("users")),
+        if p.settings.on_server {
+            card_section((
+                list_row(p.settings.server).value(p.settings.link).glyph("cloud"),
+                if p.settings.waits {
+                    list_row("Waiting to Sync").value(p.settings.pending).glyph("clock")
+                },
+                if p.settings.adds_devices {
+                    list_row("Add a Device").glyph("smartphone").pushes().on_tap(ShellMsg::AddDevice)
+                },
+            ))
+            .header("Server")
+        },
+        if p.settings.leaves {
+            card_section(list_row(p.settings.sign_out).glyph("log-out").accent().on_tap(ShellMsg::SignOut)).footer(p.settings.sign_out_note)
+        },
+        // What a platform adds of its own: the desktop's store logins and
+        // the code Add a Device made there; nothing elsewhere.
+        hosted("settings.more"),
+        card_section((
+            list_row("Money").subtitle("Your household's budget, on your own server").tile("wallet"),
+            list_row("Version").value(p.settings.version),
+        ))
+        .header("About"),
+        if p.settings.leaving {
+            confirmation_dialog(p.settings.leave_question, p.settings.sign_out, ShellMsg::CancelSignOut).action(
+                p.settings.sign_out,
+                true,
+                ShellMsg::ConfirmSignOut,
+            )
+        },
+    ))
+}
+
+/// Household: who shares the budget, and Add a Device.
+#[view]
+pub fn settings_household(p: &ShellPage) -> View<ShellMsg> {
+    detail_page(
+        card_section((
+            list_row(p.settings.who).subtitle(p.settings.login).tile("users"),
+            if p.settings.adds_devices {
+                list_row("Add a Device").glyph("smartphone").pushes().on_tap(ShellMsg::AddDevice)
+            },
+        ))
+        .header("Shared With")
+        .footer(p.settings.household_note),
+    )
+}
+
+/// Connected Banks: the ask of the moment, each bank with how it is doing
+/// (its page pushed when tapped), Connect a Bank and Sync Now.
+#[view]
+pub fn settings_banks(p: &ShellPage) -> View<ShellMsg> {
+    pushes(
+        detail_page((
+            if let Some(a) = p.settings.ask {
+                ask_card(a)
+            },
+            card_section((
+                for b in p.settings.banks {
+                    list_row(b.title)
+                        .subtitle(b.status)
+                        .mark(b.glyph, "checking")
+                        .badge(b.waiting)
+                        .pushes()
+                        .on_tap(ShellMsg::OpenBank { name: b.name })
+                },
+                if p.settings.can_connect {
+                    list_row("Connect a Bank").glyph("circle-plus").accent().on_tap(ShellMsg::ConnectBank)
+                },
+            ))
+            .header("Banks")
+            .footer(p.settings.banks_note),
+            card_section(list_row("Sync Now").glyph("refresh-cw").accent().on_tap(ShellMsg::Refresh)).footer(p.settings.sync_note),
+        )),
+        if let Some(b) = p.settings.bank {
+            bank_page(b)
+        },
+        p.settings.showing_bank,
+        ShellMsg::CloseBank,
+    )
+}
+
+/// The ask of the moment: where it stands, Open Plaid's Page while the
+/// page waits, Dismiss once it is answered; what has come of it under.
+#[view]
+pub fn ask_card(a: &AskItem) -> View<ShellMsg> {
+    card_section((
+        list_row(a.title).value(a.state),
+        if a.waiting {
+            list_row("Open Plaid's Page").glyph("link").accent().on_tap(ShellMsg::OpenAsk)
+        },
+        if a.over {
+            list_row("Dismiss").glyph("x").on_tap(ShellMsg::DismissAsk)
+        },
+    ))
+    .footer(a.note)
+    .into()
+}
+
+/// A connected bank's page: the ask about it, Log In Again when its login
+/// ran out, what its last import failed with, when it last synced and what
+/// that brought, each of its accounts and what it feeds (tapped, the
+/// choice), Reconnect and Disconnect (asked about first).
+#[view]
+pub fn bank_page(b: &BankPage) -> View<ShellMsg> {
+    toolbar(
+        b.title,
+        detail_page((
+            if let Some(a) = b.ask {
+                ask_card(a)
+            },
+            if b.needs_login {
+                card_section(list_row("Reconnect").glyph("refresh-cw").accent().on_tap(ShellMsg::Reconnect))
+                    .header("Log In Again")
+                    .footer(b.login_note_shown)
+            },
+            if b.failing {
+                card_section((list_row(b.error).glyph("triangle-alert"), list_row("Failed").value(b.failed))).header("Last Import")
+            },
+            card_section((
+                list_row("Last Synced").value(b.synced),
+                list_row("Brought In").value(b.brought),
+                if b.removes {
+                    list_row("Removed").value(b.removed)
+                },
+                if b.locks {
+                    list_row("Left as Reconciled").value(b.locked)
+                },
+            )),
+            if b.has_feeds {
+                card_section(for f in b.feeds {
+                    list_row(f.title)
+                        .subtitle(f.about)
+                        .mark(f.glyph, f.kind)
+                        .value(f.feeds)
+                        .on_tap(ShellMsg::ChooseFeed { plaid: f.plaid })
+                })
+                .header("Accounts")
+                .footer(b.feeds_note)
+            },
+            card_section((
+                if b.reconnects {
+                    list_row("Reconnect").glyph("refresh-cw").accent().on_tap(ShellMsg::Reconnect)
+                },
+                if b.connects {
+                    list_row("Disconnect").glyph("circle-minus").accent().on_tap(ShellMsg::Disconnect)
+                },
+            ))
+            .footer(b.actions_note),
+            if b.disconnecting {
+                confirmation_dialog(
+                    b.disconnect_question,
+                    "Plaid forgets the login and the bank stops importing. Its accounts here, and what's in them, stay.",
+                    ShellMsg::CancelDisconnect,
+                )
+                .action("Disconnect", true, ShellMsg::ConfirmDisconnect)
+            },
+            if let Some(c) = b.choosing {
+                form_sheet(
+                    "What It Feeds",
+                    ShellMsg::CancelFeed,
+                    (
+                        form_section((
+                            if c.can_open {
+                                list_row(c.opens).glyph("circle-plus").accent().on_tap(ShellMsg::FeedNew)
+                            },
+                            for a in c.accounts {
+                                list_row(a.name).mark(a.glyph, a.kind).on_tap(ShellMsg::FeedAccount { id: a.id })
+                            },
+                        ))
+                        .header(c.title)
+                        .footer(c.accounts_note),
+                        form_section(if c.ignored {
+                            list_row("Import It Again")
+                                .glyph("eye")
+                                .accent()
+                                .on_tap(ShellMsg::FeedIgnored { ignored: false })
+                        } else {
+                            list_row("Don't Import It")
+                                .glyph("eye-off")
+                                .accent()
+                                .on_tap(ShellMsg::FeedIgnored { ignored: true })
+                        }),
+                    ),
+                )
+            },
+        )),
+        (),
+    )
+}
+
+/// Appearance: the system's, or always light or dark.
+#[view]
+pub fn settings_appearance(p: &ShellPage) -> View<ShellMsg> {
+    detail_page(
+        card_section(option_picker(
+            "Appearance",
+            p.settings.appearance,
+            |key| ShellMsg::AppearanceKey { key },
+            (
+                picker_choice("System", "smartphone", "system"),
+                picker_choice("Light", "eye", "light"),
+                picker_choice("Dark", "eye-off", "dark"),
+            ),
+        ))
+        .footer(p.settings.appearance_note),
     )
 }
 

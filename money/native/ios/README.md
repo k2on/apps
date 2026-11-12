@@ -249,8 +249,9 @@ Foundation only — type-checked on Linux, tested there and on the simulator:
 
 Apple's — compiled by CI: `MoneyApp`, `Shell` (the shell's host: routes,
 the generated screens hosted, a register's own runtime per register shown,
-the generated sheets over it), `InsightsView`, `SettingsView`, `BanksView`,
-the receipts' views, `Theme`. Budget, Accounts, Transactions, a register and
+the generated sheets over it), `InsightsView`, the receipts' views,
+`Theme`. Settings (its General, Household, Connected Banks and Appearance
+panes, a bank's page) is the shell's, generated from money/app. Budget, Accounts, Transactions, a register and
 the sheets (a transaction's form, Categorize, Reconcile) are generated from
 money/app.
 

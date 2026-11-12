@@ -71,6 +71,12 @@ pub enum MoneyRequest {
     Review,
     /// Settings, on the pane of this title.
     Settings { pane: String },
+    /// Signed out of the server, or out of the demo (Settings' Sign Out,
+    /// asked about first).
+    SignOut,
+    /// Add a Device: the shared page (`ark_app::welcome::add_device`) over
+    /// a code the host has the server make.
+    AddDevice,
 }
 
 /// The id a route or a message carries (`Id::hex`), as a row's.

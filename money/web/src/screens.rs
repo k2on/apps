@@ -7,7 +7,7 @@
 
 use std::rc::Rc;
 
-use arkui_web::{amount, fields, glyph, parts, quiet, send, AnyView};
+use arkui_web::{amount, glyph, parts, quiet, send, AnyView};
 use leptos::html;
 use leptos::prelude::*;
 use money_app::shell::view::money_settings;
@@ -63,9 +63,6 @@ pub fn hosted(app: &MoneyWeb, name: &'static str) -> AnyView {
             arkui_web::render(money_app::insights::view::insights::view(&app.insights.screen_of(&app.store, app.now_ms())).map(Msg::Insights))
         }
         "household" => household(),
-        "settings.general" => settings_general(),
-        "settings.household" => settings_household(),
-        "settings.banks" => settings_banks(app),
         _ => quiet("Nothing Selected"),
     }
 }
@@ -143,87 +140,6 @@ fn household() -> AnyView {
                 .attr("aria-label", "Settings")
                 .on(leptos::ev::click, |_| send(Msg::Settings(true)))
                 .child(glyph("settings", 15)),
-        ))
-        .into_any()
-}
-
-fn settings_general() -> AnyView {
-    // What the page says (`data-theme`); written as HTML, the address's.
-    let theme = match arkui_web::page::writing() {
-        true => arkui_web::query("theme"),
-        false => web_sys::window()
-            .and_then(|w| w.document())
-            .and_then(|d| d.document_element())
-            .and_then(|e| e.get_attribute("data-theme")),
-    }
-    .unwrap_or_default();
-    let chosen = match theme.as_str() {
-        "light" => "Light",
-        "dark" => "Dark",
-        _ => "System",
-    };
-    let choice = |t: &'static str, v: &'static str| -> (String, arkui_web::Action) {
-        (
-            t.to_string(),
-            Rc::new(move || {
-                if let Some(root) = web_sys::window().and_then(|w| w.document()).and_then(|d| d.document_element()) {
-                    let _ = match v {
-                        "" => root.remove_attribute("data-theme"),
-                        v => root.set_attribute("data-theme", v),
-                    };
-                }
-                arkui_web::redraw();
-            }),
-        )
-    };
-    html::div()
-        .class("money-settings")
-        .child((
-            fields::picker(
-                "appearance",
-                "Appearance",
-                chosen.into(),
-                vec![choice("System", ""), choice("Light", "light"), choice("Dark", "dark")],
-            ),
-            html::p()
-                .class("ark-caption")
-                .child("The demo household lives in this page alone: nothing is sent anywhere."),
-        ))
-        .into_any()
-}
-
-fn settings_household() -> AnyView {
-    html::div()
-        .class("money-settings")
-        .child(card(
-            Some("Who Shares This Budget".into()),
-            vec![html::div()
-                .class("ark-figure-row")
-                .child((html::span().child("Demo Household"), html::span().class("ark-caption").child("Owner")))
-                .into_any()],
-        ))
-        .into_any()
-}
-
-fn settings_banks(app: &MoneyWeb) -> AnyView {
-    let banks: &[BankLine] = app.store.rows(&MoneyView::Banks);
-    let rows: Vec<AnyView> = banks
-        .iter()
-        .map(|b| {
-            html::div()
-                .class("ark-figure-row")
-                .child((
-                    html::span().child(b.institution.clone()),
-                    html::span().class("ark-caption").child(format!("{} accounts", b.accounts)),
-                ))
-                .into_any()
-        })
-        .collect();
-    html::div()
-        .class("money-settings")
-        .child(card(
-            Some("Connected Banks".into()),
-            if rows.is_empty() { vec![quiet("No Banks Connected")] } else { rows },
         ))
         .into_any()
 }

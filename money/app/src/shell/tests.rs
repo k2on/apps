@@ -166,15 +166,34 @@ fn the_inspector_and_the_commands() {
     assert_eq!(places, vec![MenuPlace::File, MenuPlace::View, MenuPlace::Go]);
 }
 
-/// Settings has the reference's three panes, one shown at a time.
-/// Falsified by leaving one out, or showing a pane no title names.
+/// Settings has its four panes, one shown at a time, each drawn from
+/// Rust: no platform hosts any of them, only what it adds to General. Falsified by leaving one out, a
+/// pane still hosted, or showing a pane no title names.
 #[test]
-fn settings_has_three_panes() {
+fn settings_has_four_panes_none_hosted() {
     let mut demo = Demo::new();
     let mut rt = Runtime::<MoneyShell>::new();
     let mut names = vec![];
-    hosted(&money_settings::view(&rt.screen(&demo)), &mut names);
-    assert_eq!(names, vec!["settings.general", "settings.household", "settings.banks"]);
+    let view = money_settings::view(&rt.screen(&demo));
+    hosted(&view, &mut names);
+    assert_eq!(names, ["settings.more"], "only what a platform adds of its own");
+    let mut panes = vec![];
+    fn titles<M>(v: &View<M>, out: &mut Vec<&'static str>) {
+        match v {
+            View::List(vs) => vs.iter().for_each(|v| titles(v, out)),
+            View::Part(p) => {
+                if let Part::SettingsPane { title, .. } = p {
+                    out.push(*title);
+                }
+                for (_, slot) in p.call().slots {
+                    titles(slot, out);
+                }
+            }
+            _ => {}
+        }
+    }
+    titles(&view, &mut panes);
+    assert_eq!(panes, PANES);
     assert_eq!(rt.screen(&demo).pane, "General");
     rt.dispatch(
         ShellMsg::Pane {

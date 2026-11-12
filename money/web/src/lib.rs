@@ -181,6 +181,11 @@ impl MoneyWeb {
             answered: Arc::default(),
         };
         app.shell_step(ShellMsg::Month { month });
+        // The page's own `?theme=`, which it wore from its first frame, is
+        // the shell's appearance from here.
+        if let Some(key) = arkui_web::query("theme").filter(|t| t == "light" || t == "dark") {
+            app.shell_step(ShellMsg::AppearanceKey { key });
+        }
         app.follow();
         app
     }
@@ -218,7 +223,6 @@ impl MoneyWeb {
 
     fn shell_step(&mut self, msg: ShellMsg) {
         let searching = matches!(msg, ShellMsg::Search { .. } | ShellMsg::ShowActivity);
-        let launching = matches!(msg, ShellMsg::Launch { .. } | ShellMsg::Address { .. });
         let mut rt = std::mem::take(&mut self.shell);
         let mut desk = Desk::new(self);
         rt.dispatch(msg, &mut desk);
@@ -228,9 +232,7 @@ impl MoneyWeb {
         if searching {
             self.search = self.shell.state().search.clone();
         }
-        if launching {
-            self.appearance();
-        }
+        self.appearance();
         for n in natives {
             self.carry(n);
         }
@@ -320,6 +322,66 @@ impl MoneyWeb {
             self.step(|a| &mut a.sheets, SheetsMsg::Month { month, today });
         }
         self.hold_wanted();
+        // Who is signed in where, for Settings.
+        let facts = self.facts();
+        if self.shell.state().settings.facts != facts {
+            self.shell_step(ShellMsg::Session { facts });
+        }
+        // Plaid's page, once the server has answered this page's ask with
+        // it: in a tab of its own, which the page cannot follow, so it is
+        // taken as closed once opened.
+        if let Some(url) = self.shell_page().settings.plaid {
+            #[cfg(target_arch = "wasm32")]
+            if let Some(w) = web_sys::window() {
+                let _ = w.open_with_url_and_target(&url, "_blank");
+            }
+            self.shell_step(ShellMsg::PageClosed { url });
+        }
+    }
+
+    /// Who is signed in where, as Settings says it: the page's server and
+    /// login, or the demo in the page alone.
+    fn facts(&self) -> money_app::shell::SessionFacts {
+        let version = env!("CARGO_PKG_VERSION").to_string();
+        let Some(live) = &self.live else {
+            return money_app::shell::SessionFacts {
+                demo: true,
+                version,
+                ..Default::default()
+            };
+        };
+        let status = self.peer.status();
+        money_app::shell::SessionFacts {
+            who: live
+                .login
+                .as_ref()
+                .map(|l| {
+                    if l.user.name.is_empty() {
+                        l.user.id.clone()
+                    } else {
+                        l.user.name.clone()
+                    }
+                })
+                .unwrap_or_default(),
+            login: live
+                .login
+                .as_ref()
+                .map(|l| {
+                    if l.user.email.is_empty() {
+                        l.user.id.clone()
+                    } else {
+                        l.user.email.clone()
+                    }
+                })
+                .unwrap_or_default(),
+            demo: false,
+            server: ark_auth::onboarding::display(&live.server),
+            linked: Some(status.linked),
+            pending: status.pending as i64,
+            version,
+            leaves: live.login.is_some(),
+            adds_devices: false,
+        }
     }
 
     /// Every view a runtime names held, and those none names now let go.
@@ -445,6 +507,19 @@ impl MoneyWeb {
                     self.shell_step(ShellMsg::Pane { title: pane });
                 }
             }
+            // Signed out of the page's server: the session revoked, the
+            // sign-in machine back to its start. The demo's page has no way
+            // out (`SessionFacts::leaves`).
+            MoneyRequest::SignOut => {
+                if self.live.is_some() {
+                    let _ = self.peer.sign_out();
+                    self.onboard(ark_auth::onboarding::Event::SignOut);
+                    self.settings = false;
+                }
+            }
+            // The browser makes no code for another device
+            // (`SessionFacts::adds_devices`).
+            MoneyRequest::AddDevice => {}
         }
     }
 
@@ -486,13 +561,17 @@ impl MoneyWeb {
     }
 
     /// The appearance the shell says, over the system's.
+    /// The appearance the shell asks for (a launch's, Settings'), over
+    /// the system's: the page's `data-theme`, or none.
     fn appearance(&self) {
         #[cfg(target_arch = "wasm32")]
-        if let Some(a) = self.shell.state().appearance {
+        if let Some(root) = web_sys::window().and_then(|w| w.document()).and_then(|d| d.document_element()) {
             use money_app::shell::Appearance;
-            if let Some(root) = web_sys::window().and_then(|w| w.document()).and_then(|d| d.document_element()) {
-                let _ = root.set_attribute("data-theme", if a == Appearance::Dark { "dark" } else { "light" });
-            }
+            let _ = match self.shell.state().appearance {
+                Some(Appearance::Dark) => root.set_attribute("data-theme", "dark"),
+                Some(Appearance::Light) => root.set_attribute("data-theme", "light"),
+                None => root.remove_attribute("data-theme"),
+            };
         }
     }
 }

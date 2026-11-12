@@ -26,9 +26,11 @@ use crate::budget::BudgetMsg;
 use crate::MoneyRequest;
 
 pub mod inspect;
+pub mod settings;
 pub mod view;
 
 pub use inspect::{CategoryInspector, DetailLine, TransactionInspector};
+pub use settings::{AskItem, BankItem, BankPage, FeedChoice, FeedItem, FeedTarget, SessionFacts, SettingsPage, SettingsState};
 
 /// The shell, as `ark_app` runs it.
 pub struct MoneyShell;
@@ -37,7 +39,7 @@ pub struct MoneyShell;
 pub const SECTIONS: [&str; 4] = ["budget", "accounts", "transactions", "insights"];
 
 /// Settings' panes, by title, in order.
-pub const PANES: [&str; 3] = ["General", "Household", "Connected Banks"];
+pub const PANES: [&str; 4] = ["General", "Household", "Connected Banks", "Appearance"];
 
 /// The tag of an account's own place: a child of Accounts.
 pub fn account_tag(id: &str) -> String {
@@ -68,8 +70,11 @@ pub struct ShellState {
     /// launch) its name; the transaction a register's inspector shows.
     pub category: Option<String>,
     pub transaction: Option<String>,
-    /// The appearance a launch asked for over the system's.
+    /// The appearance asked for over the system's: a launch's, or
+    /// Settings' Appearance.
     pub appearance: Option<Appearance>,
+    /// What Settings is in the middle of, and who is signed in where.
+    pub settings: SettingsState,
 }
 
 /// Light or dark, over the system's.
@@ -91,6 +96,7 @@ impl Default for ShellState {
             category: None,
             transaction: None,
             appearance: None,
+            settings: SettingsState::default(),
         }
     }
 }
@@ -173,6 +179,57 @@ pub enum ShellMsg {
     CoverOverspending,
     /// The inspected category's transactions, in Transactions.
     ShowActivity,
+    /// Who is using the budget and where, as the host knows it, whenever
+    /// that changes ([`settings`]).
+    Session {
+        facts: SessionFacts,
+    },
+    /// Settings' Sign Out (Leave the Demo): asked about first.
+    SignOut,
+    ConfirmSignOut,
+    CancelSignOut,
+    /// Add a Device: the host's code for another device to join with.
+    AddDevice,
+    /// Connect a Bank: the server asked for Plaid's page.
+    ConnectBank,
+    /// The shown bank's login again, on Plaid's page.
+    Reconnect,
+    /// The shown bank disconnected: asked about first.
+    Disconnect,
+    ConfirmDisconnect,
+    CancelDisconnect,
+    /// A connected bank's page, by the name the server keeps it under.
+    OpenBank {
+        name: String,
+    },
+    CloseBank,
+    /// Plaid's page opened again, from the ask's row.
+    OpenAsk,
+    /// Plaid's page closed (its Done, or the host's tab gone).
+    PageClosed {
+        url: String,
+    },
+    /// The answered ask put away.
+    DismissAsk,
+    /// What one of the shown bank's accounts feeds, to choose (its Plaid id).
+    ChooseFeed {
+        plaid: String,
+    },
+    CancelFeed,
+    /// It feeds a new account here, of its kind.
+    FeedNew,
+    /// It feeds the account of this hex id.
+    FeedAccount {
+        id: String,
+    },
+    /// It is imported no more, or again.
+    FeedIgnored {
+        ignored: bool,
+    },
+    /// Settings' Appearance: `system`, `light` or `dark`.
+    AppearanceKey {
+        key: String,
+    },
 }
 
 /// One account's place in the sidebar.
@@ -208,6 +265,8 @@ pub struct ShellPage {
     pub category: Option<CategoryInspector>,
     /// Transaction Details, while a transaction is inspected.
     pub transaction: Option<TransactionInspector>,
+    /// The Settings scene's panes.
+    pub settings: SettingsPage,
     /// What waits for a look in Transactions: the bank's imports to review.
     pub to_review: Option<i64>,
     /// The open accounts on the budget, then those only tracked.
@@ -229,10 +288,14 @@ impl App for MoneyShell {
         if !s.month.is_empty() {
             v.push(MoneyView::Lines { month: s.month.clone() });
         }
+        v.extend(settings::holds());
         v
     }
 
     fn update(s: &mut ShellState, msg: ShellMsg, data: &Data<'_, MoneyView>) -> Vec<Command<Self>> {
+        if let Some(out) = settings::update(s, &msg, data) {
+            return out;
+        }
         match msg {
             ShellMsg::Select { tag } => {
                 select(s, tag, data);
@@ -342,6 +405,28 @@ impl App for MoneyShell {
             ShellMsg::ThisMonth => vec![Command::Request(MoneyRequest::ThisMonth)],
             ShellMsg::Refresh => vec![Command::Request(MoneyRequest::Refresh)],
             ShellMsg::Filter => vec![Command::Request(MoneyRequest::Filter)],
+            // Settings' own, taken above (`settings::update`).
+            ShellMsg::Session { .. }
+            | ShellMsg::SignOut
+            | ShellMsg::ConfirmSignOut
+            | ShellMsg::CancelSignOut
+            | ShellMsg::AddDevice
+            | ShellMsg::ConnectBank
+            | ShellMsg::Reconnect
+            | ShellMsg::Disconnect
+            | ShellMsg::ConfirmDisconnect
+            | ShellMsg::CancelDisconnect
+            | ShellMsg::OpenBank { .. }
+            | ShellMsg::CloseBank
+            | ShellMsg::OpenAsk
+            | ShellMsg::PageClosed { .. }
+            | ShellMsg::DismissAsk
+            | ShellMsg::ChooseFeed { .. }
+            | ShellMsg::CancelFeed
+            | ShellMsg::FeedNew
+            | ShellMsg::FeedAccount { .. }
+            | ShellMsg::FeedIgnored { .. }
+            | ShellMsg::AppearanceKey { .. } => vec![],
         }
     }
 
@@ -374,6 +459,7 @@ impl App for MoneyShell {
                 .as_deref()
                 .and_then(|k| inspect::transaction_named(data.rows(&MoneyView::Register { account: None }), k))
                 .map(inspect::transaction),
+            settings: settings::screen(s, data),
             to_review: (unapproved > 0).then_some(unapproved),
             budget_accounts: open.iter().filter(|a| a.on_budget).map(place).collect(),
             tracking_accounts: open.iter().filter(|a| !a.on_budget).map(place).collect(),
@@ -482,9 +568,17 @@ fn launch(s: &mut ShellState, l: Launch, data: &Data<'_, MoneyView>) -> Vec<Comm
             Some(_) => ShellState::default().section,
             None => std::mem::take(&mut s.section),
         };
+        // Who is signed in where, and an ask being followed, are not the
+        // window's: they stay.
+        let settings = SettingsState {
+            facts: std::mem::take(&mut s.settings.facts),
+            awaiting: s.settings.awaiting.take(),
+            ..SettingsState::default()
+        };
         *s = ShellState {
             month: std::mem::take(&mut s.month),
             section,
+            settings,
             ..ShellState::default()
         };
     }

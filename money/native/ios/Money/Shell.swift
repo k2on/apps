@@ -82,11 +82,11 @@ struct Shell: View {
             .preferredColorScheme(model.shell.page.appearance.map { $0 == .dark ? .dark : .light })
             .settingsShown($settings) {
                 MoneySettingsView()
-                    .environmentObject(model.shell)
-                    .environmentObject(model)
+                    .moneySettings(model)
                     .environmentObject(watched)
-                    .environment(\.hostedScreens) { name in AnyView(SettingsHosted(name: name)) }
             }
+            // Who is signed in where, for Settings (money_app's SessionFacts).
+            .onChange(of: model.facts, initial: true) { model.shell.send(.session(facts: model.facts)) }
             // The budget's title is its month: the shell is told as it moves.
             .onChange(of: model.month) { model.shell.send(.month(month: model.month)) }
             .toast($model.notice)
@@ -95,8 +95,11 @@ struct Shell: View {
             .onAppear { takeLink() }
             .onChange(of: model.links) { takeLink() }
             // Plaid's page, as soon as the server answers with it, wherever the
-            // person is; closed by its Done, or once the server is finished.
-            .safari(model.bankPage, tint: Color.accent) { model.bankPageClosed() }
+            // person is; closed by its Done, or once the server is finished
+            // (money_app's shell says which: `SettingsPage.plaid`).
+            .safari(model.shell.page.settings.plaid.flatMap { URL(string: $0) }, tint: Color.accent) {
+                if let url = model.shell.page.settings.plaid { model.shell.send(.pageClosed(url: url)) }
+            }
     }
 
     /// The link the first run kept, taken: a launch as the app runs. What
@@ -178,9 +181,6 @@ struct Shell: View {
             case "budget.inspector.none":
                 ContentUnavailableView("Nothing Selected", systemImage: "sidebar.trailing", description: Text("Select a row to see its details here."))
             case "household": AccountButton()
-            case "settings.general": SettingsView()
-            case "settings.banks": BanksView()
-            case "settings.household": ContentUnavailableView("Household", systemImage: "person.2", description: Text("Who shares this budget, and their roles."))
             default: ContentUnavailableView("Nothing Selected", systemImage: "sidebar.right")
             }
         }
@@ -208,6 +208,8 @@ struct Shell: View {
             if sheets.page.transaction == nil { pending.append(r) }
         case let .sheet(msg): model.sheets?.send(msg)
         case .settings: settings = true
+        case .signOut: model.signOut()
+        case .addDevice: model.addingDevice = true
         case let .accounts(msg):
             model.shell.send(.select(tag: "accounts"))
             model.accounts?.send(msg)
@@ -250,9 +252,12 @@ struct Shell: View {
         switch r {
         case .accounts: register(nil, search: "")
         case let .account(id, _): register(id, search: "")
-        case .banks: BanksView()
-        case let .bank(name): BankView(name: name)
-        case .settings: SettingsView()
+        // Connected Banks, written from Rust (Generated/MoneyBanksView.swift).
+        case .banks:
+            MoneyBanksView().environmentObject(model.shell).environment(\.rowMark) { kind in AnyView(AccountMark(kind: kind)) }
+        case let .bank(name):
+            MoneyBanksView().environmentObject(model.shell).environment(\.rowMark) { kind in AnyView(AccountMark(kind: kind)) }
+                .onAppear { model.shell.send(.openBank(name: name)) }
         default: EmptyView()
         }
     }
@@ -318,6 +323,7 @@ struct AccountButton: View {
         let t = then
         then = nil
         switch t {
+        case .page(.settings)?: model.shell.request(.settings(pane: ""))
         case let .page(r)?: open(r)
         case .signOut?: model.signOut()
         case nil: break
@@ -350,17 +356,29 @@ struct RegisterHost: View {
     }
 }
 
-/// A pane of Settings (Generated/MoneySettingsView.swift): money's own
-/// screens, until each moves into Rust.
-struct SettingsHosted: View {
-    let name: String
+/// The Settings scene (Generated/MoneySettingsView.swift) as money shows
+/// it: over the shell's runtime, accounts drawn with their marks, nothing
+/// of its own in General (only the desktop adds there), and Add a Device's
+/// shared page when the shell asks for it.
+private struct MoneySettings: ViewModifier {
+    @ObservedObject var model: Model
 
-    var body: some View {
-        switch name {
-        case "settings.server": SettingsView()
-        case "settings.banks": BanksView()
-        case "settings.household": ContentUnavailableView("Household", systemImage: "house", description: Text("Who shares this budget, and their roles."))
-        default: ContentUnavailableView("Appearance", systemImage: "circle.lefthalf.filled", description: Text("Follows the system's light and dark."))
-        }
+    func body(content: Content) -> some View {
+        content
+            .environmentObject(model.shell)
+            .environmentObject(model)
+            .environment(\.rowMark) { kind in AnyView(AccountMark(kind: kind)) }
+            .environment(\.hostedScreens) { _ in AnyView(EmptyView()) }
+            .sheet(isPresented: $model.addingDevice) {
+                let (server, login) = (model.server, model.login)
+                NavigationStack {
+                    AddDeviceView { await addDevice(server: server, login: login) }
+                        .toolbar { Button("Done") { model.addingDevice = false } }
+                }
+            }
     }
+}
+
+extension View {
+    func moneySettings(_ model: Model) -> some View { modifier(MoneySettings(model: model)) }
 }

@@ -132,5 +132,9 @@ class Screens {
         shot("register") { ScreenFrame { RegisterScreen(holder) } }
     }
 
-    @Test fun settings() = shot("settings") { SettingsScreen(book.state.value, onBack = none) }
+    @Test fun settings() {
+        val holder = MoneyShellHolder(book.session, {}, { book.state.value.today })
+        holder.send(uniffi.money_bridge.ShellMsg.Session(facts = uniffi.money_bridge.SessionFacts("Alex", "", true, "", true, 0L, "0.1", true, false)))
+        shot("settings") { ScreenFrame { MoneySettings(holder) } }
+    }
 }

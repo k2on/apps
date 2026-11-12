@@ -58,23 +58,18 @@ import uniffi.money_bridge.Assign
 import uniffi.money_bridge.Auto
 import uniffi.money_bridge.AutoAssign
 import uniffi.money_bridge.BankLine
-import uniffi.money_bridge.BankName
 import uniffi.money_bridge.BudgetLine
 import uniffi.money_bridge.Categorize
 import uniffi.money_bridge.DeleteCategory
 import uniffi.money_bridge.Draft
-import uniffi.money_bridge.Follow
 import uniffi.money_bridge.GroupLine
 import uniffi.money_bridge.HideCategory
-import uniffi.money_bridge.IgnoreLinked
-import uniffi.money_bridge.LinkAccount
 import uniffi.money_bridge.LinkedLine
 import uniffi.money_bridge.MoneyChange
 import uniffi.money_bridge.MoveCategory
 import uniffi.money_bridge.MoveGroup
 import uniffi.money_bridge.MoveMoney
 import uniffi.money_bridge.OpenAccount
-import uniffi.money_bridge.OpenLinked
 import uniffi.money_bridge.PayeeLine
 import uniffi.money_bridge.Reconcile
 import uniffi.money_bridge.RenameCategory
@@ -85,7 +80,6 @@ import uniffi.money_bridge.Summary
 import uniffi.money_bridge.TxnLine
 import uniffi.money_bridge.Txns
 import uniffi.money_bridge.banksWanting
-import uniffi.money_bridge.follow
 import uniffi.money_bridge.uncovered
 import dev.arkui.Feedback
 import dev.arkui.Watched
@@ -198,14 +192,6 @@ private constructor(
     /** Every note said, in order: the diagnostics' and the tests'. */
     val said: MutableList<String> = CopyOnWriteArrayList()
 
-    private val _pages = MutableSharedFlow<String>(extraBufferCapacity = 4)
-
-    /** Plaid's pages to open, each once: the answer to a connection asked for here. */
-    val pages: SharedFlow<String> = _pages.asSharedFlow()
-
-    /** Every page asked to be opened, in order: the tests'. */
-    val opened: MutableList<String> = CopyOnWriteArrayList()
-
     // Held on `run`'s thread only.
     private var month: String = today.take(7)
     /** What every screen draws from, held while the book is open. */
@@ -215,14 +201,6 @@ private constructor(
     /** Each view's version when it was last read into the ledger. */
     private val seen = HashMap<MoneyView, ULong>()
     private var syncing = false
-
-    /**
-     * A page asked for here and not yet opened: the newest ask there was before it (none: there was
-     * none), so the drain knows the server's answer to this one when it arrives.
-     */
-    private var awaiting: Awaiting? = null
-
-    private class Awaiting(val after: Id?)
 
     private fun start() {
         for (v in ALWAYS) always.add(session.hold(v))
@@ -280,16 +258,6 @@ private constructor(
         val b = MoneyView.Budget(month)
         val got = if (fresh(b) || was.month != month) session.budget(month) else null
         val asks = if (fresh(MoneyView.Asks)) session.asks() else was.asks
-        awaiting?.let { w ->
-            when (val f = follow(asks, w.after)) {
-                is Follow.Page -> {
-                    awaiting = null
-                    browse(f.url)
-                }
-                Follow.Over -> awaiting = null
-                Follow.Wait -> {}
-            }
-        }
         val s = peer.status()
         // The demo is Alex's, as the demo window is, with no session row to say so.
         val signed = peer.signedIn()
@@ -454,46 +422,6 @@ private constructor(
 
     fun openAccount(name: String, kind: AccountKind, onBudget: Boolean, balance: Long) =
         act("add the account") { MoneyChange.OpenAccount(OpenAccount(name, kind, onBudget, balance, today)) }
-
-    /** The bank's account `plaid` feeds `account` from now on. */
-    fun link(plaid: String, account: Id) = act("link it") { MoneyChange.Link(LinkAccount(plaid, account)) }
-
-    fun ignore(plaid: String, ignored: Boolean) = act("change it") { MoneyChange.Ignore(IgnoreLinked(plaid, ignored)) }
-
-    /** The bank's account `plaid` given an account of its own, of its kind (a card a credit account). */
-    fun openLinked(plaid: String) = post {
-        if (send("open an account for it", null, MoneyChange.OpenLinked(OpenLinked(plaid, "")))) {
-            say("Opened. Its history arrives with the bank's next import")
-        }
-    }
-
-    /** Ask the server to connect a bank: its page opens when the server answers with it ([pages]). */
-    fun connect() = askPage("connect a bank", MoneyChange.Connect)
-
-    /** Ask the server for the page to log in to `bank` again. */
-    fun reconnect(bank: String) = askPage("reconnect the bank", MoneyChange.Reconnect(BankName(bank)))
-
-    /** Ask the server to forget `bank`. Its accounts here, and what is in them, stay. */
-    fun disconnect(bank: String) = post {
-        if (demo) return@post say("The demo has no server to disconnect a bank from")
-        if (send("disconnect the bank", null, MoneyChange.Disconnect(BankName(bank)))) say("Asked the server to disconnect the bank")
-    }
-
-    // An ask whose answer is a page to open: the newest ask before it kept, so the drain knows its answer.
-    private fun askPage(what: String, change: MoneyChange) = post {
-        if (demo) return@post say("The demo has no server to connect a bank through")
-        val after = session.asks().firstOrNull()?.id
-        if (send(what, null, change)) {
-            awaiting = Awaiting(after)
-            say("Asked the server for Plaid's page")
-        }
-    }
-
-    /** Plaid's page opened: when the server's answer arrives, or again from Settings. */
-    fun browse(url: String) {
-        opened.add(url)
-        _pages.tryEmit(url)
-    }
 
     /**
      * A change as it is, said as `what` when refused: what the server's importer does, which a test

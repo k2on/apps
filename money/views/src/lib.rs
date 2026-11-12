@@ -106,6 +106,15 @@ pub fn screens() -> ark_ui_gen::app::App {
                     ..shell
                 },
             ),
+            // Connected Banks alone, where Accounts' Bank Connections opens it.
+            Generated::view(
+                money_app::shell::view::settings_banks::record,
+                Names {
+                    swift: "MoneyBanksView",
+                    kotlin: "MoneyBanks",
+                    ..shell
+                },
+            ),
             Generated::commands(
                 money_app::shell::view::commands,
                 Names {
