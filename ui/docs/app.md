@@ -258,7 +258,8 @@ hands the process says how in its module.toml's `[phone]` (the ark-ffi
 method that registers it, and how Swift and Kotlin make it): the generated
 `@main` and activity register each listed one as the process's
 (`ArkProcess.registerHaptics(device: PhoneHaptics())`, … ark-ffi's
-`devices`, which links their crates and carries their UniFFI traits), and
+`devices`: a feature of ark-ffi per module, which the app's bridge turns
+on, links its crate and carries its UniFFI traits), and
 the activity puts a module's page at its root (ark-camera's
 `CameraPage`); an app writes nothing native for its modules. An answer
 that comes later (the camera's) wakes the app's host, which drains its

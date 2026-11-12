@@ -13,7 +13,9 @@ path = "src/lib.rs"
 [dependencies]
 ark = { path = "../../rust/ark" }
 ark-app = { path = "../../ui/rust/app" }
-ark-ffi = { path = "../../rust/ark-ffi" }
+# With the device modules money lists (app.toml's `modules`), which the
+# app library registers through it (`devices`).
+ark-ffi = { path = "../../rust/ark-ffi", features = ["haptics", "clipboard", "share", "camera", "scanner"] }
 ark-peer = { path = "../../rust/ark-peer", default-features = false }
 # Every number, day and length as the apps write them, in the library
 # (its bindings are `ark_format`'s).

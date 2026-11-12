@@ -1582,16 +1582,19 @@ rec {
           {
             name = "ark-camera";
             packageId = "ark-camera";
+            optional = true;
             features = [ "ffi" ];
           }
           {
             name = "ark-clipboard";
             packageId = "ark-clipboard";
+            optional = true;
             features = [ "ffi" ];
           }
           {
             name = "ark-haptics";
             packageId = "ark-haptics";
+            optional = true;
             features = [ "ffi" ];
           }
           {
@@ -1615,6 +1618,7 @@ rec {
           {
             name = "ark-scanner";
             packageId = "ark-scanner";
+            optional = true;
           }
           {
             name = "ark-secure-store";
@@ -1624,6 +1628,7 @@ rec {
           {
             name = "ark-share";
             packageId = "ark-share";
+            optional = true;
             features = [ "ffi" ];
           }
           {
@@ -1660,9 +1665,14 @@ rec {
         ];
         features = {
           "bindgen" = [ "uniffi/cli" "uniffi/cargo-metadata" ];
-          "model" = [ "ark-scanner/model" ];
+          "camera" = [ "dep:ark-camera" ];
+          "clipboard" = [ "dep:ark-clipboard" ];
+          "haptics" = [ "dep:ark-haptics" ];
+          "model" = [ "scanner" "ark-scanner/model" ];
+          "scanner" = [ "camera" "dep:ark-scanner" ];
+          "share" = [ "dep:ark-share" ];
         };
-        resolvedDefaultFeatures = [ "bindgen" "model" ];
+        resolvedDefaultFeatures = [ "bindgen" "camera" "clipboard" "haptics" "model" "scanner" "share" ];
       };
       "ark-format" = rec {
         crateName = "ark-format";
@@ -15208,6 +15218,7 @@ rec {
           {
             name = "ark-ffi";
             packageId = "ark-ffi";
+            features = [ "haptics" "clipboard" "share" "camera" "scanner" ];
           }
           {
             name = "ark-format";

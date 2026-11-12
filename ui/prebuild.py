@@ -1429,11 +1429,16 @@ def check(root):
         if a.get("crate") and os.path.exists(os.path.join(crate_dir, "Cargo.toml")):
             deps = load(os.path.join(crate_dir, "Cargo.toml")).get("dependencies", {})
             # A device the phone hands the process (module.toml's `[phone]`)
-            # is registered through ark-ffi, which links its crate.
-            ffi = load(os.path.join(root, "rust", "ark-ffi", "Cargo.toml")).get("dependencies", {})
+            # is registered through ark-ffi, its feature of the module's name
+            # turned on by the bridge, which links the module's crate.
+            ffi = load(os.path.join(root, "rust", "ark-ffi", "Cargo.toml"))
+            on = deps.get("ark-ffi", {}).get("features", []) if isinstance(deps.get("ark-ffi"), dict) else []
             for n in a.get("modules", []):
-                if n in every and "phone" in module(root, n) and module(root, n)["crate"] not in ffi:
-                    problems.append(f"rust/ark-ffi/Cargo.toml has no dependency on {module(root, n)['crate']}, whose [phone] it registers")
+                feature = n.removeprefix("ark-")
+                if n in every and "phone" in module(root, n) and (module(root, n)["crate"] not in ffi.get("dependencies", {}) or feature not in ffi.get("features", {})):
+                    problems.append(f"rust/ark-ffi/Cargo.toml has no feature {feature} over {module(root, n)['crate']}, whose [phone] it registers")
+                elif n in every and "phone" in module(root, n) and feature not in on:
+                    problems.append(f"{app}/{bridge or 'app'}/Cargo.toml's ark-ffi has no feature {feature}, which app.toml's modules ask")
                 elif n in every and "phone" not in module(root, n) and module(root, n)["crate"] not in deps:
                     problems.append(f"{app}/{bridge or 'app'}/Cargo.toml has no dependency on {module(root, n)['crate']}, which app.toml lists")
         # In a checkout (not nix's copy, which has no git): nothing committed

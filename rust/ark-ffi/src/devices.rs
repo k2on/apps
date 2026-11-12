@@ -3,12 +3,16 @@
 //! app writes none of this. Its app.toml lists its modules, each module's
 //! module.toml says how the phone makes its device and which of these
 //! takes it (`[phone]`), and the generated entry points (ui/prebuild.py)
-//! register them at launch, through the app library.
+//! register them at launch, through the app library. Each is ark-ffi's
+//! feature of the module's name, which the app's bridge turns on.
 
+#[allow(unused_imports)]
 use std::sync::Arc;
 
+#[allow(unused_imports)]
 use crate::ArkProcess;
 
+#[cfg(feature = "haptics")]
 #[uniffi::export]
 impl ArkProcess {
     /// The phone's haptics (ark-haptics).
@@ -17,28 +21,44 @@ impl ArkProcess {
             m.set(Some(ark_haptics::phone::port(device)));
         })
     }
+}
 
+#[cfg(feature = "clipboard")]
+#[uniffi::export]
+impl ArkProcess {
     /// The phone's clipboard (ark-clipboard).
     pub fn register_clipboard(&self, device: Arc<dyn ark_clipboard::phone::Clipboard>) {
         self.add_modules(|m| {
             m.set(Some(ark_clipboard::phone::port(device)));
         })
     }
+}
 
+#[cfg(feature = "share")]
+#[uniffi::export]
+impl ArkProcess {
     /// The phone's share sheet (ark-share).
     pub fn register_share(&self, device: Arc<dyn ark_share::phone::Share>) {
         self.add_modules(|m| {
             m.set(Some(ark_share::phone::port(device)));
         })
     }
+}
 
+#[cfg(feature = "camera")]
+#[uniffi::export]
+impl ArkProcess {
     /// The phone's camera (ark-camera).
     pub fn register_camera(&self, device: Arc<dyn ark_camera::Camera>) {
         self.add_modules(|m| {
             m.set(Some(device));
         })
     }
+}
 
+#[cfg(feature = "scanner")]
+#[uniffi::export]
+impl ArkProcess {
     /// The page scanner (ark-scanner): its eyes and its warp are Rust's,
     /// its frames and shutter the camera's, so it is registered after the
     /// camera and over it; with no camera registered, none.
@@ -50,7 +70,7 @@ impl ArkProcess {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "scanner"))]
 mod tests {
     use super::*;
     use ark_module::Reply;
