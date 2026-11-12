@@ -659,8 +659,7 @@ fn shell_part<'a, M: Clone + 'static>(p: Part<M>, ctx: &mut Ctx<'a, '_, M>) -> E
             }
             // A title is never broken: a window too narrow for every tab
             // scrolls them sideways.
-            let heads = scrollable(row(heads).spacing(4).align_y(Alignment::Center))
-                .direction(scrollable::Direction::Horizontal(Default::default()));
+            let heads = scrollable(row(heads).spacing(4).align_y(Alignment::Center)).direction(scrollable::Direction::Horizontal(Default::default()));
             column![
                 container(heads).center_x(Length::Fill).padding([6, 12]),
                 rule::horizontal(1).style(style::edge),
@@ -854,7 +853,10 @@ fn bar_button<'a, M: Clone + 'a>(title: &'static str, glyph: &'static str, _plac
 /// from its own cache), opening their account; said as "Account" and their
 /// name.
 fn account_button<'a, M: Clone + 'a>(name: String, tap: M) -> Element<'a, M> {
-    let who = crate::account::Who { name: name.clone(), id: name.clone() };
+    let who = crate::account::Who {
+        name: name.clone(),
+        id: name.clone(),
+    };
     let b = button(container(crate::account::face(Some(&who), None, BAR_GLYPH + 4.0)).center(BAR_BUTTON))
         .padding(0)
         .style(style::quiet)

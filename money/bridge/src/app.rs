@@ -108,7 +108,9 @@ impl<A: App<Key = domain::MoneyView, Change = MoneyChange, Route = Route, Reques
         // An answer that comes later (the camera's) wakes the host, which
         // drains every runtime on its own thread.
         let router = self.app.shell.clone();
-        self.app.inbox.ask_telling(&ark_ffi::ArkProcess::shared().modules(), ticket, ask, move || router.answered())
+        self.app
+            .inbox
+            .ask_telling(&ark_ffi::ArkProcess::shared().modules(), ticket, ask, move || router.answered())
     }
     fn request(&mut self, r: MoneyRequest) {
         match r {

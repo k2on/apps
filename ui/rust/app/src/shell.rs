@@ -218,7 +218,10 @@ pub fn account_label(name: &str) -> String {
 /// The initial the account item shows with no picture: the name's first
 /// letter, capitalized; `?` for none.
 pub fn account_initial(name: &str) -> String {
-    name.chars().find(|c| c.is_alphanumeric()).map(|c| c.to_uppercase().collect()).unwrap_or_else(|| "?".into())
+    name.chars()
+        .find(|c| c.is_alphanumeric())
+        .map(|c| c.to_uppercase().collect())
+        .unwrap_or_else(|| "?".into())
 }
 
 /// A toolbar's button, where `placement` puts it.

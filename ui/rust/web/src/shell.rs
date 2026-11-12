@@ -657,8 +657,16 @@ fn peel<M: Clone + 'static>(v: View<M>) -> (Option<Found<M>>, Option<(&'static s
 fn account_button<M: Clone + 'static>(name: &str, picture: &str, tap: M) -> AnyView {
     let said = ark_app::shell::account_label(name);
     let face = match picture.is_empty() {
-        true => html::span().class("ark-account-initial").attr("aria-hidden", "true").child(ark_app::shell::account_initial(name)).into_any(),
-        false => html::img().class("ark-account-picture").attr("src", picture.to_string()).attr("alt", "").into_any(),
+        true => html::span()
+            .class("ark-account-initial")
+            .attr("aria-hidden", "true")
+            .child(ark_app::shell::account_initial(name))
+            .into_any(),
+        false => html::img()
+            .class("ark-account-picture")
+            .attr("src", picture.to_string())
+            .attr("alt", "")
+            .into_any(),
     };
     crate::wired!(html::button(), crate::tapped("Account", &tap))
         .class("ark-bar-button ark-account")

@@ -530,11 +530,18 @@ fn the_toolbars_end_with_the_account() {
     };
     rt.dispatch(facts(true, ""), &mut demo);
     let (name, picture, tap) = account(&money_shell::view(&rt.screen(&demo))).expect("the shell's account item");
-    assert_eq!((name.as_str(), picture.as_str()), ("Alex", ""), "the demo's household is Alex's, with no picture");
+    assert_eq!(
+        (name.as_str(), picture.as_str()),
+        ("Alex", ""),
+        "the demo's household is Alex's, with no picture"
+    );
     assert_eq!(tap, ShellMsg::Account);
     rt.dispatch(facts(false, "https://money.example.com/auth/picture/sam"), &mut demo);
     let (name, picture, _) = account(&money_shell::view(&rt.screen(&demo))).unwrap();
-    assert_eq!((name.as_str(), picture.as_str()), ("Sam Lee", "https://money.example.com/auth/picture/sam"));
+    assert_eq!(
+        (name.as_str(), picture.as_str()),
+        ("Sam Lee", "https://money.example.com/auth/picture/sam")
+    );
     rt.dispatch(ShellMsg::Pane { title: "Appearance".into() }, &mut demo);
     rt.dispatch(ShellMsg::Account, &mut demo);
     assert_eq!(rt.screen(&demo).pane, "General");
