@@ -481,7 +481,7 @@ pub fn bank_page(b: &BankPage) -> View<ShellMsg> {
                 )
             },
         )),
-        (),
+        bar_item("Sync", "refresh-cw", Placement::Primary, ShellMsg::Refresh),
     )
 }
 

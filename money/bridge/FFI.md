@@ -1,8 +1,9 @@
 # money's library for its phones
 
-> **This crate is being removed.** It is here only while some of money's
-> screens are still native (Receipts, Settings, and the phones'
-> `Model.swift` / `Book.kt`). The end state generates the phones'
+> **This crate is being removed.** It is here only while the phones'
+> `Model.swift` / `Book.kt` still own the first run, the session and its
+> screens' runtimes (every screen, Receipts and Settings among them, is
+> Rust now). The end state generates the phones'
 > bindings from `money/app` and `money/core` (nix/ark-app.nix), with no
 > committed `money/bridge`. Don't build on it: a new screen or field goes
 > in `money/app` as a `#[view]`; a device feature is a port in
