@@ -96,7 +96,7 @@ impl App {
             ShellMsg::Find => Some(Page::Ledger(Ledger::All)),
             _ => None,
         };
-        let launching = matches!(msg, ShellMsg::Launch { .. });
+        let launching = matches!(msg, ShellMsg::Launch { .. } | ShellMsg::Address { .. });
         let mut rt = std::mem::take(&mut self.shell);
         let searching = matches!(msg, ShellMsg::Search { .. } | ShellMsg::ShowActivity);
         let mut desk = Desk { app: self, natives: vec![] };

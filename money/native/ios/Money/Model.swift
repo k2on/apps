@@ -212,14 +212,6 @@ final class Model: ObservableObject {
     /// The link kept for the app, once the app itself shows; once.
     func takeLink() -> URL? { machine.takeLink().flatMap { URL(string: $0) } }
 
-    /// What a link names that is not a page: a sign-in link (`money://join?…`)
-    /// is the sign-in machine's ([open(url:)]), and is not navigated to.
-    func takes(_ route: Route) -> Bool {
-        if case .join = route { return true }
-        if case .welcome = route { return true }
-        return false
-    }
-
     // MARK: the session
 
     private func open(_ o: Opening) {

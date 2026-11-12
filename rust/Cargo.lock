@@ -4619,6 +4619,7 @@ dependencies = [
  "ark-share",
  "money-core",
  "money-seed",
+ "serde_json",
 ]
 
 [[package]]

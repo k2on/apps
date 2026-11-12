@@ -29,3 +29,6 @@ ark-scanner = { path = "../../modules/ark-scanner" }
 ark-peer = { path = "../../rust/ark-peer", default-features = false }
 money-core = { path = "../core", features = ["demo"] }
 money-seed = { path = "../demo" }
+# Reading money/demo/shots.json: each screen's route the launch its
+# arguments are (src/shell/tests.rs).
+serde_json = { workspace = true }

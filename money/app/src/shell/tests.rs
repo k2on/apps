@@ -363,3 +363,91 @@ fn a_launch_puts_the_inspector_away_before_it_moves() {
     let page = rt.screen(&demo);
     assert_eq!((page.section.as_str(), page.inspector), ("insights", false));
 }
+
+/// An address is a launch: `money:///budget` selects the Budget wherever
+/// the shell was, and pushes nothing; a row's route opens the row; a bank
+/// is Settings' Banks; a sign-in link is not the shell's. Falsified by
+/// taking an address as a route pushed on the section shown (dry run
+/// 43113069044: the iPad's Budget pushed over itself, an empty page).
+#[test]
+fn an_address_selects_what_it_names() {
+    let mut demo = Phone(Demo::new());
+    let mut rt = Runtime::<MoneyShell>::new();
+    let to = |a: &str| ShellMsg::Address { address: a.into() };
+    rt.dispatch(ShellMsg::Select { tag: "insights".into() }, &mut demo);
+    rt.dispatch(to("money:///budget"), &mut demo);
+    let page = rt.screen(&demo);
+    assert_eq!((page.section.as_str(), page.showing), ("budget", false));
+    assert!(demo.0.requests.is_empty(), "nothing pushed: {:?}", demo.0.requests);
+
+    rt.dispatch(to("money:///account/sapphire?inspector=1"), &mut demo);
+    let page = rt.screen(&demo);
+    assert_eq!(
+        (page.account_title.as_str(), page.showing, page.inspector),
+        ("Chase Sapphire", true, true)
+    );
+    let id = page.section.trim_start_matches("accounts/").to_string();
+    // The route's own spelling (`Route::Account`'s url), by its id; the
+    // inspector shown, so put away first.
+    rt.dispatch(to(&format!("money:///account/{id}/chase-sapphire/")), &mut demo);
+    assert!(rt.awaits_draw());
+    assert!(rt.drawn(&mut demo));
+    let page = rt.screen(&demo);
+    assert_eq!((page.section, page.inspector), (format!("accounts/{id}"), false));
+
+    rt.dispatch(to("money:///banks"), &mut demo);
+    assert_eq!(
+        demo.0.requests.last(),
+        Some(&MoneyRequest::Settings {
+            pane: "Connected Banks".into()
+        })
+    );
+    rt.dispatch(to("money:///inbox?appearance=dark"), &mut demo);
+    let page = rt.screen(&demo);
+    assert_eq!((page.section.as_str(), page.appearance), ("transactions", Some(Appearance::Dark)));
+    rt.dispatch(to("money:///filtered"), &mut demo);
+    assert_eq!(rt.screen(&demo).section, "transactions");
+
+    let before = rt.screen(&demo);
+    demo.0.requests.clear();
+    for not_ours in ["money://join?server=https%3A%2F%2Fh&code=1", "money:///welcome", "money:///"] {
+        rt.dispatch(to(not_ours), &mut demo);
+    }
+    assert_eq!(rt.screen(&demo), before, "the onboarding's links leave the shell as it was");
+    assert!(demo.0.requests.is_empty());
+
+    // The browser's own spelling of an account's place: its tag.
+    rt.dispatch(to(&format!("/accounts/{id}/")), &mut demo);
+    assert_eq!(rt.screen(&demo).section, format!("accounts/{id}"));
+}
+
+/// Every screenshot's `route` (money/demo/shots.json) opens what its
+/// launch arguments open: the same page, the same requests of the
+/// platform. Falsified by an address the shell reads otherwise than its
+/// `-screen` (a bank's, a sheet's, To Review's).
+#[test]
+fn every_shot_route_is_its_launch() {
+    let shots: serde_json::Value = serde_json::from_str(include_str!("../../../demo/shots.json")).unwrap();
+    let mut n = 0;
+    for screen in shots["screens"].as_array().expect("screens") {
+        let (Some(route), Some(args)) = (screen["route"].as_str(), screen["args"].as_array()) else {
+            continue;
+        };
+        let args: Vec<String> = args.iter().filter_map(|a| a.as_str().map(String::from)).collect();
+        let open = |msg: ShellMsg| {
+            let mut demo = Demo::new();
+            let mut rt = Runtime::<MoneyShell>::new();
+            rt.dispatch(msg, &mut demo);
+            (rt.screen(&demo), demo.requests)
+        };
+        assert_eq!(
+            open(ShellMsg::Address {
+                address: format!("money://{route}")
+            }),
+            open(ShellMsg::Launch { args: args.clone() }),
+            "{route} against {args:?}"
+        );
+        n += 1;
+    }
+    assert!(n >= 20, "the shots' routes: {n}");
+}

@@ -411,10 +411,11 @@ pub struct App {
     /// The shell (money/app/src/shell): the sections, their toolbars,
     /// search and inspector, the commands, in Rust as on the phones.
     pub shell: ark_app::Runtime<money_app::shell::MoneyShell>,
-    /// The window's launch arguments (`-screen budget`, …:
-    /// `ark_app::shell::Launch`), given to the shell once the accounts
-    /// have arrived, as a link waits for them.
-    pub launch: Option<Vec<String>>,
+    /// How the window was launched, for the shell once the accounts have
+    /// arrived: the link it was opened with, as an address
+    /// (`ShellMsg::Address`), else its launch arguments (`-screen budget`,
+    /// …: `ark_app::shell::Launch`).
+    pub launch: Option<ShellMsg>,
     /// Where the window has been: the address bar, and back and forward by
     /// `^O`/`^I` and a swipe (`arkui::history`).
     pub history: arkui::history::History<Route>,
@@ -548,7 +549,7 @@ impl App {
     fn boot() -> (App, Task<Message>) {
         let today = day_of_ms(ark_peer::now_ms());
         let mut app = App::with_peer(seed::seeded(), &today);
-        app.launch = Some(std::env::args().collect());
+        app.launch = Some(launched());
         (app, Task::none())
     }
 
@@ -595,7 +596,7 @@ impl App {
             }
         };
         let mut app = App::on_server(client, &today, url, login);
-        app.launch = Some(std::env::args().collect());
+        app.launch = Some(launched());
         if let Some(s) = &mut app.server {
             (s.logins, s.user) = (Some(logins), user);
         }
@@ -809,7 +810,7 @@ impl App {
         }
         self.history.sync(&self.route());
         let task = match self.launch.take_if(|_| ready) {
-            Some(args) => Task::batch([task, self.update(Message::Shell(ShellMsg::Launch { args }))]),
+            Some(msg) => Task::batch([task, self.update(Message::Shell(msg))]),
             None => task,
         };
         // Whatever the message came to is said for a moment over the page
@@ -2608,6 +2609,17 @@ pub fn split_lines(rows: &[SplitRow], whole: i64) -> Result<Vec<SplitPart>, Stri
 
 /// A desktop sign-in's step, which waits on a loopback listener for the
 /// browser or on the server, on a thread of its own.
+/// How this window was launched, for the shell: the link it was opened
+/// with as an address, else its launch arguments.
+fn launched() -> ShellMsg {
+    match arkui::navigator::link_arg("money") {
+        Some(address) => ShellMsg::Address { address },
+        None => ShellMsg::Launch {
+            args: std::env::args().collect(),
+        },
+    }
+}
+
 fn off_thread<T: Send + 'static>(work: impl FnOnce() -> Result<T, String> + Send + 'static, done: fn(Result<T, String>) -> Message) -> Task<Message> {
     let (tx, rx) = iced::futures::channel::oneshot::channel();
     std::thread::spawn(move || {
@@ -2632,9 +2644,9 @@ pub fn main() -> iced::Result {
     // resting fingers heard, on Wayland).
     let boot = || {
         let (mut app, task) = App::boot();
-        // The link the desktop was opened with (`money://account/<id>/checking`),
-        // put in the address bar for the next update to arrive at, as a
-        // browser's own link is. A sign-in link (`money://join?server=…`) is
+        // The link the desktop was opened with (`money://account/<id>/checking`)
+        // is the shell's launch, by its address ([`launched`]): what it names
+        // selected, not pushed. A sign-in link (`money://join?server=…`) is
         // not a page: it goes to the sign-in machine as `Event::Joined`, which
         // asks first.
         let mut joined = Task::none();
@@ -2656,7 +2668,7 @@ pub fn main() -> iced::Result {
                     }
                     true
                 }
-                _ => false,
+                _ => true,
             });
             if let Some(event) = join {
                 joined = app.onboard(event);

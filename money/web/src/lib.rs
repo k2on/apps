@@ -218,7 +218,7 @@ impl MoneyWeb {
 
     fn shell_step(&mut self, msg: ShellMsg) {
         let searching = matches!(msg, ShellMsg::Search { .. } | ShellMsg::ShowActivity);
-        let launching = matches!(msg, ShellMsg::Launch { .. });
+        let launching = matches!(msg, ShellMsg::Launch { .. } | ShellMsg::Address { .. });
         let mut rt = std::mem::take(&mut self.shell);
         let mut desk = Desk::new(self);
         rt.dispatch(msg, &mut desk);
@@ -767,8 +767,9 @@ impl WebApp for MoneyWeb {
     }
 
     fn arrive(&mut self, route: &arkui_web::Address) -> Vec<Msg> {
-        // The launch arguments every shell reads, as the query says them
-        // (`?screen=budget&inspector=1`).
+        // The launch arguments every shell reads, as a query of the older
+        // form says them (`?screen=budget&inspector=1`); otherwise the
+        // address is the launch (`ShellMsg::Address`).
         let mut args = vec![];
         for key in ["screen", "inspector", "appearance", "pane", "settingsTab"] {
             if let Some(v) = route
@@ -787,15 +788,22 @@ impl WebApp for MoneyWeb {
         if route.path.first().map(String::as_str) == Some("welcome") {
             self.show_intro();
         }
-        let section = match segs.next() {
-            Some("accounts") if segs.peek().is_some_and(|s| !PATH_KEYS.contains(s)) => segs.next().map(money_app::shell::account_tag),
-            Some(s) => Some(s.to_string()),
-            None => None,
-        };
-        if let Some(tag) = section {
-            out.push(Msg::Shell(ShellMsg::Select { tag }));
-        }
-        if !args.is_empty() {
+        if args.is_empty() {
+            // The section, an account, the inspector, the appearance: what
+            // the address names, selected as a launch selects it.
+            out.push(Msg::Shell(ShellMsg::Address { address: route.url() }));
+            if segs.next() == Some("accounts") && segs.peek().is_some_and(|s| !PATH_KEYS.contains(s)) {
+                segs.next();
+            }
+        } else {
+            let section = match segs.next() {
+                Some("accounts") if segs.peek().is_some_and(|s| !PATH_KEYS.contains(s)) => segs.next().map(money_app::shell::account_tag),
+                Some(s) => Some(s.to_string()),
+                None => None,
+            };
+            if let Some(tag) = section {
+                out.push(Msg::Shell(ShellMsg::Select { tag }));
+            }
             out.push(Msg::Shell(ShellMsg::Launch { args }));
         }
         while let Some(seg) = segs.next() {

@@ -99,29 +99,27 @@ struct Shell: View {
             .safari(model.bankPage, tint: Color.accent) { model.bankPageClosed() }
     }
 
-    /// The link the first run kept, taken. A launch link (`money://?screen=…`)
-    /// is a launch as the app runs: what this shows of its own put away (a
-    /// sheet, a section's pages, a transaction inspected, Settings), then the
-    /// shell told as a launch tells it, which puts back what it showed itself
-    /// (ark_app's Launch). Any other is its route, pushed on the section shown.
+    /// The link the first run kept, taken: a launch as the app runs. What
+    /// this shows of its own is put away (a sheet, a section's pages,
+    /// Settings), then the shell is told as a launch tells it, which puts
+    /// back what it showed itself (ark_app's Launch): a launch link
+    /// (`money://?screen=…`) by its arguments, any other by its address
+    /// (`money:///budget` selects the Budget; nothing is pushed). A sign-in
+    /// link is the sign-in machine's, and the shell passes it over.
     private func takeLink() {
         guard let url = model.takeLink() else { return }
         Ready.shared.changed()
+        model.sheets?.send(.dismiss)
+        paths = [:]
+        settings = false
+        pending = []
+        // The shell puts its inspector away first and moves once the page
+        // without it is drawn (money_app's shell, Command::AfterDraw); not
+        // idle meanwhile, so no screenshot is taken between.
         if let args = Navigator<Route>.launchArgs(of: url, scheme: AppInfo.money.scheme) {
-            model.sheets?.send(.dismiss)
-            paths = [:]
-            settings = false
-            pending = []
-            // The shell puts its inspector away first and moves once the
-            // page without it is drawn (money_app's shell, Command::AfterDraw);
-            // not idle meanwhile, so no screenshot is taken between.
             model.shell.send(.launch(args: args))
-            return
-        }
-        let tag = model.shell.page.section
-        var nav = Navigator<Route>()
-        if nav.handle(url, scheme: AppInfo.money.scheme, parse: { routeFromUrl(url: $0) }, take: model.takes) {
-            for r in nav.path { push(tag, r) }
+        } else {
+            model.shell.send(.address(address: url.absoluteString))
         }
     }
 

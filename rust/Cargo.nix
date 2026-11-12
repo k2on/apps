@@ -15162,6 +15162,11 @@ rec {
             name = "money-seed";
             packageId = "money-seed";
           }
+          {
+            name = "serde_json";
+            packageId = "serde_json";
+            features = [ "raw_value" ];
+          }
         ];
 
       };

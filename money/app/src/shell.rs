@@ -149,6 +149,14 @@ pub enum ShellMsg {
     Launch {
         args: Vec<String>,
     },
+    /// An address opened (a link, a screenshot's `route`, the browser's
+    /// bar: `money:///budget`, `/account/<id>/checking/?inspector=1`), as a
+    /// launch ([`Launch::address`]): the place it names selected, never a
+    /// copy of it pushed. A sign-in link and the first run's pages are the
+    /// onboarding's, not the shell's.
+    Address {
+        address: String,
+    },
     /// The category (its hex id) the budget's inspector shows, as the
     /// budget's selection moves; none, nothing selected.
     InspectCategory {
@@ -267,6 +275,14 @@ impl App for MoneyShell {
                 vec![Command::AfterDraw(ShellMsg::Launch { args })]
             }
             ShellMsg::Launch { args } => launch(s, Launch::parse(&args), data),
+            ShellMsg::Address { address } => match addressed(&address) {
+                Some(_) if s.inspector => {
+                    s.inspector = false;
+                    vec![Command::AfterDraw(ShellMsg::Address { address })]
+                }
+                Some(l) => launch(s, l, data),
+                None => vec![],
+            },
             ShellMsg::InspectCategory { id } => {
                 s.category = id;
                 vec![]
@@ -403,6 +419,37 @@ fn named<'a>(open: &[&'a AccountLine], name: &str) -> Option<&'a AccountLine> {
         .or_else(|| open.iter().find(|a| a.name.to_lowercase().split_whitespace().any(|w| w == n)))
         .or_else(|| open.iter().find(|a| a.name.to_lowercase().contains(&n)))
         .copied()
+}
+
+/// The launch an address is, in money's words: an account's tag
+/// (`/accounts/<id>`, the browser's) is that account, a bank or the banks
+/// are Settings' Banks, a filter's register is Transactions; a sign-in link
+/// (`/join`) and the first run's pages (`/welcome`) are none, nor is an
+/// address that names nothing.
+fn addressed(address: &str) -> Option<Launch> {
+    let mut l = Launch::address(address);
+    match l.screen.as_deref() {
+        Some("join" | "welcome") => return None,
+        Some("banks" | "bank") => {
+            l.screen = Some("settings".into());
+            l.pane = Some("banks".into());
+            l.item = None;
+        }
+        // The browser's own spelling of an account's place: its tag.
+        Some("accounts")
+            if l.item
+                .as_deref()
+                .is_some_and(|i| i.len() == 32 && i.bytes().all(|b| b.is_ascii_hexdigit())) =>
+        {
+            l.screen = Some("account".into());
+        }
+        Some("filter" | "filtered") => {
+            l.screen = Some("transactions".into());
+            l.item = None;
+        }
+        _ => {}
+    }
+    (!l.is_empty()).then_some(l)
 }
 
 /// Settings' pane a launch's word names (`general`, `household`,

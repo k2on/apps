@@ -180,38 +180,21 @@ fun MoneyApp(
             )
         }
 
-    // A link the app was opened with (`money://account/Checking`): its route, navigated to. The
-    // tabs' own routes switch to the tab; a sign-in link (`money://join?…`) is the onboarding's.
-    // A launch link (`money://?screen=…`, ui/docs/shots.md) is a launch as the app runs: the
-    // sheets put away and the pages popped, then the shell told as a launch tells it, which puts
-    // back what it showed itself. The first run keeps every link (`FirstRun::open_link`), so one
-    // that came while its pages or the sign-in showed is taken here, once the app shows.
+    // A link the app was opened with or sent, taken as a launch as the app runs: the sheets put
+    // away and the pages popped, then the shell told as a launch tells it, which puts back what
+    // it showed itself — a launch link (`money://?screen=…`, ui/docs/shots.md) by its arguments,
+    // any other by its address (`money:///budget` selects the Budget; nothing is pushed). A
+    // sign-in link is the onboarding's, and the shell passes it over. The first run keeps every
+    // link (`FirstRun::open_link`), so one that came while its pages or the sign-in showed is
+    // taken here, once the app shows.
     val linked by links.collectAsStateWithLifecycle()
     LaunchedEffect(linked) {
         val link = takeLink() ?: return@LaunchedEffect
         dev.arkui.Ready.changed()
-        Navigator.launchArgsOf(link, "money")?.let { args ->
-            sheets.send(SheetsMsg.Dismiss)
-            account = false
-            nav.popBackStack("shell", inclusive = false)
-            sections.send(ShellMsg.Launch(args = args))
-            return@LaunchedEffect
-        }
-        Navigator(nav, ::destination).handle(link, "money", ::routeFromUrl) { r ->
-            when (r) {
-                is Route.Join, is Route.Welcome -> true
-                is Route.Budget -> true.also { sections.send(ShellMsg.Select(tag = "budget")) }
-                // Category Details, the shell's inspector, over the budget.
-                is Route.Category -> true.also {
-                    sections.send(ShellMsg.Select(tag = "budget"))
-                    sections.send(ShellMsg.InspectCategory(id = r.id))
-                    sections.send(ShellMsg.Inspector(shown = true))
-                }
-                is Route.Insights -> true.also { sections.send(ShellMsg.Select(tag = "insights")) }
-                is Route.Inbox -> true.also { sections.send(ShellMsg.Select(tag = "transactions")) }
-                else -> false
-            }
-        }
+        sheets.send(SheetsMsg.Dismiss)
+        account = false
+        nav.popBackStack("shell", inclusive = false)
+        sections.send(Navigator.launchArgsOf(link, "money")?.let { ShellMsg.Launch(args = it) } ?: ShellMsg.Address(address = link))
     }
 
     val entry by nav.currentBackStackEntryAsState()
@@ -359,17 +342,6 @@ private fun RegisterHosted(
 
 /** Where the back stack goes for a register's route: an account's, or All Accounts. */
 private fun register(route: Route): String = "register/" + RouteArg.of(route.url())
-
-/**
- * Where the back stack goes for a route this phone pushes: a register (a saved filter's is every
- * account's here), or Settings, which is where the banks are.
- */
-private fun destination(route: Route): String =
-    when (route) {
-        is Route.Settings, is Route.Banks, is Route.Bank -> "settings"
-        is Route.Account -> register(route)
-        else -> register(Route.Accounts)
-    }
 
 /** A tab, kept where it was; the tab showing goes back to its top. */
 private fun NavHostController.go(t: Tab) {
