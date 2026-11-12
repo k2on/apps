@@ -111,7 +111,19 @@ final class ShotsWalk {
         func go(_ to: (dark: Bool, landscape: Bool)) async throws -> String {
             let t = Date()
             if to.dark != at.dark { ShotsWindow.theme(dark: to.dark) }
-            if to.landscape != at.landscape { ShotsWindow.orient(landscape: to.landscape) }
+            if to.landscape != at.landscape {
+                var why = ""
+                ShotsWindow.orient(landscape: to.landscape) { why = $0 }
+                // Until the scene is the way it was asked (its geometry is
+                // the system's to change); the device told as well if not.
+                var tries = 0
+                while ShotsWindow.wide != to.landscape && tries < 100 {
+                    if tries == 30 { ShotsWindow.turnDevice(landscape: to.landscape) }
+                    try await Task.sleep(nanoseconds: 50_000_000)
+                    tries += 1
+                }
+                if ShotsWindow.wide != to.landscape { throw Stop(why: "the scene did not turn \(to.landscape ? "on its side" : "upright"): \(why)") }
+            }
             at = to
             try await settled("\(name(at))")
             return ms(t)

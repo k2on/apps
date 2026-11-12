@@ -269,13 +269,30 @@ public enum ShotsWindow {
     }
 
     /// Every scene turned on its side (`landscape`), or upright: as the
-    /// device turned.
-    public static func orient(landscape: Bool) {
+    /// device turned. What the scene said if it would not (its error).
+    public static func orient(landscape: Bool, refused: @escaping (String) -> Void = { _ in }) {
         for scene in UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }) {
             scene.windows.first?.rootViewController?.setNeedsUpdateOfSupportedInterfaceOrientations()
-            scene.requestGeometryUpdate(.iOS(interfaceOrientations: landscape ? .landscapeRight : .portrait)) { _ in }
+            scene.requestGeometryUpdate(.iOS(interfaceOrientations: landscape ? .landscapeRight : .portrait)) { e in
+                refused("\(e.localizedDescription)")
+            }
         }
         Ready.shared.changed()
+    }
+
+    /// The device itself told it is turned, as the simulator's own Rotate
+    /// does: for a scene that would not turn by its geometry alone.
+    public static func turnDevice(landscape: Bool) {
+        UIDevice.current.setValue((landscape ? UIInterfaceOrientation.landscapeRight : .portrait).rawValue, forKey: "orientation")
+        UIViewController.attemptRotationToDeviceOrientation()
+        Ready.shared.changed()
+    }
+
+    /// Whether the app's scene is wider than tall now.
+    public static var wide: Bool {
+        guard let w = windows.first else { return false }
+        let b = w.windowScene?.coordinateSpace.bounds ?? w.bounds
+        return b.width > b.height
     }
 }
 #endif
