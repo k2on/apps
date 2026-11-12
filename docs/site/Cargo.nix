@@ -997,6 +997,7 @@ rec {
         features = {
           "csr" = [ "leptos/csr" ];
           "default" = [ "csr" ];
+          "host" = [ "dep:ark" "dep:ark-peer" "dep:ark-auth" "dep:wasm-bindgen-futures" "web-sys/Storage" ];
           "hydrate" = [ "leptos/hydrate" ];
           "ssr" = [ "leptos/ssr" ];
         };
