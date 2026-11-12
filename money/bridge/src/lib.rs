@@ -75,8 +75,9 @@ ark::twins!(
     },
 );
 
-// money's first run: the shared pages, money's words (money/app/src/welcome.rs).
-ark_ffi::first_run_app!(money_app::welcome::copy);
+// money's first run: the shared pages over its host's machine (money's
+// words, money/app/src/welcome.rs, are the host's: host.rs).
+ark_ffi::welcome_app!();
 
 /// Numbers, days and lengths as every client writes them: in this library,
 /// so its bindings (`uniffi.ark_format`; `formatAmount`, `formatLength` …)
@@ -87,10 +88,12 @@ mod app;
 pub mod core;
 mod demo;
 mod hall;
+mod host;
 mod session;
-pub use app::{register_devices, AccountsApp, AppShell, BudgetApp, InsightsApp, RegisterApp, SheetsApp, ShellApp, TransactionsApp};
+pub use app::{register_devices, AccountsApp, BudgetApp, InsightsApp, RegisterApp, SheetsApp, ShellApp, TransactionsApp};
 pub use demo::{money_demo, DemoBank, DemoSync};
 pub use hall::Hall;
+pub use host::{Household, MoneyHost, NativeAsk};
 pub use session::{Budget, Changed, Holding, MoneyView, Session};
 
 mod routes;

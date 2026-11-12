@@ -34,11 +34,13 @@ use ark_peer::{monotonic_ms, Config, Files, Update, Watched};
 
 uniffi::setup_scaffolding!();
 
+pub mod host;
 pub mod keep;
 pub mod process;
 pub mod session;
 pub mod typed;
 pub mod wake;
+pub use host::{ArkHost, Handle, HostApp, HostShell, Launch, Opened};
 pub use keep::{LoginKeep, OldShelf};
 pub use process::{ArkProcess, Attached, BackgroundWork};
 pub use session::{Hold, Session};
@@ -859,118 +861,71 @@ pub fn exchange(server: String, code: String) -> Result<Login, Refusal> {
 }
 
 /// The sign-in machine and the first run's pages, for an app's bridge
-/// (`first_run_app!`'s), which names them by these paths.
+/// (`welcome_app!`'s), which names them by these paths.
 pub use ark_app;
 pub use ark_auth;
+/// The periodic sync's foreign trait, linked into every app's library (see
+/// Cargo.toml).
+pub use ark_background;
 
 /// An app's first run over UniFFI: the shared pages (`ark_app::welcome`)
-/// over the sign-in machine (`ark_auth::first_run`), as one object the
-/// phone's holder reads and sends to. Written in the app's bridge, after
-/// its twins of `ark_app::welcome`'s records (`WelcomePageFfi`,
-/// `WelcomeMsgFfi`, `AddDevicePageFfi`), which UniFFI exports in the app's
-/// own namespace: `ark_ffi::first_run_app!(money_app::welcome::copy)`.
-/// `$copy` is the app's words, `fn(scan, demo) -> WelcomeCopy`.
+/// over the sign-in machine its host runs ([`ArkHost`]), as one screen the
+/// phone's generated `WelcomeView` / `WelcomeScreen` reads and sends to —
+/// the same shape as every other screen's runtime (`page`, `send`,
+/// `version`, `is_idle`, `drawn`), so the phones' shared screen holder
+/// holds it. Written in the app's bridge, after its twins of
+/// `ark_app::welcome`'s records (`WelcomePageFfi`, `WelcomeMsgFfi`,
+/// `AddDevicePageFfi`), which UniFFI exports in the app's own namespace:
+/// `ark_ffi::welcome_app!()`.
 #[macro_export]
-macro_rules! first_run_app {
-    ($copy:path) => {
-        /// What a press on the first run asks of the phone: the machine's
-        /// effects, and whether to scan another device's code.
-        #[derive(uniffi::Record)]
-        pub struct FirstRunAsked {
-            pub effects: Vec<$crate::ark_auth::onboarding::Effect>,
-            pub scan: bool,
-            /// The app's pages walked to their end or skipped just now.
-            pub seen: bool,
-        }
-
-        /// The app's first run: its pages, over the sign-in machine.
+macro_rules! welcome_app {
+    () => {
+        /// The app's first run: its pages, over its host's sign-in machine.
         #[derive(uniffi::Object)]
-        pub struct FirstRunApp(std::sync::Mutex<$crate::ark_auth::first_run::FirstRun>);
-
-        impl FirstRunApp {
-            fn run(&self) -> std::sync::MutexGuard<'_, $crate::ark_auth::first_run::FirstRun> {
-                self.0.lock().unwrap_or_else(|e| e.into_inner())
-            }
-        }
+        pub struct WelcomeApp(std::sync::Arc<$crate::ArkHost>);
 
         #[uniffi::export]
-        impl FirstRunApp {
-            /// The first run of `app`; `scan` where a camera reads another
-            /// device's code, `demo` where the demo household runs.
+        impl WelcomeApp {
+            /// The first run `host` runs.
             #[uniffi::constructor]
-            pub fn new(app: $crate::ark_auth::onboarding::AppInfo, scan: bool, demo: bool) -> std::sync::Arc<FirstRunApp> {
-                std::sync::Arc::new(FirstRunApp(std::sync::Mutex::new($crate::ark_auth::first_run::FirstRun::new(
-                    app,
-                    $copy(scan, demo),
-                ))))
+            pub fn new(host: std::sync::Arc<$crate::ArkHost>) -> std::sync::Arc<WelcomeApp> {
+                std::sync::Arc::new(WelcomeApp(host))
             }
 
             /// The page that shows; none of them while the app does.
             pub fn page(&self) -> WelcomePageFfi {
                 use $crate::Twin;
-                self.run().page().ffi()
+                self.0.with_run(|r| r.page()).ffi()
             }
 
-            /// A press on a page.
-            pub fn send(&self, msg: WelcomeMsgFfi) -> FirstRunAsked {
+            /// A press on a page: its effects carried out by the host.
+            pub fn send(&self, msg: WelcomeMsgFfi) {
                 use $crate::Twin;
-                let a = self.run().send($crate::ark_app::welcome::WelcomeMsg::from_ffi(msg));
-                FirstRunAsked {
-                    effects: a.effects,
-                    scan: a.scan,
-                    seen: a.seen,
-                }
+                self.0.press($crate::ark_app::welcome::WelcomeMsg::from_ffi(msg))
             }
 
-            /// One of the machine's events: what an effect came to, a link
-            /// opened, the app back in front.
-            pub fn event(&self, event: $crate::ark_auth::onboarding::Event) -> Vec<$crate::ark_auth::onboarding::Effect> {
-                self.run().event(event)
+            /// Grows with everything the host's shell shows.
+            pub fn version(&self) -> u64 {
+                self.0.version()
             }
 
-            /// What the camera read for "Scan a Code".
-            pub fn scanned(&self, text: Option<String>) -> Vec<$crate::ark_auth::onboarding::Effect> {
-                self.run().scanned(text)
+            /// Whether nothing is on its way.
+            pub fn is_idle(&self) -> bool {
+                self.0.idle()
             }
 
-            /// The app's pages passed over: a launch straight to a route,
-            /// a link or a screenshot's, as a returning person's would.
-            pub fn skip_intro(&self) {
-                self.run().skip_intro()
+            /// Nothing comes later: answers are the host's.
+            pub fn drain(&self) -> bool {
+                false
             }
 
-            /// The app's pages from the first, over wherever it stands:
-            /// their route (`/welcome/`).
-            pub fn show_intro(&self) {
-                self.run().show_intro()
+            /// Nothing waits on a draw.
+            pub fn drawn(&self) -> bool {
+                false
             }
 
-            /// Where a launch starts with the app's pages (`FirstRun::launch`).
-            pub fn launch(&self, seen: bool, straight: bool) {
-                self.run().launch(seen, straight)
-            }
-
-            /// A link for the app itself, kept until the app shows
-            /// (`FirstRun::open_link`): its pages put away.
-            pub fn open_link(&self, url: String) {
-                self.run().open_link(url)
-            }
-
-            /// The link kept, once the app itself shows; once.
-            pub fn take_link(&self) -> Option<String> {
-                self.run().take_link()
-            }
-
-            pub fn step(&self) -> $crate::ark_auth::onboarding::Step {
-                self.run().machine().step()
-            }
-
-            pub fn said(&self) -> $crate::ark_auth::onboarding::Said {
-                self.run().machine().said()
-            }
-
-            pub fn remembered(&self) -> $crate::ark_auth::onboarding::Remembered {
-                self.run().machine().remembered()
+            pub fn awaits_draw(&self) -> bool {
+                false
             }
         }
 

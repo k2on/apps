@@ -3,7 +3,8 @@
 //! store. A screen's generated SwiftUI or Compose reads its record
 //! (`AccountsApp::page`) and sends it messages (`AccountsApp::send`); the
 //! app's update runs here, its changes go to the peer, its routes and its
-//! typed requests ([`MoneyRequest`]) to the [`AppShell`] the phone gave,
+//! typed requests ([`MoneyRequest`]) to money's host (`host.rs`), which
+//! makes every screen's runtime and carries out what each asks,
 //! its modules' operations to the modules the phone registered
 //! ([`Devices`]: money/app.toml's, each a crate under modules/, a UniFFI
 //! foreign trait its swift/ and kotlin/ implement).
@@ -33,21 +34,23 @@ use crate::*;
 use ark_ffi::Twin;
 use money_app::MoneyRequest;
 
-/// What only the phone's shell can do for a screen: open a route on its
-/// navigator, carry out a typed request (the bank sync, a sheet still drawn
-/// by hand, a message for another screen's runtime), and say the time and
-/// the session's day.
-#[uniffi::export(with_foreign)]
-pub trait AppShell: Send + Sync {
-    /// Not `open`: UniFFI writes a vtable field of that name quoted into its C
-    /// header for Swift, which clang cannot read.
-    fn open_route(&self, route: RouteFfi);
-    fn request(&self, request: MoneyRequestFfi);
+/// What a screen's runtime asks of the app's host (`host.rs`): open a
+/// route, carry out a typed request (the bank sync, a message for another
+/// screen's runtime, what only the phone's shell draws), say the time and
+/// the session's day, and take what was asked once the runtime is let go
+/// (`settle`), so a request that reaches another runtime, or this one, is
+/// never carried out mid-message.
+pub(crate) trait Router: Send + Sync {
+    fn open_route(&self, route: Route);
+    fn request(&self, request: MoneyRequest);
     /// Milliseconds since the epoch, by the device's clock.
     fn now_ms(&self) -> i64;
     /// The session's day (`2026-10-26`): the demo's day in the demo, today
     /// otherwise — what a new account is dated with.
     fn today(&self) -> String;
+    /// What was asked during a message, carried out now that no runtime's
+    /// lock is held.
+    fn settle(&self);
 }
 
 /// The time a screen is worked out at: the device's clock on the session's
@@ -90,7 +93,7 @@ pub fn register_devices(
 /// process's.
 pub struct Running<A: App<Key = domain::MoneyView, Change = MoneyChange, Route = Route, Request = MoneyRequest>> {
     session: Arc<ark_ffi::Session<domain::MoneyView>>,
-    shell: Arc<dyn AppShell>,
+    shell: Arc<dyn Router>,
     runtime: Mutex<Runtime<A>>,
     inbox: Inbox<A::Msg>,
     holds: Mutex<(Vec<domain::MoneyView>, Vec<ark_ffi::Hold<domain::MoneyView>>)>,
@@ -121,7 +124,7 @@ impl<A: App<Key = domain::MoneyView, Change = MoneyChange, Route = Route, Reques
         }
     }
     fn open(&mut self, route: Route) {
-        self.app.shell.open_route(route.ffi())
+        self.app.shell.open_route(route)
     }
     fn ask(&mut self, ticket: Ticket, ask: Ask<A::Msg>) {
         self.app.inbox.ask(&ark_ffi::ArkProcess::shared().modules(), ticket, ask)
@@ -140,7 +143,7 @@ impl<A: App<Key = domain::MoneyView, Change = MoneyChange, Route = Route, Reques
                     let _ = Host::<A>::send(self, MoneyChange::AddPhoto(domain::AddPhoto { file, txn_id }));
                 }
             }
-            r => self.app.shell.request(r.ffi()),
+            r => self.app.shell.request(r),
         }
     }
     /// A file a screen is about to show, fetched from the server when the
@@ -156,9 +159,9 @@ impl<A: App<Key = domain::MoneyView, Change = MoneyChange, Route = Route, Reques
 }
 
 impl<A: App<Key = domain::MoneyView, Change = MoneyChange, Route = Route, Request = MoneyRequest>> Running<A> {
-    fn new(session: &Session, shell: Arc<dyn AppShell>) -> Running<A> {
+    pub(crate) fn new(session: Arc<ark_ffi::Session<domain::MoneyView>>, shell: Arc<dyn Router>) -> Running<A> {
         let app = Running {
-            session: session.inner.clone(),
+            session,
             shell,
             runtime: Mutex::new(Runtime::<A>::new()),
             inbox: Inbox::default(),
@@ -178,44 +181,55 @@ impl<A: App<Key = domain::MoneyView, Change = MoneyChange, Route = Route, Reques
         }
     }
 
-    fn send(&self, msg: A::Msg) {
-        let mut rt = self.runtime.lock().unwrap_or_else(|e| e.into_inner());
-        rt.dispatch(msg, &mut Phone { app: self });
-        self.inbox.drain(&mut rt, &mut Phone { app: self });
-        self.hold(&rt);
+    pub(crate) fn send(&self, msg: A::Msg) {
+        {
+            let mut rt = self.runtime.lock().unwrap_or_else(|e| e.into_inner());
+            rt.dispatch(msg, &mut Phone { app: self });
+            self.inbox.drain(&mut rt, &mut Phone { app: self });
+            self.hold(&rt);
+        }
+        self.shell.settle();
     }
 
-    fn screen(&self) -> A::Screen {
+    pub(crate) fn screen(&self) -> A::Screen {
         let rt = self.runtime.lock().unwrap_or_else(|e| e.into_inner());
         rt.screen(&Phone { app: self })
     }
 
-    fn version(&self) -> u64 {
+    pub(crate) fn version(&self) -> u64 {
         self.runtime.lock().unwrap_or_else(|e| e.into_inner()).version()
     }
 
-    fn is_idle(&self) -> bool {
+    pub(crate) fn is_idle(&self) -> bool {
         let rt = self.runtime.lock().unwrap_or_else(|e| e.into_inner());
         self.session.read(|st, _| rt.is_idle(st))
     }
 
     /// The answers that came since (a camera's, later than its message),
     /// run; whether any did, so the page is read again.
-    fn drain(&self) -> bool {
-        let mut rt = self.runtime.lock().unwrap_or_else(|e| e.into_inner());
-        let before = rt.version();
-        self.inbox.drain(&mut rt, &mut Phone { app: self });
-        self.hold(&rt);
-        rt.version() != before
+    pub(crate) fn drain(&self) -> bool {
+        let moved = {
+            let mut rt = self.runtime.lock().unwrap_or_else(|e| e.into_inner());
+            let before = rt.version();
+            self.inbox.drain(&mut rt, &mut Phone { app: self });
+            self.hold(&rt);
+            rt.version() != before
+        };
+        self.shell.settle();
+        moved
     }
 
     /// The page drawn: what waited on it taken ([`Runtime::drawn`]);
     /// whether any did, so the page is read again.
     fn drawn(&self) -> bool {
-        let mut rt = self.runtime.lock().unwrap_or_else(|e| e.into_inner());
-        let ran = rt.drawn(&mut Phone { app: self });
-        self.inbox.drain(&mut rt, &mut Phone { app: self });
-        self.hold(&rt);
+        let ran = {
+            let mut rt = self.runtime.lock().unwrap_or_else(|e| e.into_inner());
+            let ran = rt.drawn(&mut Phone { app: self });
+            self.inbox.drain(&mut rt, &mut Phone { app: self });
+            self.hold(&rt);
+            ran
+        };
+        self.shell.settle();
         ran
     }
 }
@@ -226,16 +240,18 @@ macro_rules! screen {
     ($(#[$doc:meta])* $name:ident, $app:ty, $msg:ty, $msg_ffi:ty, $page:ty) => {
         $(#[$doc])*
         #[derive(uniffi::Object)]
-        pub struct $name(Running<$app>);
+        pub struct $name(pub(crate) Running<$app>);
+
+        impl $name {
+            /// The screen over `session`, its views held while it lives; what
+            /// it asks of its host to `router`.
+            pub(crate) fn over(session: Arc<ark_ffi::Session<domain::MoneyView>>, router: Arc<dyn Router>) -> Arc<$name> {
+                Arc::new($name(Running::new(session, router)))
+            }
+        }
 
         #[uniffi::export]
         impl $name {
-            /// The screen over `session`, its views held while it lives.
-            #[uniffi::constructor]
-            pub fn new(session: Arc<Session>, shell: Arc<dyn AppShell>) -> Arc<$name> {
-                Arc::new($name(Running::new(&session, shell)))
-            }
-
             /// `msg` taken: the state updated, its changes sent, its routes
             /// opened, the views it names held.
             pub fn send(&self, msg: $msg_ffi) {
@@ -293,7 +309,7 @@ screen!(
     /// commands (money/app/src/shell). Its generated SwiftUI and Compose
     /// (`MoneyShellView`, `MoneySettingsView`, `MoneyCommands`) read its
     /// page and send it messages; a command only a hosted screen can carry
-    /// out goes to the [`AppShell`]'s `request`, typed.
+    /// out goes to money's host, typed (`host.rs`).
     ShellApp, MoneyShell, ShellMsg, ShellMsgFfi, ShellPageFfi
 );
 screen!(

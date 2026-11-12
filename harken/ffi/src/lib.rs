@@ -29,10 +29,11 @@ ark::twins!(
 );
 
 // harken's first run on the pages every Ark app shares (ark_app::welcome),
-// its words harken_app::welcome's. Its phones still draw their own
-// (ios/Harken/OnboardingViews.swift, android/…/OnboardingScreens.kt):
-// moving them onto `FirstRunApp` is harken's port.
-ark_ffi::first_run_app!(harken_app::welcome::copy);
+// over an `ArkHost` once harken has one (its words harken_app::welcome's).
+// Its phones still draw their own (ios/Harken/OnboardingViews.swift,
+// android/…/OnboardingScreens.kt): moving them onto `WelcomeApp` and the
+// shared app library (ui/swift's ArkApp, ui/kotlin/app) is harken's port.
+ark_ffi::welcome_app!();
 
 mod routes;
 pub use routes::route_from_url;

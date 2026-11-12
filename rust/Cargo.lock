@@ -346,6 +346,7 @@ dependencies = [
  "ark",
  "ark-app",
  "ark-auth",
+ "ark-background",
  "ark-module",
  "ark-notifications",
  "ark-peer",

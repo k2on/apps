@@ -64,6 +64,7 @@ pub mod keep;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod oidc;
 pub mod onboarding;
+pub mod probe;
 pub mod remember;
 /// The two tables and the functions over them are the kernel's
 /// (`ark::auth`): a domain embeds them without depending on sign-in.

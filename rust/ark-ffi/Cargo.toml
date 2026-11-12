@@ -18,6 +18,11 @@ ark-secure-store = { path = "../../modules/ark-secure-store", features = ["ffi"]
 # A wake from the notifications (a push, a notice's button) and the
 # endpoint they hand out written as the session's push row (`wake`).
 ark-notifications = { path = "../../modules/ark-notifications", features = ["ffi"] }
+# The periodic sync's foreign trait (`NativeBackground`), so every app's
+# library carries it: an app that declares `[background]` in app.toml needs
+# nothing more of its bridge for the phones' job and task (ui/swift's ArkApp,
+# ui/kotlin/app).
+ark-background = { path = "../../modules/ark-background", features = ["ffi"] }
 ark-push = { path = "../ark-push" }
 serde_json = { workspace = true }
 uniffi = { version = "0.32.2", default-features = false }

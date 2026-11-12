@@ -1585,6 +1585,11 @@ rec {
             features = [ "ffi" ];
           }
           {
+            name = "ark-background";
+            packageId = "ark-background";
+            features = [ "ffi" ];
+          }
+          {
             name = "ark-module";
             packageId = "ark-module";
           }
