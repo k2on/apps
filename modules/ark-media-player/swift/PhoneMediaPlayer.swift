@@ -58,6 +58,10 @@ public final class PhoneMediaPlayer: NSObject, NativeMediaPlayer, @unchecked Sen
     private let squares: Squares
     /// What a car or a watch was given to browse, by parent: kept for CarPlay (README.md).
     private var children = [String: [BrowseItem]]()
+    /// The process's runtime kept online while it plays (ArkProcess's
+    /// `BackgroundWork`): it plays on with no scene, and what it plays
+    /// syncs. Ended when it stops playing.
+    private var work: BackgroundWork?
 
     /// A player whose placeholder artwork is drawn in `squares`, the app's palette.
     public init(squares: Squares = .neutral) {
@@ -102,6 +106,7 @@ public final class PhoneMediaPlayer: NSObject, NativeMediaPlayer, @unchecked Sen
     }
 
     private func statusChanged(_ s: AVPlayer.TimeControlStatus) {
+        working(s == .playing)
         switch s {
         case .playing: tell(.playing)
         case .waitingToPlayAtSpecifiedRate: if wanted { tell(.waiting) }
@@ -206,8 +211,19 @@ public final class PhoneMediaPlayer: NSObject, NativeMediaPlayer, @unchecked Sen
         DispatchQueue.main.async { self.player.volume = min(max(volume, 0), 1) }
     }
 
+    /// Online while it plays, the runtime's work ended once it stops.
+    private func working(_ playing: Bool) {
+        if playing, work == nil {
+            work = ArkProcess.shared().work()
+        } else if !playing {
+            work?.end()
+            work = nil
+        }
+    }
+
     public func stop() {
         DispatchQueue.main.async {
+            self.working(false)
             self.wanted = false
             self.forgetItem()
             self.player.replaceCurrentItem(with: nil)

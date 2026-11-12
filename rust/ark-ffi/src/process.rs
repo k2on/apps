@@ -49,6 +49,10 @@ struct Inner {
     /// How many times the runtime was made: one per process, again only
     /// after a sign-out.
     opened: u32,
+    /// The app's device modules (app.toml's), registered once by the app:
+    /// every screen's runtime asks through them. The device's, not the
+    /// session's, so a sign-out keeps them.
+    modules: ark_app::Modules,
 }
 
 /// Background work that keeps the runtime online while it runs, with no
@@ -129,6 +133,18 @@ impl ArkProcess {
             }
         }
         Ok(p)
+    }
+
+    /// The app's device modules registered: the process's from now on, for
+    /// every screen of every UI attached (a second registration replaces
+    /// the first).
+    pub fn register_modules(&self, modules: ark_app::Modules) {
+        self.lock().modules = modules;
+    }
+
+    /// The device modules registered; none before the app registers them.
+    pub fn modules(&self) -> ark_app::Modules {
+        self.lock().modules.clone()
     }
 
     /// The app's process-wide part called `name`, made by `make` the first
@@ -295,5 +311,26 @@ mod tests {
         drop(playing);
         assert!(!p.online(), "idle: offline");
         assert_eq!(*said.lock().unwrap(), [true, false, true, false]);
+    }
+
+    /// The device modules are the process's: registered once, every
+    /// runtime's, and kept across a sign-out (the device's, not the
+    /// session's); registered again, replaced. Falsified by letting them go
+    /// with the session's parts.
+    #[test]
+    fn the_modules_are_the_processs() {
+        trait Buzz: Send + Sync {}
+        struct Phone;
+        impl Buzz for Phone {}
+        let p = ArkProcess::apart();
+        assert!(p.modules().get::<dyn Buzz>().is_none());
+        let mut m = ark_app::Modules::new();
+        m.set(Some(Arc::new(Phone) as Arc<dyn Buzz>));
+        p.register_modules(m);
+        assert!(p.modules().get::<dyn Buzz>().is_some());
+        p.sign_out();
+        assert!(p.modules().get::<dyn Buzz>().is_some(), "kept across a sign-out");
+        p.register_modules(ark_app::Modules::new());
+        assert!(p.modules().get::<dyn Buzz>().is_none(), "replaced");
     }
 }

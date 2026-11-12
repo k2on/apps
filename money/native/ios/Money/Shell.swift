@@ -231,7 +231,7 @@ struct Shell: View {
     @ViewBuilder private func register(_ account: String?, search: String) -> some View {
         if let s = model.session {
             let m = model
-            RegisterHost(session: s, devices: m.devices, account: account, search: search,
+            RegisterHost(session: s, account: account, search: search,
                          refresh: { Task { await m.refresh() } }, today: { m.today }, run: { r in run(r) })
                 .id(account ?? "all")
         }
@@ -339,9 +339,9 @@ struct RegisterHost: View {
     let search: String
     let run: (MoneyRequest) -> Void
 
-    init(session: Session, devices: Devices?, account: String?, search: String,
+    init(session: Session, account: String?, search: String,
          refresh: @escaping () -> Void, today: @escaping () -> String, run: @escaping (MoneyRequest) -> Void) {
-        _screen = StateObject(wrappedValue: RegisterScreen(session: session, devices: devices, account: account, refresh: refresh, today: today))
+        _screen = StateObject(wrappedValue: RegisterScreen(session: session, account: account, refresh: refresh, today: today))
         self.search = search
         self.run = run
     }

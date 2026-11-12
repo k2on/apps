@@ -122,6 +122,14 @@ system does to it, each said: an interruption (`Interrupted`, and
 - **The Apple Watch's own app** (browsing and playing on the watch) is a
   watchOS target of its own: not built.
 
+## The Process's Runtime
+
+While it plays, the player holds the process's runtime online
+(`ArkProcess.shared().work()`, a `BackgroundWork`; ui/docs/app.md): the
+sound plays on with no screen attached, and the replica syncs what it
+plays. The work ends when it pauses, ends or is stopped. This is not a
+background component: the app declares none for it.
+
 ## Permissions
 
 Declared in `module.toml`:

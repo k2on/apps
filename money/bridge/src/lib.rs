@@ -88,7 +88,7 @@ pub mod core;
 mod demo;
 mod hall;
 mod session;
-pub use app::{AccountsApp, AppShell, BudgetApp, Devices, InsightsApp, RegisterApp, SheetsApp, ShellApp, TransactionsApp};
+pub use app::{register_devices, AccountsApp, AppShell, BudgetApp, InsightsApp, RegisterApp, SheetsApp, ShellApp, TransactionsApp};
 pub use demo::{money_demo, DemoBank, DemoSync};
 pub use hall::Hall;
 pub use session::{Budget, Changed, Holding, MoneyView, Session};

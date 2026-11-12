@@ -63,42 +63,35 @@ pub fn session_now(clock_ms: i64, today: &str) -> i64 {
     }
 }
 
-/// The phone's device modules, the ones money lists (money/app.toml), made
-/// once at startup and handed to every screen ([`AccountsApp::use_devices`]
-/// …); any may be none. The scanner is the camera's: its eyes and its warp
-/// are Rust's (ark-scanner), its frames and shutter the camera module's.
-#[derive(uniffi::Object)]
-pub struct Devices {
-    modules: Modules,
-}
-
+/// The phone's device modules, the ones money lists (money/app.toml),
+/// registered once at startup as the process's (`ArkProcess::modules`):
+/// every screen's runtime asks through them. Any may be none. The scanner
+/// is the camera's: its eyes and its warp are Rust's (ark-scanner), its
+/// frames and shutter the camera module's.
 #[uniffi::export]
-impl Devices {
-    #[uniffi::constructor]
-    pub fn new(
-        haptics: Option<Arc<dyn Haptics>>,
-        clipboard: Option<Arc<dyn Clipboard>>,
-        share: Option<Arc<dyn Share>>,
-        camera: Option<Arc<dyn Camera>>,
-    ) -> Arc<Devices> {
-        let mut m = Modules::new();
-        m.set(haptics.map(ark_haptics::phone::port))
-            .set(clipboard.map(ark_clipboard::phone::port))
-            .set(share.map(ark_share::phone::port))
-            .set(camera.clone())
-            .set(camera.map(ark_scanner::over_camera));
-        Arc::new(Devices { modules: m })
-    }
+pub fn register_devices(
+    haptics: Option<Arc<dyn Haptics>>,
+    clipboard: Option<Arc<dyn Clipboard>>,
+    share: Option<Arc<dyn Share>>,
+    camera: Option<Arc<dyn Camera>>,
+) {
+    let mut m = Modules::new();
+    m.set(haptics.map(ark_haptics::phone::port))
+        .set(clipboard.map(ark_clipboard::phone::port))
+        .set(share.map(ark_share::phone::port))
+        .set(camera.clone())
+        .set(camera.map(ark_scanner::over_camera));
+    ark_ffi::ArkProcess::shared().register_modules(m);
 }
 
 /// One screen's app running over the session: its runtime, the views its
 /// state names held (again after every message, as `App::holds` reads the
-/// state), the modules registered, and the answers that came later.
+/// state), and the answers that came later. Its modules are the
+/// process's.
 pub struct Running<A: App<Key = domain::MoneyView, Change = MoneyChange, Route = Route, Request = MoneyRequest>> {
     session: Arc<ark_ffi::Session<domain::MoneyView>>,
     shell: Arc<dyn AppShell>,
     runtime: Mutex<Runtime<A>>,
-    modules: Mutex<Modules>,
     inbox: Inbox<A::Msg>,
     holds: Mutex<(Vec<domain::MoneyView>, Vec<ark_ffi::Hold<domain::MoneyView>>)>,
 }
@@ -131,8 +124,7 @@ impl<A: App<Key = domain::MoneyView, Change = MoneyChange, Route = Route, Reques
         self.app.shell.open_route(route.ffi())
     }
     fn ask(&mut self, ticket: Ticket, ask: Ask<A::Msg>) {
-        let modules = self.app.modules.lock().unwrap_or_else(|e| e.into_inner()).clone();
-        self.app.inbox.ask(&modules, ticket, ask)
+        self.app.inbox.ask(&ark_ffi::ArkProcess::shared().modules(), ticket, ask)
     }
     fn request(&mut self, r: MoneyRequest) {
         match r {
@@ -169,7 +161,6 @@ impl<A: App<Key = domain::MoneyView, Change = MoneyChange, Route = Route, Reques
             session: session.inner.clone(),
             shell,
             runtime: Mutex::new(Runtime::<A>::new()),
-            modules: Mutex::new(Modules::default()),
             inbox: Inbox::default(),
             holds: Mutex::new((vec![], vec![])),
         };
@@ -226,10 +217,6 @@ impl<A: App<Key = domain::MoneyView, Change = MoneyChange, Route = Route, Reques
         self.inbox.drain(&mut rt, &mut Phone { app: self });
         self.hold(&rt);
         ran
-    }
-
-    fn use_devices(&self, devices: &Devices) {
-        *self.modules.lock().unwrap_or_else(|e| e.into_inner()) = devices.modules.clone();
     }
 }
 
@@ -288,11 +275,6 @@ macro_rules! screen {
             /// Whether something waits for the page to be drawn.
             pub fn awaits_draw(&self) -> bool {
                 self.0.runtime.lock().unwrap_or_else(|e| e.into_inner()).awaits_draw()
-            }
-
-            /// The phone's device modules, registered once at startup.
-            pub fn use_devices(&self, devices: Arc<Devices>) {
-                self.0.use_devices(&devices)
             }
         }
     };

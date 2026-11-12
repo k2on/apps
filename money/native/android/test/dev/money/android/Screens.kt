@@ -106,16 +106,16 @@ class Screens {
     }
 
     @Test fun budget() {
-        val holder = BudgetHolder(book.session, {}, { book.state.value.today }, null)
+        val holder = BudgetHolder(book.session, {}, { book.state.value.today })
         holder.send(uniffi.money_bridge.BudgetMsg.Month(month = book.state.value.month))
         shot("budget") { ScreenFrame { BudgetScreen(holder) } }
     }
 
-    @Test fun accounts() = shot("accounts") { ScreenFrame { AccountsScreen(AccountsHolder(book.session, {}, { book.state.value.today }, null)) } }
+    @Test fun accounts() = shot("accounts") { ScreenFrame { AccountsScreen(AccountsHolder(book.session, {}, { book.state.value.today })) } }
 
     @Test fun review() =
         shot("transactions") {
-            val holder = TransactionsHolder(book.session, {}, { book.state.value.today }, null)
+            val holder = TransactionsHolder(book.session, {}, { book.state.value.today })
             holder.send(uniffi.money_bridge.TransactionsMsg.Month(month = book.state.value.month))
             ScreenFrame { TransactionsScreen(holder) }
         }
@@ -128,7 +128,7 @@ class Screens {
 
     @Test fun register() {
         val card = book.state.value.accounts.first { it.kind == "credit" }
-        val holder = RegisterHolder(book.session, {}, { book.state.value.today }, null, card.id.hex)
+        val holder = RegisterHolder(book.session, {}, { book.state.value.today }, card.id.hex)
         shot("register") { ScreenFrame { RegisterScreen(holder) } }
     }
 

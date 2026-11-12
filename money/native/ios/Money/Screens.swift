@@ -34,11 +34,10 @@ final class AccountsScreen: ObservableObject {
 
     /// The tab over `session`; `refresh` asks the bank, `today` is the
     /// session's day (the demo's in the demo).
-    init(session: Session, devices: Devices?, refresh: @escaping () -> Void, today: @escaping () -> String) {
+    init(session: Session, refresh: @escaping () -> Void, today: @escaping () -> String) {
         let shell = ScreenShell(refresh: refresh, today: today)
         self.shell = shell
         app = AccountsApp(session: session, shell: shell)
-        if let devices { app.useDevices(devices: devices) }
         page = app.page()
         shell.opened = { [weak self] r in self?.open(r) }
         shell.requested = { [weak self] r in self?.request(r) }
@@ -72,11 +71,10 @@ final class BudgetScreen: ObservableObject {
     private let app: BudgetApp
     private let shell: ScreenShell
 
-    init(session: Session, devices: Devices?, month: String, refresh: @escaping () -> Void, today: @escaping () -> String) {
+    init(session: Session, month: String, refresh: @escaping () -> Void, today: @escaping () -> String) {
         let shell = ScreenShell(refresh: refresh, today: today)
         self.shell = shell
         app = BudgetApp(session: session, shell: shell)
-        if let devices { app.useDevices(devices: devices) }
         app.send(msg: .month(month: month))
         page = app.page()
         shell.opened = { [weak self] r in self?.open(r) }
@@ -110,11 +108,10 @@ final class TransactionsScreen: ObservableObject {
     private let app: TransactionsApp
     private let shell: ScreenShell
 
-    init(session: Session, devices: Devices?, month: String, refresh: @escaping () -> Void, today: @escaping () -> String) {
+    init(session: Session, month: String, refresh: @escaping () -> Void, today: @escaping () -> String) {
         let shell = ScreenShell(refresh: refresh, today: today)
         self.shell = shell
         app = TransactionsApp(session: session, shell: shell)
-        if let devices { app.useDevices(devices: devices) }
         app.send(msg: .month(month: month))
         page = app.page()
         shell.requested = { [weak self] r in self?.request(r) }
@@ -145,11 +142,10 @@ final class RegisterScreen: ObservableObject {
     private let app: RegisterApp
     private let shell: ScreenShell
 
-    init(session: Session, devices: Devices?, account: String?, refresh: @escaping () -> Void, today: @escaping () -> String) {
+    init(session: Session, account: String?, refresh: @escaping () -> Void, today: @escaping () -> String) {
         let shell = ScreenShell(refresh: refresh, today: today)
         self.shell = shell
         app = RegisterApp(session: session, shell: shell)
-        if let devices { app.useDevices(devices: devices) }
         app.send(msg: .show(account: account))
         page = app.page()
         shell.requested = { [weak self] r in self?.request(r) }
@@ -208,11 +204,10 @@ final class SheetsScreen: ObservableObject {
     private let app: SheetsApp
     private let shell: ScreenShell
 
-    init(session: Session, devices: Devices?, month: String, refresh: @escaping () -> Void, today: @escaping () -> String) {
+    init(session: Session, month: String, refresh: @escaping () -> Void, today: @escaping () -> String) {
         let shell = ScreenShell(refresh: refresh, today: today)
         self.shell = shell
         app = SheetsApp(session: session, shell: shell)
-        if let devices { app.useDevices(devices: devices) }
         app.send(msg: .month(month: month, today: today()))
         page = app.page()
     }

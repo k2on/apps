@@ -132,6 +132,22 @@ object ArkMedia {
         private set
 
     var listener: MediaListener? = null
+
+    /**
+     * The process's runtime kept online while it plays (ArkProcess's `BackgroundWork`): the
+     * service plays on with no screen, and what it plays syncs. Ended when it stops playing.
+     */
+    private var work: dev.arkdb.ffi.BackgroundWork? = null
+
+    private fun working(playing: Boolean) {
+        if (playing && work == null) {
+            work = runCatching { dev.arkdb.ffi.ArkProcess.shared().work() }.getOrNull()
+        } else if (!playing) {
+            work?.end()
+            work = null
+        }
+    }
+
     internal var info: NowPlaying? = null
     internal var controls = MediaControls(false, false, 0u, 0u, false, false, false)
 
@@ -212,6 +228,7 @@ object ArkMedia {
             stop()
             clearMediaItems()
         }
+        working(false)
         loaded = false
         shown?.changed()
     }
@@ -279,6 +296,7 @@ object ArkMedia {
 
         override fun onIsPlayingChanged(isPlaying: Boolean) {
             val p = exo ?: return
+            working(isPlaying)
             if (isPlaying) {
                 tell(MediaEvent.Playing)
                 main.removeCallbacks(ticking)

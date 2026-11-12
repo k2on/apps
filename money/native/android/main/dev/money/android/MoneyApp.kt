@@ -95,7 +95,7 @@ import dev.arkui.modules.CameraPage
 import dev.arkui.modules.PhoneCamera
 import dev.arkui.modules.PhoneClipboard
 import dev.arkui.modules.PhoneHaptics
-import uniffi.money_bridge.Devices
+import uniffi.money_bridge.registerDevices
 import uniffi.money_bridge.Auto
 import uniffi.money_bridge.Route
 import uniffi.money_bridge.TxnLine
@@ -123,8 +123,6 @@ class Shell(
     val onAccountSheet: () -> Unit = {},
     /** "Add a Device": the join link another phone signs in with, made as this login. */
     val addDevice: suspend () -> dev.arkui.DeviceLinkShown = { dev.arkui.DeviceLinkShown(null, 0, emptyList(), "Sign in first.") },
-    /** The device modules money lists (money/app.toml), registered with every screen. */
-    val devices: Devices? = null,
 )
 
 val LocalShell = staticCompositionLocalOf<Shell> { error("no shell") }
@@ -185,9 +183,10 @@ fun MoneyApp(
     // The device modules (money/app.toml): the camera's page is drawn at the root, below.
     val hapticView = androidx.compose.ui.platform.LocalView.current
     val camera = remember { PhoneCamera() }
-    val devices = remember(hapticView) { Devices(PhoneHaptics(hapticView), PhoneClipboard(hapticView.context), null, camera) }
+    // Registered as the process's (`ArkProcess`'s modules): every screen's runtime asks through them.
+    remember(hapticView) { registerDevices(PhoneHaptics(hapticView), PhoneClipboard(hapticView.context), null, camera) }
     // The sheets over the app, written from Rust (generated/SheetsScreen.kt): its month the book's.
-    val sheets = remember(book, devices) { SheetsHolder(book.session, { book.sync() }, { book.state.value.today }, devices) }
+    val sheets = remember(book) { SheetsHolder(book.session, { book.sync() }, { book.state.value.today }) }
     camera.onAnswered = { sheets.answered() }
     val shell =
         remember(book, nav) {
@@ -200,7 +199,6 @@ fun MoneyApp(
                 onSignOut = onSignOut,
                 onAccountSheet = { account = true },
                 addDevice = addDevice,
-                devices = devices,
             )
         }
 
@@ -231,14 +229,14 @@ fun MoneyApp(
     // window's width — each its top bar, search and inspector, hosting money's own screens.
     LaunchedEffect(ledger) { sections.reload() }
     // Budget, written from Rust (generated/BudgetScreen.kt), over its runtime: its month the book's.
-    val budget = remember(book) { BudgetHolder(book.session, { book.sync() }, { book.state.value.today }, devices) }
+    val budget = remember(book) { BudgetHolder(book.session, { book.sync() }, { book.state.value.today }) }
     LaunchedEffect(budget, ledger.month) { budget.send(uniffi.money_bridge.BudgetMsg.Month(month = ledger.month)) }
     LaunchedEffect(ledger) { budget.reload() }
     // Accounts, written from Rust (generated/AccountsScreen.kt), over its runtime.
-    val accounts = remember(book) { AccountsHolder(book.session, { book.sync() }, { book.state.value.today }, devices) }
+    val accounts = remember(book) { AccountsHolder(book.session, { book.sync() }, { book.state.value.today }) }
     LaunchedEffect(ledger) { accounts.reload() }
     // Transactions, written from Rust (generated/TransactionsScreen.kt), over its runtime.
-    val transactions = remember(book) { TransactionsHolder(book.session, { book.sync() }, { book.state.value.today }, devices) }
+    val transactions = remember(book) { TransactionsHolder(book.session, { book.sync() }, { book.state.value.today }) }
     LaunchedEffect(ledger) { sheets.reload() }
     LaunchedEffect(sheets, ledger.month) { sheets.send(SheetsMsg.Month(month = ledger.month, today = ledger.today)) }
     // What any screen's runtime asks of the app (`MoneyRequest`).
@@ -365,7 +363,7 @@ private fun RegisterHosted(
     title: String? = null,
     onBack: (() -> Unit)? = null,
 ) {
-    val holder = remember(book, account) { RegisterHolder(book.session, { book.sync() }, { book.state.value.today }, shell.devices, account) }
+    val holder = remember(book, account) { RegisterHolder(book.session, { book.sync() }, { book.state.value.today }, account) }
     holder.requested = carry
     LaunchedEffect(ledger) { holder.reload() }
     LaunchedEffect(holder, search) { holder.send(uniffi.money_bridge.RegisterMsg.Search(text = search)) }

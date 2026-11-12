@@ -35,7 +35,7 @@ struct MoneyApp: App {
                           demoLaunch: demo != nil, scan: QrScanner.available, intro: !Shots.on)
         let camera = PhoneCamera()
         camera.answered = { [weak model] in model?.sheets?.answered() }
-        model.devices = Devices(haptics: PhoneHaptics(), clipboard: PhoneClipboard(), share: PhoneShare(), camera: camera)
+        registerDevices(haptics: PhoneHaptics(), clipboard: PhoneClipboard(), share: PhoneShare(), camera: camera)
         let watched = Watched<MoneyView> { [weak model] v in model?.hold(v) }
         model.onMoved = { [weak watched] views in watched?.moved(views) }
         _model = StateObject(wrappedValue: model)

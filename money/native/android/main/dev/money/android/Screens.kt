@@ -24,7 +24,6 @@ import uniffi.money_bridge.Session
 import uniffi.money_bridge.ShellApp
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
-import uniffi.money_bridge.Devices
 import uniffi.money_bridge.InsightsApp
 import uniffi.money_bridge.InsightsMsg
 import uniffi.money_bridge.InsightsPage
@@ -44,7 +43,7 @@ import uniffi.money_bridge.ShellPage
 import uniffi.money_bridge.Route
 
 /** The Accounts tab, running in Rust. */
-class AccountsHolder(session: Session, refresh: () -> Unit, today: () -> String, devices: Devices?) {
+class AccountsHolder(session: Session, refresh: () -> Unit, today: () -> String) {
     /** Opens a route: the app's navigator. */
     var opened: (Route) -> Unit = {}
 
@@ -92,7 +91,6 @@ class AccountsHolder(session: Session, refresh: () -> Unit, today: () -> String,
     init {
         dev.arkui.Ready.probe("accounts") { quiet() }
         // money's modules (money/app.toml): no share sheet on Android yet.
-        devices?.let { app.useDevices(it) }
     }
 
     /** `msg` taken by the app; the page read again. */
@@ -113,7 +111,7 @@ class AccountsHolder(session: Session, refresh: () -> Unit, today: () -> String,
 }
 
 /** The Budget tab, running in Rust (money/app/src/budget): its month the book's, told as it pages. */
-class BudgetHolder(session: Session, refresh: () -> Unit, today: () -> String, devices: Devices?) {
+class BudgetHolder(session: Session, refresh: () -> Unit, today: () -> String) {
     /** Opens a route: a category's month. */
     var opened: (Route) -> Unit = {}
 
@@ -153,7 +151,6 @@ class BudgetHolder(session: Session, refresh: () -> Unit, today: () -> String, d
 
     init {
         dev.arkui.Ready.probe("budget") { quiet() }
-        devices?.let { app.useDevices(it) }
     }
 
     /** `msg` taken by the app; the page read again. */
@@ -174,7 +171,7 @@ class BudgetHolder(session: Session, refresh: () -> Unit, today: () -> String, d
 }
 
 /** The Transactions tab, running in Rust (money/app/src/transactions): To Review and All. */
-class TransactionsHolder(session: Session, refresh: () -> Unit, today: () -> String, devices: Devices?) {
+class TransactionsHolder(session: Session, refresh: () -> Unit, today: () -> String) {
     /** What only the app does: a transaction's details or its form. */
     var requested: (MoneyRequest) -> Unit = {}
 
@@ -211,7 +208,6 @@ class TransactionsHolder(session: Session, refresh: () -> Unit, today: () -> Str
 
     init {
         dev.arkui.Ready.probe("transactions") { quiet() }
-        devices?.let { app.useDevices(it) }
     }
 
     fun send(msg: TransactionsMsg) {
@@ -225,7 +221,7 @@ class TransactionsHolder(session: Session, refresh: () -> Unit, today: () -> Str
 }
 
 /** A register, running in Rust (money/app/src/register): an account's transactions or every account's. */
-class RegisterHolder(session: Session, refresh: () -> Unit, today: () -> String, devices: Devices?, account: String?) {
+class RegisterHolder(session: Session, refresh: () -> Unit, today: () -> String, account: String?) {
     /** What only the app does: a transaction's details, a sheet. */
     var requested: (MoneyRequest) -> Unit = {}
 
@@ -249,7 +245,6 @@ class RegisterHolder(session: Session, refresh: () -> Unit, today: () -> String,
     val page: StateFlow<RegisterPage>
 
     init {
-        devices?.let { app.useDevices(it) }
         app.send(RegisterMsg.Show(account = account))
         _page = MutableStateFlow(app.page())
         page = _page
@@ -297,7 +292,7 @@ class InsightsHolder(session: Session, refresh: () -> Unit, today: () -> String)
  * The sheets over the app, running in Rust (money/app/src/sheets): a transaction's form and its
  * receipt, a category given, an account reconciled.
  */
-class SheetsHolder(session: Session, refresh: () -> Unit, today: () -> String, devices: Devices?) {
+class SheetsHolder(session: Session, refresh: () -> Unit, today: () -> String) {
     private val shell =
         object : AppShell {
             override fun openRoute(route: Route) {}
@@ -328,7 +323,6 @@ class SheetsHolder(session: Session, refresh: () -> Unit, today: () -> String, d
 
     init {
         dev.arkui.Ready.probe("sheets") { quiet() }
-        devices?.let { app.useDevices(it) }
     }
 
     fun send(msg: SheetsMsg) {

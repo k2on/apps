@@ -51,8 +51,6 @@ final class Model: ObservableObject {
     /// The shell's runtime (Screens.swift): the app's for its life, running
     /// while a session is open.
     let shell = MoneyShellScreen()
-    /// The phone's device modules (money/app.toml), given every screen run in Rust.
-    var devices: Devices? = nil
     /// The Transactions tab, running in Rust (money/app/src/transactions).
     @Published private(set) var transactions: TransactionsScreen? = nil
     /// Insights, running in Rust (money/app/src/insights).
@@ -231,19 +229,19 @@ final class Model: ObservableObject {
 
     private func opened(_ s: Session) {
         session = s
-        accounts = AccountsScreen(session: s, devices: devices,
+        accounts = AccountsScreen(session: s,
                                   refresh: { [weak self] in Task { await self?.refresh() } },
                                   today: { [weak self] in self?.today ?? moneyToday() })
-        budget = BudgetScreen(session: s, devices: devices, month: month,
+        budget = BudgetScreen(session: s, month: month,
                               refresh: { [weak self] in Task { await self?.refresh() } },
                               today: { [weak self] in self?.today ?? moneyToday() })
-        transactions = TransactionsScreen(session: s, devices: devices, month: month,
+        transactions = TransactionsScreen(session: s, month: month,
                                           refresh: { [weak self] in Task { await self?.refresh() } },
                                           today: { [weak self] in self?.today ?? moneyToday() })
         insights = InsightsScreen(session: s, month: month,
                                   refresh: { [weak self] in Task { await self?.refresh() } },
                                   today: { [weak self] in self?.today ?? moneyToday() })
-        sheets = SheetsScreen(session: s, devices: devices, month: month,
+        sheets = SheetsScreen(session: s, month: month,
                               refresh: { [weak self] in Task { await self?.refresh() } },
                               today: { [weak self] in self?.today ?? moneyToday() })
         shell.connect(session: s,
