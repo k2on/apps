@@ -608,4 +608,19 @@ fn the_walk_reaches_what_it_taps() {
     assert_eq!(take(&tap("Auto-Assign", Some(Role::Button)), &targets, &mut focus), Took::Done);
     assert_eq!(take(&tap("Accounts", Some(Role::Tab)), &targets, &mut focus), Took::Done);
     assert_eq!(sent.borrow().clone(), ["AutoAssign", "Select { tag: \"accounts\" }"]);
+
+    // Accounts' rows by their names, not all a screen reader says of them
+    // (their kind and balance after the name): app-screens 43306576550's
+    // walk found no "Checking" row.
+    let ad = crate::testing::Demo::<crate::accounts::Accounts>::new();
+    let art = Runtime::<crate::accounts::Accounts>::new();
+    let rows = compose(vec![Screen {
+        name: "accounts".into(),
+        nodes: nodes(
+            &crate::accounts::view::accounts::view(&art.screen(&ad)),
+            Rc::new(|_: crate::accounts::AccountsMsg| {}),
+        ),
+    }]);
+    let said = tree(&rows);
+    assert!(said.contains("[row] Checking (taps"), "{said}");
 }

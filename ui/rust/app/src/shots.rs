@@ -194,23 +194,22 @@ impl<M: Clone + 'static> Walk<M> {
                 let open = s.open.as_ref().is_none_or(|(o, _)| o.get());
                 self.view(&s.rows, shown && open, modal);
             }
+            // A row by what it says first (its title, its first cell), not
+            // all a screen reader says of it (`said`: "Checking, Checking,
+            // $14,066.04"), which moves with the household.
             P::Row(r) => {
-                let label = r
-                    .said
-                    .as_ref()
-                    .map(|s| s.get())
-                    .filter(|s| !s.is_empty())
-                    .unwrap_or_else(|| r.title.get());
+                let title = r.title.get();
+                let label = if title.is_empty() {
+                    r.said.as_ref().map(|s| s.get()).unwrap_or_default()
+                } else {
+                    title
+                };
                 self.push((shown, modal), label, Role::Row, r.tap.as_ref(), None, &r.menu);
             }
             P::MeterRow(r) => self.push((shown, modal), r.title.get(), Role::Row, r.tap.as_ref(), None, &r.menu),
             P::TableRow(r) => {
-                let label = r
-                    .said
-                    .as_ref()
-                    .map(|s| s.get())
-                    .filter(|s| !s.is_empty())
-                    .unwrap_or_else(|| r.cells.get().into_iter().find(|c| !c.is_empty()).unwrap_or_default());
+                let first = r.cells.get().into_iter().find(|c| !c.is_empty());
+                let label = first.unwrap_or_else(|| r.said.as_ref().map(|s| s.get()).unwrap_or_default());
                 self.push((shown, modal), label, Role::Row, r.tap.as_ref(), None, &r.menu);
             }
             P::Headline(h) => {
