@@ -1,337 +1,127 @@
-//! money's screens as Ark apps on the phones (ui/docs/app.md): the
-//! runtime (`ark_app::Runtime`) behind the bridge, over the session's
-//! store. A screen's generated SwiftUI or Compose reads its record
-//! (`AccountsApp::page`) and sends it messages (`AccountsApp::send`); the
-//! app's update runs here, its changes go to the peer, its routes and its
-//! typed requests ([`MoneyRequest`]) to money's host (`host.rs`), which
-//! makes every screen's runtime and carries out what each asks,
-//! its modules' operations to the modules the phone registered as the
-//! process's (money/app.toml's, each a crate under modules/; the app
-//! library registers them: ark-ffi's `devices`).
-//!
-//! Every screen is the same object over its own app ([`Running`]), written
-//! once by [`screen!`]: UniFFI exports no generic type.
+//! money's screens as Ark apps on the phones (ui/docs/app.md): each
+//! screen's runtime, run by money's part of its host (`money_app::host`)
+//! under ark-ffi's `Hosted`, exported as one object per app.toml `[screens]`
+//! entry ([`ark_ffi::hosted_screen!`]). A screen's generated SwiftUI or
+//! Compose reads its record (`AccountsApp::page`) and sends it messages
+//! (`AccountsApp::send`); what it asks of another runtime, or of the phone's
+//! shell, is the host's.
 
 use std::sync::{Arc, Mutex};
 
-use ark_app::{App, Ask, Host, Inbox, Runtime, Ticket};
-use ark_ffi::Refusal;
-use money_app::accounts::{Accounts, AccountsMsg};
-use money_app::budget::{Budget, BudgetMsg};
-use money_app::insights::{Insights, InsightsMsg};
-use money_app::register::{Register, RegisterMsg};
-use money_app::routes::Route;
-use money_app::sheets::{Sheets, SheetsMsg};
-use money_app::shell::{MoneyShell, ShellMsg};
-use money_app::transactions::{Transactions, TransactionsMsg};
-use money_core::{self as domain, MoneyChange};
-
-use crate::*;
+use ark_app::host::Screen;
+use ark_ffi::hosted::{blank, Hosted};
 use ark_ffi::Twin;
-use money_app::MoneyRequest;
+use money_app::accounts::Accounts;
+use money_app::budget::Budget;
+use money_app::insights::Insights;
+use money_app::register::{Register, RegisterMsg};
+use money_app::sheets::Sheets;
+use money_app::shell::MoneyShell;
+use money_app::transactions::Transactions;
 
-/// What a screen's runtime asks of the app's host (`host.rs`): open a
-/// route, carry out a typed request (the bank sync, a message for another
-/// screen's runtime, what only the phone's shell draws), say the time and
-/// the session's day, and take what was asked once the runtime is let go
-/// (`settle`), so a request that reaches another runtime, or this one, is
-/// never carried out mid-message.
-pub(crate) trait Router: Send + Sync {
-    fn open_route(&self, route: Route);
-    fn request(&self, request: MoneyRequest);
-    /// Milliseconds since the epoch, by the device's clock.
-    fn now_ms(&self) -> i64;
-    /// The session's day (`2026-10-26`): the demo's day in the demo, today
-    /// otherwise — what a new account is dated with.
-    fn today(&self) -> String;
-    /// What was asked during a message, carried out now that no runtime's
-    /// lock is held.
-    fn settle(&self);
-    /// A device module answered: taken by the runtime that asked once no
-    /// lock of its is held (the host's thread drains every runtime).
-    fn answered(&self);
-}
+use crate::host::MoneyPhone;
+use crate::*;
 
-/// The time a screen is worked out at: the device's clock on the session's
-/// day, and noon of that day when the clock is on another (the demo's
-/// fixed day), so what is dated today is dated with the session's day.
-pub fn session_now(clock_ms: i64, today: &str) -> i64 {
-    if domain::dates::day_of_ms(clock_ms) == today {
-        return clock_ms;
-    }
-    match domain::dates::parse_day(today) {
-        Some((y, m, d)) => domain::dates::days_from_civil(y, m, d) * 86_400_000 + 43_200_000,
-        None => clock_ms,
-    }
-}
-
-/// One screen's app running over the session: its runtime, the views its
-/// state names held (again after every message, as `App::holds` reads the
-/// state), and the answers that came later. Its modules are the
-/// process's.
-pub struct Running<A: App<Key = domain::MoneyView, Change = MoneyChange, Route = Route, Request = MoneyRequest>> {
-    session: Arc<ark_ffi::Session<domain::MoneyView>>,
-    shell: Arc<dyn Router>,
-    runtime: Mutex<Runtime<A>>,
-    inbox: Inbox<A::Msg>,
-    holds: Mutex<(Vec<domain::MoneyView>, Vec<ark_ffi::Hold<domain::MoneyView>>)>,
-}
-
-/// The phone, as the runtime's host for one message.
-struct Phone<'a, A: App<Key = domain::MoneyView, Change = MoneyChange, Route = Route, Request = MoneyRequest>> {
-    app: &'a Running<A>,
-}
-
-impl<A: App<Key = domain::MoneyView, Change = MoneyChange, Route = Route, Request = MoneyRequest>> Host<A> for Phone<'_, A> {
-    fn read<R>(&self, f: impl FnOnce(&dyn ark::views::Views<domain::MoneyView>) -> R) -> R {
-        // A file a row names is read where the phone keeps it (`file:`).
-        self.app.session.read(|st, peer| {
-            f(&ark::views::WithFiles {
-                views: st,
-                url: |file: &ark::file::FileRef| peer.file_url(file),
-            })
-        })
-    }
-    fn now_ms(&self) -> i64 {
-        session_now(self.app.shell.now_ms(), &self.app.shell.today())
-    }
-    fn send(&mut self, change: MoneyChange) -> Result<(), String> {
-        match self.app.session.send(|p| p.mutate_encoded(change.name(), change.input())) {
-            Ok(_) => Ok(()),
-            Err(Refusal::Refused { why }) => Err(why),
-        }
-    }
-    fn open(&mut self, route: Route) {
-        self.app.shell.open_route(route)
-    }
-    fn ask(&mut self, ticket: Ticket, ask: Ask<A::Msg>) {
-        // An answer that comes later (the camera's) wakes the host, which
-        // drains every runtime on its own thread.
-        let router = self.app.shell.clone();
-        self.app
-            .inbox
-            .ask_telling(&ark_ffi::ArkProcess::shared().modules(), ticket, ask, move || router.answered())
-    }
-    fn request(&mut self, r: MoneyRequest) {
-        match r {
-            // A receipt's photo kept: on the phone at once, and sent to the
-            // server (which reads it) on this connection or the next.
-            MoneyRequest::KeepPhoto { jpeg, txn } => {
-                let peer = self.app.session.peer().clone();
-                // A phone whose files cannot be written keeps nothing; the
-                // section stays as it was, the ways to give one still there.
-                if peer.put_file(jpeg.clone(), money_app::receipts::JPEG.into()).is_ok() {
-                    let file = ark::file::FileRef::of(&jpeg, money_app::receipts::JPEG);
-                    let txn_id = txn.as_deref().and_then(money_app::id_of);
-                    let _ = Host::<A>::send(self, MoneyChange::AddPhoto(domain::AddPhoto { file, txn_id }));
-                }
-            }
-            r => self.app.shell.request(r),
-        }
-    }
-    /// A file a screen is about to show, fetched from the server when the
-    /// phone does not hold it; the views are rung when it arrives.
-    fn want(&mut self, file: ark::file::FileRef) {
-        let _ = self.app.session.peer().file(file.hash, file.size, file.media);
-    }
-    /// SwiftUI and Compose draw the page after they read it: what waits
-    /// on a draw waits for `drawn`.
-    fn draws_between(&self) -> bool {
-        true
-    }
-}
-
-impl<A: App<Key = domain::MoneyView, Change = MoneyChange, Route = Route, Request = MoneyRequest>> Running<A> {
-    pub(crate) fn new(session: Arc<ark_ffi::Session<domain::MoneyView>>, shell: Arc<dyn Router>) -> Running<A> {
-        let app = Running {
-            session,
-            shell,
-            runtime: Mutex::new(Runtime::<A>::new()),
-            inbox: Inbox::default(),
-            holds: Mutex::new((vec![], vec![])),
-        };
-        app.hold(&app.runtime.lock().unwrap_or_else(|e| e.into_inner()));
-        app
-    }
-
-    /// The views the state names held, and those it no longer names let go.
-    fn hold(&self, rt: &Runtime<A>) {
-        let want = rt.holds();
-        let mut h = self.holds.lock().unwrap_or_else(|e| e.into_inner());
-        if h.0 != want {
-            let held = want.iter().map(|k| self.session.hold(k.clone())).collect();
-            *h = (want, held);
-        }
-    }
-
-    pub(crate) fn send(&self, msg: A::Msg) {
-        {
-            let mut rt = self.runtime.lock().unwrap_or_else(|e| e.into_inner());
-            rt.dispatch(msg, &mut Phone { app: self });
-            self.inbox.drain(&mut rt, &mut Phone { app: self });
-            self.hold(&rt);
-        }
-        self.shell.settle();
-    }
-
-    pub(crate) fn screen(&self) -> A::Screen {
-        let rt = self.runtime.lock().unwrap_or_else(|e| e.into_inner());
-        rt.screen(&Phone { app: self })
-    }
-
-    pub(crate) fn version(&self) -> u64 {
-        self.runtime.lock().unwrap_or_else(|e| e.into_inner()).version()
-    }
-
-    pub(crate) fn is_idle(&self) -> bool {
-        let rt = self.runtime.lock().unwrap_or_else(|e| e.into_inner());
-        self.session.read(|st, _| rt.is_idle(st))
-    }
-
-    /// The answers that came since (a camera's, later than its message),
-    /// run; whether any did. The host's, when a module answered.
-    pub(crate) fn drain(&self) -> bool {
-        let moved = {
-            let mut rt = self.runtime.lock().unwrap_or_else(|e| e.into_inner());
-            let before = rt.version();
-            self.inbox.drain(&mut rt, &mut Phone { app: self });
-            self.hold(&rt);
-            rt.version() != before
-        };
-        self.shell.settle();
-        moved
-    }
-
-    /// The page drawn: what waited on it taken ([`Runtime::drawn`]);
-    /// whether any did, so the page is read again.
-    fn drawn(&self) -> bool {
-        let ran = {
-            let mut rt = self.runtime.lock().unwrap_or_else(|e| e.into_inner());
-            let ran = rt.drawn(&mut Phone { app: self });
-            self.inbox.drain(&mut rt, &mut Phone { app: self });
-            self.hold(&rt);
-            ran
-        };
-        self.shell.settle();
-        ran
-    }
-}
-
-/// A screen's app as UniFFI exports it: `$name` over `$app`, its messages
-/// `$msg` (whose twin is `$msg_ffi`) and its page's twin `$page`.
-macro_rules! screen {
-    ($(#[$doc:meta])* $name:ident, $app:ty, $msg:ty, $msg_ffi:ty, $page:ty) => {
-        $(#[$doc])*
-        #[derive(uniffi::Object)]
-        pub struct $name(pub(crate) Running<$app>);
-
-        impl $name {
-            /// The screen over `session`, its views held while it lives; what
-            /// it asks of its host to `router`.
-            pub(crate) fn over(session: Arc<ark_ffi::Session<domain::MoneyView>>, router: Arc<dyn Router>) -> Arc<$name> {
-                Arc::new($name(Running::new(session, router)))
-            }
-        }
-
-        #[uniffi::export]
-        impl $name {
-            /// `msg` taken: the state updated, its changes sent, its routes
-            /// opened, the views it names held.
-            pub fn send(&self, msg: $msg_ffi) {
-                self.0.send(<$msg>::from_ffi(msg))
-            }
-
-            /// What the screen shows now.
-            pub fn page(&self) -> $page {
-                self.0.screen().ffi()
-            }
-
-            /// A number that grows with every message taken: with the
-            /// session's versions, what says to read the page again.
-            pub fn version(&self) -> u64 {
-                self.0.version()
-            }
-
-            /// Whether nothing is left to come (`Runtime::is_idle`): what a
-            /// screenshot driver waits on, with the version unchanged.
-            pub fn is_idle(&self) -> bool {
-                self.0.is_idle()
-            }
-
-            /// The page as last read has been drawn: what waited on that
-            /// (`Command::AfterDraw`) taken; whether any did, so the page
-            /// is read again. Asked while `awaits_draw`.
-            pub fn drawn(&self) -> bool {
-                self.0.drawn()
-            }
-
-            /// Whether something waits for the page to be drawn.
-            pub fn awaits_draw(&self) -> bool {
-                self.0.runtime.lock().unwrap_or_else(|e| e.into_inner()).awaits_draw()
-            }
-        }
-    };
-}
-
-screen!(
+ark_ffi::hosted_screen!(
     /// The Accounts tab, running.
-    AccountsApp, Accounts, AccountsMsg, AccountsMsgFfi, AccountsPageFfi
+    AccountsApp, MoneyPhone, Accounts, AccountsMsgFfi, AccountsPageFfi
 );
-screen!(
+ark_ffi::hosted_screen!(
     /// The Budget tab, running: its month's views held as the month moves.
-    BudgetApp, Budget, BudgetMsg, BudgetMsgFfi, BudgetPageFfi
+    BudgetApp, MoneyPhone, Budget, BudgetMsgFfi, BudgetPageFfi
 );
-screen!(
+ark_ffi::hosted_screen!(
     /// money's shell, running: its sections, toolbar, inspector, search and
     /// commands (money/app/src/shell). Its generated SwiftUI and Compose
     /// (`MoneyShellView`, `MoneySettingsView`, `MoneyCommands`) read its
-    /// page and send it messages; a command only a hosted screen can carry
-    /// out goes to money's host, typed (`host.rs`).
-    ShellApp, MoneyShell, ShellMsg, ShellMsgFfi, ShellPageFfi
+    /// page and send it messages.
+    ShellApp, MoneyPhone, MoneyShell, ShellMsgFfi, ShellPageFfi
 );
-screen!(
-    /// The Transactions tab, running (money/app/src/transactions): To
-    /// Review and All, approving and categorizing.
-    TransactionsApp, Transactions, TransactionsMsg, TransactionsMsgFfi, TransactionsPageFfi
+ark_ffi::hosted_screen!(
+    /// The Transactions tab, running: To Review and All.
+    TransactionsApp, MoneyPhone, Transactions, TransactionsMsgFfi, TransactionsPageFfi
 );
-screen!(
-    /// Insights, running (money/app/src/insights): where the month's money went.
-    InsightsApp, Insights, InsightsMsg, InsightsMsgFfi, InsightsPageFfi
+ark_ffi::hosted_screen!(
+    /// Insights, running: where the month's money went.
+    InsightsApp, MoneyPhone, Insights, InsightsMsgFfi, InsightsPageFfi
 );
-screen!(
-    /// A register, running (money/app/src/register): an account's
-    /// transactions, or every account's, as a table.
-    RegisterApp, Register, RegisterMsg, RegisterMsgFfi, RegisterPageFfi
+ark_ffi::hosted_screen!(
+    /// The sheets over the app, running: a transaction's form and its
+    /// receipt, a category given, an account reconciled.
+    SheetsApp, MoneyPhone, Sheets, SheetsMsgFfi, SheetsPageFfi
 );
-screen!(
-    /// The sheets over the app, running (money/app/src/sheets): a
-    /// transaction's form and its receipt, a category given, an account
-    /// reconciled.
-    SheetsApp, Sheets, SheetsMsg, SheetsMsgFfi, SheetsPageFfi
-);
+
+/// A register, running for as long as the phone shows it (an account's
+/// transactions, or every account's): a page pushed on a stack, beside the
+/// host's runtimes, over its session.
+#[derive(uniffi::Object)]
+pub struct RegisterApp {
+    host: Arc<Hosted<MoneyPhone>>,
+    screen: Mutex<Screen<Register>>,
+}
+
+impl RegisterApp {
+    pub(crate) fn over(host: Arc<Hosted<MoneyPhone>>, account: Option<String>) -> Option<Arc<RegisterApp>> {
+        let mut screen = Screen::new();
+        host.beside(&mut screen, |s, cx| s.send(RegisterMsg::Show { account }, cx))?;
+        Some(Arc::new(RegisterApp {
+            host,
+            screen: Mutex::new(screen),
+        }))
+    }
+
+    fn screen(&self) -> std::sync::MutexGuard<'_, Screen<Register>> {
+        self.screen.lock().unwrap_or_else(|e| e.into_inner())
+    }
+}
+
+impl Drop for RegisterApp {
+    fn drop(&mut self) {
+        let mut s = self.screen();
+        self.host.close_beside(&mut s);
+    }
+}
+
+#[uniffi::export]
+impl RegisterApp {
+    /// `msg` taken.
+    pub fn send(&self, msg: RegisterMsgFfi) {
+        let mut s = self.screen();
+        self.host.beside(&mut s, |s, cx| s.send(RegisterMsg::from_ffi(msg), cx));
+    }
+
+    /// What the register shows now.
+    pub fn page(&self) -> RegisterPageFfi {
+        let s = self.screen();
+        self.host
+            .read_beside(&s, |s, place, now| s.page(place, now))
+            .unwrap_or_else(blank::<Register>)
+            .ffi()
+    }
+
+    pub fn version(&self) -> u64 {
+        self.screen().version()
+    }
+
+    pub fn is_idle(&self) -> bool {
+        let s = self.screen();
+        self.host.read_beside(&s, |s, place, _| s.is_idle(place)).unwrap_or(true)
+    }
+
+    /// The page drawn: what waited on it taken; whether any did.
+    pub fn drawn(&self) -> bool {
+        let mut s = self.screen();
+        self.host.beside(&mut s, |s, cx| s.drawn(cx)).unwrap_or(false)
+    }
+
+    pub fn awaits_draw(&self) -> bool {
+        self.screen().awaits_draw()
+    }
+}
 
 /// The shell's page before a session runs it: on Budget, nothing held,
 /// nobody signed in — what a phone draws until its session opens.
 #[uniffi::export]
 pub fn shell_blank() -> ShellPageFfi {
-    let store = ark_peer::store::Store::<domain::MoneyView>::new();
-    let data = ark_app::Data { store: &store, now_ms: 0 };
-    <MoneyShell as App>::screen(&Default::default(), &data).ffi()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::session_now;
-
-    /// On the session's own day the clock is the time; on another (the
-    /// demo's fixed day), noon of the session's day. Falsified by the
-    /// device's clock alone: an account added in the demo was dated with
-    /// the phone's day, not the demo's.
-    #[test]
-    fn the_time_is_on_the_sessions_day() {
-        let noon_26 = session_now(0, "2026-10-26");
-        assert_eq!(session_now(noon_26 + 3_600_000, "2026-10-26"), noon_26 + 3_600_000);
-        assert_eq!(session_now(noon_26 + 30 * 86_400_000, "2026-10-26"), noon_26);
-        assert_eq!(money_core::dates::day_of_ms(session_now(0, "2026-10-26")), "2026-10-26");
-    }
+    blank::<MoneyShell>().ffi()
 }

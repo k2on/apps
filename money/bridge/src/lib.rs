@@ -57,6 +57,7 @@ ark::twins!(
     },
     money_app::{
         MoneyRequest,
+        host::Household,
         accounts::{AccountItem, AccountsMsg, AccountsPage, AccountsShelf, AddForm, KindChoice, RenameForm},
         insights::{InsightsMsg, InsightsPage, PlanRow, SpentGroup},
         budget::{AmountForm, BudgetChoice, BudgetMsg, BudgetPage, CategoryForm, CategoryItem, GroupItem, MoveForm, NameForm},
@@ -89,12 +90,10 @@ pub mod core;
 mod demo;
 mod hall;
 mod host;
-mod session;
 pub use app::{AccountsApp, BudgetApp, InsightsApp, RegisterApp, SheetsApp, ShellApp, TransactionsApp};
-pub use demo::{money_demo, DemoBank, DemoSync};
+pub use demo::money_demo;
 pub use hall::Hall;
-pub use host::{Household, MoneyHost, NativeAsk};
-pub use session::{Budget, Changed, Holding, MoneyView, Session};
+pub use host::{MoneyHost, MoneyPhone, NativeAsk};
 
 mod routes;
 pub use routes::route_from_url;

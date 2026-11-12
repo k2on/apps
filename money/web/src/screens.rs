@@ -17,51 +17,35 @@ use money_core::*;
 use crate::{MoneyWeb, Msg};
 
 pub fn lines(app: &MoneyWeb) -> &[BudgetLine] {
-    app.store.rows(&MoneyView::Lines { month: app.month.clone() })
+    app.store.rows(&MoneyView::Lines { month: app.month() })
 }
 
 pub fn summary(app: &MoneyWeb) -> Summary {
     app.store
-        .first::<Summary>(&MoneyView::Summary { month: app.month.clone() })
+        .first::<Summary>(&MoneyView::Summary { month: app.month() })
         .cloned()
         .unwrap_or_default()
 }
 
 /// A screen the shell hosts, by name.
 pub fn hosted(app: &MoneyWeb, name: &'static str) -> AnyView {
-    let section = app.shell.state().section.clone();
+    let section = app.app().shell.state().section.clone();
     match name {
-        "budget" => {
-            // The window's month, whatever the page was last told.
-            let state = money_app::budget::State {
-                month: app.month.clone(),
-                ..app.budget.state().clone()
-            };
-            let data = ark_app::Data {
-                store: &app.store,
-                now_ms: app.now_ms(),
-            };
-            arkui_web::render(
-                money_app::budget::view::budget::view(&<money_app::budget::Budget as ark_app::App>::screen(&state, &data)).map(crate::Msg::Budget),
-            )
-        }
+        "budget" => arkui_web::render(money_app::budget::view::budget::view(&app.page::<money_app::budget::Budget>()).map(crate::Msg::Budget)),
         "budget.inspector" => budget_inspector(app),
-        "accounts" => arkui_web::render(money_app::accounts::view::accounts::view(
-            &app.accounts.screen_of(&app.store, app.now_ms()),
-        )),
+        "accounts" => arkui_web::render(money_app::accounts::view::accounts::view(&app.page::<money_app::accounts::Accounts>())),
         "accounts.register" => match tagged_account(&section) {
-            Some(_) => {
-                arkui_web::render(money_app::register::view::register::view(&app.register.screen_of(&app.store, app.now_ms())).map(Msg::Register))
-            }
+            Some(_) => match &app.app().register {
+                Some(r) => arkui_web::render(money_app::register::view::register::view(&r.page(&app.seen(), app.now_ms())).map(Msg::Register)),
+                None => quiet("Select an Account"),
+            },
             None => quiet("Select an Account"),
         },
         "transactions" => arkui_web::render(
-            money_app::transactions::view::transactions::view(&app.transactions.screen_of(&app.store, app.now_ms())).map(Msg::Transactions),
+            money_app::transactions::view::transactions::view(&app.page::<money_app::transactions::Transactions>()).map(Msg::Transactions),
         ),
         "transactions.inspector" => quiet("No Transaction Selected"),
-        "insights" => {
-            arkui_web::render(money_app::insights::view::insights::view(&app.insights.screen_of(&app.store, app.now_ms())).map(Msg::Insights))
-        }
+        "insights" => arkui_web::render(money_app::insights::view::insights::view(&app.page::<money_app::insights::Insights>()).map(Msg::Insights)),
         "household" => household(),
         _ => quiet("Nothing Selected"),
     }
@@ -91,7 +75,7 @@ fn budget_inspector(app: &MoneyWeb) -> AnyView {
     let carried: i64 = lines(app).iter().map(|l| l.carried).sum();
     let body = vec![
         card(
-            Some(format!("{}'s Summary", ark_format::month(&app.month))),
+            Some(format!("{}'s Summary", ark_format::month(&app.month()))),
             vec![
                 figure_row("Left over from last month", carried),
                 figure_row("Assigned this month", s.assigned),
@@ -159,11 +143,7 @@ pub fn over(app: &MoneyWeb, page: &ShellPage) -> AnyView {
         )
     });
     // A receipt's photo is read from the replica's memory (`data:`).
-    let files = ark::views::WithFiles {
-        views: &app.store,
-        url: |file: &ark::file::FileRef| app.peer.file_url(file),
-    };
-    let sheets = arkui_web::render(money_app::sheets::view::sheets::view(&app.sheets.screen_of(&files, app.now_ms())).map(Msg::Sheets));
+    let sheets = arkui_web::render(money_app::sheets::view::sheets::view(&app.page::<money_app::sheets::Sheets>()).map(Msg::Sheets));
     (settings, sheets).into_any()
 }
 

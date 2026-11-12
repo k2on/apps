@@ -127,17 +127,17 @@ impl MoneyWeb {
     /// already (the login this browser remembers there), back from signing
     /// in with a code to trade, or on its way to sign in.
     pub fn on_server(server: String, today: String) -> MoneyWeb {
-        let mut app = MoneyWeb::over(replica(&server), today);
         let logins = Logins::new("money");
         let login = logins.recall(&server).filter(|l| l.expires_ms > ark_peer::now_ms());
-        app.live = Some(Live {
+        let live = Live {
             server: server.clone(),
             // The server is the page's own: no demo, no camera to scan with.
             first_run: FirstRun::new(self::app(), money_app::welcome::copy(false, false)),
             logins,
             login: None,
             timer: None,
-        });
+        };
+        let mut app = MoneyWeb::over(replica(&server), today, Some(live));
         #[cfg(target_arch = "wasm32")]
         app.peer.set_waker(Rc::new(|| arkui_web::send(Msg::Wake)));
         #[cfg(target_arch = "wasm32")]

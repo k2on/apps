@@ -3,7 +3,8 @@
 > **This crate is being removed.** Every screen is Rust, and the phones'
 > `Model.swift`, `Bridge.swift`, `Book.kt` and `Start.kt` are gone: the
 > first run, the session and its screens' runtimes are the app host's
-> (ark-ffi's `ArkHost`, `src/host.rs`'s `MoneyHost`) under the app library
+> (ark-ffi's `ArkHost` over `money_app::host`, money's part of its host,
+> which every platform runs) under the app library
 > every Ark app shares (ui/docs/app.md, "The App Library"). It is here
 > because the twins and the runtimes' exports are still written by hand.
 > The end state generates the phones' bindings from `money/app` and
@@ -34,10 +35,9 @@ Three ways in, each an `ark_ffi::Peer`:
   Alex with the importer's role: what the apps run with no server, their
   previews draw, and the screenshots are taken of. A fixed `today`
   (`"2026-10-26"`) is the same household every time; none is today.
-  **`DemoBank().sync(peer, today)`** stands in for Plaid behind Sync, as
-  the window's does: a pending coffee and a fill-up, then the coffee posted
-  with its tip and an order, then nothing new. Its `note` is what the
-  demo says of it.
+  The demo's bank behind Sync is money's host's (`money_app::host`): a
+  pending coffee and a fill-up, then the coffee posted with its tip and an
+  order, then nothing new, said as a notice.
 - **`Hall()`** — a money server in the process, over memory:
   `hall.device(dir, user, session, roles)` is a phone dialling it,
   `hall.carry()` delivers everything said. What the apps' tests sync two
@@ -59,26 +59,9 @@ domain's sentence for its first failed refinement, before it is sent.
 `follow(asks, since)`; `accountShelves`, `netWorth`, `accountKinds()`,
 `suggestPayees`, `unmatchedReceipts`. A phone decides none of them.
 
-**Views are the core's.** `Session(peer)` holds the views the screens
-draw, each named by a `MoneyView` — `accounts`, `groups`, `budget(month)`,
-`inbox`, `register(account)`, `payees`, `banks`, `linked`, `asks`,
-`photos`, `receipts`, `paid(txn)`, `items(receipt)`, `search(account,
-text)` (the core's filter: payee, the bank's words, memo, category, account or amount) — and what a page is
-made of is the domain's (`money_core::MoneyView`): a month's budget is
-its lines, its summary, its spending and its formulas on every platform.
-`session.hold(view)` holds one while a screen shows it (a `Holding`, let
-go when dropped; held twice, it stays until both are), the core keeps its
-rows spliced on its own thread, `session.setListener(Changed)` is told
-which views moved (`moved(views)`, on that thread; the app hops to its
-main thread), and `session.version(view)` grows whenever one did. A view is
-read by name: `session.budget(month)` (`Budget`: lines, summary, spending),
-`session.register(account)`, … — UniFFI's own records
-(`uniffi.money_bridge` on Android; the same module on iOS), each the
-twin this crate writes of the core's type (`ark::twins!`), no JSON. ArkUI
-draws them: `watched.watch(view) { read }` on Android, `.holding(view)` on
-iOS; the iced window holds `ark_peer::store::Store<MoneyView>` itself.
-`session.send(change)` is `moneySend` with its refusal kept
-(`session.refusal()`). Nothing runs on a clock.
+**Views are the core's.** The screens' runtimes hold what they read
+(`money_app::host`, over ark-ffi's `PhonePlace`); a phone reads only the
+pages they work out.
 
 **Refusals are values.** A form asks first: `session.check(change)` is
 the domain's own sentence for the first refinement the change fails ("an
@@ -148,17 +131,15 @@ have to carry when it goes:
 
 - **The host** (`host.rs`): `MoneyHost` (`new(launch, store)`, `host()`,
   `welcome()`, each screen's runtime, `register(account)`, `takeAsks()`,
-  `household()`, `generation()`, `syncBank()`), `NativeAsk` and
-  `Household`, over ark-ffi's `ArkHost`; its `HostApp` (how the replica
-  and the demo open, what a session's runtimes are and what one asks of
-  another) is money's, and a generated bridge takes it as written.
-- **The screens' runtimes** (`app.rs`): one object per screen
-  (`AccountsApp` … `ShellApp`), `shellBlank`. (The device modules are
-  the app library's: ark-ffi's `devices`, from app.toml.)
+  `household()`, `generation()`, `today()`, `month()`, `syncBank()`) and
+  `NativeAsk`, over ark-ffi's `Hosted` and money's part of its host
+  (`money_app::host::Money`, every platform's). What is money's here is
+  `MoneyPhone` alone: how its replica and its demo open.
+- **The screens' objects** (`app.rs`): a line per app.toml `[screens]`
+  entry (`ark_ffi::hosted_screen!`), the register a phone pushes
+  (`RegisterApp`, beside the host) and `shellBlank`.
 - **The first run's page** (`welcome_app!`): `WelcomeApp`, `addDevicePage`.
-- `moneyOpen`, `moneyProcessOpen`, `moneyDemo` and `DemoBank`, the
-  session (`session.rs`, now only the host's and the tests'), the hall of
-  servers and logins (`hall.rs`, the tests'), and the routes
-  (`routes.rs`).
+- `moneyOpen`, `moneyProcessOpen` and `moneyDemo`, the hall of servers and
+  logins (`hall.rs`, the tests'), and the routes (`routes.rs`).
 
 Add to this list only with a reason in the commit.

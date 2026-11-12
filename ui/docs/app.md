@@ -68,11 +68,67 @@ the store's. The runtime has no thread or clock of its own (the host says
 the time: the browser has no clock `std` can read), so the same code runs
 behind the phones' bridge, in the iced window and in wasm.
 
-A `Host` is each shell's: `money/bridge/src/app.rs` (the phones: the bridge's
-`Session`, an `AppShell` foreign trait for routes and the time),
-`money/iced/src/overview.rs` (the window: its own store and changes, iced's
-clipboard), and the tests' (`money/app/src/accounts/tests.rs`, over the
-demo household and the modules' fakes).
+A runtime's `Host` is what carries its commands out for one message. No
+shell writes one any more: `ark_app::host::Screen` is a runtime with its
+host written once over the platform's place (below), and the tests'
+(`money/app/src/testing.rs`, over the demo household and the modules'
+fakes) is the one other.
+
+### The App's Part of Its Host: `ark_app::host`
+
+An app is more than one runtime: money's shell, Budget, Accounts,
+Transactions, Insights and the sheets run side by side over one session,
+and what one asks is often another's message (the shell's Previous Month
+moves Budget, Transactions, Insights and the sheets; a launch's
+`-screen category:groceries` is the shell's inspector over the budget's
+line). That part — which runtimes there are, what a route or a request
+becomes, what one page says that another follows, a link taken, the
+demo's bank behind Sync, who is signed in as Settings says it — is the
+app's, the same on every platform, and written once in its app crate
+(`money_app::host::Money`). A host is two halves:
+
+- **The place** (`ark_app::host::Place`), the platform's: the views its
+  store holds (read, held, released), the time, a change sent to its
+  peer, its device modules and what wakes it when one answers later, a
+  file fetched or kept, a sentence said, the server dialled, who is
+  signed in where (`Session`: the demo, the day, the login, the server as
+  shown, the link, what is pending, the version, and whether this host can
+  sign out or add a device), and two facts of its toolkit: whether it
+  draws between messages (SwiftUI, Compose) and whether a page opened goes
+  on a section's stack (a phone) or is one of the window's places (the
+  browser, the desktop). Object-safe, and handed in by reference for each
+  call, so nothing of it is kept by the app.
+- **The app's part** (`HostedApp`): its screens (each an
+  `ark_app::host::Screen<A>`, a runtime that holds the views its state
+  names through the place, and takes its modules' answers), opened over a
+  `Session`; `route`, `request`, `back` for what they asked; `follow`
+  after every call; `moved` when the store moved or an answer came later
+  (what a launch asked before the household arrived is asked again);
+  `link` and `launched` for a launch's arguments or an address; and its
+  `Native`s — what only the toolkit's shell can do (money's: a page pushed,
+  Settings or Add a Device put up, its own pages put away for a link,
+  signed out) — taken by the host after the call.
+
+`Hosting<H>` is the loop between them, the same everywhere: a message in
+for one screen (`send::<Accounts>(msg, place)`, `Has<Accounts>` saying
+which field it is), the routes and requests it asked carried out in order
+once no runtime is mid-message (so a request that reaches another runtime,
+or the same one, never runs inside it), `follow`, the app's own views held,
+and `idle`/`version` summed over its screens. ark-app stays free of the
+world: the place is a trait, and no adapter crate is named.
+
+Each platform has one place and drives the one loop:
+
+| Platform | Place | Driven by |
+|---|---|---|
+| iPhone, iPad, Mac, Android | ark-ffi's `PhonePlace` (the session's views over the process's peer, the process's modules, the login, the link) | ark-ffi's `Hosted<P>`, the `HostApp` under `ArkHost`; one UniFFI object per screen (`ark_ffi::hosted_screen!`); a register pushed on a stack runs `beside` it |
+| Browser | `money_web::WebPlace` (the page's replica and store; `Seen` to read) | `MoneyWeb` |
+| Desktop | not yet: the iced window still carries its own requests (`money/iced/src/sections.rs`) | |
+| Tests | `money/app/src/host/tests.rs`'s place over the demo household | `Hosting` |
+
+What an app's bridge still names on the phones is only `PhoneApp`: how
+its replica and its demo open, its domain's hash, how a change is encoded,
+which native signs out.
 
 ### Layout: `#[view]`
 
@@ -411,16 +467,15 @@ the type is still known. A module that is not registered answers
 `ModuleError::Unavailable`, so every operation is answered.
 
 **A request is the app's own port.** What only the host can do yet is an
-enum of the app's (`money_app::MoneyRequest`): the bank sync, whose demo
-differs per shell; what the host decides between (`OpenTransaction { key }`:
+enum of the app's (`money_app::MoneyRequest`): the bank sync (the demo's
+bank, or the server's importer asked); what the host decides between (`OpenTransaction { key }`:
 Transaction Details in the inspector while it shows, the transaction's sheet
 otherwise); a message for another of the app's runtimes beside it (`Budget {
 msg: BudgetMsg::AutoAssign }` from the shell's toolbar, `Sheet { msg:
 SheetsMsg::Reconcile { account } }` from a register's Reconcile…, the sheets
-any screen raises being one runtime of their own). Each shell matches on it — the phones'
-`AppShell.request(request:)`, iced's `App::requested`, the browser's
-`MoneyWeb::carry` — and a variant goes when what it asks moves into
-Rust. There is no call into a shell by name, and `ShellMsg` has a case
+any screen raises being one runtime of their own). The app's part of its host matches on it once
+(`money_app::host::Money::request`, "The App's Part of Its Host"), for
+every platform but the desktop, whose window still has `App::requested`. There is no call into a shell by name, and `ShellMsg` has a case
 for each command (`NewTransaction`, `PreviousMonth`, …), not a string.
 What a shell used to be told so it could follow (the search typed, the
 launch's appearance) is the page's (`ShellPage::search`,
@@ -434,7 +489,7 @@ driver waits until a screen is idle and its version has not moved since
 it last looked. Each shell exposes them:
 
 - **The phones**: every screen's runtime has `isIdle()` and `version()`
-  over UniFFI (money/bridge/src/app.rs), and the app's host sums them
+  over UniFFI (`ark_ffi::hosted_screen!`), and the app's host sums them
   (`ArkHost::idle`, `ArkHost::version`, with the session's peer settled);
   the app library probes that once for a screenshot's ready signal
   (ArkUI's `Ready`), ready at a version that stood still.
@@ -599,11 +654,10 @@ the delegate reaches) with the delegate adaptor in its `@main`; Kotlin's
 library and, with `[background]`, its `BackgroundHooks`) and
 `generated/ArkActivity.kt` (`class MainActivity : ArkActivity()` drawing
 `[android] root`, and the holders); the manifest names the Application.
-The app's own part of its host is its bridge's `HostApp` (money's
-`MoneyHost`, money/bridge/src/host.rs): how its replica and its demo
-open, and what it makes of a session — its screens' runtimes, what one
-asks of another, its month, its session's facts — as the desktop's
-`live.rs` is money's there. What is left native is what an app draws
+The app's own part of its host is its app crate's (`money_app::host`,
+"The App's Part of Its Host"), run under `ArkHost` by ark-ffi's
+`Hosted`; its bridge names only how its replica and its demo open
+(`PhoneApp`). What is left native is what an app draws
 itself beside its generated screens: money's shell host (Shell.swift,
 MoneyApp.kt), its theme and marks.
 
@@ -617,9 +671,10 @@ money nor harken declares any.
 
 **harken, later.** harken is not an Ark app yet (no app.toml). To adopt
 the library it needs: an app.toml (`[ffi] host`, `[screens]`, `[apple]
-scene`, `[android] root`); a `HostApp` in harken/ffi (its replica's
-open, its demo, its screens' runtimes) exporting a `HarkenHost` with
-`host()` and `welcome()`, as `MoneyHost` does; its first run drawn as the
+scene`, `[android] root`); its part of its host in harken/app (a
+`HostedApp`: its screens' runtimes and what one asks of another) and a
+`PhoneApp` in harken/ffi (its replica's open, its demo) exporting a
+`HarkenHost` with `host()` and `welcome()`, as `MoneyHost` does; its first run drawn as the
 generated `WelcomeView` over `WelcomeApp` in place of its own onboarding
 (OnboardingViews.swift, OnboardingScreens.kt); and its process player's
 work (`ArkMedia`, `BackgroundWork`) kept as it is, the player being its
@@ -708,7 +763,7 @@ Nothing native of an app is committed. An app is
 ├── icon.svg      its icon, every platform's
 ├── core/         its domain, and (`demo`) its demo's household
 ├── app/          ark-app: its state, messages, update, #[view]s and `commands()`
-├── bridge/       the phones' bridge: the UniFFI twins, its host's part (`HostApp`), the exports (going: see below)
+├── bridge/       the phones' bridge: the UniFFI twins, how its replica opens (`PhoneApp`), the exports (going: see below)
 ├── server/       when it has one
 ├── demo/         the demo's household (its seed crate), shots.json, server.sh
 └── native/       what is not written in Rust yet (going: see below)
@@ -720,7 +775,8 @@ The end state is `app.toml`, `icon.svg`, `core/`, `app/`, `server/` and
 review, and each of the other directories only shrinks until it is gone.
 `bridge/` is still committed because the phones' bindings are written
 there by hand: the twins of the core's and the app's types, the screens'
-runtimes (`app.rs`) and money's part of its host (`host.rs`); every money
+objects (`app.rs`, a line per screen) and how its replica opens
+(`host.rs`); money's part of its host is money-app's; every money
 screen is Rust, and the phones' `Model.swift`, `Bridge.swift`, `Book.kt`
 and `Start.kt` are gone into the app library and the host ("The App
 Library"). Once the twins and the runtimes are generated by

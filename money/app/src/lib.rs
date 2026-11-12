@@ -13,6 +13,7 @@
 
 pub mod accounts;
 pub mod budget;
+pub mod host;
 pub mod insights;
 pub mod look;
 pub mod receipts;

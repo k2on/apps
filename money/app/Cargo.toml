@@ -14,7 +14,8 @@ path = "src/lib.rs"
 ark = { path = "../../rust/ark" }
 ark-app = { path = "../../ui/rust/app" }
 ark-format = { path = "../../rust/ark-format" }
-money-core = { path = "../core" }
+# The demo's household and its bank, which the host runs behind Sync in the demo.
+money-core = { path = "../core", features = ["demo"] }
 # Where money can be, spelled as paths (`src/routes.rs`).
 ark-router = { path = "../../ui/rust/router" }
 

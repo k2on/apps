@@ -99,7 +99,7 @@ the wallpaper's colours (dynamic colour on Android 12 and later; money's
 own green scheme before that and in every screenshot), the expressive
 shapes and type, edge to edge, a navigation bar, and large top app bars
 that collapse as a page scrolls. Pulling any page down asks the bank for
-anything new: the demo's bank answers at once (`DemoBank`), a server's
+anything new: the demo's bank answers at once (money's host's, `money_app::host`), a server's
 importer is asked (`banks.sync`) and its import arrives as any change
 does.
 

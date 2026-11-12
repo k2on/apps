@@ -15159,6 +15159,7 @@ rec {
           {
             name = "money-core";
             packageId = "money-core";
+            features = [ "demo" ];
           }
         ];
         devDependencies = [

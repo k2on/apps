@@ -136,7 +136,7 @@ receipt, or a photo of one, carries the receipt mark.
 
 **Pull to refresh** on any list asks the bank for anything new: on a server,
 `banks.sync` (any household member may ask the importer to sync now) with
-the link dialled; in the demo, the demo's bank (`DemoBank`), whose first
+the link dialled; in the demo, the demo's bank (money's host's, `money_app::host`), whose first
 two syncs bring a pending coffee and a fill-up and then post the coffee.
 What it brought is said on glass at the top.
 
