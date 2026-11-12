@@ -21,7 +21,7 @@ shape is the most likely to need a fix at the first build (README.md,
 | Tab reselected: back to its root, then to its list's top (`Reselect`, `ScrollsToTop`) | The system does both for a tab's `NavigationStack` | (system) | — | yes, by the system |
 | Back at a tab's root goes to Home, with the predictive-back preview (`PageBack` `toFirst`) | Not built: iOS has no back gesture at a tab's root; the tab bar is how one goes Home | — | — | no, no iOS idiom |
 | Home (`HomeScreen.kt`): Last played card, Recently added shelf + All songs, Your playlists shelf + New, Albums shelf + See all, offline banner, "getting your library" after a beat, empty state | The same sections; the last-played card on glass, its play button a tinted interactive glass circle | `glassEffect(_:in:)` †, `Glass.tint(_:)` †, `Glass.interactive()` †, `ContentUnavailableView` | HomeView.swift | yes |
-| Last played: the session's track, else the log's newest play; pressing it resumes the session (and opens the player) or plays the list it came from | Same rule (`LastPlayed.of`, held by `NowPlayingTests`) | — | Playing.swift, Model.swift | yes |
+| Last played: the session's track, else the log's newest play; pressing it resumes the session (and opens the player) or plays the list it came from | Same rule (`LastPlayed.of`) | — | Playing.swift, Model.swift | yes |
 | Search (`SearchScreen.kt`): field, as-you-type after 150 ms, songs (50) / albums / artists, recent searches (8, this phone's), clear, offline banner, nothing found | The system search field in the Search tab, the same three groups and recent searches | `.searchable(text:prompt:)`, `.onSubmit(of: .search)`, `ContentUnavailableView.search(text:)` | SearchView.swift | yes |
 | Library (`LibraryScreen.kt`): Playlists / Albums / Artists / Songs chips, New playlist, album grid (adaptive 150 dp), artists list, songs list | A segmented control under the title (glass in iOS 26), the same four lists, New Playlist the playlists' first row, the large title's line the face alone (no `+`) | `Picker(...).pickerStyle(.segmented)`, `LazyVGrid(.adaptive(minimum: 150))`, `safeAreaInset(edge: .top)` | LibraryView.swift | yes |
 | Album page: header (cover, kind, title, artist link, facts), Play / Shuffle, sections by part, track numbers, performer under the title | **Ahead of Android, at the desktop's** (`view_album`): the cover beside the title in bold, who played most of it (`albums`' `performer`) in the gold and whose it is under it, each opening their page; Play `.glassProminent`, Shuffle `.glass` in one `GlassEffectContainer`; the tracks in runs of one work, each under its composer in small capitals and its title with the run's length, movements unnumbered; at the foot the year, how much, and the label | `.buttonStyle(.glassProminent)` †, `.buttonStyle(.glass)` †, `GlassEffectContainer(spacing:)` † | Pages.swift, Hero.swift, Catalogue.swift | yes |
@@ -50,7 +50,7 @@ shape is the most likely to need a fix at the first build (README.md,
 | Add to playlist sheet: New playlist, every playlist ticked where the song is, tap toggles | A sheet with the same list | `.sheet(item:)`, `.presentationDetents` | Sheets.swift | yes |
 | New playlist dialog: name, `create_playlist`'s own checks said as typed, "Make it" / "Make and add" | A small sheet with the field and the domain's sentence in the footer | `Form`, `TextField`, `.onChange(of:)` | Sheets.swift | yes |
 | Queue sheet: now playing, up next (100), tap to play from there | Same, and swipe to remove and drag to reorder — each the session's `remove` / `move` | `List`, `.onDelete`, `.onMove`, `EditButton` | PlayerViews.swift | yes (more than Android: its sheet has no remove/reorder; Media3's controller does) |
-| Device picker (`DevicesSheet`): rows by name, ticked where the sound is, the group first ("Kitchen + 1"), slider and mute per row, join `+` / leave `−`, cursor on the output | Same rows (`DevicePicker`, held by `PressTests`) | `List`, `Slider` | Sheets.swift, Session.swift | yes |
+| Device picker (`DevicesSheet`): rows by name, ticked where the sound is, the group first ("Kitchen + 1"), slider and mute per row, join `+` / leave `−`, cursor on the output | Same rows (`DevicePicker`) | `List`, `Slider` | Sheets.swift, Session.swift | yes |
 | Snackbar for a refusal or rejection, said once | An alert, said once | `.alert(_:isPresented:)` | Shell.swift | yes |
 | Account: the face at the end of a tab's title (`TabTitle`'s `account`, arkui's `AccountFace`) raising the account sheet (arkui's `AccountSheet`): the face large, the name and the email, "Connected to …" or "Can't Reach …", Settings, Sign Out, Done; Settings from the sheet rises as it always did | Same, as Apple's iOS 26 apps have it (the Games app's Home, on the right): the large title as the page's first row, the face at the trailing end of its line and the Library's + just before it, none of them on glass; scrolled under the bar, the inline title rises into it (the Library's row stays put over its chips); on every tab's root and no pushed page. The sheet is a `List` in its own stack, Settings pushed on the tab once it has gone | `LargeTitleRow` and `.largeTitleBar` (ArkUI: `.navigationBarTitleDisplayMode(.inline)`, `ToolbarItem(placement: .principal)`, `.sharedBackgroundVisibility(.hidden)` †, `.onScrollGeometryChange(for:of:action:)`, `.onGeometryChange`), `.sheet(isPresented:onDismiss:)`, `.presentationDetents([.medium, .large])` | Account.swift (ArkUI), Components.swift `AccountButton` | yes |
 
@@ -87,7 +87,7 @@ shape is the most likely to need a fix at the first build (README.md,
 | Volume keys move the remote device's volume (`DeviceInfo.PLAYBACK_TYPE_REMOTE`) | Not built: iOS gives an app no way to take the hardware volume buttons for a remote device | — | — | no, no public API |
 | Headset buttons | The remote commands are what a headset presses | `MPRemoteCommandCenter` | modules/ark-media-player/swift | yes |
 | Covers: disk cache by FNV-1a, memory cache bounded by bytes, decoded small, one fetch per URL, failures remembered, warm a list | Same: Caches/covers by `Art.hash`, `NSCache` by cost, ImageIO thumbnails at a few sizes | `CGImageSourceCreateThumbnailAtIndex`, `URLSession` | Covers.swift | yes, a search's covers warmed as its answer arrives |
-| The derived square: the name's gradient and a note, picked by FNV-1a over UTF-16 | Same, the desktop's gradients (`RowsTests` pins the hash) | `Canvas` | Theme.swift | yes |
+| The derived square: the name's gradient and a note, picked by FNV-1a over UTF-16 | Same, the desktop's gradients | `Canvas` | Theme.swift | yes |
 | Covers for a car (`CoverProvider`, `content://`) | Not built: there is no car (below) | — | — | no |
 | Android Auto (`Car.kt`): browse tree, search, voice, resumption | Not built. CarPlay audio apps need the `com.apple.developer.carplay-audio` entitlement, granted by Apple on request; a follow-up: a `CPTemplateApplicationSceneDelegate` with a `CPListTemplate` tree over the same views. CarPlay's own now-playing screen already shows what ark-media-player shows | — | — | no, needs Apple's entitlement |
 | The session outlives the activity (`Kept.kt`, `Sessions.kt`, the media service holding it) | One process, one `Model` for its life: the session lives as long as the app does, and background audio keeps the app alive while it plays | — | HarkenApp.swift | yes, by the platform |
@@ -129,7 +129,7 @@ undamped period `2π/√(k/m)`:
 | A page with nothing to grow from rises 24 dp and fades | A route opened from no cover (a menu's Go to album) zooms from nowhere, which the system draws as its default push | (system) |
 | Tabs switch at once | Tabs switch at once | (system) |
 | The full player: one card, `p` from 0 to 1, collapsed face out by 20 %, expanded face in from 60 %, the cover travelling between, dim to 40 % | The zoom from the accessory into the full-screen player and back, interactive | Shell.swift |
-| A fling through a list: no frame dropped (`FlingTests`) | `List`/`LazyVStack`, covers decoded small off the main thread and cached by size | Covers.swift |
+| A fling through a list: no frame dropped | `List`/`LazyVStack`, covers decoded small off the main thread and cached by size | Covers.swift |
 
 The durations differ where the system draws the move: the zoom
 transitions' springs are UIKit's, not settable from SwiftUI.
@@ -172,13 +172,11 @@ Checked here, on Linux: every file that imports nothing of Apple's but
 Foundation and Combine — Rows, Session, Playing, Onboarding, Bridge,
 Model and the generated types — type-checks against UniFFI's Swift for
 harken's library (`tools/typecheck.sh`, `checks.harken-ios-typecheck`, Swift
-5.8); and HarkenTests compiled with them and run against the
-library built for the host — each new test falsified once (the player
-over a `Hall` is Rust's now, `harken/ffi/tests/player.rs`). Every file
-parses (`swiftc -parse`).
+5.8); the player over a `Hall` is Rust's, tested in
+`harken/ffi/tests/player.rs`. Every file parses (`swiftc -parse`).
 
 The catalogue's pages (Catalogue.swift, Hero.swift, the work, performance
-and person pages, the bridge's held listings, CatalogueTests) were written
+and person pages, the bridge's held listings) were written
 in a container with no Swift toolchain at all: neither type-checked nor
 parsed there. Catalogue.swift, Rows.swift, Bridge.swift and Model.swift
 are in `tools/typecheck.sh`'s set and are checked by the next run of it.

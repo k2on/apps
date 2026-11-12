@@ -1,6 +1,6 @@
 // The account's listening session as the phone's screens read it, and what
 // they ask of it — nothing of Apple's but Foundation, so every rule here is
-// type-checked on Linux and held by `HarkenTests`. The reconciler that makes
+// type-checked on Linux. The reconciler that makes
 // this phone's player agree with the session, and says what happened to it,
 // is harken's one reconciler, in Rust (`harken/player`, through the FFI's
 // `Player`); what is here is what the screens, the device picker and the lock

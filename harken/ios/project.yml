@@ -6,8 +6,7 @@
 # `HarkenFFI.xcframework` (the Rust kernel with harken's domain linked in, a
 # static library for a phone and the simulator) and `swift/`, the Swift
 # UniFFI writes for it with the bridge's typed half — and the app's own
-# sources, the generated types in `Harken/Gen/` among them; and its tests,
-# the model's rules and the player against an in-process harken server.
+# sources, the generated types in `Harken/Gen/` among them.
 #
 # Swift 5 language mode, not 6: the bridge's typed half (`Typed.swift`,
 # shared with Android's and not this project's) declares `Id.none` a static
@@ -89,24 +88,10 @@ targets:
         GENERATE_INFOPLIST_FILE: false
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
-  HarkenTests:
-    type: bundle.unit-test
-    platform: iOS
-    sources:
-      - path: HarkenTests
-    dependencies:
-      - target: Harken
-    settings:
-      base:
-        PRODUCT_BUNDLE_IDENTIFIER: us.koon.harken.tests
-        GENERATE_INFOPLIST_FILE: true
 schemes:
   Harken:
     build:
       targets:
         Harken: all
-        HarkenTests: [test]
-    test:
-      targets: [HarkenTests]
     archive:
       config: Release

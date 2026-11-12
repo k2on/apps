@@ -3,8 +3,7 @@
 // session's while this phone is part of it, this phone's own player's while
 // it is alone — so the mini player, the full player, the queue, Home's last
 // played and the lock screen can never disagree. Nothing of Apple's but
-// Foundation: every derivation is a function of its inputs, held by
-// `HarkenTests`. The twin of the state half of Android's `Playback.kt`
+// Foundation: every derivation is a function of its inputs. The twin of the state half of Android's `Playback.kt`
 // (`PlayerState`, `draw`, `where`) and of `HomeScreen.kt`'s `lastPlayed`.
 import Foundation
 

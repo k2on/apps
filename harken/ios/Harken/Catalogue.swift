@@ -4,8 +4,7 @@
 // its title; what a performance's line says; an album's tracks in runs of
 // one work; and who is on a performance. The desktop's (`harken/iced`'s
 // `known`, `listed_works`, `view_composer`, `view_work`, `view_tracks`,
-// `view_recording`), which the pages (Pages.swift) draw and `CatalogueTests`
-// hold to it. Only sorting and filtering of what the domain's views say.
+// `view_recording`), which the pages (Pages.swift) draw. Only sorting and filtering of what the domain's views say.
 import Foundation
 
 enum Catalogue {

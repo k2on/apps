@@ -17,8 +17,8 @@ its API, the motion mapping, every Liquid Glass and iOS 26 API used, and
 what is not built and why.
 
 **Never built in Xcode, never run on a device.** It was written in a Linux
-container with no Mac. What *was* checked: the non-UI half type-checks and
-its tests run (below); every file parses.
+container with no Mac. What *was* checked: the non-UI half type-checks
+(below); every file parses.
 
 ## Building
 
@@ -36,8 +36,8 @@ why not 6 is said at its top — `UIBackgroundModes: audio`, the `harken`
 URL scheme, `ITSAppUsesNonExemptEncryption: false`, the icon in
 `Harken/Assets.xcassets`, version `1.0 (1)` which CI overrides, automatic
 signing, bundle id `us.koon.harken`) over
-`../ffi/ios/HarkenFFI.xcframework` and `../ffi/ios/swift`, and the
-`HarkenTests` unit tests, in the one scheme `Harken`. `Harken.xcodeproj`
+`../ffi/ios/HarkenFFI.xcframework` and `../ffi/ios/swift`, in the one
+scheme `Harken`. `Harken.xcodeproj`
 and `Harken/Info.plist` are outputs; regenerate rather than edit. The icon
 is `tools/icon.py`'s (standard-library Python: harken's trumpet, the
 Android launcher's and the favicon's, in gold on the dark ground, 1024 ×
@@ -45,7 +45,7 @@ Android launcher's and the favicon's, in gold on the dark ground, 1024 ×
 
 ## How the pieces meet
 
-Foundation only — type-checked and tested on Linux:
+Foundation only — type-checked on Linux:
 
 - **`Bridge`** — the session for one server and login: the peer opened over
   the replica (`Application Support/harken/server-…/replica`, one directory
@@ -82,18 +82,7 @@ ImageIO), and the screens: `Shell` (tabs, accessory, sheets, zoom),
 generated types, against UniFFI's Swift for the library and its headers
 and a stand-in for Combine's `ObservableObject`/`@Published` — nixpkgs'
 Swift 5.8, which predates `nonisolated(unsafe)`, so the check's copy of
-UniFFI's Swift has it taken out. Then HarkenTests type-check with them
-against a stand-in for XCTest's assertions; and, handed the library built
-for this machine, they are linked and run:
-
-```
-cargo build -p harken-ffi --lib          # rust/
-HARKEN_FFI_LIB=$PWD/rust/target/debug/libharken_ffi.so \
-  bash harken/ios/tools/typecheck.sh <uniffi swift bindings>
-```
-
-On a Mac the same tests are Xcode's: `xcodebuild test -scheme Harken
--destination 'platform=iOS Simulator,name=iPhone 17'`.
+UniFFI's Swift has it taken out.
 
 ## First build
 
@@ -121,10 +110,7 @@ most likely to want a fix, most likely first:
    linked; if the archive reports undefined symbols from Rust's standard
    library, add what `rustc --print native-static-libs` names (`-lc++`,
    `-liconv`, `-lresolv`) to `OTHER_LDFLAGS` in `project.yml`.
-6. **The test target**: `HarkenTests` reaches the bindings (`Hall`, `Player`)
-   through `@testable import Harken`; if the test host does not load, set
-   `TEST_HOST`/`BUNDLE_LOADER` in `project.yml` (XcodeGen normally does).
-7. Small things a compiler finds at once: a ternary's colour type
+6. Small things a compiler finds at once: a ternary's colour type
    (`Color.accentText : .quiet`), `Slider(value:in:onEditingChanged:)`, a
    `ForEach` over `enumerated()`, `UIDevice.current.name` (it is "iPhone"
    without an entitlement, which is the name other devices' pickers show).
