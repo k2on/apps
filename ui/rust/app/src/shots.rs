@@ -258,6 +258,25 @@ impl<M: Clone + 'static> Walk<M> {
                     }
                 }
             }
+            // Its choices as a picker's, each a target choosing its tag.
+            P::SearchPicker { label, pick, choices, .. } => {
+                self.text(shown, modal, label.to_string());
+                for c in crate::view::search::choices(choices) {
+                    let pick = pick.clone();
+                    let send = self.send.clone();
+                    if shown && !c.title.is_empty() {
+                        self.out.push(Node::Target(Target {
+                            label: c.title,
+                            role: Role::Item,
+                            modal,
+                            tap: Some(Rc::new(move || send(pick.call(c.tag.clone())))),
+                            typed: None,
+                            menu: vec![],
+                        }));
+                    }
+                }
+            }
+            P::SearchChoice { .. } => {}
             P::AmountEntry { label, on_typed, .. } => self.push((shown, modal), label.get(), Role::Field, None, Some(on_typed), &[]),
             P::AmountField { label, on, .. } => self.push((shown, modal), label.get(), Role::Field, None, Some(on), &[]),
             P::NameField { label, typed, .. } => self.push((shown, modal), label.to_string(), Role::Field, None, Some(typed), &[]),
