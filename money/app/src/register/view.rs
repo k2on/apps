@@ -51,7 +51,7 @@ pub fn register(p: &RegisterPage) -> View<RegisterMsg> {
                 }
             },
             if p.empty {
-                card_section(list_row(p.empty_title).subtitle(p.empty_text).glyph("list").quiet())
+                card_section(empty_state("list", p.empty_title, p.empty_text))
             },
             if p.all {
                 data_table(

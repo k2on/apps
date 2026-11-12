@@ -14,7 +14,7 @@ pub fn insights(p: &InsightsPage) -> View<InsightsMsg> {
         "Insights",
         (
             if p.nothing_spent {
-                card_section(list_row("Nothing Spent Yet").subtitle(p.empty_text).glyph("chart-column").quiet()).header("Spending")
+                card_section(empty_state("chart-column", "Nothing Spent Yet", p.empty_text)).header("Spending")
             },
             if p.spent_any {
                 card_section((

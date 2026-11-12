@@ -48,7 +48,7 @@ What falls out, and who uses it:
 | Component | What it is | harken | money |
 |---|---|---|---|
 | **Empty state** (`empty_state`) | a quiet glyph, a title, a sentence, centred | Home, Library's tabs, Search, the queue, Devices | an empty register, no transactions to review, nothing spent yet |
-| **Title stack** (`title_stack`) | a kicker over a title over a subtitle over a caption, leading or centred, each only while it has words | the players, record headers, `Featured`, `LastCard`, rows, onboarding | the header card (title, line, caption) |
+| **Title stack** (`title_stack`) | a kicker over a title over a subtitle over a caption, leading or centred, each only while it has words | the players, record headers, `Featured`, `LastCard`, rows, onboarding | the empty states' words (through `empty_state`) |
 | Glyph tile (`Part::Tile`, now a leaf the primitives can hold) | a glyph on a tinted rounded tile | onboarding's mark, the new-playlist row | the header card's glyph |
 | Status badge (`Part::StatusBadge`, a leaf) | a figure in a capsule of its tint | a download's state | a category's available |
 | Meter (`Part::Meter`, a leaf) | a bar of how far, in a tint | an episode's progress, the now-playing hairline | a goal's progress |
@@ -61,8 +61,9 @@ What falls out, and who uses it:
 | Figure with label | a quiet label over a figure | diagnostics, a record's foot | the summary card's two facts |
 | Avatar | ArkUI's `Part::Account` face, generic | people, the account | the toolbar's account |
 
-The first two are built here and used by money now; the leaves are what
-the rebuilt parts needed. The rest wait for harken's port: each is a
+The first two are built (`ui/rust/app/src/view/components.rs`) and used
+by money now — its register's, transactions' and insights' empty cards are
+`empty_state`s; the leaves are what the rebuilt parts needed. The rest wait for harken's port: each is a
 `fn` in `ark_app::view` returning primitives, like the first two.
 
 ## The Primitives
@@ -87,7 +88,7 @@ vstack((
 | `vstack(content)`, `hstack(content)`, `zstack(content)` | what it holds | `.spacing(Space)` (none: 0), `.align(Align)` across its axis (none: centred) |
 | `spacer()`, `spacer_min(Space)` | — | takes what is left along its stack's axis |
 | `scroll(content)`, `scroll_across(content)` | what scrolls | vertical, or sideways |
-| `text(words)` | words read or written | `.style(TextStyle)`, `.ink(Ink)`, `.lines(n)`, `.centred()`, `.if_any()` (nothing while empty) |
+| `text(words)` | words read or written (a field, never a `for`'s item itself: `#[view]` takes a bare binding for a sub-view's record) | `.style(TextStyle)`, `.ink(Ink)`, `.lines(n)`, `.centred()`, `.if_any()` (nothing while empty) |
 | `glyph(name)` | a Lucide name (an SF Symbol on Apple's) | `.style(TextStyle)` (its size), `.ink(Ink)` |
 | `image(url, label)` | a picture by URL | as `photo` |
 | `tile(glyph, tint)`, `status_badge(figure, tint)`, `meter(fraction, tint)` | leaves the primitives hold: ArkUI's `Tile`, `StatusBadge`, a bar | — |
@@ -101,6 +102,9 @@ And on every primitive (the `Modify` trait):
 | `.background(Surface)` | `Surface::Card` (the card's container), `Surface::Raised` (a container above it) |
 | `.corner(Corner)` | `Corner::Card` (`card-corner`), `Corner::Small` (`corner`): clips |
 | `.combine()` | one element to a screen reader, its words in order |
+
+A method of another primitive (`.spacing` on words) panics when the view
+is built or recorded, so a test of the view finds it.
 
 ## Tokens Only
 
@@ -145,7 +149,7 @@ written once, in `ui/theme.toml`, and a view names it.
 | `vstack` | `VStack(alignment:spacing:)` | `Column(verticalArrangement = spacedBy, horizontalAlignment)` | `column().spacing().align_x()` | `div.ark-stack.ark-v` (flex column, `gap`) |
 | `hstack` | `HStack(alignment:spacing:)` | `Row(horizontalArrangement = spacedBy, verticalAlignment)` | `row().spacing().align_y()` | `div.ark-stack.ark-h` |
 | `zstack` | `ZStack(alignment:)` | `Box(contentAlignment)` | `stack![]`, each centred | `div.ark-stack.ark-z` (grid, one cell) |
-| `spacer` | `Spacer(minLength:)` | `Spacer(Modifier.weight(1f))` (and `widthIn`/`heightIn(min)`) | `Space` filling its stack's axis | `div.ark-spacer` (`flex: 1`) |
+| `spacer` | `Spacer(minLength:)` | `Spacer(Modifier.weight(1f).widthIn(min = …))` (a weight is measured after the rest, so the least is kept only while there is room) | `Space` filling its stack's axis | `div.ark-spacer` (`flex: 1`) |
 | `scroll` | `ScrollView` (`.horizontal`) | `verticalScroll` / `horizontalScroll(rememberScrollState())` | `scrollable` | `overflow: auto` |
 | `text` | `Text(_)` `.arkType` `.foregroundStyle` `.lineLimit` `.multilineTextAlignment` | `Text(style, color, maxLines, overflow, textAlign)` | `text().size().font().style()` | `div.ark-text.ark-type-*` |
 | `glyph` | `Image(systemName: ArkGlyphs.sf(_))` `.arkType` | `ArkGlyph(name, ArkType.*)` (Lucide, sized by the style) | `icon::tinted` at the style's size | the inline SVG |
@@ -205,8 +209,13 @@ both phones, as Compose's `GroupCard` adds none.
 
 ## What Is Verified
 
-The generated SwiftUI and Compose are held by `ui/rust/gen/tests/snapshots`
-(a view of primitives, and the rebuilt header card); the view model by
-`ui/rust/app/src/tests.rs`. The phones' code is compiled in CI (mac-compile,
-build); the look against the hand-written parts was not compared on a
-device.
+The view model and the components by `cargo test -p ark-app`
+(`view/layout.rs`, `view/components.rs`); the generated SwiftUI and Compose
+by `ui/rust/gen/tests/snapshots` (`CardView.swift`, `CardScreen.kt`: the
+rebuilt header card and goal, an empty state, a row of a glyph, words and a
+spacer, a sideways shelf, an image — and a test that neither holds a number);
+iced's and the browser's drawing by `cargo check` and clippy. The phones'
+code is compiled in CI (mac-compile, build). Not compared on a device or in
+a screenshot against the hand-written parts: the header card's face is now
+`space-xl` above and below and `space-l` at its sides on both phones (it
+was about 19 pt on the iPhone, 24 dp all round on Android).

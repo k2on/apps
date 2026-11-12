@@ -22,7 +22,7 @@ pub fn transactions(p: &TransactionsPage) -> View<TransactionsMsg> {
             if p.reviewing {
                 (
                     if p.caught_up {
-                        card_section(list_row(p.empty_title).subtitle(p.empty_text).glyph("circle-check").quiet())
+                        card_section(empty_state("circle-check", p.empty_title, p.empty_text))
                     },
                     if p.has_review {
                         card_section((

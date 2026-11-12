@@ -100,8 +100,10 @@ by the generated views by these names.
 | CardSection | title, total, showsTotal, footer, rows | `SectionHeader` + `GroupCard` | `Section` | `section_header` + `group_card` |
 | ListRow | title, subtitle, tile/mark/glyph, badge, amount, value (words at its end), quiet, accent, **pushes**, said, menu, onTap | a `Press.Highlight` row; held, a `DropdownMenu` (lit as it is held); a `Chevron` when it pushes | a button row; held, `.contextMenu`; when it pushes, a `NavigationLink`'s look (the list's highlight, the disclosure chevron) | a bare button; right click, a long press or the menu key, `context_menu` (ArkUI's menu at the pointer, every item); a chevron when it pushes |
 | DetailPage | content | a scrolling column of cards | `List` (grouped) | a scrolling column |
-| HeaderCard | title, figure, tint, glyph?, badge, line, caption, actions | `GroupCard`, centred, its actions as rows | the list's first `Section`, centred | `style::card`, centred, a rule over the actions |
-| GoalProgress | fraction, tint, note | `ProgressBar` and its note | `ProgressView` and its note | `progress_bar` and its note |
+| HeaderCard | title, figure, tint, glyph?, badge, line, caption, actions | laid out once in Rust of the primitives (ui/docs/primitives.md): a `CardSection` whose first row is its centred face, read as one, then its actions | the same, generated | the same, drawn by `arkui::view::layout` |
+| GoalProgress | fraction, tint, note | of the primitives: a `Meter` and a quiet footnote at a row's inset | the same, generated | the same |
+| Tile, StatusBadge, Meter | glyph/figure/fraction, tint (by name) | `Tile`, `StatusBadge`, `Meter` (`Primitives.kt`) | the same (`Primitives.swift`) | `parts::tile`, `figures::status_badge`, `parts::progress_bar` |
+| EmptyState, TitleStack | glyph, title, sentence; over, title, under, caption | of the primitives (`empty_state`, `title_stack`) | the same | the same |
 | MenuAction | title, glyph, destructive, shown, onTap | `DropdownMenuItem` | `Button(role:)` with a `Label` | `context_menu::Item` |
 | FormSheet | title, onDismiss, confirm, canConfirm, onConfirm, content | `ModalBottomSheet`, the confirm a full-width button under the form | `.sheet` over a `Form`, Cancel ✕ and the confirming ✓ in its bar | a dialog with Cancel and the confirm |
 | FormSection | header, footer, content | a column, its label over and its note under | `Section(header:footer:)` | a column |
@@ -116,6 +118,13 @@ by the generated views by these names.
 | CodeImage | size, dark | `QrCode` | `QrCode` | `arkui::qr::qr_code`; the browser's inline SVG |
 | Photo (`photo`, `zoom_photo`) | url (`file:`, `data:`, `https:`; empty while fetched), label, zoom | `Image` decoded off the main thread (upright by its EXIF, at most 2400 a side); zoomed, `transformable` and a double tap, rubber-banded past 1 and `zoom-max` (`Springs.band`), settling on `Springs.move` (`Springs.fade` when reduced) | `Image` from the URL's bytes (`AsyncImage` for `https:`); zoomed, `MagnifyGesture`, a pan while larger, a double tap to `zoom-tap`, banded by `Momentum.band`, settling on `Springs.move` | `arkui::images::local`, fitted; zoomed, the room it is given (a window zooms by its size); the browser's `<img>` |
 | Paper | heading, date, names, figures, notes, total | white, monospace, the light side's ink in either theme; its shadow and `corner` | the same, `.environment(\.colorScheme, .light)` | the light tokens on `SURFACE`, Fira Mono; the browser's `.ark-paper` |
+
+## Layout Primitives
+
+Under these parts are the primitives a purely visual part is laid out of
+once, in Rust — stacks, a spacer, a scroll, text, a glyph, an image, and
+their token-only modifiers — which the generator writes as each toolkit's
+own layout: ui/docs/primitives.md.
 
 ## Tables
 
