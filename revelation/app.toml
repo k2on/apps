@@ -11,6 +11,10 @@ version = "0.1"
 accent = "blue"
 platforms = ["android"]
 modules = []
+# What is not written in Rust yet, committed under native/<platform>: the
+# escape hatch (ui/docs/app.md, "Generated, Not Committed"); revelation is
+# Kotlin alone, so all of it. checks.app-shape holds native/ to it.
+native = ["android"]
 
 [icon]
 # The whole Bible zoomed all the way out: one thin white line on the dark

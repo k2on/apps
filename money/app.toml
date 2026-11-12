@@ -19,6 +19,10 @@ scheme = "money"
 # The Rust crate that is the app (money/app): its #[view]s, `screens()` and
 # `commands()`; its UniFFI namespace is the crate's.
 crate = "money-app"
+# What is not written in Rust yet, committed under native/<platform>: the
+# escape hatch (ui/docs/app.md, "Generated, Not Committed"), going as it
+# moves into the app's crate. checks.app-shape holds native/ to it.
+native = ["ios", "android"]
 
 [icon]
 # icon.svg's full-canvas rectangle is the background; on Android the rest

@@ -2000,6 +2000,44 @@
               python3 ui/prebuild.py check
               touch $out
             '';
+            # Each Ark app's committed shape (CLAUDE.md, "An App's
+            # Directory"; ui/docs/app.md, "Generated, Not Committed"):
+            # app.toml, icon.svg, and of directories only core/, app/,
+            # server/ and demo/ — and native/ only while app.toml declares
+            # it (`native`, the platforms whose code is not Rust yet), with
+            # no platform under it that app.toml does not name. Read from
+            # the flake's source, so what git holds; `.native/` is ignored.
+            # `pending` is what an app still commits that is to be
+            # generated; a directory listed there that is gone fails too,
+            # so the list only shrinks.
+            app-shape =
+              let
+                shape = [ "core" "app" "server" "demo" ];
+                pending = {
+                  # The phones' bridge (bridge/FFI.md, "Still Here"), the
+                  # generator's adapter, the desktop and the browser: not
+                  # generated yet (see each one's README and FFI.md).
+                  money = [ "bridge" "views" "iced" "web" ];
+                };
+                dirsOf = path: lib.attrNames (lib.filterAttrs (_: t: t == "directory") (builtins.readDir path));
+                wrong = dir:
+                  let
+                    a = arkApp.read dir;
+                    native = a.native or [ ];
+                    have = dirsOf (./. + "/${dir}");
+                    waiting = pending.${dir} or [ ];
+                    allowed = shape ++ waiting ++ lib.optional (native != [ ]) "native";
+                    platforms = if lib.elem "native" have then dirsOf (./. + "/${dir}/native") else [ ];
+                  in
+                  map (d: "${dir}/${d}/ is not part of an app's shape") (lib.filter (d: !lib.elem d allowed) have)
+                  ++ map (d: "${dir}/${d}/ is gone: take it out of app-shape's pending list") (lib.filter (d: !lib.elem d have) waiting)
+                  ++ map (p: "${dir}/native/${p}/ is committed, but app.toml's `native` does not name ${p}") (lib.filter (p: !lib.elem p native) platforms);
+                said = lib.concatMap wrong arkApps;
+              in
+              pkgs.runCommand "app-shape" { } (if said == [ ] then "touch $out" else ''
+                echo ${lib.escapeShellArg (lib.concatStringsSep "\n" said)} >&2
+                exit 1
+              '');
             # The layers held (layers.toml, ui/docs/app.md "Layers"): every
             # workspace member in one layer, and no dependency a layer may
             # not use but those layers.toml's [allow] lists until fixed —
