@@ -1424,3 +1424,65 @@ ui/docs/apps/money.md for money):
    (`arkui-serve`) is built and tested and turned on by no app; "The
    Browser's Modes" says what it lacks.
 
+
+### The Desktop's Own Pages, Moved
+
+money/iced is still the window's own pages (about 9,000 lines with its
+tests): it hosts the shell (`sections.rs`) and the Accounts page
+(`overview.rs`) from Rust, and draws everything else itself. It goes the
+way the phones' screens went: each behaviour another app could use
+becomes a shared part, in arkui (iced) and in arkui-web, with its
+SwiftUI and Compose beside it where a phone has it, its numbers in
+`ui/theme.toml`; then each page is the shared `#[view]` money-app already
+has, drawn by `arkui::view`, and the window's own page goes. The desktop
+works at every step: a page moves only once the view draws everything
+the window's own page did, and the window's tests (`money/iced/src/
+tests.rs`, in iced's simulator) are moved onto the view's before its page
+is deleted.
+
+**What becomes shared** (each a part with a message of the app's, never
+a closure; the app's update decides what it means):
+
+| Behaviour | Today | Shared as |
+|---|---|---|
+| Keyboard navigation: `j`/`k`, counts, `gg`/`G`, `/`, `Enter`, `Esc` over rows | `main.rs`'s keys over `arkui::vim` | a list's or a table's `keyboard()` modifier (`arkui::vim::Grid` under it), the row under the cursor its `selected`; arkui-web the same over the DOM's keys; `.focusable()`/`onKeyPress` and Compose's `onKeyEvent` on a hardware keyboard |
+| Drag to reorder a category or a group, and onto another group | `view.rs` over `arkui::reorder` | the existing `reorder` part on `card_section`, its drop a message (`MoveCategory`, `MoveGroup`), as the phones' Reorder already is |
+| A formula field: terms of a filter and a factor, what it gives as typed | `formula.rs` | `formula_field(terms, total, on_change)` over a record money-app works out (`FormulaForm`): rows of a picker and a number field, the figure beside; the parsing and the sum stay money-core's |
+| A register's filter as chips | `filter.rs` | `filter_bar(chips)`: chips with a menu each and "Save as Filter…", the conditions money-core's `Filter`, the chips' words money-app's |
+| A receipt drawn as its paper, and a photo dropped | `receipt.rs` | the receipt is money-app's `receipts::view` (the phones' already); the drop is `arkui::files`' and the page's input, a `Command` the scanner's module answers |
+| Settings' banks and stores | `banks.rs`, `stores.rs` | the shell's Settings panes (`money_settings`), the stores' a pane of its own over money-core's `setup` calls |
+
+**The order the pages move**, each its own green commit: Insights
+(already a view everywhere else); the register (`register::view`, with
+the filter bar); Transactions; the budget with the reorder and the
+keyboard; the inspector's formula; the receipt form; Settings' banks
+and stores. Then `sections.rs` hosts only views, the window is
+`ark_app::host::Hosting<Money>` over an iced place as the browser's is,
+and `main.rs` is a generated entry point (`arkui::run` over the app's
+crate, as the phones' library is generated) with money/iced gone.
+
+### What Is Left of money's Own Native and Web Code
+
+- **The phones' shell** (money/native: Shell.swift, MoneyApp.swift,
+  MoneyApp.kt): the hosting of the shell's screens by name, the section
+  stacks a native `Open` pushes onto, a beside screen for an account's
+  register, the account sheet over `ShellPage.household`, Settings and
+  Add a Device. Generic in shape, money's only in its names: it becomes
+  the app library's (`ArkShell` in ArkApp, its Compose twin in
+  ark-app-android), driven by app.toml (which `[screens]` entry is the
+  shell, which names it hosts and over which screen, which routes are
+  pushed as which beside screen) and generated holders, keeping the
+  `-shots` hooks and `Ready` where they are. The account marks
+  (`AccountMark`, `KindTile`: a kind's glyph in a chart colour) become
+  the record's (a row's glyph and its chart slot, worked out in
+  money-app) drawn by ArkUI's `Tile`; money's tab glyphs go into ArkUI's
+  glyphs and `ui/theme.toml`. What stays app-committed: the debug key
+  app.toml names, and nothing else.
+- **The browser** (money/web): its place and sign-in (`WebPlace`,
+  `live.rs`) are the same for any app over its domain and its demo's
+  crate, and become arkui-web's (`WebHost<H: HostedApp>`); its address
+  becomes the shell's (`ShellPage.address`, read back by
+  `ShellMsg::Address`); what it hosts by name and draws over the window
+  (the budget's empty inspector, the household's foot, Settings as a
+  modal) becomes money-app's views; and `main.rs` is generated from
+  app.toml as the phones' library is.
