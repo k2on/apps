@@ -16,6 +16,7 @@
 //!   is up, only what is in it (a finger reaches nothing under it).
 //! - [`take`]: one [`Step`] taken against them.
 
+use std::fmt::Debug;
 use std::rc::Rc;
 
 use crate::view::{Input, Layout, Part, Prim, View};
@@ -60,6 +61,8 @@ impl Role {
 /// An element a step can reach: its label and role, and what it does,
 /// each a message sent to the runtime whose view it is in.
 pub struct Target {
+    /// Its id, stable whatever it says ([`id_of`]): what a step names.
+    pub id: String,
     pub label: String,
     pub role: Role,
     /// The modal it is in (a sheet, a dialog, an alert), counted in the
@@ -67,8 +70,12 @@ pub struct Target {
     pub modal: u32,
     tap: Option<Rc<dyn Fn()>>,
     typed: Option<Rc<dyn Fn(String)>>,
-    menu: Vec<(String, Rc<dyn Fn()>)>,
+    /// What holding it offers: each item's id, its title, its action.
+    menu: Vec<MenuItem>,
 }
+
+/// A menu's item: its id, its title, its action.
+type MenuItem = (String, String, Rc<dyn Fn()>);
 
 impl Target {
     /// Whether a tap does anything.
@@ -90,7 +97,7 @@ pub enum Node {
 
 /// What of `view` a step can reach, each element's action sent with
 /// `send` (the runtime's own `send`).
-pub fn nodes<M: Clone + 'static>(view: &View<M>, send: Rc<dyn Fn(M)>) -> Vec<Node> {
+pub fn nodes<M: Clone + Debug + 'static>(view: &View<M>, send: Rc<dyn Fn(M)>) -> Vec<Node> {
     let mut w = Walk {
         send,
         out: vec![],
@@ -106,7 +113,7 @@ struct Walk<M> {
     modals: u32,
 }
 
-impl<M: Clone + 'static> Walk<M> {
+impl<M: Clone + Debug + 'static> Walk<M> {
     fn act(&self, m: &M) -> Rc<dyn Fn()> {
         let (send, m) = (self.send.clone(), m.clone());
         Rc::new(move || send(m.clone()))
@@ -131,14 +138,21 @@ impl<M: Clone + 'static> Walk<M> {
         if !shown || label.is_empty() {
             return;
         }
+        let id = id_of(
+            role,
+            &label,
+            tap.map(|m| format!("{m:?}"))
+                .or_else(|| typed.map(|i| format!("{:?}", i.call(String::new())))),
+        );
         let tap = tap.map(|m| self.act(m));
         let typed = typed.map(|i| self.input(i));
         let menu = menu
             .iter()
             .filter(|i| i.shown.as_ref().is_none_or(|s| s.get()))
-            .map(|i| (i.title.get(), self.act(&i.tap)))
+            .map(|i| (action(&format!("{:?}", i.tap)), i.title.get(), self.act(&i.tap)))
             .collect();
         self.out.push(Node::Target(Target {
+            id,
             label,
             role,
             modal,
@@ -243,10 +257,12 @@ impl<M: Clone + 'static> Walk<M> {
                 let mut found = vec![];
                 collect_choices(choices, &mut found);
                 for (title, tag) in found {
+                    let id = format!("{}:{}", action(&format!("{:?}", pick.call(tag.clone()))), slug(&tag));
                     let pick = pick.clone();
                     let send = self.send.clone();
                     if shown && !title.is_empty() {
                         self.out.push(Node::Target(Target {
+                            id,
                             label: title,
                             role: Role::Item,
                             modal,
@@ -261,10 +277,12 @@ impl<M: Clone + 'static> Walk<M> {
             P::SearchPicker { label, pick, choices, .. } => {
                 self.text(shown, modal, label.to_string());
                 for c in crate::view::search::choices(choices) {
+                    let id = format!("{}:{}", action(&format!("{:?}", pick.call(c.tag.clone()))), slug(&c.tag));
                     let pick = pick.clone();
                     let send = self.send.clone();
                     if shown && !c.title.is_empty() {
                         self.out.push(Node::Target(Target {
+                            id,
                             label: c.title,
                             role: Role::Item,
                             modal,
@@ -461,6 +479,71 @@ fn collect_panes<'a, M>(v: &'a View<M>, out: &mut Vec<(&'static str, &'a View<M>
     }
 }
 
+/// An element's id, stable whatever it says, so that no copy change, no
+/// count in a row's words and no other language moves a step: a tab by its
+/// section's tag (`tab:budget`); a row by its title, as a slug
+/// (`row:checking`, `row:dining-out`: what names the record on every
+/// device); words alone likewise (`text:budget`); anything else by the
+/// message it sends, its variant in kebab case (`auto-assign`,
+/// `new-transaction`, `dismiss`; a field by what its input sends,
+/// `typed`), and a button whose message carries a value by its words too
+/// (`toggle:bills`, `inspector:category-details`). [`compose`] puts the screen's name before each but a tab's
+/// (`budget.auto-assign`, `accounts.row:checking`).
+pub fn id_of(role: Role, label: &str, msg: Option<String>) -> String {
+    match (role, msg) {
+        // A child section (`accounts/<id>`, an account in the sidebar) by
+        // its parent and its title: `tab:accounts/checking`.
+        (Role::Tab, Some(m)) => match first_string(&m) {
+            Some(t) if t.contains('/') => format!("tab:{}/{}", slug(t.split('/').next().unwrap_or_default()), slug(label)),
+            Some(t) => format!("tab:{}", slug(&t)),
+            None => format!("tab:{}", slug(label)),
+        },
+        (Role::Row, _) => format!("row:{}", slug(label)),
+        (Role::Text, _) | (_, None) => format!("text:{}", slug(label)),
+        // A button whose message carries what it is for (a group's fold, the
+        // inspector's toggle) by its words too: `toggle:bills`.
+        (Role::Button, Some(m)) if m.contains(['{', '(']) => format!("{}:{}", action(&m), slug(label)),
+        (_, Some(m)) => action(&m),
+    }
+}
+
+/// A message's variant (its Debug's leading name) in kebab case:
+/// `AutoAssign` is `auto-assign`.
+pub fn action(debug: &str) -> String {
+    let name: String = debug.chars().take_while(|c| c.is_alphanumeric() || *c == '_').collect();
+    let mut out = String::new();
+    for (i, c) in name.chars().enumerate() {
+        if c.is_uppercase() && i > 0 {
+            out.push('-');
+        }
+        out.extend(c.to_lowercase());
+    }
+    out
+}
+
+/// The first string a message's Debug holds (`Select { tag: "budget" }`).
+fn first_string(debug: &str) -> Option<String> {
+    let start = debug.find('"')? + 1;
+    let end = start + debug[start..].find('"')?;
+    Some(debug[start..end].to_string())
+}
+
+/// Words as an id's part: lower case, letters and digits, a dash between
+/// words; anything else (an emoji, punctuation) dropped. A tag's `/` kept.
+pub fn slug(s: &str) -> String {
+    let mut out = String::new();
+    for c in s.chars() {
+        if c.is_alphanumeric() {
+            out.extend(c.to_lowercase());
+        } else if c == '/' {
+            out.push('/');
+        } else if !out.is_empty() && !out.ends_with('-') && !out.ends_with('/') {
+            out.push('-');
+        }
+    }
+    out.trim_matches('-').to_string()
+}
+
 /// One runtime's nodes, under its name (app.toml's `[screens]` key, or a
 /// screen run beside the app's, `register`).
 pub struct Screen {
@@ -495,7 +578,18 @@ pub fn compose(mut screens: Vec<Screen>) -> Vec<Target> {
     let mut out = vec![];
     let mut modals = 0;
     for (i, _) in hosted.iter().enumerate().filter(|(_, h)| !**h) {
-        expand(i, &mut taken, &resolve, &mut out, &mut modals);
+        expand(i, &names, &mut taken, &resolve, &mut out, &mut modals);
+    }
+    // Rows of one title (a payee's charges, newest first): the second and
+    // after by their place among them, `row:target~2`, so each record is
+    // one id; any other two of one id fail the step that names them.
+    let mut seen = std::collections::HashMap::<String, usize>::new();
+    for t in out.iter_mut().filter(|t| t.role == Role::Row) {
+        let n = seen.entry(t.id.clone()).or_default();
+        *n += 1;
+        if *n > 1 {
+            t.id = format!("{}~{n}", t.id);
+        }
     }
     let top = out.iter().map(|t| t.modal).max().unwrap_or(0);
     if top > 0 {
@@ -504,12 +598,22 @@ pub fn compose(mut screens: Vec<Screen>) -> Vec<Target> {
     out
 }
 
-fn expand(i: usize, taken: &mut [Option<Vec<Node>>], resolve: &dyn Fn(&str) -> Option<usize>, out: &mut Vec<Target>, modals: &mut u32) {
+fn expand(
+    i: usize,
+    names: &[String],
+    taken: &mut [Option<Vec<Node>>],
+    resolve: &dyn Fn(&str) -> Option<usize>,
+    out: &mut Vec<Target>,
+    modals: &mut u32,
+) {
     let Some(nodes) = taken[i].take() else { return };
     let base = *modals;
     for n in nodes {
         match n {
             Node::Target(mut t) => {
+                if !t.id.starts_with("tab:") {
+                    t.id = format!("{}.{}", names[i], t.id);
+                }
                 if t.modal > 0 {
                     t.modal += base;
                     *modals = (*modals).max(t.modal);
@@ -518,7 +622,7 @@ fn expand(i: usize, taken: &mut [Option<Vec<Node>>], resolve: &dyn Fn(&str) -> O
             }
             Node::Hosted { name, shown: true } => {
                 if let Some(j) = resolve(&name) {
-                    expand(j, taken, resolve, out, modals);
+                    expand(j, names, taken, resolve, out, modals);
                 }
             }
             Node::Hosted { .. } => {}
@@ -526,20 +630,23 @@ fn expand(i: usize, taken: &mut [Option<Vec<Node>>], resolve: &dyn Fn(&str) -> O
     }
 }
 
-/// A shot's step, as shots.json writes it (.github/screens/apps.md).
+/// A shot's step, as shots.json writes it (.github/screens/apps.md): each
+/// names an element by its id ([`id_of`]), as a shot's `<id>.tree.txt`
+/// lists them.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Step {
-    /// `{"tap": "<label>"}`: the element that says it (`a|b`: either), of
-    /// `role` when one is said; the last of several with `"where":
-    /// "bottom"`, else the first. A field tapped takes what is typed next.
-    Tap { label: String, role: Option<Role>, bottom: bool },
+    /// `{"tap": "<id>"}`: the element of that id. A field tapped takes
+    /// what is typed next. `{"text": "<label>"}`: by what it says instead,
+    /// for an element with nothing else to name it by (none of the apps'
+    /// walks uses it).
+    Tap { id: String, text: bool },
     /// `{"type": "<text>"}`: into the field tapped last, or the one field.
     Type { text: String },
-    /// `{"press": "<label>", "item": "<title>"}`: of what holding it
-    /// offers (a row's context menu), that item.
-    Press { label: String, item: String },
-    /// `{"await": "<label>"}`: nothing done; there once it says it.
-    Await { label: String },
+    /// `{"press": "<id>", "item": "<item id>"}`: of what holding it offers
+    /// (a row's context menu), that item.
+    Press { id: String, item: String },
+    /// `{"await": "<id>"}`: nothing done; there once it is.
+    Await { id: String },
 }
 
 /// What came of a step.
@@ -547,40 +654,44 @@ pub enum Step {
 pub enum Took {
     /// Done: its message sent (or a field focused).
     Done,
-    /// Nothing on the screen says it yet: asked again once the screen
-    /// changes, until the shot's limit.
+    /// Nothing on the screen is it: asked again only while the screen is
+    /// still on its way (a sign-in, a sync); at a ready screen it fails.
     NotYet,
     /// It cannot be done (it says why).
     Failed(String),
 }
 
-fn matching<'a>(targets: &'a [Target], label: &str, role: Option<Role>) -> Vec<&'a Target> {
-    let wanted: Vec<&str> = label.split('|').collect();
-    targets
-        .iter()
-        .filter(|t| wanted.contains(&t.label.as_str()) && role.is_none_or(|r| t.role == r))
-        .collect()
+/// The one element `id` names (`text`: says), or why not.
+fn one<'a>(targets: &'a [Target], id: &str, text: bool) -> Result<Option<&'a Target>, String> {
+    let found: Vec<&Target> = targets.iter().filter(|t| if text { t.label == id } else { t.id == id }).collect();
+    match found.as_slice() {
+        [] => Ok(None),
+        [t] => Ok(Some(t)),
+        many => Err(format!(
+            "{} elements are {id}: {}",
+            many.len(),
+            many.iter().map(|t| format!("{} ({})", t.id, t.label)).collect::<Vec<_>>().join(", ")
+        )),
+    }
 }
 
 /// `step` taken against what is on the screen now. `focus` is the field a
-/// tap focused (its label), what `type` types into.
+/// tap focused (its id), what `type` types into.
 pub fn take(step: &Step, targets: &[Target], focus: &mut Option<String>) -> Took {
     match step {
-        Step::Tap { label, role, bottom } => {
-            let found = matching(targets, label, *role);
-            let acting: Vec<&&Target> = found.iter().filter(|t| t.tap.is_some() || t.typed.is_some()).collect();
-            let Some(t) = (if *bottom { acting.last() } else { acting.first() }) else {
-                return Took::NotYet;
+        Step::Tap { id, text } => {
+            let t = match one(targets, id, *text) {
+                Ok(Some(t)) => t,
+                Ok(None) => return Took::NotYet,
+                Err(why) => return Took::Failed(why),
             };
-            match (&t.tap, &t.typed) {
-                (Some(tap), _) => {
-                    if t.typed.is_some() {
-                        *focus = Some(t.label.clone());
-                    }
-                    tap();
-                }
-                (None, Some(_)) => *focus = Some(t.label.clone()),
-                (None, None) => unreachable!(),
+            if t.typed.is_some() {
+                *focus = Some(t.id.clone());
+            }
+            match &t.tap {
+                Some(tap) => tap(),
+                None if t.typed.is_some() => {}
+                None => return Took::Failed(format!("{id} ({}) does nothing when tapped", t.label)),
             }
             Took::Done
         }
@@ -588,7 +699,7 @@ pub fn take(step: &Step, targets: &[Target], focus: &mut Option<String>) -> Took
             let fields: Vec<&Target> = targets.iter().filter(|t| t.typed.is_some()).collect();
             let field = focus
                 .as_ref()
-                .and_then(|f| fields.iter().find(|t| &t.label == f))
+                .and_then(|f| fields.iter().find(|t| &t.id == f))
                 .or_else(|| (fields.len() == 1).then(|| &fields[0]));
             match field {
                 Some(t) => {
@@ -598,36 +709,39 @@ pub fn take(step: &Step, targets: &[Target], focus: &mut Option<String>) -> Took
                 None if fields.is_empty() => Took::NotYet,
                 None => Took::Failed(format!(
                     "no field is focused to type into, and there are {}: tap one first",
-                    fields.iter().map(|t| t.label.as_str()).collect::<Vec<_>>().join(", ")
+                    fields.iter().map(|t| t.id.as_str()).collect::<Vec<_>>().join(", ")
                 )),
             }
         }
-        Step::Press { label, item } => {
-            let found = matching(targets, label, None);
-            let Some(t) = found.iter().find(|t| !t.menu.is_empty()) else {
-                return Took::NotYet;
+        Step::Press { id, item } => {
+            let t = match one(targets, id, false) {
+                Ok(Some(t)) => t,
+                Ok(None) => return Took::NotYet,
+                Err(why) => return Took::Failed(why),
             };
-            match t.menu.iter().find(|(title, _)| title == item) {
-                Some((_, act)) => {
+            match t.menu.iter().find(|(i, _, _)| i == item) {
+                Some((_, _, act)) => {
                     act();
                     Took::Done
                 }
                 None => Took::Failed(format!(
-                    "{label}'s menu has no {item}: {}",
-                    t.menu.iter().map(|(title, _)| title.as_str()).collect::<Vec<_>>().join(", ")
+                    "{id}'s menu has no {item}: {}",
+                    t.menu.iter().map(|(i, title, _)| format!("{i} ({title})")).collect::<Vec<_>>().join(", ")
                 )),
             }
         }
-        Step::Await { label } => match matching(targets, label, None).is_empty() {
-            true => Took::NotYet,
-            false => Took::Done,
+        Step::Await { id } => match one(targets, id, false) {
+            Ok(Some(_)) => Took::Done,
+            Ok(None) => Took::NotYet,
+            Err(why) => Took::Failed(why),
         },
     }
 }
 
-/// What is on the screen, a line each: its role, its label, what it does
-/// (`taps`, `types`, its menu), and the modal it is in. What a step can
-/// name: written beside each shot, and said when a step finds nothing.
+/// What is on the screen, a line each: its role, its id, what it says, what
+/// it does (`taps`, `types`, its menu's items by id), and whether it is in
+/// a modal. What a step names: written beside each shot, and said when a
+/// step finds nothing.
 pub fn tree(targets: &[Target]) -> String {
     let mut s = String::new();
     for t in targets {
@@ -639,9 +753,12 @@ pub fn tree(targets: &[Target]) -> String {
             does.push("types".to_string());
         }
         if !t.menu.is_empty() {
-            does.push(format!("menu: {}", t.menu.iter().map(|(m, _)| m.as_str()).collect::<Vec<_>>().join(", ")));
+            does.push(format!(
+                "menu: {}",
+                t.menu.iter().map(|(i, _, _)| i.as_str()).collect::<Vec<_>>().join(", ")
+            ));
         }
-        s.push_str(&format!("[{}] {}", t.role.name(), t.label));
+        s.push_str(&format!("[{}] {} \u{2014} {}", t.role.name(), t.id, t.label));
         if !does.is_empty() {
             s.push_str(&format!(" ({})", does.join("; ")));
         }

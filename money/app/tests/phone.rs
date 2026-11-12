@@ -343,8 +343,9 @@ fn a_household_shares_one_budget() {
 
 /// A screenshot walk's steps on a new install (ui/docs/shots.md, "In the
 /// App"): the first run's pages are a new person's, and each step reaches
-/// what it names on them — Get Started, the address field typed into,
-/// Continue — through the host, as a tap sends it. Falsified by a walk's
+/// what it names on them by id — Get Started, the address field typed
+/// into, Continue — through the host, as a tap sends it, and the host is
+/// not idle while the server is asked. Falsified by a walk's
 /// launch passing over the pages (as a `-shots` launch once did), or a
 /// step taking nothing.
 #[test]
@@ -355,14 +356,19 @@ fn a_walk_goes_through_the_first_run() {
     l.walk = true;
     let (host, _, _) = library(l);
     let tree = host.shots_tree();
-    assert!(tree.contains("[button] Get Started (taps)"), "{tree}");
-    assert_eq!(host.shots_step(r#"{"tap": "Get Started"}"#.into()), ShotsTook::Done);
+    assert!(tree.contains("[button] welcome.next \u{2014} Get Started (taps)"), "{tree}");
+    assert_eq!(host.shots_step(r#"{"tap": "welcome.next"}"#.into()), ShotsTook::Done);
     let tree = host.shots_tree();
-    assert!(tree.contains("[field] Server Address (types)"), "{tree}");
-    assert!(matches!(host.shots_step(r#"{"tap": "Nowhere"}"#.into()), ShotsTook::NotYet { .. }));
-    assert_eq!(host.shots_step(r#"{"tap": "Server Address", "role": "field"}"#.into()), ShotsTook::Done);
+    assert!(tree.contains("[field] welcome.typed \u{2014} Server Address (types)"), "{tree}");
+    assert!(matches!(
+        host.shots_step(r#"{"tap": "welcome.nowhere"}"#.into()),
+        ShotsTook::NotYet { .. }
+    ));
+    assert_eq!(host.shots_step(r#"{"tap": "welcome.typed"}"#.into()), ShotsTook::Done);
     assert_eq!(host.shots_step(r#"{"type": "http://127.0.0.1:9"}"#.into()), ShotsTook::Done);
     let typed = host.with_run(|r| r.page()).server.map(|s| s.typed).unwrap_or_default();
     assert_eq!(typed, "http://127.0.0.1:9");
-    assert_eq!(host.shots_step(r#"{"tap": "Continue", "role": "button"}"#.into()), ShotsTook::Done);
+    assert_eq!(host.shots_step(r#"{"tap": "welcome.check"}"#.into()), ShotsTook::Done);
+    // The server is asked on a thread of the host's: not idle until it answers.
+    until("the server's answer", || host.idle());
 }

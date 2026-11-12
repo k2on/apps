@@ -22,7 +22,7 @@
 
 use std::rc::Rc;
 
-use ark_app::shots::{self, Role, Step, Took};
+use ark_app::shots::{self, Step, Took};
 
 use super::ArkHost;
 
@@ -48,23 +48,21 @@ pub enum ShotsTook {
 pub(crate) fn step_of(json: &str) -> Result<Step, String> {
     let v: serde_json::Value = serde_json::from_str(json).map_err(|e| format!("{json}: {e}"))?;
     let s = |k: &str| v.get(k).and_then(|x| x.as_str()).map(String::from);
-    if let Some(label) = s("tap") {
-        let role = match s("role") {
-            Some(r) => Some(Role::of(&r).ok_or_else(|| format!("no role {r}: tab, button, field, row, item or text"))?),
-            None => None,
-        };
-        let bottom = s("where").as_deref() == Some("bottom");
-        return Ok(Step::Tap { label, role, bottom });
+    if let Some(id) = s("tap") {
+        return Ok(Step::Tap { id, text: false });
+    }
+    if let Some(id) = s("text") {
+        return Ok(Step::Tap { id, text: true });
     }
     if let Some(text) = s("type") {
         return Ok(Step::Type { text });
     }
-    if let Some(label) = s("press") {
+    if let Some(id) = s("press") {
         let item = s("item").ok_or_else(|| format!("a press names the item of its menu: {json}"))?;
-        return Ok(Step::Press { label, item });
+        return Ok(Step::Press { id, item });
     }
-    if let Some(label) = s("await") {
-        return Ok(Step::Await { label });
+    if let Some(id) = s("await") {
+        return Ok(Step::Await { id });
     }
     Err(format!("no such step: {json}"))
 }
@@ -145,35 +143,16 @@ impl ArkHost {
 mod tests {
     use super::*;
 
-    /// Each step as shots.json writes it. Falsified by a role that is not
-    /// one read as none, or a press with no item taken.
+    /// Each step as shots.json writes it: an element by its id, or by what
+    /// it says only as `text`. Falsified by a press with no item taken.
     #[test]
     fn steps_read_as_written() {
-        assert_eq!(
-            step_of(r#"{"tap": "Budget", "role": "tab"}"#),
-            Ok(Step::Tap {
-                label: "Budget".into(),
-                role: Some(Role::Tab),
-                bottom: false
-            })
-        );
-        assert_eq!(
-            step_of(r#"{"tap": "Auto-Assign", "where": "bottom"}"#),
-            Ok(Step::Tap {
-                label: "Auto-Assign".into(),
-                role: None,
-                bottom: true
-            })
-        );
-        assert_eq!(
-            step_of(r#"{"type": "http://10.0.2.2:8788"}"#),
-            Ok(Step::Type {
-                text: "http://10.0.2.2:8788".into()
-            })
-        );
-        assert_eq!(step_of(r#"{"await": "Budget"}"#), Ok(Step::Await { label: "Budget".into() }));
-        assert!(step_of(r#"{"tap": "Budget", "role": "tabs"}"#).is_err());
-        assert!(step_of(r#"{"press": "Groceries"}"#).is_err());
+        let tap = |id: &str, text| Ok(Step::Tap { id: id.into(), text });
+        assert_eq!(step_of(r#"{"tap": "tab:budget"}"#), tap("tab:budget", false));
+        assert_eq!(step_of(r#"{"text": "Get Started"}"#), tap("Get Started", true));
+        assert_eq!(step_of(r#"{"type": "x"}"#), Ok(Step::Type { text: "x".into() }));
+        assert_eq!(step_of(r#"{"await": "tab:budget"}"#), Ok(Step::Await { id: "tab:budget".into() }));
+        assert!(step_of(r#"{"press": "budget.row:groceries"}"#).is_err());
         assert!(step_of(r#"{"wait": 2}"#).is_err());
     }
 }

@@ -68,9 +68,10 @@ fn accounts() -> View<Msg> {
     list_row("Checking").on_tap(Msg::Open("checking".into())).into()
 }
 
-/// A tab is tapped by its label and role; a row of the screen a tab hosts
-/// only while that tab shows. Falsified by every tab's content reached
-/// (Groceries tapped from Accounts), or a tab not sent its select.
+/// Each element by its id: a tab by its section's tag, a row by its title,
+/// a button by its message; a row of the screen a tab hosts only while that
+/// tab shows. Falsified by every tab's content reached (Groceries tapped
+/// from Accounts), or an id that moves with what the element says.
 #[test]
 fn a_tab_and_what_it_shows() {
     let sent: Sent = Rc::default();
@@ -82,18 +83,14 @@ fn a_tab_and_what_it_shows() {
         ])
     };
     let mut focus = None;
-    let tap = |label: &str, role| Step::Tap {
-        label: label.into(),
-        role,
-        bottom: false,
-    };
+    let tap = |id: &str| Step::Tap { id: id.into(), text: false };
     let t = all("accounts");
-    assert_eq!(take(&tap("Groceries", None), &t, &mut focus), Took::NotYet, "{}", tree(&t));
-    assert_eq!(take(&tap("Budget", Some(Role::Tab)), &t, &mut focus), Took::Done);
-    assert_eq!(take(&tap("Checking", Some(Role::Row)), &t, &mut focus), Took::Done);
+    assert_eq!(take(&tap("budget.row:groceries"), &t, &mut focus), Took::NotYet, "{}", tree(&t));
+    assert_eq!(take(&tap("tab:budget"), &t, &mut focus), Took::Done);
+    assert_eq!(take(&tap("accounts.row:checking"), &t, &mut focus), Took::Done);
     let t = all("budget");
-    assert_eq!(take(&tap("Groceries", None), &t, &mut focus), Took::Done);
-    assert_eq!(take(&tap("New Transaction", Some(Role::Button)), &t, &mut focus), Took::Done);
+    assert_eq!(take(&tap("budget.row:groceries"), &t, &mut focus), Took::Done);
+    assert_eq!(take(&tap("shell.new"), &t, &mut focus), Took::Done);
     assert_eq!(
         sent.borrow().clone(),
         vec![
@@ -103,6 +100,7 @@ fn a_tab_and_what_it_shows() {
             ("shell", Msg::New),
         ]
     );
+    assert!(tree(&t).contains("[tab] tab:budget \u{2014} Budget (taps)"), "{}", tree(&t));
 }
 
 /// While a dialog is up only what is in it is reached, whichever screen
@@ -116,20 +114,20 @@ fn a_dialog_over_everything() {
         screen("accounts", accounts(), &sent),
     ]);
     let mut focus = None;
-    let tap = |label: &str| Step::Tap {
-        label: label.into(),
-        role: None,
-        bottom: false,
-    };
-    assert_eq!(take(&tap("Groceries"), &t, &mut focus), Took::NotYet, "{}", tree(&t));
-    assert_eq!(take(&tap("Cancel"), &t, &mut focus), Took::Done);
+    let tap = |id: &str| Step::Tap { id: id.into(), text: false };
+    assert_eq!(take(&tap("budget.row:groceries"), &t, &mut focus), Took::NotYet, "{}", tree(&t));
+    assert_eq!(take(&tap("budget.cancel"), &t, &mut focus), Took::Done);
     assert_eq!(sent.borrow().clone(), vec![("budget", Msg::Cancel)]);
-    assert!(tree(&t).contains("[button] Underfunded (taps) (modal)"), "{}", tree(&t));
+    assert!(
+        tree(&t).contains("[button] budget.underfunded \u{2014} Underfunded (taps) (modal)"),
+        "{}",
+        tree(&t)
+    );
 }
 
 /// A field tapped takes what is typed, through its input; a wide button
-/// sends its message; `a|b` is either. Falsified by typing with nothing
-/// focused when there are two fields.
+/// sends its message; a label is reached only as `text`. Falsified by
+/// typing with nothing focused when there are two fields.
 #[test]
 fn a_field_is_typed_into() {
     let sent: Sent = Rc::default();
@@ -153,17 +151,9 @@ fn a_field_is_typed_into() {
     );
     let t = compose(vec![screen("welcome", page, &sent)]);
     let mut focus = None;
-    let tapped = take(
-        &Step::Tap {
-            label: "Server Address".into(),
-            role: Some(Role::Field),
-            bottom: false,
-        },
-        &t,
-        &mut focus,
-    );
-    assert_eq!(tapped, Took::Done);
-    assert_eq!(focus.as_deref(), Some("Server Address"));
+    let tap = |id: &str| Step::Tap { id: id.into(), text: false };
+    assert_eq!(take(&tap("welcome.typed"), &t, &mut focus), Took::Done, "{}", tree(&t));
+    assert_eq!(focus.as_deref(), Some("welcome.typed"));
     assert_eq!(
         take(
             &Step::Type {
@@ -174,12 +164,12 @@ fn a_field_is_typed_into() {
         ),
         Took::Done
     );
+    assert_eq!(take(&tap("welcome.check"), &t, &mut focus), Took::Done);
     assert_eq!(
         take(
             &Step::Tap {
-                label: "Go|Continue".into(),
-                role: None,
-                bottom: false
+                id: "Continue".into(),
+                text: true
             },
             &t,
             &mut focus
@@ -189,7 +179,7 @@ fn a_field_is_typed_into() {
     assert_eq!(
         take(
             &Step::Await {
-                label: "Connect to Your Server".into()
+                id: "welcome.text:connect-to-your-server".into()
             },
             &t,
             &mut focus
@@ -198,6 +188,38 @@ fn a_field_is_typed_into() {
     );
     assert_eq!(
         sent.borrow().clone(),
-        vec![("welcome", Msg::Typed("http://10.0.2.2:8788".into())), ("welcome", Msg::Check)]
+        vec![
+            ("welcome", Msg::Typed("http://10.0.2.2:8788".into())),
+            ("welcome", Msg::Check),
+            ("welcome", Msg::Check)
+        ]
     );
+}
+
+/// Ids are words a step can say: an emoji, punctuation and case gone; rows
+/// of one title are each their own by their place (`~2`).
+#[test]
+fn ids_are_slugs() {
+    let sent: Sent = Rc::default();
+    let twice: View<Msg> = (
+        list_row("Target").on_tap(Msg::Open("a".into())),
+        list_row("Target").on_tap(Msg::Open("b".into())),
+    )
+        .into();
+    let t = compose(vec![screen("transactions", twice, &sent)]);
+    let took = take(
+        &Step::Tap {
+            id: "transactions.row:target~2".into(),
+            text: false,
+        },
+        &t,
+        &mut None,
+    );
+    assert_eq!(took, Took::Done);
+    assert_eq!(sent.borrow().clone(), vec![("transactions", Msg::Open("b".into()))]);
+    assert_eq!(slug("🍜 Dining Out"), "dining-out");
+    assert_eq!(slug("accounts/0a1B"), "accounts/0a1b");
+    assert_eq!(action("AutoAssign"), "auto-assign");
+    assert_eq!(action("Select { tag: \"x\" }"), "select");
+    assert_eq!(id_of(Role::Tab, "Budget", Some("Select { tag: \"budget\" }".into())), "tab:budget");
 }

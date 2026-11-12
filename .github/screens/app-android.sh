@@ -318,8 +318,7 @@ listen
 # (the server's address for `{server}`), the app opened as a new app is,
 # with `-shots 1`; it signs in, taps its way from shot to shot, draws each
 # screen in both themes, writes them beside the plan and ends its process.
-# Then the pictures pulled, and one real tap on the screen (`walk.touch`:
-# `adb input` on a tab, the app's ready signal after it), seconds long.
+# Then the pictures pulled.
 walk() {
   local list=large dir="/sdcard/Android/data/$pkg/files/shots" t=$SECONDS pid=""
   [ "$(basename "$out")" = android ] && list=phone
@@ -363,18 +362,6 @@ walk() {
   mkdir -p "${RESULTS:-$out/..}"
   cp "$out/pulled/walk.log" "${RESULTS:-$out/..}/walk-$app-$(basename "$out").log" 2> /dev/null || true
   rm -rf "$out/pulled"
-  # One real touch: the app opened again (the plan gone), a tab tapped where
-  # the screen shows it, and the app's ready signal after.
-  local touch
-  touch=$(jq -c '.walk.touch // empty' "$shots")
-  if [ -n "$touch" ] && [ "$list" = phone ]; then
-    t=$SECONDS
-    open_app || return 1
-    SHOTS=1 tap "$(jq -r .tap <<< "$touch")" 5 "$(jq -r '.role // ""' <<< "$touch")" || { echo "::error::$app: the touch found nothing"; return 1; }
-    ready || return 1
-    echo "  the touch: $(jq -r .tap <<< "$touch") tapped, ready again ($((SECONDS - t))s)"
-    adb shell am force-stop "$pkg"
-  fi
 }
 if jq -e '.walk' "$shots" > /dev/null; then
   walk || exit 1

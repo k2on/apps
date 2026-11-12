@@ -558,7 +558,7 @@ fn the_toolbars_end_with_the_account() {
 /// walk names that no view says (a tab renamed, the account's button gone).
 #[test]
 fn the_walk_reaches_what_it_taps() {
-    use ark_app::shots::{compose, nodes, take, tree, Role, Screen, Step, Took};
+    use ark_app::shots::{compose, nodes, take, tree, Screen, Step, Took};
     use std::cell::RefCell;
     use std::rc::Rc;
     let mut demo = Demo::new();
@@ -588,25 +588,21 @@ fn the_walk_reaches_what_it_taps() {
     ]);
     let said = tree(&targets);
     for want in [
-        "[tab] Budget (taps)",
-        "[tab] Accounts (taps)",
-        "[tab] Transactions (taps)",
-        "[tab] Insights (taps)",
-        "[button] Account (taps)",
-        "[button] New Transaction (taps)",
-        "[button] Auto-Assign (taps)",
-        "[row] 🍜 Dining Out (taps",
+        "[tab] tab:budget \u{2014} Budget (taps)",
+        "[tab] tab:accounts \u{2014} Accounts (taps)",
+        "[tab] tab:transactions \u{2014} Transactions (taps)",
+        "[tab] tab:insights \u{2014} Insights (taps)",
+        "[button] shell.account \u{2014} Account (taps)",
+        "[button] shell.new-transaction \u{2014} New Transaction (taps)",
+        "[button] budget.auto-assign \u{2014} Auto-Assign (taps)",
+        "[row] budget.row:dining-out \u{2014} \u{1f35c} Dining Out (taps",
     ] {
         assert!(said.contains(want), "{want}, in:\n{said}");
     }
     let mut focus = None;
-    let tap = |label: &str, role: Option<Role>| Step::Tap {
-        label: label.into(),
-        role,
-        bottom: true,
-    };
-    assert_eq!(take(&tap("Auto-Assign", Some(Role::Button)), &targets, &mut focus), Took::Done);
-    assert_eq!(take(&tap("Accounts", Some(Role::Tab)), &targets, &mut focus), Took::Done);
+    let tap = |id: &str| Step::Tap { id: id.into(), text: false };
+    assert_eq!(take(&tap("budget.auto-assign"), &targets, &mut focus), Took::Done);
+    assert_eq!(take(&tap("tab:accounts"), &targets, &mut focus), Took::Done);
     assert_eq!(sent.borrow().clone(), ["AutoAssign", "Select { tag: \"accounts\" }"]);
 
     // Accounts' rows by their names, not all a screen reader says of them
@@ -622,5 +618,21 @@ fn the_walk_reaches_what_it_taps() {
         ),
     }]);
     let said = tree(&rows);
-    assert!(said.contains("[row] Checking (taps"), "{said}");
+    let mut td = crate::testing::Demo::<crate::transactions::Transactions>::new();
+    let mut trt = Runtime::<crate::transactions::Transactions>::new();
+    td.run(&mut trt, [crate::transactions::TransactionsMsg::Show { review: false }]);
+    let txns = compose(vec![Screen {
+        name: "transactions".into(),
+        nodes: nodes(
+            &crate::transactions::view::transactions::view(&trt.screen(&td)),
+            Rc::new(|_: crate::transactions::TransactionsMsg| {}),
+        ),
+    }]);
+    let listed = tree(&txns);
+    assert!(listed.contains("[button] transactions.show:all \u{2014} All (taps)"), "{listed}");
+    assert!(
+        listed.contains("[row] transactions.row:target \u{2014}") && listed.contains("[row] transactions.row:target~2 \u{2014}"),
+        "{listed}"
+    );
+    assert!(said.contains("[row] accounts.row:checking \u{2014} Checking (taps"), "{said}");
 }

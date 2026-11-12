@@ -171,6 +171,9 @@ public object Ready {
         }
     }
 
+    /** Whether the screen is ready now, at generation [at] still. */
+    public fun isReady(at: Int): Boolean = readyAt == at && generation() == at
+
     /** The generation now: a walk's step waits for the screen to be ready after it. */
     public fun generation(): Int = synchronized(lock) { generation }
 

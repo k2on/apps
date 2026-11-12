@@ -131,7 +131,7 @@ public object ShotsWalk {
             val steps = shot.optJSONArray("steps")
             val n = steps?.length() ?: 0
             var t = System.currentTimeMillis()
-            for (k in 0 until n) take(steps!!.getJSONObject(k).toString(), id)
+            val each = (0 until n).map { k -> take(steps!!.getJSONObject(k).toString(), id) }
             val stepped = System.currentTimeMillis() - t
             val tree = this.steps?.tree() ?: ""
             val times = mutableListOf<String>()
@@ -157,25 +157,35 @@ public object ShotsWalk {
                 }
                 times += "$theme picture ${System.currentTimeMillis() - t} ms"
             }
-            say("$id: $n steps $stepped ms, ${times.joinToString(", ")}")
+            say("$id: $n steps $stepped ms [${each.joinToString("; ")}], ${times.joinToString(", ")}")
         }
     }
 
-    /** One step, once what it names is on the screen, then the screen waited for. */
-    private fun take(json: String, id: String) {
+    /**
+     * One step, then the screen waited for: its times, Rust's and the ready signal's. What it names
+     * not there at a ready screen fails at once (it will not come); while the screen is on its way
+     * (a sign-in, a sync) it is looked for again each time the screen is ready anew.
+     */
+    private fun take(json: String, id: String): String {
         val by = this.steps ?: throw Stop("$id: $json: this app takes no steps")
-        val until = System.currentTimeMillis() + FIND
+        val began = System.currentTimeMillis()
+        val until = began + FIND
         while (true) {
             val g = Ready.generation()
-            when (val took = by.step(json)) {
+            val r = System.currentTimeMillis()
+            val took = by.step(json)
+            val rust = System.currentTimeMillis() - r
+            when (took) {
                 is Took.Done -> {
+                    val w = System.currentTimeMillis()
                     settled("$id after $json")
-                    return
+                    return "$json $rust ms + ready ${System.currentTimeMillis() - w} ms"
                 }
                 is Took.NotYet -> {
-                    if (System.currentTimeMillis() > until) throw Stop("$id: nothing on the screen for $json in ${FIND / 1000} s; there was:\n${took.labels}")
-                    // Looked for again once the screen has changed (or a moment on).
-                    Ready.awaitReady(g, 500)
+                    if (Ready.isReady(g) || System.currentTimeMillis() > until) {
+                        throw Stop("$id: nothing on the ready screen is $json (${System.currentTimeMillis() - began} ms); there was:\n${took.labels}")
+                    }
+                    Ready.awaitReady(g, FIND)
                 }
                 is Took.Failed -> throw Stop("$id: $json: ${took.why}")
             }

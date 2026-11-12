@@ -6,7 +6,7 @@
 //
 // The plan, `<Application Support>/shots/plan.json`:
 //
-//   {"orientation": "portrait" | "landscape",
+//   {"orientations": ["portrait", "landscape"] (the iPad's; none: upright),
 //    "shots": [{"id": "welcome", "steps": []},
 //              {"id": "budget", "steps": [{"tap": "Get Started"}, …]}, …]}
 //
@@ -18,8 +18,10 @@
 // message a tap on it sends. After each the walk waits for the app's own
 // ready signal (`Ready`), then the next. Then the screen is taken in the
 // theme it is in, the theme switched, and taken again; the next shot
-// starts in the theme this one ended in. Each picture lands in
-// `shots/out/<theme>/<id>.png`, what a step can name beside it
+// starts in the theme this one ended in; an iPad's turns on its side in
+// the app too, one switch at a time. Each picture lands in
+// `shots/out/<theme>/<id>.png` (`out/<portrait|landscape>/<theme>/` when
+// it turns), what a step can name beside it
 // (`<id>.tree.txt`), each shot's times in `shots/out/walk.log`, and
 // `shots/out/done` (or `failed`, why) once it is over.
 import ArkUI
@@ -94,68 +96,88 @@ final class ShotsWalk {
         guard let p = try JSONSerialization.jsonObject(with: data) as? [String: Any], let shots = p["shots"] as? [[String: Any]] else {
             throw Stop(why: "\(plan.path) is no plan")
         }
-        // The first screen ready, light, the way the plan holds the device.
+        // The first screen ready, light, upright. A plan with `orientations`
+        // (the iPad's: both) takes each stop in every theme and way up, one
+        // thing switched at a time: light upright, dark upright, dark on its
+        // side, light on its side; the next stop from where this one ended,
+        // the other way round. A one-theme app's stop is one picture a way.
         let one = p["theme"] as? String
+        let turns = (p["orientations"] as? [String] ?? []).count > 1
         var dark = false
+        var landscape = false
         ShotsWindow.theme(dark: dark)
-        if p["orientation"] as? String == "landscape" { ShotsWindow.orient(landscape: true) }
         try await settled("the first screen")
         for shot in shots {
             guard let id = shot["id"] as? String else { throw Stop(why: "a shot with no id") }
             let steps = shot["steps"] as? [[String: Any]] ?? []
             var t = Date()
-            for step in steps { try await take(step, id) }
+            var each: [String] = []
+            for step in steps { each.append(try await take(step, id)) }
             let stepped = Date().timeIntervalSince(t)
             let tree = host.shotsTree()
             var times: [String] = []
-            var first: Data? = nil
-            for n in 0..<(one == nil ? 2 : 1) {
-                if n == 1 {
-                    // The other theme, as the system's switch would: no relaunch.
+            var drawn: [String: Data] = [:]
+            // The switches of this stop, in order: theme, way up, theme.
+            var switches: [String] = one == nil ? ["theme"] : []
+            if turns { switches = one == nil ? ["theme", "turn", "theme"] : ["turn"] }
+            for n in 0...switches.count {
+                if n > 0 {
                     t = Date()
-                    dark.toggle()
-                    ShotsWindow.theme(dark: dark)
-                    try await settled("\(id) in \(dark ? "dark" : "light")")
-                    times.append("switched \(ms(t))")
+                    if switches[n - 1] == "theme" {
+                        dark.toggle()
+                        ShotsWindow.theme(dark: dark)
+                    } else {
+                        landscape.toggle()
+                        ShotsWindow.orient(landscape: landscape)
+                    }
+                    try await settled("\(id) \(dark ? "dark" : "light") \(landscape ? "landscape" : "portrait")")
+                    times.append("\(switches[n - 1]) \(ms(t))")
                 }
                 t = Date()
                 guard let png = ShotsWindow.picture() else { throw Stop(why: "\(id): no window to draw") }
-                if let f = first, f == png { throw Stop(why: "\(id): dark and light drew the same picture") }
-                first = png
                 let theme = dark ? "dark" : "light"
-                for t in one == nil ? [theme] : ["light", "dark"] {
-                    let dir = out.appendingPathComponent(t)
+                let way = landscape ? "landscape" : "portrait"
+                // Another theme the same picture, or another way up: it did not switch.
+                for (k, d) in drawn where d == png { throw Stop(why: "\(id): \(theme) \(way) drew the same picture as \(k)") }
+                drawn["\(theme) \(way)"] = png
+                for th in one == nil ? [theme] : ["light", "dark"] {
+                    let dir = turns ? out.appendingPathComponent(way).appendingPathComponent(th) : out.appendingPathComponent(th)
                     try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
                     try png.write(to: dir.appendingPathComponent("\(id).png"))
                     try tree.write(to: dir.appendingPathComponent("\(id).tree.txt"), atomically: true, encoding: .utf8)
                 }
-                times.append("\(theme) picture \(ms(t))")
+                times.append("\(theme) \(turns ? way + " " : "")picture \(ms(t))")
             }
-            say("\(id): \(steps.count) steps \(Int(stepped * 1000)) ms, \(times.joined(separator: ", "))")
+            say("\(id): \(steps.count) steps \(Int(stepped * 1000)) ms [\(each.joined(separator: "; "))], \(times.joined(separator: ", "))")
         }
         #else
         throw Stop(why: "a walk is the iPhone's and the iPad's")
         #endif
     }
 
-    /// One step, taken once what it names is on the screen, then the screen
-    /// waited for.
-    private func take(_ step: [String: Any], _ id: String) async throws {
+    /// One step, then the screen waited for: its times, Rust's and the
+    /// ready signal's. What it names not there at a ready screen fails at
+    /// once (it will not come); while the screen is on its way (a sign-in,
+    /// a sync) it is looked for again each time the screen is ready anew.
+    private func take(_ step: [String: Any], _ id: String) async throws -> String {
         let json = String(decoding: try JSONSerialization.data(withJSONObject: step, options: [.sortedKeys]), as: UTF8.self)
         let until = Date().addingTimeInterval(Self.find)
+        let began = Date()
         while true {
             let g = Ready.shared.generation
-            switch host.shotsStep(step: json) {
+            let r = Date()
+            let took = host.shotsStep(step: json)
+            let rust = ms(r)
+            switch took {
             case .done:
-                Ready.shared.changed()
+                let w = Date()
                 try await settled("\(id) after \(json)")
-                return
+                return "\(json) \(rust) + ready \(ms(w))"
             case let .notYet(labels):
-                if Date() > until {
-                    throw Stop(why: "\(id): nothing on the screen for \(json) in \(Int(Self.find)) s; there was:\n\(labels)")
+                if (Ready.shared.ready && Ready.shared.generation == g) || Date() > until {
+                    throw Stop(why: "\(id): nothing on the ready screen is \(json) (\(ms(began))); there was:\n\(labels)")
                 }
-                // Looked for again once the screen has changed (or a moment on).
-                _ = await Ready.shared.untilReady(after: g, within: 0.5)
+                _ = await Ready.shared.untilReady(after: g, within: Self.find)
             case let .failed(why):
                 throw Stop(why: "\(id): \(json): \(why)")
             }

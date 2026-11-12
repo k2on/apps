@@ -170,3 +170,17 @@ slots, the rest left out. The parts decide which, never the app.
 | HeroHeading | title | `HeroHeading` | `HeroHeading` | `hero::heading` |
 | HeroEntry | over, title, under, count, open, picture | `HeroEntry` | `HeroEntry` | `hero::entry` / `hero::listing` |
 | HeroMore | label, open | `HeroMore` | `HeroMore` | `hero::more` |
+
+## Ids
+
+Every element a person can act on in a view has an id, derived from what
+it does and not from what it says (`ark_app::shots::id_of`): a section's
+tab by its tag (`tab:budget`), a row by its title (`row:checking`; rows of
+one title by their place, `row:target~2`), anything else by its message's
+variant in kebab case (`auto-assign`, `dismiss`; with its words when the
+message carries a value, `toggle:bills`), under its screen's name
+(`budget.auto-assign`). A view writes none: a part's builder needs no
+`.id`, and a copy change, a count in a row's words or another language
+leaves it as it was. What names elements by them today is the screenshot
+walk (ui/docs/shots.md, "In the App"); the toolkits do not yet write them
+as accessibility identifiers.

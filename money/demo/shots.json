@@ -1,5 +1,5 @@
 {
-  "_": "money's screenshots (.github/screens/apps.md; which phones it is on is flake.nix's list, `publish`): its server is server.sh, seeded up to the run's day (DEMO_DAY), signed in to as `user`, who goes by `name`. `walk`: the phones' and the larger screens' (each a list), walked inside the app from a new install (ui/docs/shots.md, \"In the App\"): `welcome`, the first run's page a new install opens on; then signed in through the first run (Get Started, the server's address typed — `{server}` is the run's — Continue), landing on the budget; and every shot after reached by tapping from where the last left it, each its steps' labels as the views on the screen say them (a shot's `<id>.tree.txt`). `touch`: once the walk is over, the one real tap on each phone's screen (XCUITest's on the iPhone, `adb input` on Android), the app's ready signal after it. Each stop is taken in the theme the walk is in, the theme switched, and taken again. A category and a transaction are opened in the platform's way: on a phone Category Details' sheet and the transaction's form; on a larger screen the inspector (Transaction Details shown first). `desktop` is the iced window's (ui/rust/shots): its size, and its shots, each clicking what a text on the screen says, in one window. Its accounts are Checking's register, its transactions all accounts'. `screens` and `launch` are the Mac's and the browser's: each screen opened by its launch arguments (the Mac's own window, app-mac.sh; the browser's address, app-web.sh), as no walk takes them.",
+  "_": "money's screenshots (.github/screens/apps.md; which phones it is on is flake.nix's list, `publish`): its server is server.sh, seeded up to the run's day (DEMO_DAY), signed in to as `user`, who goes by `name`. `walk`: the phones' and the larger screens' (each a list), walked inside the app from a new install (ui/docs/shots.md, \"In the App\"): `welcome`, the first run's page a new install opens on; then signed in through the first run (`welcome.next`, the server's address typed into `welcome.typed` — `{server}` is the run's — `welcome.check`), landing on the budget; and every shot after reached by tapping from where the last left it, each step naming an element by its id (ui/docs/shots.md: `tab:budget`, `budget.row:dining-out`, `shell.new-transaction`; a shot's `<id>.tree.txt` lists them). Each stop is taken in the theme the walk is in, the theme switched, and taken again; on the iPad both ways up too, turned in the app, one switch at a time. A category and a transaction are opened in the platform's way: on a phone Category Details' sheet and the transaction's form; on a larger screen the inspector (Transaction Details shown first). `desktop` is the iced window's (ui/rust/shots): its size, and its shots, each clicking what a text on the screen says, in one window. Its accounts are Checking's register, its transactions all accounts'. `screens` and `launch` are the Mac's and the browser's: each screen opened by its launch arguments (the Mac's own window, app-mac.sh; the browser's address, app-web.sh), as no walk takes them.",
   "server": {
     "port": 8788,
     "user": "alex",
@@ -7,10 +7,6 @@
     "picture": "nix/demo/alex.jpg"
   },
   "walk": {
-    "touch": {
-      "tap": "Accounts",
-      "role": "tab"
-    },
     "phone": [
       {
         "id": "welcome",
@@ -20,21 +16,19 @@
         "id": "budget",
         "steps": [
           {
-            "tap": "Get Started"
+            "tap": "welcome.next"
           },
           {
-            "tap": "Server Address",
-            "role": "field"
+            "tap": "welcome.typed"
           },
           {
             "type": "{server}"
           },
           {
-            "tap": "Continue",
-            "role": "button"
+            "tap": "welcome.check"
           },
           {
-            "await": "Budget"
+            "await": "tab:budget"
           }
         ]
       },
@@ -42,8 +36,7 @@
         "id": "category",
         "steps": [
           {
-            "tap": "🍜 Dining Out",
-            "role": "row"
+            "tap": "budget.row:dining-out"
           }
         ]
       },
@@ -51,12 +44,10 @@
         "id": "accounts",
         "steps": [
           {
-            "tap": "Category Details",
-            "role": "button"
+            "tap": "shell.inspector:category-details"
           },
           {
-            "tap": "Accounts",
-            "role": "tab"
+            "tap": "tab:accounts"
           }
         ]
       },
@@ -64,8 +55,7 @@
         "id": "account",
         "steps": [
           {
-            "tap": "Checking",
-            "role": "row"
+            "tap": "accounts.row:checking"
           }
         ]
       },
@@ -73,8 +63,7 @@
         "id": "review",
         "steps": [
           {
-            "tap": "Transactions",
-            "role": "tab"
+            "tap": "tab:transactions"
           }
         ]
       },
@@ -82,12 +71,10 @@
         "id": "transaction",
         "steps": [
           {
-            "tap": "All",
-            "role": "button"
+            "tap": "transactions.show:all"
           },
           {
-            "tap": "Target",
-            "role": "row"
+            "tap": "transactions.row:target"
           }
         ]
       },
@@ -95,12 +82,10 @@
         "id": "add-transaction",
         "steps": [
           {
-            "tap": "Cancel",
-            "role": "button"
+            "tap": "sheets.dismiss"
           },
           {
-            "tap": "New Transaction",
-            "role": "button"
+            "tap": "shell.new-transaction"
           }
         ]
       },
@@ -108,12 +93,10 @@
         "id": "insights",
         "steps": [
           {
-            "tap": "Cancel",
-            "role": "button"
+            "tap": "sheets.dismiss"
           },
           {
-            "tap": "Insights",
-            "role": "tab"
+            "tap": "tab:insights"
           }
         ]
       },
@@ -121,13 +104,10 @@
         "id": "auto-assign-menu",
         "steps": [
           {
-            "tap": "Budget",
-            "role": "tab"
+            "tap": "tab:budget"
           },
           {
-            "tap": "Auto-Assign",
-            "role": "button",
-            "where": "bottom"
+            "tap": "budget.auto-assign"
           }
         ]
       },
@@ -135,12 +115,10 @@
         "id": "settings",
         "steps": [
           {
-            "tap": "Cancel",
-            "role": "button"
+            "tap": "budget.cancel-auto"
           },
           {
-            "tap": "Account",
-            "role": "button"
+            "tap": "shell.account"
           }
         ]
       }
@@ -154,21 +132,19 @@
         "id": "budget",
         "steps": [
           {
-            "tap": "Get Started"
+            "tap": "welcome.next"
           },
           {
-            "tap": "Server Address",
-            "role": "field"
+            "tap": "welcome.typed"
           },
           {
             "type": "{server}"
           },
           {
-            "tap": "Continue",
-            "role": "button"
+            "tap": "welcome.check"
           },
           {
-            "await": "Budget"
+            "await": "tab:budget"
           }
         ]
       },
@@ -176,8 +152,7 @@
         "id": "category",
         "steps": [
           {
-            "tap": "🍜 Dining Out",
-            "role": "row"
+            "tap": "budget.row:dining-out"
           }
         ]
       },
@@ -185,12 +160,10 @@
         "id": "accounts",
         "steps": [
           {
-            "tap": "Category Details",
-            "role": "button"
+            "tap": "shell.inspector:category-details"
           },
           {
-            "tap": "Accounts",
-            "role": "tab"
+            "tap": "tab:accounts"
           }
         ]
       },
@@ -198,8 +171,7 @@
         "id": "account",
         "steps": [
           {
-            "tap": "Checking",
-            "role": "row"
+            "tap": "accounts.row:checking"
           }
         ]
       },
@@ -207,8 +179,7 @@
         "id": "review",
         "steps": [
           {
-            "tap": "Transactions",
-            "role": "tab"
+            "tap": "tab:transactions"
           }
         ]
       },
@@ -216,16 +187,13 @@
         "id": "transaction",
         "steps": [
           {
-            "tap": "All",
-            "role": "button"
+            "tap": "transactions.show:all"
           },
           {
-            "tap": "Transaction Details",
-            "role": "button"
+            "tap": "shell.inspector:transaction-details"
           },
           {
-            "tap": "Target",
-            "role": "row"
+            "tap": "transactions.row:target"
           }
         ]
       },
@@ -233,12 +201,10 @@
         "id": "add-transaction",
         "steps": [
           {
-            "tap": "Transaction Details",
-            "role": "button"
+            "tap": "shell.inspector:transaction-details"
           },
           {
-            "tap": "New Transaction",
-            "role": "button"
+            "tap": "shell.new-transaction"
           }
         ]
       },
@@ -246,12 +212,10 @@
         "id": "insights",
         "steps": [
           {
-            "tap": "Cancel",
-            "role": "button"
+            "tap": "sheets.dismiss"
           },
           {
-            "tap": "Insights",
-            "role": "tab"
+            "tap": "tab:insights"
           }
         ]
       },
@@ -259,13 +223,10 @@
         "id": "auto-assign-menu",
         "steps": [
           {
-            "tap": "Budget",
-            "role": "tab"
+            "tap": "tab:budget"
           },
           {
-            "tap": "Auto-Assign",
-            "role": "button",
-            "where": "bottom"
+            "tap": "budget.auto-assign"
           }
         ]
       },
@@ -273,12 +234,10 @@
         "id": "settings",
         "steps": [
           {
-            "tap": "Cancel",
-            "role": "button"
+            "tap": "budget.cancel-auto"
           },
           {
-            "tap": "Account",
-            "role": "button"
+            "tap": "shell.account"
           }
         ]
       }

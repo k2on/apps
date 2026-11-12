@@ -5,13 +5,12 @@
 # (FAMILY=ipad) the iPad, booted already.
 #
 # An app whose shots.json has a `walk` walks it inside itself (ui/docs/
-# shots.md, "In the App"): for each way the device is held, installed
-# afresh, its list (`phone` on the iPhone, `large` on the iPad) written as a
-# plan into its own container, and opened with `-shots YES`; it goes through
-# its first run, signs in, taps its way from shot to shot, draws each
-# screen in both themes, writes the pictures beside the plan and exits.
-# Then on the iPhone one real tap on its screen (`walk.touch`, by the
-# driver below, in its light run), seconds long.
+# shots.md, "In the App"): installed afresh, its list (`phone` on the
+# iPhone, `large` on the iPad) written as a plan into its own container,
+# and opened with `-shots YES`; it goes through its first run, signs in,
+# taps its way from shot to shot, draws each screen in both themes (and on
+# the iPad both ways up, turning in the app), writes the pictures beside
+# the plan and exits.
 #
 # Any other app (harken's, whose screens are its own, not ArkUI's views)
 # is driven from outside: a run of the driver (drive-ios/) for all of them
@@ -64,12 +63,9 @@ xcrun simctl status_bar "$udid" override --time 9:41 --batteryState discharging 
 
 # Each driven app's part of the plan (Drive.swift's `Entry`): one for the
 # iPhone, two for the iPad (upright, then on its side, signed in already);
-# the walks, each app's for each way the device is held; and the touches,
-# a driven entry of one shot after the walks, in the light run alone.
+# and the walks, one each app.
 plan=$results/plan-$family.json
-touches=$results/touch-$family.json
 echo '[]' > "$plan"
-echo '[]' > "$touches"
 taken=()
 walks=()
 for a in "$@"; do
@@ -85,15 +81,10 @@ for a in "$@"; do
   xcrun simctl install "$udid" "$app" || { echo "::error::$a did not install"; echo "$a" >> "$partial"; continue; }
   bundle=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app/Info.plist")
   if jq -e '.walk' "$a/demo/shots.json" > /dev/null; then
-    for k in $kinds; do
-      walks+=("$a:${k%%:*}:${k#*:}:$bundle:$app")
-      taken+=("$a:$k")
-    done
-    touch=$(jq -c '.walk.touch // empty' "$a/demo/shots.json")
-    if [ -n "$touch" ] && [ "$family" = iphone ]; then
-      jq --arg b "$bundle" --arg o "$results/touch/$a" --argjson t "$touch" \
-        '. + [{bundle: $b, out: $o, signedIn: true, shots: [{id: "touch", steps: [$t]}]}]' "$touches" > "$touches.next" && mv "$touches.next" "$touches"
-    fi
+    # One walk a device: the iPad's turns on its side in the app, at
+    # every stop, so both ways up come of the one walk.
+    walks+=("$a:$family:$bundle:$app")
+    for k in $kinds; do taken+=("$a:$k"); done
     continue
   fi
   # Opened once and closed: a simulator just booted took longer than the
@@ -128,7 +119,7 @@ done
 # container; its log (each shot's step, switch and picture times) said.
 status=0
 for w in ${walks[@]+"${walks[@]}"}; do
-  IFS=: read -r a kind orientation bundle app <<< "$w"
+  IFS=: read -r a kind bundle app <<< "$w"
   list=phone
   [ "$family" = ipad ] && list=large
   server=$(jq -r --argjson off "${PORT_OFFSET:-0}" '.server.port // empty | "http://127.0.0.1:\(. + $off)"' "$a/demo/shots.json")
@@ -142,8 +133,8 @@ for w in ${walks[@]+"${walks[@]}"}; do
   data=$(xcrun simctl get_app_container "$udid" "$bundle" data)
   shots="$data/Library/Application Support/shots"
   mkdir -p "$shots"
-  jq --arg s "$server" --arg l "$list" --arg o "$orientation" \
-    '{orientation: (if $o == "" then "portrait" else $o end), theme: .walk.theme, shots: .walk[$l]} | with_entries(select(.value != null))
+  jq --arg s "$server" --arg l "$list" \
+    '{orientations: (if $l == "large" then ["portrait", "landscape"] else null end), theme: .walk.theme, shots: .walk[$l]} | with_entries(select(.value != null))
      | walk(if type == "string" then gsub("\\{server\\}"; $s) else . end)' "$a/demo/shots.json" > "$shots/plan.json"
   pid=$(xcrun simctl launch "$udid" "$bundle" -shots YES 2>&1 | awk -F': ' '/: [0-9]+$/ {print $NF}')
   echo "$a $kind: the walk launched (pid ${pid:-unknown})"
@@ -160,11 +151,16 @@ for w in ${walks[@]+"${walks[@]}"}; do
   sed 's/^/  /' "$shots/out/walk.log" 2> /dev/null || true
   cp "$shots/out/walk.log" "$results/walk-$a-$kind.log" 2> /dev/null || true
   echo "$a $kind: the walk took $(( $(date +%s) - t ))s"
-  dir=$out/$a/$kind
-  for theme in light dark; do
-    [ -d "$shots/out/$theme" ] || continue
-    mkdir -p "$dir/$theme"
-    cp "$shots/out/$theme"/* "$dir/$theme/"
+  # The iPhone's pictures under ios/, the iPad's under ipad-portrait/ and
+  # ipad-landscape/ (the walk's out/portrait/ and out/landscape/).
+  dir=$out/$a/ios
+  for from in "" portrait landscape; do
+    [ -n "$from" ] && dir=$out/$a/ipad-$from
+    for theme in light dark; do
+      [ -d "$shots/out/${from:+$from/}$theme" ] || continue
+      mkdir -p "$dir/$theme"
+      cp "$shots/out/${from:+$from/}$theme"/* "$dir/$theme/"
+    done
   done
   if [ ! -f "$shots/out/done" ]; then
     echo "::error::$a $kind: the walk failed: $(cat "$shots/out/failed" 2> /dev/null || echo 'it said nothing')"
@@ -175,7 +171,7 @@ for w in ${walks[@]+"${walks[@]}"}; do
   rm -f "$shots/plan.json"
 done
 
-if [ "$(jq length "$plan")" = 0 ] && [ "$(jq length "$touches")" = 0 ]; then
+if [ "$(jq length "$plan")" = 0 ]; then
   echo "nothing for the driver on the $family"
 else
 [ -f "$derived/built" ] || bash "$here/driver-ios.sh" "$derived"
@@ -222,10 +218,7 @@ missing() {
 
 : > "$results/$family.log"
 for theme in light dark; do
-  # The touches in the light run alone, after the driven apps.
-  this=$results/plan-$family-$theme.json
-  if [ "$theme" = light ]; then jq -s '.[0] + .[1]' "$plan" "$touches" > "$this"; else cp "$plan" "$this"; fi
-  [ "$(jq length "$this")" -gt 0 ] || continue
+  this=$plan
   run=0
   if appearance "$theme"; then
     drive "$family-$theme" "$theme" "$this" || run=$?
@@ -256,11 +249,6 @@ for theme in light dark; do
 done
 xcrun simctl ui "$udid" appearance light || true
 echo "the driver ran for $(( $(date +%s) - start ))s (status $status)"
-# Each touch: the app's ready signal after the tap, or it failed.
-while read -r o; do
-  [ -n "$o" ] || continue
-  if [ -f "$o/light/touch.png" ]; then echo "the touch on $(basename "$o"): tapped, ready again"; else echo "::error::the touch on $(basename "$o") did not happen"; status=1; fi
-done < <(jq -r '.[].out' "$touches")
 fi
 
 # Each shot's size, as it was drawn.

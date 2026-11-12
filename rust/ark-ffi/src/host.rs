@@ -196,6 +196,8 @@ pub struct ArkHost {
     /// runtime, mid-message).
     told: Mutex<Option<std::sync::mpsc::Sender<()>>>,
     me: Weak<ArkHost>,
+    /// The first run's work off the shell's thread still on its way.
+    away: std::sync::atomic::AtomicUsize,
 }
 
 /// What a launch remembers that is no secret: the server, whether the demo
@@ -263,6 +265,7 @@ impl ArkHost {
             launch,
             told: Mutex::new(None),
             me: me.clone(),
+            away: std::sync::atomic::AtomicUsize::new(0),
         })
     }
 
@@ -406,7 +409,15 @@ impl ArkHost {
     /// `f` on a thread of its own, with the host.
     fn off(&self, f: impl FnOnce(Arc<ArkHost>) + Send + 'static) {
         if let Some(h) = self.me.upgrade() {
-            std::thread::spawn(move || f(h));
+            // On its way until it is done: the host is not idle meanwhile
+            // (a server checked, a code traded, a session opened), so a
+            // screenshot's ready signal waits for what it brings.
+            h.away.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+            std::thread::spawn(move || {
+                f(h.clone());
+                h.away.fetch_sub(1, std::sync::atomic::Ordering::AcqRel);
+                h.changed();
+            });
         }
     }
 
@@ -681,7 +692,7 @@ impl ArkHost {
     /// version unchanged.
     pub fn idle(&self) -> bool {
         let peer = self.lock().open.clone().map(|(p, _)| p);
-        peer.is_none_or(|p| p.settled()) && self.app.idle()
+        self.away.load(std::sync::atomic::Ordering::Acquire) == 0 && peer.is_none_or(|p| p.settled()) && self.app.idle()
     }
 
     /// "Add a Device": a join link another device signs in with, made as

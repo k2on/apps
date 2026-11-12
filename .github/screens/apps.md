@@ -38,12 +38,11 @@ All of it is in `<app>/demo/`:
   {
     "server": { "port": 8788, "user": "alex", "name": "Alex" },
     "walk": {
-      "touch": { "tap": "Accounts", "role": "tab" },
       "phone": [
         { "id": "welcome", "steps": [] },
-        { "id": "budget", "steps": [{ "tap": "Get Started" }, { "tap": "Server Address", "role": "field" },
-                                    { "type": "{server}" }, { "tap": "Continue", "role": "button" }, { "await": "Budget" }] },
-        { "id": "category", "steps": [{ "tap": "🍜 Dining Out", "role": "row" }] }
+        { "id": "budget", "steps": [{ "tap": "welcome.next" }, { "tap": "welcome.typed" }, { "type": "{server}" },
+                                    { "tap": "welcome.check" }, { "await": "tab:budget" }] },
+        { "id": "category", "steps": [{ "tap": "budget.row:dining-out" }] }
       ],
       "large": [ … ]
     }
@@ -51,27 +50,23 @@ All of it is in `<app>/demo/`:
   ```
 
   One list for both phones (`phone`: the iPhone, Android's phone), one for
-  the larger screens (`large`: the iPad either way up, Android's tablet,
-  the Fold open and folded), the same ids. The app is installed afresh on
-  each device (and each way the iPad is held, and each of the Fold's
-  postures) and opened with its list as a plan in its own directory: it
-  shows its first run (`welcome`), signs in through it (`{server}` is this
-  device's server's address), lands where it lands, and reaches each shot
-  after by its steps from where the last left it: tabs, rows, toolbar
-  buttons, a sheet's Cancel, a dialog's actions. A step is `{"tap":
-  "<label>"}` (`a|b` either; `"role"`: `tab`, `button`, `field`, `row`,
-  `item`, `text`; `"where": "bottom"`: the last of several), `{"type":
-  "<text>"}` (into the field tapped last), `{"press": "<label>", "item":
-  "<title>"}` (an item of what holding it offers), `{"await": "<label>"}`.
-  Labels are what the ArkUI views say: each shot's `<id>.tree.txt` lists
-  what its screen had, and a step that finds nothing in 20 s fails with
-  that list (`stuck.why.txt`). Each stop is taken in both themes, the
-  theme switched in the app between the two pictures, light then dark,
-  dark then light, and so on. `"theme": "dark"`: an app that draws one
-  theme (revelation), each screen taken once as both. `touch`: once the
-  walk is over, on each phone, the one real tap (XCUITest on the iPhone,
-  `adb input` on Android) and the app's ready signal after it, seconds
-  long.
+  the larger screens (`large`: the iPad, which turns on its side at every
+  stop inside the walk, Android's tablet, the Fold open and folded), the
+  same ids. The app is installed afresh on each device (and in each of the
+  Fold's postures) and opened with its list as a plan in its own
+  directory: it shows its first run (`welcome`), signs in through it
+  (`{server}` is this device's server's address), lands where it lands,
+  and reaches each shot after by its steps from where the last left it:
+  tabs, rows, toolbar buttons, a sheet's dismissal, a dialog's actions.
+  A step names an element by its id (ui/docs/shots.md, "In the App":
+  `tab:budget`, `budget.row:dining-out`, `shell.new-transaction`,
+  `budget.cancel-auto`): `{"tap": "<id>"}`, `{"type": "<text>"}` (into the
+  field tapped last), `{"press": "<id>", "item": "<item id>"}`, `{"await":
+  "<id>"}`. Each shot's `<id>.tree.txt` lists every id on its screen beside
+  what it says, and a step that finds nothing fails with that list
+  (`stuck.why.txt`). Each stop is taken in both themes (and on the iPad
+  both ways up), one switch at a time. `"theme": "dark"`: an app that draws
+  one theme (revelation), each screen taken once as both.
 
   Not reached by a tap, and so not taken on the phones: the Mac's and the
   browser's own (a row's context menu open, a date picker's popover, the
@@ -216,7 +211,7 @@ which nix builds at the commit (see below).
   the app's external files (`/sdcard/Android/data/<package>/files/shots`),
   opens it, waits until the app says the walk is `done` (or `failed`,
   why), pulls the pictures and its `walk.log` (each shot's step, switch and
-  picture times), then the touch; for an app driven from outside, signs
+  picture times); for an app driven from outside, signs
   in through Chrome, and does each shot's steps with `adb input`. The emulator reaches the server on
   the host's loopback as `10.0.2.2`. Each shot opens the app as the
   launcher does (`am start -W` of its launcher activity) and waits until
@@ -227,14 +222,15 @@ which nix builds at the commit (see below).
   night mode says it back and the launcher, which the change re-creates,
   is in front again.
 - **`apps-ios.sh`**: for a walk, each app installed afresh (the
-  simulator's keychain emptied) for each way the device is held, its plan
+  simulator's keychain emptied), its plan
   written into its data container (`simctl get_app_container`), opened
   with `-shots YES`, and waited for until it says it is over; its pictures
   and `walk.log` copied out. One command per device, its own everything:
   `PORT_OFFSET` (its servers' instances, `app-server.sh <app> <dir>
   <port>`), `RESULTS`, `PARTIAL` and `DRIVER`, so the iPhone and the iPad
-  can be taken at once. **`driver-ios.sh`** and the UI test in
-  **`drive-ios/`**, for the touch and for an app driven from outside: an
+  can be taken at once. The iPad's walk writes upright and on its side
+  apart (ipad-portrait/, ipad-landscape/). **`driver-ios.sh`** and the UI
+  test in **`drive-ios/`**, for an app driven from outside (harken): an
   XCUITest bundle of its own, built once for any
   simulator, which drives the installed apps by their bundle ids (the
   apps' projects are untouched). One run of it per device and theme takes

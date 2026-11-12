@@ -124,13 +124,30 @@ ArkUI's `ShotsWalk` (ui/kotlin/shots) take it, then the process ends.
   first run's page while it shows, else every runtime's view, each hosted
   one in its place, only what shows (a tab bar's selected tab, a pushed
   page while it is pushed, an inspector while it is open), and while a
-  sheet, a dialog or an alert is up only what is in it — by its label and
-  its role (`tab`, `button`, `field`, `row`, `item`, `text`), and sends
-  the message that element's action sends, through the same runtime's
-  `send` a finger's tap goes through. `tap` (a field tapped takes what is
-  typed next), `type`, `press` with its menu's `item`, `await`. A label
-  not there yet is looked for again once the screen changes, for 20 s at
-  most; then the walk fails with the tree of what was there.
+  sheet, a dialog or an alert is up only what is in it — and sends the
+  message that element's action sends, through the same runtime's `send`
+  a finger's tap goes through.
+- **A step names an element by its id**, never by what it says, so no
+  copy change, no count in a row's words and no other language moves it.
+  Ids are derived, not written (`shots::id_of`): a tab by its section's
+  tag (`tab:budget`; a child section by its parent and title,
+  `tab:accounts/checking`); a row by its title as a slug (`row:checking`,
+  `row:dining-out`; rows of one title by their place after the first,
+  `row:target~2`); anything else by the message it sends, its variant in
+  kebab case (`auto-assign`, `new-transaction`, `dismiss`; a field by what
+  its input sends, `typed`), with its words too when the message carries a
+  value (`toggle:bills`, `inspector:category-details`). Each but a tab's
+  has its screen's name before it (`budget.auto-assign`,
+  `accounts.row:checking`). Two elements of one id fail the step that
+  names it, naming both. `tap` (a field tapped takes what is typed next),
+  `type`, `press` with its menu's `item` id, `await`; `{"text":
+  "<label>"}` reaches an element by what it says, for one with nothing
+  else to name it by (no walk uses it).
+- **A step that finds nothing fails at once** at a ready screen (what it
+  names will not come), with the ids on the screen beside what each says.
+  While the screen is still on its way it is looked for again each time it
+  is ready anew: the first run's work off the shell's thread (a server
+  checked, a code traded, a session opened) keeps the host from idle.
 - **After each step the app waits for its own ready signal** at a newer
   generation (`Ready.untilReady`, `Ready.awaitReady`): its limit only
   guards.
@@ -140,13 +157,18 @@ ArkUI's `ShotsWalk` (ui/kotlin/shots) take it, then the process ends.
   dialog's dim drawn as the system dims it). The status bar is the
   system's and in neither. Each picture is `<id>.png` under its theme,
   with what a step can name beside it (`<id>.tree.txt`).
-- **Both themes in one walk.** At each stop the screen is drawn in the
-  theme the walk is in, the theme switched inside the app (every window's
-  `overrideUserInterfaceStyle`; Android 12's per-app night mode, which
-  makes the activity again and says a newer generation for it), the ready
-  signal waited for, and drawn again; the next stop starts in the theme
-  this one ended in. A dark picture byte for byte its light one fails,
-  unless the plan says the app draws one theme (`"theme": "dark"`).
+- **Both themes in one walk, and on the iPad both ways up.** At each stop
+  the screen is drawn as the walk stands, one thing switched inside the
+  app (the theme: every window's `overrideUserInterfaceStyle`, Android
+  12's per-app night mode, which makes the activity again and says a newer
+  generation for it; the iPad's way up: `requestGeometryUpdate`), the
+  ready signal waited for, and drawn again, until every one is taken; the
+  next stop starts as this one ended: light, dark, dark on its side, light
+  on its side; then light on its side, dark on its side, dark, light. A
+  picture byte for byte another of the stop fails, unless the plan says
+  the app draws one theme (`"theme": "dark"`). Android's tablet is taken
+  in landscape alone, as before; the Fold's postures are the emulator's,
+  each a walk of its own.
 - **The sign-in.** The walk goes through the first run as a new person
   does. The system's browser sheet is not the app's and no step reaches
   it, so a walk's launch reads the dev server's answer to the sign-in
@@ -155,8 +177,14 @@ ArkUI's `ShotsWalk` (ui/kotlin/shots) take it, then the process ends.
   `<scheme>://auth`: a real server answers with a page for a person, and
   then the sheet opens as ever. Only a simulator's build (`target_abi =
   "sim"`) or Android's on an emulator can.
-- **Times.** Each shot's steps, switch and pictures are logged
-  (`shots/out/walk.log`, `ArkShots` in Android's log, `Shots:` on iOS).
+- **Times.** Each shot's steps (each its Rust call and its ready wait),
+  switches and pictures are logged (`shots/out/walk.log`, `ArkShots` in
+  Android's log, `Shots:` on iOS).
+- **Ids outside the walk.** The same ids are not yet written into each
+  toolkit's accessibility identifiers (SwiftUI's
+  `.accessibilityIdentifier`, Compose's `testTag`, the browser's
+  `data-ark-id`): the walk reads them from the views, and nothing outside
+  the app needs them yet.
 
 An app whose screens are its own rather than ArkUI's views (harken's)
 is still driven from outside, as below.
