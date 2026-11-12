@@ -1,9 +1,18 @@
 {
-  "_": "revelation's screenshots (.github/screens/apps.md; which phones it is on is flake.nix's list, `publish`): no server; the app as it opens.",
-  "shots": [
-    {
-      "id": "open",
-      "steps": []
-    }
-  ]
+  "_": "revelation's screenshots (.github/screens/apps.md; which phones it is on is flake.nix's list, `publish`): no server; the app as it opens, walked inside the app (ui/docs/shots.md, \"In the App\") on the phone and on the larger screens. Its page is dark whatever the system's theme (`theme`), so each screen is taken once and is both its light and its dark.",
+  "walk": {
+    "theme": "dark",
+    "phone": [
+      {
+        "id": "open",
+        "steps": []
+      }
+    ],
+    "large": [
+      {
+        "id": "open",
+        "steps": []
+      }
+    ]
+  }
 }

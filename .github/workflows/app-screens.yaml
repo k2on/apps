@@ -468,11 +468,9 @@ jobs:
       fail-fast: false
       matrix:
         app: ${{ fromJSON(needs.which.outputs.android-json) }}
-        # Each theme on an emulator of its own: a light run and a dark run
-        # at once rather than one after the other (harken's was eight
-        # minutes of its ten). Their captures meet in the same
-        # <app>/android/ (merge-multiple), whole when both are there.
-        theme: [light, dark]
+        # Both themes in the one walk through the app: each stop taken in the
+        # theme the app is in, the theme switched in the app, and taken again
+        # (app-android.sh), so a job per app and device, not per theme too.
         # The phone (a Pixel 7), a Pixel Tablet in landscape, and a Pixel
         # Fold open and then folded (apps-android.sh): the same APK, driver
         # and shots on each, each its own job. The tablet and the Fold were
@@ -481,18 +479,17 @@ jobs:
         # (harken's 16.7 minutes in app-screens 42728322097, the Fold's 10.3
         # after the tablet's 5.1), and those are a minute or two each.
         device: [phone, tablet, fold]
-    name: android (${{ matrix.app }}, ${{ matrix.theme }}, ${{ matrix.device }})
+    name: android (${{ matrix.app }}, ${{ matrix.device }})
     runs-on: ubuntu-latest
     # One of each app's at a time on a branch: a newer commit's (or the
     # same commit's again, from another event: on main both a script
     # change and build) takes over from the one going.
     concurrency:
-      group: app-screens-android-${{ github.event.workflow_run.head_branch || github.ref_name }}-${{ matrix.app }}-${{ matrix.theme }}-${{ matrix.device }}
+      group: app-screens-android-${{ github.event.workflow_run.head_branch || github.ref_name }}-${{ matrix.app }}-${{ matrix.device }}
       cancel-in-progress: true
     timeout-minutes: 90
     env:
       APPS: ${{ matrix.app }}
-      THEMES: ${{ matrix.theme }}
       # A run still going: its APK awaited (await-apk.sh), not downloaded.
       EARLY: ${{ github.event.action == 'requested' }}
       GH_TOKEN: ${{ github.token }}
@@ -645,14 +642,14 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: android-steps-${{ matrix.app }}-${{ matrix.theme }}-${{ matrix.device }}
+          name: android-steps-${{ matrix.app }}-${{ matrix.device }}
           path: ${{ runner.temp }}/steps
           if-no-files-found: ignore
 
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: app-screens-android-${{ matrix.app }}-${{ matrix.theme }}-${{ matrix.device }}
+          name: app-screens-android-${{ matrix.app }}-${{ matrix.device }}
           path: ${{ runner.temp }}/out
           if-no-files-found: ignore
 

@@ -2,8 +2,11 @@
 
 Each app's screens, taken from the builds that were published (the APK in
 the F-Droid repository, the commit sent to TestFlight), signed in to the
-app's own server with sample data, and driven from outside as a person
-would: no code in any app knows it is being photographed. The same system
+app's own server with sample data. An app built on ArkUI's runtime walks
+its shots on the phones and tablets itself, from a new install, and draws
+its own pictures (shots.json's `walk`, ui/docs/shots.md "In the App"); the
+others are driven from outside as a person would. No code in any app
+knows it is being photographed: what does it is ArkUI's and ark-app's. The same system
 the docs' arkui shots use (`screens.yaml`): a real Android emulator and a
 real iOS simulator, light and dark, onto the `screens` branch with a
 manifest. Beside them a third "phone", `desktop`: the app's iced window,
@@ -28,90 +31,83 @@ neither driver is told it: Android reads it from the APK, iOS from the app.
 
 All of it is in `<app>/demo/`:
 
-- **`shots.json`**: the app's server, and its shots.
+- **`shots.json`'s `walk`**: the app's server, and the walk its phones
+  and tablets take inside the app (money's, revelation's):
 
   ```json
   {
     "server": { "port": 8788, "user": "alex", "name": "Alex" },
-    "shots": [
-      { "id": "budget", "steps": [{ "tap": "Budget" }] },
-      { "id": "insights", "steps": [{ "tap": "Insights" }, { "wait": 2 }] }
-    ]
+    "walk": {
+      "touch": { "tap": "Accounts", "role": "tab" },
+      "phone": [
+        { "id": "welcome", "steps": [] },
+        { "id": "budget", "steps": [{ "tap": "Get Started" }, { "tap": "Server Address", "role": "field" },
+                                    { "type": "{server}" }, { "tap": "Continue", "role": "button" }, { "await": "Budget" }] },
+        { "id": "category", "steps": [{ "tap": "🍜 Dining Out", "role": "row" }] }
+      ],
+      "large": [ … ]
+    }
   }
   ```
 
-  `server` (optional): the port its `server.sh`
-  listens on, the id the server's dev sign-in is given (`user`, lowercase:
-  the login and what entries carry), and the name that person goes by
-  (`name`, `ARK_DEV_NAME`: what Settings, the account button and "Entered
-  by" show), and their picture. **The app is
+  One list for both phones (`phone`: the iPhone, Android's phone), one for
+  the larger screens (`large`: the iPad either way up, Android's tablet,
+  the Fold open and folded), the same ids. The app is installed afresh on
+  each device (and each way the iPad is held, and each of the Fold's
+  postures) and opened with its list as a plan in its own directory: it
+  shows its first run (`welcome`), signs in through it (`{server}` is this
+  device's server's address), lands where it lands, and reaches each shot
+  after by its steps from where the last left it: tabs, rows, toolbar
+  buttons, a sheet's Cancel, a dialog's actions. A step is `{"tap":
+  "<label>"}` (`a|b` either; `"role"`: `tab`, `button`, `field`, `row`,
+  `item`, `text`; `"where": "bottom"`: the last of several), `{"type":
+  "<text>"}` (into the field tapped last), `{"press": "<label>", "item":
+  "<title>"}` (an item of what holding it offers), `{"await": "<label>"}`.
+  Labels are what the ArkUI views say: each shot's `<id>.tree.txt` lists
+  what its screen had, and a step that finds nothing in 20 s fails with
+  that list (`stuck.why.txt`). Each stop is taken in both themes, the
+  theme switched in the app between the two pictures, light then dark,
+  dark then light, and so on. `"theme": "dark"`: an app that draws one
+  theme (revelation), each screen taken once as both. `touch`: once the
+  walk is over, on each phone, the one real tap (XCUITest on the iPhone,
+  `adb input` on Android) and the app's ready signal after it, seconds
+  long.
+
+  Not reached by a tap, and so not taken on the phones: the Mac's and the
+  browser's own (a row's context menu open, a date picker's popover, the
+  command box), which only a pointer or keys open; and nothing yet of
+  Settings past its first pane (Settings is put up by the platform's own
+  sheet, which the views do not hold, so the walk ends there).
+
+- **`shots.json`'s `shots`**: an app whose screens are its own, not
+  ArkUI's views (harken's), and so driven from outside. **The app is
   opened once for each device and theme, and its shots are taken in that
   one launch, in order**: each shot's `steps` done from where the last shot
   left the app, and the screen taken. `"fresh": true` on a shot opens the
-  app again for it, for one that what came before would get in the way of
-  (harken's `player`, which plays from Home's Recently added and needs the
-  mini player there from the start; the desktop's `keys` after `search`,
-  which leaves the command box open); a shot whose steps change what a
-  later one shows goes after it. So the shots are written in the order
-  they are taken, and a tab's tap is a tab switched in the running app:
-  `{"tap": "<label>"}` taps the element whose accessibility label (what it
-  says) or identifier is `<label>` (an iOS `accessibilityIdentifier`, an
-  Android resource id or exposed Compose `testTag`), and `"role"`
-  (`tab`, `button`, `field`, `text`) says which kind when several share a
-  label (a tab and a heading both saying "Transactions"); `{"press": "<label>"}` holds it instead (a long press: a row's
-  context menu); `{"type":
-  "<text>"}` types into what has focus; `{"wait": <seconds>}` waits.
-  `"where": "bottom"` on a tap takes the lowest on the screen of all that
-  match, and `"unless": "<label>"` skips a step when that label is on the
-  screen already; `{"await": "<label>"}` waits (up to 20 s) until it is (`a|b`: either).
-  `{"relaunch": true}` stops and opens the app again.
-  `"hold": true` on a tap presses it long, as a finger opens a context
-  menu (iOS `press(forDuration:)`, Android a still swipe of a second);
-  the menu's items are then tapped by what they say, as any other.
+  app again for it (harken's `player`, which plays from Home's Recently
+  added and needs the mini player there from the start). A step's
+  `{"tap": "<label>"}` taps the element whose accessibility label or
+  identifier is `<label>` (an iOS `accessibilityIdentifier`, an Android
+  resource id or exposed Compose `testTag`), `"role"` as above;
+  `{"press": "<label>"}` holds it; `{"type": "<text>"}` types into what has
+  focus; `{"wait": <seconds>}` waits; `"where": "bottom"`, `"unless":
+  "<label>"` (skip when that label is on the screen already), `{"await":
+  "<label>"}` (up to 20 s, `a|b` either), `{"relaunch": true}`, and
+  `"hold": true` on a tap (a long press). Each shot is saved with the tree
+  of the screen it was taken from (`<id>.tree.txt`: on Android `ui.py
+  --tree`'s outline of uiautomator's dump; on iOS XCUITest's description);
+  a step that finds nothing leaves `stuck.png` and `stuck.tree.txt`.
 
-  **A screen opened by its launch arguments** rather than by steps: a
-  shot's `"args"` (`["-screen", "category:dining", "-menu", "sort"]`)
-  are given to the app when it is opened for that shot (signing in opens
-  it with none). An app whose shell takes them by a link while it runs says
-  so, `"links": true` (money's): then a shot's `args` are a **launch link**
-  in the running app, `<scheme>://?screen=category%3Adining&inspector=1`,
-  the browser's spelling of them, which the shell takes as a launch — what
-  it showed put back first (its sheets, pages, inspector, search, Settings),
-  then that screen — and the app is opened again only for a `fresh` shot.
-  On the iPhone and the iPad they are the
-  process's launch arguments, which an app reads from UserDefaults'
-  argument domain (`UserDefaults.standard.string(forKey: "screen")`); on
-  Android each `-<key> <value>` pair is a string extra of the launch
-  intent (`intent.getStringExtra("screen")`). An app that reads none
-  opens as it always does, so a shot can say both its args and the steps
-  that reach the same screen. What a shot opens that animates in (a
-  dropdown, a submenu, a popover, a sheet) is taken once it has settled:
-  the iPhone's every shot, once the screen is the same three times half a
-  second apart; Android's, for a shot with a `hold` step or
-  `"settle": true`, once it is the same twice running (else, as ever,
-  three seconds after its last step). harken's `player`
-  shot: the lowest "Für Elise" (the mini player, if one is there; else
-  Recently added's, which plays it), until something plays ("Pause") or
-  the player is open ("Close the player"); then the app opened again, so
-  that the mini player is there from the start (on Android one that has
-  only just come does not open on a tap), the mini player tapped, and the
-  shot taken once the player is open.
+  `server` (optional, either kind): the port its `server.sh` listens on,
+  the id the server's dev sign-in is given (`user`, lowercase: the login
+  and what entries carry), and the name that person goes by (`name`,
+  `ARK_DEV_NAME`: what Settings, the account button and "Entered by"
+  show), and their picture.
 
-  **Write steps from the accessibility tree, not by guessing.** Every shot
-  is saved with the tree of the screen it was taken from, beside its
-  picture: `<id>.tree.txt` on the `screens` branch (`apps/<app>/<phone>/
-  <theme>/`) and in the run's artifacts. On Android it is `ui.py --tree`'s
-  outline of uiautomator's dump (what each node says, its `#id`, its
-  `[role]`, whether it can be pressed); on iOS, XCUITest's own
-  description of the app's hierarchy. To add a shot, open the tree of the
-  screen it starts from and name what to tap as it is written there. A
-  step that finds nothing leaves `stuck.png` and `stuck.tree.txt`: what
-  was on the screen instead.
-
-- **`shots.json`'s `screens`** (optional): screens opened by their launch
-  arguments alone, no steps, on the devices each is `on` (the phones'
-  directories: `ios`, `ipad-portrait`, `ipad-landscape`, `mac`,
-  `android`, `android-tablet`, `fold-unfolded`, `fold-folded`):
+- **`shots.json`'s `screens`** (optional): the Mac's and the browser's
+  screens, opened by their launch arguments alone, no steps, on the sizes
+  each is `on` (`mac`, and the browser's `ios`, `ipad-portrait`,
+  `ipad-landscape`):
 
   ```json
   "launch": { "mac": ["-demo", "2026-11-18", "-window", "1440x900"] },
@@ -205,15 +201,23 @@ which nix builds at the commit (see below).
 - **`app-server.sh`**: runs an app's `server.sh` on the port its
   `shots.json` names, then waits until `/healthz` answers and the log's
   head stands still (a scanner done adding).
-- **Signing in**: every app here signs in through arkui's onboarding, so
-  the drivers do it the same way for all of them. They type the server's
+- **Signing in**: a walk signs in through arkui's first run by its own
+  steps; the browser's sign-in sheet is the system's, so a walk's launch
+  takes a dev server's answer to it straight back without the sheet
+  (ui/docs/shots.md, "In the App"; only a simulator's or an emulator's
+  walk can). An app driven from outside signs in through arkui's
+  onboarding the same way for all of them. They type the server's
   address into "Server address", tap Continue (and "Sign in" if it is
   there), give the server's dev sign-in page the name, and allow a
   permission the app asks for. The login is kept, so each shot after opens
   signed in.
 - **`app-android.sh`** (with `ui.py`, which finds a label's place in
-  uiautomator's dump): installs the APK, signs in through Chrome, and does
-  each shot's steps with `adb input`. The emulator reaches the server on
+  uiautomator's dump): installs the APK; for a walk, pushes its plan into
+  the app's external files (`/sdcard/Android/data/<package>/files/shots`),
+  opens it, waits until the app says the walk is `done` (or `failed`,
+  why), pulls the pictures and its `walk.log` (each shot's step, switch and
+  picture times), then the touch; for an app driven from outside, signs
+  in through Chrome, and does each shot's steps with `adb input`. The emulator reaches the server on
   the host's loopback as `10.0.2.2`. Each shot opens the app as the
   launcher does (`am start -W` of its launcher activity) and waits until
   its own window has the focus (`dumpsys window`); one that never comes is
@@ -222,8 +226,16 @@ which nix builds at the commit (see below).
   theme is set with the app stopped, and the app opened only once the
   night mode says it back and the launcher, which the change re-creates,
   is in front again.
-- **`apps-ios.sh`**, **`driver-ios.sh`** and the UI test in
-  **`drive-ios/`**: an XCUITest bundle of its own, built once for any
+- **`apps-ios.sh`**: for a walk, each app installed afresh (the
+  simulator's keychain emptied) for each way the device is held, its plan
+  written into its data container (`simctl get_app_container`), opened
+  with `-shots YES`, and waited for until it says it is over; its pictures
+  and `walk.log` copied out. One command per device, its own everything:
+  `PORT_OFFSET` (its servers' instances, `app-server.sh <app> <dir>
+  <port>`), `RESULTS`, `PARTIAL` and `DRIVER`, so the iPhone and the iPad
+  can be taken at once. **`driver-ios.sh`** and the UI test in
+  **`drive-ios/`**, for the touch and for an app driven from outside: an
+  XCUITest bundle of its own, built once for any
   simulator, which drives the installed apps by their bundle ids (the
   apps' projects are untouched). One run of it per device and theme takes
   every app, from a plan apps-ios.sh writes, the simulator's appearance
@@ -379,15 +391,17 @@ build, the same driver, the same shots.json, light and dark.
 | `ipad-landscape/` | the same iPad, on its side | the same |
 | `mac/` | the runner's own screen | an app whose commit has `<app>-macos` |
 
-- **Android's tablet and Fold**: each app and theme is three Android jobs
-  at once, all from the same APK: the phone's (the Pixel 7, as before),
+- **Android's tablet and Fold**: each app is three Android jobs at once
+  (both themes in each: a walk switches them itself, and the driver takes
+  them one after the other), all from the same APK: the phone's (the Pixel 7, as before),
   the tablet's and the Fold's. The tablet's boots a Pixel Tablet, held in
   landscape (rotation locked, its natural way up), and takes every shot;
   the Fold's boots the Fold (the Pixel Fold's
   profile where the runner's avdmanager lists it; GitHub's has had only
   the emulator's `7.6in Foldable`, and device.json says which), opened
-  (`adb emu unfold`), signed in and every shot taken, then folded and
-  every shot taken again, the login kept. Folded is told three ways, until
+  (`adb emu unfold`), every shot taken, then folded and every shot taken
+  again (a walk from a new install in each; an app driven from outside
+  keeps its login). Folded is told three ways, until
   the screen changes size: the emulator's hinge (`adb emu fold`), Android's
   device state (`cmd device_state`, CLOSED, which apps read the posture
   from), and, as GitHub's headless `7.6in Foldable` takes both and still

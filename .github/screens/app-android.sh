@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # An app's screenshots from a booted emulator (apps.md), the same for every
 # app: what is the app's is its <app>/demo/shots.json. The APK installed
-# as it is; signed in, if the app has a server, as a person signs in through
+# as it is. An app whose shots.json has a `walk` walks it inside itself
+# (`walk` below, ui/docs/shots.md "In the App"). Any other is driven from
+# outside: signed in, if the app has a server, as a person signs in through
 # arkui's onboarding — the address typed, Continue, Sign in, the server's
 # dev sign-in page in the browser given the name shots.json says, a
 # permission asked allowed; then, in light and in dark, each shot: the app
@@ -18,11 +20,7 @@
 # (after a few seconds), and `a|b` for whichever of two is there; {"await": "<label>"} waits for that label to be there (`a|b`, either);
 # {"relaunch": true} stops and opens the app again; {"type": "<text>"}; or {"wait": <seconds>}.
 # "hold": true on a tap presses it long (a context menu, as a finger opens
-# one). A shot's "args", its launch arguments as the iPhone's are given
-# (`["-screen", "budget"]`), are the intent's string extras here, each
-# `-<key> <value>` pair `--es <key> <value>` (the app reads
-# `intent.getStringExtra("screen")`), every time the app is opened for that
-# shot; signing in opens it with none. Writes <out>/device.json,
+# one). Writes <out>/device.json,
 # <out>/<theme>/<id>.png, and beside each the tree it was taken from,
 # <id>.tree.txt (ui.py --tree), which is what a step can name.
 #
@@ -134,7 +132,7 @@ step() {
   skip=$(jq -r '.unless // ""' <<< "$s")
   if [ -n "$skip" ] && says "$skip"; then return 0; fi
   if jq -e 'has("relaunch")' <<< "$s" > /dev/null; then
-    open_app "${at_args:-}"
+    open_app
   elif jq -e 'has("await")' <<< "$s" > /dev/null; then
     local label one
     label=$(jq -r '.await' <<< "$s")
@@ -205,18 +203,14 @@ why() {
 # activity in a task of its own: `am start -W`, which returns once it has
 # drawn), then waited for until its own window has the focus; not a fixed
 # four seconds after `monkey`, which says nothing when a launch is lost.
-# Given launch arguments (a shot of shots.json's `screens`), they go with
-# it as the intent's string array `ark.args` (ark_app::shell::Launch), and
-# each `-key value` pair as a string extra too (`extras`, set per shot).
-extras=()
 open_app() {
   local said extra=()
-  # `-shots 1` first: no motion, and the ready signal (ArkUI's Shots.kt).
-  extra=(--esa ark.args "-shots,1${1:+,$1}")
+  # `-shots 1`: no motion, and the ready signal (ArkUI's Shots.kt).
+  extra=(--esa ark.args "-shots,1")
   adb shell am force-stop "$pkg"
   forget
   adb shell am broadcast -a android.intent.action.CLOSE_SYSTEM_DIALOGS >/dev/null
-  said=$(adb shell am start -W -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -f 0x10200000 -n "$activity" ${extra[@]+"${extra[@]}"} ${extras[@]+"${extras[@]}"} 2>&1 | tr -d '\r')
+  said=$(adb shell am start -W -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -f 0x10200000 -n "$activity" ${extra[@]+"${extra[@]}"} 2>&1 | tr -d '\r')
   if ! front "$pkg" 30; then
     echo "::error::$app: not in front 30 seconds after it was opened (am start: $(grep -E '^(Status|LaunchState|Error|Warning)' <<< "$said" | tr '\n' ' '))"
     why > "$out/stuck.why.txt" 2>&1 || true
@@ -224,19 +218,6 @@ open_app() {
     return 1
   fi
   # What it shows first (a list, a cover), drawn: its ready signal.
-  ready
-}
-
-# How a shot's `route` reaches the app: the one place that says it, so a
-# router's own spelling (a whole URL) is a change here alone. A link to the
-# running app (VIEW, its package), no relaunch, then its ready signal.
-scheme=$(jq -r '.scheme // empty' "$shots")
-# Whether the app opens a screen's launch arguments by a link as it runs.
-links=$(jq -r '.links == true' "$shots")
-open_route() {
-  local url=$1
-  case $url in *://*) ;; *) url="${scheme:-$app}://$url" ;; esac
-  adb shell am start -a android.intent.action.VIEW -d "'$url'" "$pkg" > /dev/null
   ready
 }
 
@@ -331,6 +312,79 @@ demo status -e volume hide -e bluetooth hide -e location hide -e alarm hide -e s
 # The app's ready signal, read from here on.
 listen
 
+# An app whose shots.json has a `walk` walks it inside itself (ui/docs/
+# shots.md, "In the App"): the list for this device (`phone` on the phone,
+# `large` on the tablet and the Fold) as a plan in the app's own files
+# (the server's address for `{server}`), the app opened as a new app is,
+# with `-shots 1`; it signs in, taps its way from shot to shot, draws each
+# screen in both themes, writes them beside the plan and ends its process.
+# Then the pictures pulled, and one real tap on the screen (`walk.touch`:
+# `adb input` on a tab, the app's ready signal after it), seconds long.
+walk() {
+  local list=large dir="/sdcard/Android/data/$pkg/files/shots" t=$SECONDS pid=""
+  [ "$(basename "$out")" = android ] && list=phone
+  jq --arg s "$server" --arg l "$list" '{theme: .walk.theme, shots: .walk[$l]} | with_entries(select(.value != null))
+    | walk(if type == "string" then gsub("\\{server\\}"; $s) else . end)' "$shots" > "$out/plan.json"
+  adb shell mkdir -p "$dir"
+  adb shell rm -rf "$dir/out"
+  adb push "$out/plan.json" "$dir/plan.json" > /dev/null
+  rm "$out/plan.json"
+  # What the app would ask a person for, said yes to already: no system
+  # dialog over the walk.
+  adb shell pm grant "$pkg" android.permission.POST_NOTIFICATIONS 2> /dev/null || true
+  adb logcat -c
+  theme_set light
+  open_app || { why > "$out/stuck.why.txt" 2>&1 || true; return 1; }
+  # Until the walk says it is over (or its process ends without saying).
+  local until=$((SECONDS + 1200))
+  while [ "$SECONDS" -lt "$until" ]; do
+    adb shell "[ -f $dir/out/done ] || [ -f $dir/out/failed ]" && break
+    pid=$(adb shell pidof "$pkg" 2> /dev/null | tr -d '\r' || true)
+    [ -n "$pid" ] || { sleep 1; adb shell "[ -f $dir/out/done ] || [ -f $dir/out/failed ]" && break; echo "::error::$app: the app ended with its walk unsaid"; break; }
+    sleep 1
+  done
+  adb logcat -d -s ArkShots:I | tr -d '\r' | sed 's/^/  /' || true
+  rm -rf "$out/pulled"
+  adb pull "$dir/out" "$out/pulled" > /dev/null || true
+  adb shell rm -f "$dir/plan.json"
+  echo "  the walk took $((SECONDS - t))s"
+  if [ ! -f "$out/pulled/done" ]; then
+    echo "::error::$app $(basename "$out"): the walk failed: $(cat "$out/pulled/failed" 2> /dev/null || echo 'it said nothing')"
+    { cat "$out/pulled/failed" 2> /dev/null; why; } > "$out/stuck.why.txt" 2>&1 || true
+    adb logcat -d -b crash 2>/dev/null | tail -n 80 >> "$out/stuck.why.txt" || true
+    for theme in light dark; do [ -d "$out/pulled/$theme" ] && mkdir -p "$out/$theme" && cp "$out/pulled/$theme"/* "$out/$theme/"; done
+    rm -rf "$out/pulled"
+    return 1
+  fi
+  for theme in light dark; do
+    mkdir -p "$out/$theme"
+    cp "$out/pulled/$theme"/* "$out/$theme/"
+  done
+  mkdir -p "${RESULTS:-$out/..}"
+  cp "$out/pulled/walk.log" "${RESULTS:-$out/..}/walk-$app-$(basename "$out").log" 2> /dev/null || true
+  rm -rf "$out/pulled"
+  # One real touch: the app opened again (the plan gone), a tab tapped where
+  # the screen shows it, and the app's ready signal after.
+  local touch
+  touch=$(jq -c '.walk.touch // empty' "$shots")
+  if [ -n "$touch" ] && [ "$list" = phone ]; then
+    t=$SECONDS
+    open_app || return 1
+    SHOTS=1 tap "$(jq -r .tap <<< "$touch")" 5 "$(jq -r '.role // ""' <<< "$touch")" || { echo "::error::$app: the touch found nothing"; return 1; }
+    ready || return 1
+    echo "  the touch: $(jq -r .tap <<< "$touch") tapped, ready again ($((SECONDS - t))s)"
+    adb shell am force-stop "$pkg"
+  fi
+}
+if jq -e '.walk' "$shots" > /dev/null; then
+  walk || exit 1
+  bash "$here/distinct.sh" "$out" || exit 1
+  first=$(find "$out" -mindepth 2 -maxdepth 2 -name '*.png' | sort | head -1)
+  read -r w h < <(python3 -I -c 'import struct, sys; d = open(sys.argv[1], "rb").read(24); print(*struct.unpack(">II", d[16:24]))' "$first")
+  printf '{"name":"%s","width":%s,"height":%s,"corner":%s,"cutout":"%s"}\n' "$name" "$w" "$h" "${CORNER:-110}" "${CUTOUT:-hole}" > "$out/device.json"
+  exit 0
+fi
+
 # Signed in once, through arkui's onboarding; the login is kept for every
 # shot after. Its waits are the browser's and the system's, which are not
 # the app's to say; no shot is taken from them. The address typed (cleared
@@ -414,7 +468,6 @@ for theme in ${THEMES:-light dark}; do
   theme_set "$theme"
   # Stopped by the theme: the next shot launches it.
   running=
-  at_args=
   mkdir -p "$out/$theme"
   while read -r shot <&3; do
     id=$(jq -r .id <<< "$shot")
@@ -423,35 +476,17 @@ for theme in ${THEMES:-light dark}; do
     # shots): where a shot went other than it was written to.
     steps="${RESULTS:-$out/../steps}/$app/$(basename "$out")/$theme/$id"
     mkdir -p "$steps"
-    # Its launch arguments: `-key value` pairs, as string extras.
-    extras=()
-    while read -r k v; do
-      [ -n "$k" ] && extras+=(--es "'${k#-}'" "'$v'")
-    done < <(jq -r '(.args // []) as $a | range(0; $a | length; 2) as $i | "\($a[$i]) \($a[$i + 1] // "")"' <<< "$shot")
-    route=$(jq -r '.route // empty' <<< "$shot")
-    args=$(jq -r '.args // [] | join(",")' <<< "$shot")
     began=$(date +%s.%N)
     # In the app as it runs, one shot after another: launched afresh only
-    # for the theme's first shot, one that says it needs a clean start
-    # (`fresh`), or one whose launch arguments the app takes only at
-    # launch; a screen's arguments otherwise as a launch link (`links`:
-    # the app's shell puts back what it showed, then opens that screen),
-    # its route as a link, or its steps from where the last left it.
-    if [ -z "${running:-}" ] || jq -e '.fresh == true' <<< "$shot" > /dev/null ||
-      { [ -n "$args" ] && [ "$links" != true ] && [ "$args" != "$at_args" ]; }; then
-      open_app "$args" || { cp "$out/stuck.why.txt" "$steps/0-failed.txt" 2>/dev/null || true; exit 1; }
+    # for the theme's first shot, or one that says it needs a clean start
+    # (`fresh`); else its steps from where the last left it.
+    if [ -z "${running:-}" ] || jq -e '.fresh == true' <<< "$shot" > /dev/null; then
+      open_app || { cp "$out/stuck.why.txt" "$steps/0-failed.txt" 2>/dev/null || true; exit 1; }
       running=1
-      at_args=$args
       how=launched
-    elif [ -n "$args" ]; then
-      open_route "$(jq -r '.args as $a | [range(0; $a | length; 2) as $i | "\($a[$i] | sub("^-+"; ""))=\($a[$i + 1] // "" | @uri)"] | "?" + join("&")' <<< "$shot")" || exit 1
-      at_args=$args
-      how=linked
     else
       how=continued
     fi
-    # Where the router can take it: in the app as it runs.
-    [ -z "$route" ] || open_route "$route" || exit 1
     n=0
     # The steps on a descriptor of their own: `adb shell` reads standard
     # input, and on it would take every step after the first (a shot of
@@ -481,7 +516,7 @@ for theme in ${THEMES:-light dark}; do
       exit 1
     fi
     echo "  $id: $how, $(( $(jq -r '.steps // [] | length' <<< "$shot") )) steps, $(awk -v a="$began" -v b="$(date +%s.%N)" 'BEGIN { printf "%.1f", b - a }')s"
-  done 3< <(jq -c --arg k "$(basename "$out")" '.shots[], (.screens // [] | .[] | select((.on // []) | index($k)))' "$shots")
+  done 3< <(jq -c '.shots[]' "$shots")
 done
 
 # Each shot its own screen: none the same picture as another.

@@ -107,19 +107,70 @@ run to the next). Two runs are held to each other by
   step taps a field to type in it.
 - Where a list is scrolled: where a shot's steps put it, or its top.
 
+## In the App
+
+On the phones and the tablets an app built on ArkUI's runtime (money;
+revelation, which takes no steps) walks its shots itself and photographs
+itself: nothing outside it looks at the screen, finds a label or touches
+it. A launch with `-shots` that finds a walk's plan in the app's own
+directory — `Application Support/shots/plan.json` on an iOS simulator,
+the app's external files' `shots/plan.json` on an Android emulator,
+which only the app and the machine's own tools write — is a **walk**
+(`Launch.walk`): ArkApp's `ShotsWalk` (ui/swift/Sources/ArkApp) and
+ArkUI's `ShotsWalk` (ui/kotlin/shots) take it, then the process ends.
+
+- **The steps are Rust's** (`ark_app::shots`, `ArkHost.shots_step`): a
+  step reaches what it names in the ArkUI views on the screen now — the
+  first run's page while it shows, else every runtime's view, each hosted
+  one in its place, only what shows (a tab bar's selected tab, a pushed
+  page while it is pushed, an inspector while it is open), and while a
+  sheet, a dialog or an alert is up only what is in it — by its label and
+  its role (`tab`, `button`, `field`, `row`, `item`, `text`), and sends
+  the message that element's action sends, through the same runtime's
+  `send` a finger's tap goes through. `tap` (a field tapped takes what is
+  typed next), `type`, `press` with its menu's `item`, `await`. A label
+  not there yet is looked for again once the screen changes, for 20 s at
+  most; then the walk fails with the tree of what was there.
+- **After each step the app waits for its own ready signal** at a newer
+  generation (`Ready.untilReady`, `Ready.awaitReady`): its limit only
+  guards.
+- **Then it draws itself**: its own windows at the screen's scale (iOS:
+  every window of its scenes by `drawHierarchy`, a sheet, a menu or a
+  popover with them; Android: every window of the process by PixelCopy, a
+  dialog's dim drawn as the system dims it). The status bar is the
+  system's and in neither. Each picture is `<id>.png` under its theme,
+  with what a step can name beside it (`<id>.tree.txt`).
+- **Both themes in one walk.** At each stop the screen is drawn in the
+  theme the walk is in, the theme switched inside the app (every window's
+  `overrideUserInterfaceStyle`; Android 12's per-app night mode, which
+  makes the activity again and says a newer generation for it), the ready
+  signal waited for, and drawn again; the next stop starts in the theme
+  this one ended in. A dark picture byte for byte its light one fails,
+  unless the plan says the app draws one theme (`"theme": "dark"`).
+- **The sign-in.** The walk goes through the first run as a new person
+  does. The system's browser sheet is not the app's and no step reaches
+  it, so a walk's launch reads the dev server's answer to the sign-in
+  itself (`ark_auth::client::straight_back`, as the desktop does) and
+  takes the code only when it comes straight back to the app's own
+  `<scheme>://auth`: a real server answers with a page for a person, and
+  then the sheet opens as ever. Only a simulator's build (`target_abi =
+  "sim"`) or Android's on an emulator can.
+- **Times.** Each shot's steps, switch and pictures are logged
+  (`shots/out/walk.log`, `ArkShots` in Android's log, `Shots:` on iOS).
+
+An app whose screens are its own rather than ArkUI's views (harken's)
+is still driven from outside, as below.
+
 ## Navigation
 
-Every driver opens the app once for each device and theme and walks its
-shots in order in that one launch (`.github/screens/apps.md`). A shot is
-reached in the running app: by its launch arguments as a **launch link**
-(`<scheme>://?screen=…&inspector=1`, the browser's spelling of them, read by
-`Navigator.launchArgs` / `Navigator.launchArgsOf`), which an app's shell
-takes as a launch — everything it showed put back where a launch leaves it
-(ark_app's `Launch` puts back the shell's own state; the platform puts away
-its sheets and pages), then that screen; by its `route` as a link
-(`<scheme>://<route>`); or by its steps from where the last shot left it.
-Only a shot marked `fresh`, or one whose launch-time arguments change, has
-the app launched again. In the browser the same is the address moved in
+A walk (above) reaches every shot by its steps from where the last left
+it, from a new install. A driver from outside opens the app once for each
+device and theme and walks its shots in order in that one launch
+(`.github/screens/apps.md`), each by its steps; only a shot marked
+`fresh` has the app launched again. The Mac's and the browser's screens are
+each opened by its launch arguments (the browser's address): read by
+`Navigator.launchArgs` / `Navigator.launchArgsOf`, taken by an app's
+shell as a launch. In the browser the same is the address moved in
 place (`history.pushState` and `popstate`): arkui-web puts the app back
 (`WebApp::rewind`) and its own menus, popovers, command box and focus with
 it, then arrives at the new address. Taps remain for what only a finger

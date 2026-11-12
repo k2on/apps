@@ -5,14 +5,18 @@
 # answers /healthz, and until its log's head has stood still for five
 # seconds (a scanner done adding). Nothing here is any one app's.
 #
-#   app-server.sh <app> <dir>
+#   app-server.sh <app> <dir> [port]
+#
+# `port`: where it listens, when not the one shots.json names: a second
+# instance of the same server, for another device taken at once (each its
+# own <dir>, its own state: harken's playback is held per account).
 #
 # The server's pid is left in <dir>/pid and its log in <dir>/server.log,
 # by the app's script. Run from the repository's root.
 set -euo pipefail
 app=$1
 dir=$2
-port=$(jq -r '.server.port' "$app/demo/shots.json")
+port=${3:-$(jq -r '.server.port' "$app/demo/shots.json")}
 mkdir -p "$dir"
 # Who its dev sign-in signs in when a login names nobody (ark-auth): the
 # phone's sign-in sheet then opens and comes straight back, with no page
