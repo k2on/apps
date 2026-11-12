@@ -51,6 +51,7 @@ import androidx.compose.material3.PermanentDrawerSheet
 import androidx.compose.material3.PermanentNavigationDrawer
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SearchBar
+import androidx.compose.material3.PrimaryScrollableTabRow
 import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.SearchBarDefaults
 import androidx.compose.material3.Tab
@@ -91,6 +92,8 @@ import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.key.utf16CodePoint
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.dp
 
 // * What the app provides
@@ -546,6 +549,9 @@ public fun PanesScope.SettingsPane(title: String, glyph: String, content: @Compo
     panes += SettingsPaneItem(title, glyph, content)
 }
 
+/** A tab's inset on each side of its title (Material's own). */
+private val TAB_INSET = 16.dp
+
 /**
  * Settings: its panes' tabs across the top, the one titled `selection`
  * under them (choosing another sends `onSelect`).
@@ -556,15 +562,29 @@ public fun SettingsPanes(selection: String, onSelect: (String) -> Unit, panes: P
     val all = PanesScope().apply(panes).panes
     val lookup = LocalGlyphs.current
     val shown = all.firstOrNull { it.title == selection } ?: all.firstOrNull() ?: return
+    // A title is never broken: the tabs share the width when the widest
+    // title fits its share on one line, and scroll at their own widths
+    // when it would not (a phone's four panes).
+    val measurer = rememberTextMeasurer()
+    val style = MaterialTheme.typography.titleSmall
+    val tabs: @Composable () -> Unit = {
+        all.forEach { p ->
+            Tab(
+                selected = p == shown,
+                onClick = { onSelect(p.title) },
+                text = { Text(p.title, maxLines = 1, softWrap = false) },
+                icon = { Icon(shellGlyph(p.glyph, lookup), contentDescription = null) },
+            )
+        }
+    }
     Column(Modifier.fillMaxSize()) {
-        PrimaryTabRow(selectedTabIndex = all.indexOf(shown)) {
-            all.forEach { p ->
-                Tab(
-                    selected = p == shown,
-                    onClick = { onSelect(p.title) },
-                    text = { Text(p.title) },
-                    icon = { Icon(shellGlyph(p.glyph, lookup), contentDescription = null) },
-                )
+        BoxWithConstraints(Modifier.fillMaxWidth()) {
+            val inset = with(LocalDensity.current) { (TAB_INSET * 2).roundToPx() }
+            val widest = all.maxOf { measurer.measure(it.title, style, maxLines = 1, softWrap = false).size.width }
+            if ((widest + inset) * all.size <= constraints.maxWidth) {
+                PrimaryTabRow(selectedTabIndex = all.indexOf(shown)) { tabs() }
+            } else {
+                PrimaryScrollableTabRow(selectedTabIndex = all.indexOf(shown), edgePadding = 0.dp) { tabs() }
             }
         }
         Box(Modifier.weight(1f)) { shown.content() }

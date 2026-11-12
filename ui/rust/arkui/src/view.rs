@@ -649,10 +649,12 @@ fn shell_part<'a, M: Clone + 'static>(p: Part<M>, ctx: &mut Ctx<'a, '_, M>) -> E
                     heads.push(pane_tab(title, glyph, on, select.call(title.to_string())));
                 }
             }
+            // A title is never broken: a window too narrow for every tab
+            // scrolls them sideways.
+            let heads = scrollable(row(heads).spacing(4).align_y(Alignment::Center))
+                .direction(scrollable::Direction::Horizontal(Default::default()));
             column![
-                container(row(heads).spacing(4).align_y(Alignment::Center))
-                    .center_x(Length::Fill)
-                    .padding([6, 12]),
+                container(heads).center_x(Length::Fill).padding([6, 12]),
                 rule::horizontal(1).style(style::edge),
                 container(draw(shown, ctx)).height(Length::Fill)
             ]
@@ -872,7 +874,7 @@ fn pane_tab<'a, M: Clone + 'a>(title: &'static str, glyph: &'static str, on: boo
     };
     let label = column![
         icon::tinted(shape(glyph), 22.0, tint),
-        text(title).size(11).style(move |t| text::Style {
+        text(title).size(11).wrapping(text::Wrapping::None).style(move |t| text::Style {
             color: Some(tint(crate::theme::of(t))),
             ..Default::default()
         })

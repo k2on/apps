@@ -109,8 +109,8 @@ button.ark-sidebar-heading:hover, button.ark-sidebar-heading.ark-on { color: var
 .ark-split-content { width: var(--ark-content-width); flex: none; border-right: 1px solid var(--ark-hairline); overflow: auto; }
 .ark-split-detail { flex: 1; min-width: 0; overflow: auto; }
 
-.ark-pane-tabs { display: flex; justify-content: center; gap: 4px; padding: 6px 12px; border-bottom: 1px solid var(--ark-hairline); }
-.ark-pane-tab { display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 4px 12px; border-radius: 8px; font-size: 11px; color: color-mix(in srgb, var(--ark-ink) 65%, transparent); }
+.ark-pane-tabs { display: flex; justify-content: safe center; gap: 4px; padding: 6px 12px; border-bottom: 1px solid var(--ark-hairline); overflow-x: auto; scrollbar-width: none; }
+.ark-pane-tab { flex: none; white-space: nowrap; display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 4px 12px; border-radius: 8px; font-size: 11px; color: color-mix(in srgb, var(--ark-ink) 65%, transparent); }
 .ark-pane-tab.ark-on { color: var(--ark-accent); background: var(--ark-container); }
 .ark-settings-body { flex: 1; min-height: 0; overflow: auto; }
 
