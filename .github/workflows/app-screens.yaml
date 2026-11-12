@@ -958,7 +958,26 @@ jobs:
         timeout-minutes: 40
         env:
           RESULTS: ${{ runner.temp }}/results
-        run: bash .github/screens/apps-ios.sh "$RUNNER_TEMP/out" "$RUNNER_TEMP/apps" "$(cat "$RUNNER_TEMP/device")" $APPS
+        run: |
+          # The iPad booted beside the iPhone while the iPhone walks (a walk
+          # is the app alone, light on the runner), so it is ready when the
+          # iPhone is done: of the pinned Xcode's iOS's simulators
+          # (ios-runtime.sh), the first kind there is.
+          if [ -n "$IPAD_APPS" ]; then
+            rt=$(bash .github/screens/ios-runtime.sh)
+            xcrun simctl list devices available -j | jq -r --arg rt "$rt" '
+              .devices[$rt] as $d
+              | ["^iPad Pro 13-inch", "^iPad Air 13-inch", "^iPad"]
+              | map(. as $p | $d | map(select(.name | test($p))) | sort_by(.name) | last) | map(select(. != null)) | first
+              | "\(.udid) \(.name)"' > "$RUNNER_TEMP/ipad"
+            read -r udid name < "$RUNNER_TEMP/ipad"
+            echo "Booting $name ($udid) beside the iPhone"
+            date +%s > "$RUNNER_TEMP/ipad-boot-start"
+            xcrun simctl boot "$udid"
+            ( xcrun simctl bootstatus "$udid" -b > /dev/null; date +%s > "$RUNNER_TEMP/ipad-booted" ) &
+          fi
+          bash .github/screens/apps-ios.sh "$RUNNER_TEMP/out" "$RUNNER_TEMP/apps" "$(cat "$RUNNER_TEMP/device")" $APPS
+          echo "memory: $(vm_stat | awk '/free|active|wired/ {printf "%s %s ", $1$2, $NF}')"
       - uses: actions/upload-artifact@v4
         if: always() && steps.open.outputs.open == 'true'
         with:
@@ -966,12 +985,10 @@ jobs:
           path: ${{ runner.temp }}/out/*/ios/
           if-no-files-found: ignore
 
-      # The iPad's, after the iPhone's: the iPhone shut down and only then
-      # the iPad booted (not under the iPhone's shots, which a second
-      # simulator would slow), the newest iPad Pro 13-inch (else an iPad Air
-      # 13-inch, else the newest iPad); each app whose build takes it, in
-      # portrait and then on its side, light and dark, in one walk
-      # (apps-ios.sh, FAMILY=ipad).
+      # The iPad's, after the iPhone's walk, on the iPad booted beside it
+      # meanwhile (the newest iPad Pro 13-inch, else an iPad Air 13-inch,
+      # else the newest iPad): each app whose build takes it, upright and
+      # on its side, light and dark, in one walk (apps-ios.sh, FAMILY=ipad).
       - if: ${{ !cancelled() && steps.open.outputs.open == 'true' && env.IPAD_APPS != '' }}
         name: Capture (iPad)
         timeout-minutes: 40
@@ -979,20 +996,11 @@ jobs:
           RESULTS: ${{ runner.temp }}/results
           FAMILY: ipad
         run: |
-          xcrun simctl shutdown all || true
-          # Of the pinned Xcode's iOS's simulators (ios-runtime.sh), the first
-          # kind there is.
-          rt=$(bash .github/screens/ios-runtime.sh)
-          read -r udid name < <(xcrun simctl list devices available -j | jq -r --arg rt "$rt" '
-            .devices[$rt] as $d
-            | ["^iPad Pro 13-inch", "^iPad Air 13-inch", "^iPad"]
-            | map(. as $p | $d | map(select(.name | test($p))) | sort_by(.name) | last) | map(select(. != null)) | first
-            | "\(.udid) \(.name)"')
-          echo "Booting $name ($udid)"
-          start=$(date +%s)
-          xcrun simctl boot "$udid"
+          # Booted beside the iPhone (the Capture step); waited for here.
+          read -r udid name < "$RUNNER_TEMP/ipad"
           xcrun simctl bootstatus "$udid" -b > /dev/null
-          echo "booted in $(( $(date +%s) - start ))s"
+          start=$(cat "$RUNNER_TEMP/ipad-boot-start")
+          echo "$name booted $(( $(cat "$RUNNER_TEMP/ipad-booted" 2> /dev/null || date +%s) - start ))s after it was asked, ready $(( $(date +%s) - start ))s after"
           bash .github/screens/apps-ios.sh "$RUNNER_TEMP/out" "$RUNNER_TEMP/apps" "$name" $IPAD_APPS
       - uses: actions/upload-artifact@v4
         if: always() && steps.open.outputs.open == 'true' && env.IPAD_APPS != ''

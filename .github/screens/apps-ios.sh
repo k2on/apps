@@ -68,11 +68,16 @@ for w in ${walks[@]+"${walks[@]}"}; do
   [ "$family" = ipad ] && list=large
   server=$(jq -r --argjson off "${PORT_OFFSET:-0}" '.server.port // empty | "http://127.0.0.1:\(. + $off)"' "$a/demo/shots.json")
   t=$(date +%s)
+  # Each phase said with its time: what a walk's start costs.
+  p=$(date +%s)
+  ph() { echo "  $1 $(( $(date +%s) - p ))s"; p=$(date +%s); }
   xcrun simctl terminate "$udid" "$bundle" > /dev/null 2>&1 || true
   xcrun simctl uninstall "$udid" "$bundle" > /dev/null 2>&1 || true
   xcrun simctl keychain "$udid" reset > /dev/null 2>&1 || true
+  ph "uninstalled, keychain emptied"
   xcrun simctl install "$udid" "$app" || { echo "::error::$a did not install"; echo "$a" >> "$partial"; status=1; continue; }
   # What the app would ask a person for, said yes to already.
+  ph installed
   xcrun simctl privacy "$udid" grant all "$bundle" > /dev/null 2>&1 || true
   data=$(xcrun simctl get_app_container "$udid" "$bundle" data)
   shots="$data/Library/Application Support/shots"
@@ -80,8 +85,9 @@ for w in ${walks[@]+"${walks[@]}"}; do
   jq --arg s "$server" --arg l "$list" \
     '{orientations: (if $l == "large" then ["portrait", "landscape"] else null end), theme: .walk.theme, shots: .walk[$l]} | with_entries(select(.value != null))
      | walk(if type == "string" then gsub("\\{server\\}"; $s) else . end)' "$a/demo/shots.json" > "$shots/plan.json"
+  ph "permissions, plan written"
   pid=$(xcrun simctl launch "$udid" "$bundle" -shots YES 2>&1 | awk -F': ' '/: [0-9]+$/ {print $NF}')
-  echo "$a $kind: the walk launched (pid ${pid:-unknown})"
+  ph "launched (pid ${pid:-unknown})"
   until=$(( $(date +%s) + 1200 ))
   while [ "$(date +%s)" -lt "$until" ]; do
     [ -f "$shots/out/done" ] || [ -f "$shots/out/failed" ] && break

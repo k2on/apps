@@ -111,6 +111,10 @@ private final class Signal: ObservableObject {
             return nil
         }
         for w in UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }).flatMap(\.windows) {
+            // Every window, a dialog's and a menu's made since the root's
+            // first: the system's own Core Animation at a hundred times
+            // its speed (`still()`), each time the screen is looked at.
+            if w.layer.speed < 100 { w.layer.speed = 100 }
             if let m = any(w.layer) { return m }
         }
         return nil
