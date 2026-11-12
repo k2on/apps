@@ -3,7 +3,8 @@
 //! every platform — the phones behind their generated library (`money-ffi`,
 //! ui/prebuild.py's `ffi`, which writes the UniFFI twins of these records
 //! and messages), the iced
-//! window (money/iced) and the browser (money/web).
+//! window (money/iced) and the browser (arkui-web's host over
+//! [`window`], its entry point generated from app.toml).
 //!
 //! The screens moved here: Accounts ([`accounts`]) — the shelves of
 //! accounts and what the household is worth, Add Account, renaming,
@@ -24,6 +25,7 @@ pub mod sheets;
 pub mod shell;
 pub mod transactions;
 pub mod welcome;
+pub mod window;
 pub mod words;
 
 #[cfg(test)]

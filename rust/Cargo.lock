@@ -597,12 +597,16 @@ dependencies = [
 name = "arkui-web"
 version = "0.1.0"
 dependencies = [
+ "ark",
  "ark-app",
+ "ark-auth",
  "ark-format",
+ "ark-peer",
  "ark-router",
  "arkui-glyphs",
  "leptos",
  "wasm-bindgen",
+ "wasm-bindgen-futures",
  "web-sys",
 ]
 
@@ -4694,26 +4698,6 @@ dependencies = [
  "tokio",
  "tungstenite",
  "ureq",
-]
-
-[[package]]
-name = "money-web"
-version = "0.1.0"
-dependencies = [
- "ark",
- "ark-app",
- "ark-auth",
- "ark-format",
- "ark-peer",
- "ark-scanner",
- "arkui-web",
- "leptos",
- "money-app",
- "money-core",
- "money-seed",
- "wasm-bindgen",
- "wasm-bindgen-futures",
- "web-sys",
 ]
 
 [[package]]

@@ -1,6 +1,6 @@
-//! The page on its server: a replica of the household's budget, signed in
-//! as a person, synced over the server's socket — what every native client
-//! is, in the page (ui/docs/app.md, "The Browser's Modes").
+//! An app's page on its server (feature `host`): a replica of its domain,
+//! signed in as a person, synced over the server's socket — what every
+//! native client is, in the page (ui/docs/app.md, "The Browser's Modes").
 //!
 //! **Signing in** is the machine every app's shell walks
 //! (`ark_auth::onboarding`), as the phones and the desktop walk it: the
@@ -9,13 +9,13 @@
 //! address with a one-minute code, and trades it at `/auth/session`. The
 //! session's token is then the server's `HttpOnly` cookie, which no script
 //! on the page can read; what the page remembers between loads
-//! (`ark_peer::Logins`, the page's `localStorage` under `money.logins`) is
+//! (`ark_peer::Logins`, the page's `localStorage` under `<scheme>.logins`) is
 //! the login without it — who, which session, until when. The socket says
 //! nothing as its first message (`ark_auth::COOKIE_HELLO`), and the server
 //! takes the cookie. A session the server turns away (signed out
 //! elsewhere, expired) is forgotten and signed in again, once.
 //!
-//! **The replica** is an `ark_peer::Peer` over money's domain compiled to
+//! **The replica** is an `ark_peer::Peer` over the app's domain compiled to
 //! wasm, dialling the socket whenever it has a login (`Peer::connect`,
 //! the page's own `WebSocket`): the server's changes arrive as they are
 //! made, and this page's are authored through the domain's mutators
@@ -41,15 +41,22 @@ use ark_auth::first_run::FirstRun;
 use ark_auth::onboarding::{AppInfo, Effect, Event, Remembered, Step};
 use ark_peer::{Config, Logins, Memory, Peer};
 
-use crate::{MoneyWeb, Msg};
+use ark_app::host::HostedApp;
+use ark_app::window::Windowed;
 
-/// Who money is, to the sign-in machine.
-pub fn app() -> AppInfo {
+use crate::host::{HostMsg, WebHost, WebHosted};
+
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+type Msg<W> = HostMsg<<<W as WebHosted>::App as Windowed>::Msg>;
+
+/// Who the app is, to the sign-in machine: the page's server is its own,
+/// so no demo is offered.
+pub fn app<W: WebHosted>() -> AppInfo {
     AppInfo {
-        name: "Money".into(),
-        scheme: "money".into(),
+        name: W::NAME.into(),
+        scheme: W::SCHEME.into(),
         demo: false,
-        what: "your budget".into(),
+        what: <W::App as HostedApp>::KEEPS.into(),
     }
 }
 
@@ -76,27 +83,34 @@ impl Live {
     }
 }
 
-/// Where this browser keeps that money's pages were seen.
-const SEEN: &str = "money.intro-seen";
+/// Where this browser keeps that the app's pages were seen
+/// (`money.intro-seen`).
+fn seen_key<W: WebHosted>() -> String {
+    format!("{}.intro-seen", W::SCHEME)
+}
 
-/// Whether this browser has seen money's pages (its local storage; off the
-/// browser, as the prerenderer and the tests run, it has).
-fn intro_seen() -> bool {
+/// Whether this browser has seen the app's pages (its local storage; off
+/// the browser, as the prerenderer and the tests run, it has).
+fn intro_seen<W: WebHosted>() -> bool {
+    let key = seen_key::<W>();
     #[cfg(target_arch = "wasm32")]
     return web_sys::window()
         .and_then(|w| w.local_storage().ok().flatten())
-        .and_then(|s| s.get_item(SEEN).ok().flatten())
+        .and_then(|s| s.get_item(&key).ok().flatten())
         .is_some();
     #[cfg(not(target_arch = "wasm32"))]
-    true
+    {
+        let _ = key;
+        true
+    }
 }
 
-fn remember_intro() {
+fn remember_intro<W: WebHosted>() {
     #[cfg(target_arch = "wasm32")]
     if let Some(s) = web_sys::window().and_then(|w| w.local_storage().ok().flatten()) {
-        let _ = s.set_item(SEEN, "1");
+        let _ = s.set_item(&seen_key::<W>(), "1");
     }
-    let _ = SEEN;
+    let _ = seen_key::<W>;
 }
 
 /// Whether the page was loaded at its root, with no query: no link that
@@ -110,10 +124,10 @@ fn at_root() -> bool {
     true
 }
 
-/// A replica of money's domain in memory, dialling `server`'s socket once
-/// it has a login.
-pub fn replica(server: &str) -> Peer {
-    let mut peer = Peer::open_as(Config::of(money_core::shared()), Box::new(Memory::default()), None);
+/// A replica of the app's domain in memory, dialling `server`'s socket
+/// once it has a login.
+pub fn replica<W: WebHosted>(server: &str) -> Peer {
+    let mut peer = Peer::open_as(Config::of(W::domain()), Box::new(Memory::default()), None);
     // A page draws on the thread it takes frames in on: a fill is taken
     // between frames, a few milliseconds a pump.
     peer.link.budget = Some(8);
@@ -121,25 +135,25 @@ pub fn replica(server: &str) -> Peer {
     peer
 }
 
-impl MoneyWeb {
+impl<W: WebHosted> WebHost<W> {
     /// The page on `server`, its replica empty until the server fills it,
     /// and the sign-in machine told where this load starts: signed in
     /// already (the login this browser remembers there), back from signing
     /// in with a code to trade, or on its way to sign in.
-    pub fn on_server(server: String, today: String) -> MoneyWeb {
-        let logins = Logins::new("money");
+    pub fn on_server(server: String, today: String) -> WebHost<W> {
+        let logins = Logins::new(W::SCHEME);
         let login = logins.recall(&server).filter(|l| l.expires_ms > ark_peer::now_ms());
         let live = Live {
             server: server.clone(),
             // The server is the page's own: no demo, no camera to scan with.
-            first_run: FirstRun::new(self::app(), money_app::welcome::copy(false, false)),
+            first_run: FirstRun::new(self::app::<W>(), W::App::welcome(false, false)),
             logins,
             login: None,
             timer: None,
         };
-        let mut app = MoneyWeb::over(replica(&server), today, Some(live));
+        let mut app = WebHost::<W>::over(replica::<W>(&server), today, Some(live));
         #[cfg(target_arch = "wasm32")]
-        app.peer.set_waker(Rc::new(|| arkui_web::send(Msg::Wake)));
+        app.peer.set_waker(Rc::new(|| crate::send(Msg::<W>::Wake)));
         #[cfg(target_arch = "wasm32")]
         let (code, returned) = (ark_auth::web::take_code(), ark_auth::web::came_back());
         #[cfg(not(target_arch = "wasm32"))]
@@ -153,7 +167,7 @@ impl MoneyWeb {
             demo: false,
         };
         app.onboard(Event::Launched { remembered, code, returned });
-        // money's pages from the first, as on every platform, until this
+        // The app's pages from the first, as on every platform, until this
         // browser has seen them; not on a load that goes straight somewhere
         // (a link's path or query, a sign-in coming back, a code brought to
         // trade, whose query `take_code` has already cleared: the Welcome
@@ -164,10 +178,10 @@ impl MoneyWeb {
         // through it, so a reload of the signed-in page is the app, not
         // Welcome over it (money-web-sync's reload, build 43105468847).
         if returned || brought_code {
-            remember_intro();
+            remember_intro::<W>();
         }
         if let Some(live) = &mut app.live {
-            live.first_run.launch(intro_seen(), straight);
+            live.first_run.launch(intro_seen::<W>(), straight);
         }
         app
     }
@@ -186,14 +200,14 @@ impl MoneyWeb {
         let Some(live) = &mut self.live else { return };
         let asked = live.first_run.send(msg);
         if asked.seen {
-            remember_intro();
+            remember_intro::<W>();
         }
         for effect in asked.effects {
             self.effect(effect);
         }
     }
 
-    /// money's pages from the first, over the app: their path, /welcome/.
+    /// The app's pages from the first, over the app: their path, /welcome/.
     pub fn show_intro(&mut self) {
         if let Some(live) = &mut self.live {
             live.first_run.show_intro();
@@ -230,7 +244,7 @@ impl MoneyWeb {
                         Ok(login) => Event::SignedIn { login: login.into() },
                         Err(why) => Event::SignInFailed { why },
                     };
-                    arkui_web::send(Msg::Onboard(said));
+                    crate::send(Msg::<W>::Onboard(Box::new(said)));
                 });
                 #[cfg(not(target_arch = "wasm32"))]
                 let _ = (server, code);
@@ -303,17 +317,11 @@ impl MoneyWeb {
             }
             let Some(due) = self.peer.deadline() else { return };
             let wait = due.saturating_sub(ark_peer::monotonic_ms()).min(i32::MAX as u64) as i32;
-            let ring = wasm_bindgen::closure::Closure::once_into_js(|| arkui_web::send(Msg::Wake));
+            let ring = wasm_bindgen::closure::Closure::once_into_js(|| crate::send(Msg::<W>::Wake));
             live.timer = window
                 .set_timeout_with_callback_and_timeout_and_arguments_0(ring.unchecked_ref(), wait)
                 .ok();
         }
         let _ = &live.timer;
-    }
-
-    /// The first run's page, while the app is not shown: every app's
-    /// (`ark_app::welcome`), what the machine says on it.
-    pub fn welcome(&self, live: &Live) -> arkui_web::AnyView {
-        arkui_web::render(ark_app::welcome::welcome::view(&live.first_run.page()).map(Msg::Welcome))
     }
 }

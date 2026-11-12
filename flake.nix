@@ -78,7 +78,7 @@
       arkApp = import ./nix/ark-app.nix { inherit lib self; };
       arkApps = [ "money" "revelation" ];
 
-      rustDirs = [ "rust" "ui/rust" "modules" "harken/domain" "harken/app" "harken/player" "harken/server" "harken/iced" "harken/ffi" "money/core" "money/demo" "money/app" "money/iced" "money/server" "harken/demo" "money/web" ];
+      rustDirs = [ "rust" "ui/rust" "modules" "harken/domain" "harken/app" "harken/player" "harken/server" "harken/iced" "harken/ffi" "money/core" "money/demo" "money/app" "money/iced" "money/server" "harken/demo" ];
       # The typed Kotlin and Swift `arkdb gen` writes, which harken/ffi's
       # tests hold to its domain (`tests/gen.rs`).
       genDirs = [
@@ -455,12 +455,13 @@
                 substituteInPlace $out/index.html --replace-fail "v=dev" "v=$(basename $out | cut -c1-32)"
               fi
             '';
-          # money's web client: the shell and its screens over the demo
-          # household, in the page alone (money/web).
+          # money's page: its part of its host run by arkui-web's `WebHost`,
+          # on its server or its demo, the crate and index.html generated
+          # from money/app.toml (nix/ark-app.nix's `webSrc`).
           money-web = wasmPage {
             pname = "money-web";
             crate = "money-web";
-            files = [ ./money/web/index.html ./money/web/favicon.svg ];
+            files = let page = arkApp.webSrc pkgs cargoMetadata (arkApp.read "money"); in [ "${page}/index.html" "${page}/favicon.svg" ];
           };
           # The specification is `rust/ark` (spec/README.md), and the tools
           # over it are `rust/arkdb`, whose binary is `arkdb` (`gen`, `fuzz`,
@@ -2047,8 +2048,8 @@
             inherit money-web;
             # And is a real client: signed in through money-server, synced
             # with another device over its socket, offline and back
-            # (money/web/nix/sync.nix, in Playwright's Chromium).
-            money-web-sync = pkgs.callPackage ./money/web/nix/sync.nix {
+            # (money/server/nix/web-sync.nix, in Playwright's Chromium).
+            money-web-sync = pkgs.callPackage ./money/server/nix/web-sync.nix {
               inherit money-web money-seed;
               money-server = money-server-bin;
             };

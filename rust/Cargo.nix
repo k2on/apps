@@ -447,16 +447,6 @@ rec {
       # File a bug if you depend on any for non-debug work!
       debug = internal.debugCrate { inherit packageId; };
     };
-    "money-web" = rec {
-      packageId = "money-web";
-      build = internal.buildRustCrateWithFeatures {
-        packageId = "money-web";
-      };
-
-      # Debug support which might change between releases.
-      # File a bug if you depend on any for non-debug work!
-      debug = internal.debugCrate { inherit packageId; };
-    };
   };
 
   # A derivation that joins the outputs of all workspace members together.
@@ -2503,12 +2493,29 @@ rec {
         libName = "arkui_web";
         dependencies = [
           {
+            name = "ark";
+            packageId = "ark";
+            optional = true;
+          }
+          {
             name = "ark-app";
             packageId = "ark-app";
           }
           {
+            name = "ark-auth";
+            packageId = "ark-auth";
+            optional = true;
+            usesDefaultFeatures = false;
+          }
+          {
             name = "ark-format";
             packageId = "ark-format";
+          }
+          {
+            name = "ark-peer";
+            packageId = "ark-peer";
+            optional = true;
+            usesDefaultFeatures = false;
           }
           {
             name = "ark-router";
@@ -2528,6 +2535,12 @@ rec {
             packageId = "wasm-bindgen";
           }
           {
+            name = "wasm-bindgen-futures";
+            packageId = "wasm-bindgen-futures";
+            optional = true;
+            target = { target, features }: ("wasm32" == target."arch" or null);
+          }
+          {
             name = "web-sys";
             packageId = "web-sys";
             features = [ "Window" "Document" "Element" "HtmlElement" "HtmlInputElement" "KeyboardEvent" "MouseEvent" "Event" "EventTarget" "DomRect" "Location" "UrlSearchParams" "MediaQueryList" "CssStyleDeclaration" "Node" "History" "FocusEvent" "PointerEvent" "ScrollIntoViewOptions" "ScrollLogicalPosition" "Navigator" "NodeList" "HtmlDocument" ];
@@ -2536,10 +2549,11 @@ rec {
         features = {
           "csr" = [ "leptos/csr" ];
           "default" = [ "csr" ];
+          "host" = [ "dep:ark" "dep:ark-peer" "dep:ark-auth" "dep:wasm-bindgen-futures" "web-sys/Storage" ];
           "hydrate" = [ "leptos/hydrate" ];
           "ssr" = [ "leptos/ssr" ];
         };
-        resolvedDefaultFeatures = [ "csr" "default" "hydrate" "ssr" ];
+        resolvedDefaultFeatures = [ "csr" "default" "host" "hydrate" "ssr" ];
       };
       "arrayref" = rec {
         crateName = "arrayref";
@@ -15469,94 +15483,6 @@ rec {
           }
         ];
 
-      };
-      "money-web" = rec {
-        crateName = "money-web";
-        version = "0.1.0";
-        edition = "2021";
-        crateBin = [
-          {
-            name = "money-web";
-            path = "src/main.rs";
-            requiredFeatures = [ ];
-          }
-        ];
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../money/web; };
-        libName = "money_web";
-        dependencies = [
-          {
-            name = "ark";
-            packageId = "ark";
-          }
-          {
-            name = "ark-app";
-            packageId = "ark-app";
-          }
-          {
-            name = "ark-auth";
-            packageId = "ark-auth";
-            usesDefaultFeatures = false;
-          }
-          {
-            name = "ark-format";
-            packageId = "ark-format";
-          }
-          {
-            name = "ark-peer";
-            packageId = "ark-peer";
-            usesDefaultFeatures = false;
-          }
-          {
-            name = "ark-scanner";
-            packageId = "ark-scanner";
-            target = { target, features }: ("wasm32" == target."arch" or null);
-            features = [ "web" ];
-          }
-          {
-            name = "arkui-web";
-            packageId = "arkui-web";
-            usesDefaultFeatures = false;
-          }
-          {
-            name = "leptos";
-            packageId = "leptos";
-            usesDefaultFeatures = false;
-          }
-          {
-            name = "money-app";
-            packageId = "money-app";
-          }
-          {
-            name = "money-core";
-            packageId = "money-core";
-            features = [ "demo" ];
-          }
-          {
-            name = "money-seed";
-            packageId = "money-seed";
-          }
-          {
-            name = "wasm-bindgen";
-            packageId = "wasm-bindgen";
-            target = { target, features }: ("wasm32" == target."arch" or null);
-          }
-          {
-            name = "wasm-bindgen-futures";
-            packageId = "wasm-bindgen-futures";
-            target = { target, features }: ("wasm32" == target."arch" or null);
-          }
-          {
-            name = "web-sys";
-            packageId = "web-sys";
-            features = [ "Window" "Document" "Element" "Location" "Storage" ];
-          }
-        ];
-        features = {
-          "csr" = [ "arkui-web/csr" "leptos/csr" ];
-          "default" = [ "csr" ];
-          "ssr" = [ "arkui-web/ssr" "leptos/ssr" ];
-        };
-        resolvedDefaultFeatures = [ "csr" "default" "ssr" ];
       };
       "moxcms" = rec {
         crateName = "moxcms";

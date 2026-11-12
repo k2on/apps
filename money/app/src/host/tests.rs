@@ -13,9 +13,9 @@ use crate::testing::NOW;
 use crate::MoneyRequest;
 
 /// A place over the demo's household, as a phone (`stacks`) or a window.
-struct Test {
-    peer: Peer,
-    store: Store<MoneyView>,
+pub(crate) struct Test {
+    pub(crate) peer: Peer,
+    pub(crate) store: Store<MoneyView>,
     stacks: bool,
     said: Vec<String>,
     dialled: bool,
@@ -77,7 +77,7 @@ impl Place<MoneyView, MoneyChange> for Test {
     }
 }
 
-fn open(stacks: bool) -> (Hosting<Money>, Test) {
+pub(crate) fn open(stacks: bool) -> (Hosting<Money>, Test) {
     let mut place = Test::new(stacks);
     let h = Hosting::<Money>::open(&demo(), &mut place);
     (h, place)

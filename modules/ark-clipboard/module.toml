@@ -17,6 +17,13 @@ register = "registerClipboard"
 swift = "PhoneClipboard()"
 kotlin = "dev.arkui.modules.PhoneClipboard(view.context)"
 
+# The browser's device (the page's clipboard; the crate's feature `web`): an app's
+# generated page registers it for its port when the app's crate depends on
+# this module (ui/prebuild.py's `web`).
+[web]
+device = "ark_clipboard::Browser"
+port = "ark_clipboard::Clipboard"
+
 [ios.info]
 
 [android]

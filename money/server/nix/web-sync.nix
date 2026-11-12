@@ -1,5 +1,5 @@
 # `checks.money-web-sync`: money's page as a real client, end to end, in the
-# sandbox (money/web/tests/sync.py) — money-server on the demo's seeded
+# sandbox (money/server/tests/web_sync.py) — money-server on the demo's seeded
 # household with dev auth, the SPA it serves in Playwright's headless
 # Chromium signing in by name, and `money-peer` (another device, an
 # ark-peer over the socket) seeing what the page adds and adding what the
@@ -16,7 +16,7 @@ runCommand "money-web-sync" {
   FONTCONFIG_FILE = makeFontsConf { fontDirectories = [ dejavu_fonts ]; };
 } ''
   export HOME=$TMPDIR
-  python3 -I ${../tests/sync.py} \
+  python3 -I ${../tests/web_sync.py} \
     --server ${money-server}/bin/money-server --peer ${money-server}/bin/money-peer \
     --seed ${money-seed}/bin/money-seed --web ${money-web} --out $out
 ''

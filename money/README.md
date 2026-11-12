@@ -482,10 +482,10 @@ with one control for what it feeds, a menu: a new account of its kind (the curso
 nothing (`iced/src/banks.rs`); **Account** says who is signed in where,
 with Sign out (`iced/src/settings.rs`). Connecting opens Plaid's page as soon as
 the server answers, in the system's browser, with the page's link in
-Settings too. The browser client (money/web, Leptos over arkui-web) runs
+Settings too. The browser client (`money-web`, generated from app.toml:
+arkui-web's `WebHost` over money-app's window, Leptos over the DOM) runs
 the same shell, signed in to the server that serves it and synced
-(above); Settings' Account pane and signing out there are not drawn in
-the page yet.
+(above).
 
 ## The demo
 
@@ -576,7 +576,7 @@ typing into the demo's fields under Xvfb; and a phone, which does not
 exist yet.
 
 **The browser, end to end** (`checks.money-web-sync`,
-`web/tests/sync.py`, in CI's build): money-server on the seeded
+`server/tests/web_sync.py`, in CI's build): money-server on the seeded
 household with dev auth, the SPA it serves in Playwright's headless
 Chromium. A bad code is said on the sign-in page with Sign In; Sign In
 goes to the server's sign-in and back to the seeded household; the

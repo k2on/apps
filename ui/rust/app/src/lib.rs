@@ -656,6 +656,7 @@ pub mod shell;
 pub mod shots;
 pub mod view;
 pub mod welcome;
+pub mod window;
 pub mod writing;
 
 /// `#[view]`: a function of a screen's record laid out once for every

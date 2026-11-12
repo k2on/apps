@@ -1472,6 +1472,156 @@ def arkffi_features(root, a):
     return [n.removeprefix("ark-") for n in module_names(root, a) if "phone" in module(root, n)]
 
 
+# ------------------------------------------------------------- the browser's page
+
+# An Ark app's page is generated, never committed, the phones' library's
+# twin: one crate, `<id>-web` (its binary the page's module), written from
+# app.toml — its name, scheme, accent and version, and of `[ffi]` the app's
+# part of its host, its domain and its demo — that runs the part in the
+# page through arkui-web's `host` (`WebHost`), with the browser's device of
+# each module its crate depends on whose module.toml says `[web]`; and the
+# page that loads it, `index.html`, with its icon beside it. nix/ark-app.nix
+# builds it (`<id>-web`, flake.nix's `<id>-web` page), and a cargo build of
+# the page adds it to the workspace at `<app>/.web`.
+
+
+def web_modules(root, a):
+    """The browser's devices of the app's modules: (crate, device, port)
+    for each whose module.toml says `[web]`."""
+    out = []
+    for n in module_names(root, a):
+        w = module(root, n).get("web")
+        if w:
+            out.append((module(root, n)["crate"], w["device"], w["port"]))
+    return out
+
+
+def web_crates(a):
+    """The crates the page names, by their packages' names: the app's, its
+    domain's, its demo's, and the runtime's."""
+    names = [a["crate"], a["ffi"]["domain"].split("::", 1)[0].replace("_", "-")]
+    if a["ffi"].get("demo"):
+        names.append(a["ffi"]["demo"])
+    return list(dict.fromkeys(names + ["ark", "ark-app", "ark-peer"]))
+
+
+def web_main(root, a):
+    """The page's main.rs."""
+    f = a["ffi"]
+    crate = rust_name(a["crate"])
+    demo = f.get("demo")
+    seed = rust_name(demo) if demo else None
+    devices = "".join(
+        f"            modules.register::<dyn {port}>(std::sync::Arc::new({device}));\n"
+        for _, device, port in web_modules(root, a))
+    modules = (f"""
+    /// The browser's devices of its modules (their module.toml's `[web]`).
+    fn modules(modules: &mut ark_app::Modules) {{
+        #[cfg(target_arch = "wasm32")]
+        {{
+{devices}        }}
+        let _ = modules;
+    }}
+""" if devices else "")
+    return f"""//! {HEADER.format(app=a['dir'])}
+//! {a['name']} in the browser (ui/docs/app.md, "The Browser's Modes"): its
+//! crate's part of its host ({crate}::{f['app']}) run in the page by
+//! arkui-web's `WebHost`, on its server or (`?demo`) its demo. Never
+//! committed.
+
+/// {a['name']} in the browser: its name, scheme, accent, domain and demo.
+struct Web;
+
+impl arkui_web::host::WebHosted for Web {{
+    type App = {crate}::{f['app']};
+    const NAME: &'static str = {json.dumps(a['name'])};
+    const SCHEME: &'static str = {json.dumps(a.get('scheme', a['id']))};
+    const ACCENT: &'static str = {json.dumps(a['accent'])};
+    const VERSION: &'static str = {json.dumps(a.get('version', '0.1'))};
+    const MARK: &'static str = include_str!("icon.svg");
+
+    fn domain() -> std::sync::Arc<ark::domain::Domain> {{
+        {f['domain']}()
+    }}
+
+    fn demo(today: &str, now_ms: i64) -> ark_peer::Peer {{
+        {f"{seed}::open({seed}::seeded_disk(today, now_ms))" if seed else 'unreachable!("{} has no demo: {} {}", Self::NAME, today, now_ms)'}
+    }}
+{modules}}}
+
+fn main() {{
+    arkui_web::host::run::<Web>();
+}}
+"""
+
+
+def web_cargo(root, a):
+    """The page's Cargo.toml, as a member of the workspace at `<app>/.web`."""
+    dirs = workspace_dirs(root)
+    here = os.path.join(a["dir"], ".web")
+    rel = lambda c: os.path.relpath(dirs[c], here)
+    deps = "".join(f'{c} = {{ path = "{rel(c)}"{", default-features = false" if c == "ark-peer" else ""} }}\n' for c in web_crates(a))
+    mods = "".join(f'{c} = {{ path = "{rel(c)}", features = ["web"] }}\n' for c, _, _ in web_modules(root, a))
+    return f"""# {HEADER.format(app=a['dir'])}
+[package]
+name = "{a['id']}-web"
+version = "0.1.0"
+edition = "2021"
+workspace = "{os.path.relpath('rust', here)}"
+
+[[bin]]
+name = "{a['id']}-web"
+path = "main.rs"
+
+[dependencies]
+{deps}arkui-web = {{ path = "{rel('arkui-web')}", default-features = false, features = ["host"] }}
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+{mods}
+[features]
+default = ["csr"]
+csr = ["arkui-web/csr"]
+"""
+
+
+def web_index(a):
+    """The page that loads the module: its name, its icon, the module."""
+    return f"""<!doctype html>
+<!-- {HEADER.format(app=a['dir'])} -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>{a['name']}</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+</head>
+<body>
+<script type="module">
+  // The page names the module and the wasm with `?v=dev`; the build's own
+  // hash replaces it (flake.nix, `wasmPage`), so a browser holding an older
+  // build is sent URLs its cache has never seen. From the root, not beside
+  // the page: a deep path (/welcome/, /budget/…) is answered with this page,
+  // and `./pkg/` there would be that path's, also this page.
+  import init from "/pkg/{a['id']}-web.js?v=dev";
+  init({{ module_or_path: "/pkg/{a['id']}-web_bg.wasm?v=dev" }});
+</script>
+</body>
+</html>
+"""
+
+
+def write_web(root, a, out):
+    """The page's crate (main.rs, Cargo.toml, its icon) and the page
+    (index.html, favicon.svg) into `out`."""
+    write_file(os.path.join(out, "main.rs"), web_main(root, a))
+    write_file(os.path.join(out, "Cargo.toml"), web_cargo(root, a))
+    write_file(os.path.join(out, "index.html"), web_index(a))
+    icon = os.path.join(root, a["dir"], a.get("icon", {}).get("svg", "icon.svg"))
+    for name in ("icon.svg", "favicon.svg"):
+        shutil.copyfile(icon, os.path.join(out, name))
+
+
 # ------------------------------------------------------------- writing
 
 
@@ -1637,6 +1787,17 @@ def check(root):
                 for c in ffi_crates(a):
                     if c not in names:
                         problems.append(f"{app}/app.toml's [ffi] names {c.replace('-', '_')}, whose package is no {c} of the workspace")
+        # The browser's page is written from app.toml (`web_main`): the
+        # app's part, domain and demo are `[ffi]`'s, and each module's
+        # browser device names its type and the port it is for.
+        if a.get("crate") and has(a, "web"):
+            for k in ("app", "domain"):
+                if k not in a.get("ffi", {}):
+                    problems.append(f"{app}/app.toml has web and its [ffi] says no `{k}`, which its page is written from")
+            for n in module_names(root, a):
+                w = module(root, n).get("web")
+                if w is not None and not all(k in w for k in ("device", "port")):
+                    problems.append(f"modules/{n}/module.toml's [web] says no `device` or `port`")
         bg = background(a)
         for k, v in bg.items():
             if k not in BACKGROUND:
@@ -1671,10 +1832,10 @@ def check(root):
         # In a checkout (not nix's copy, which has no git): nothing committed
         # where the generated projects and library are.
         if shutil.which("git") and os.path.exists(os.path.join(root, ".git")):
-            for d in ("ios", "android", "ffi", NATIVE):
+            for d in ("ios", "android", "ffi", "web", NATIVE, ".ffi", ".web"):
                 committed = subprocess.run(["git", "-C", root, "ls-files", f"{app}/{d}"], capture_output=True, text=True).stdout.strip()
                 if committed:
-                    problems.append(f"{app}/{d} is committed: an Ark app's native projects and phones' library are generated (ui/prebuild.py, nix/ark-app.nix)")
+                    problems.append(f"{app}/{d} is committed: an Ark app's native projects, phones' library and page are generated (ui/prebuild.py, nix/ark-app.nix)")
     problems += selftest(root)
     for p in problems:
         print(p, file=sys.stderr)
@@ -1771,6 +1932,10 @@ def main(argv):
     ff.add_argument("app")
     ff.add_argument("--root", default=REPO)
     ff.add_argument("--out", help="the directory its lib.rs and Cargo.toml are written in (the app's .ffi)")
+    wb = sub.add_parser("web")
+    wb.add_argument("app")
+    wb.add_argument("--root", default=REPO)
+    wb.add_argument("--out", help="the directory the page's crate and index.html are written in (the app's .web)")
     fd = sub.add_parser("fdroid")
     fd.add_argument("app")
     fd.add_argument("--root", default=REPO)
@@ -1807,6 +1972,9 @@ def main(argv):
         out = args.out or os.path.join(args.root, args.app, ".ffi")
         write_file(os.path.join(out, "lib.rs"), ffi_lib(a))
         write_file(os.path.join(out, "Cargo.toml"), ffi_cargo(args.root, a))
+    elif args.cmd == "web":
+        a = app_of(args.root, args.app)
+        write_web(args.root, a, args.out or os.path.join(args.root, args.app, ".web"))
     elif args.cmd == "fdroid":
         text = fdroid_yml(app_of(args.root, args.app))
         if args.out:

@@ -3,7 +3,7 @@ seeded household with dev auth, the SPA it serves in a headless Chromium
 (Playwright), and another device beside it (`money-peer`, an ark-peer
 over the socket as the phones and the desktop are).
 
-  python3 sync.py --server BIN --peer BIN --seed BIN --web DIR [--out DIR]
+  python3 web_sync.py --server BIN --peer BIN --seed BIN --web DIR [--out DIR]
 
 0. A code that is no login's is said on the sign-in page, which offers
    Sign In rather than going round by itself.
@@ -70,7 +70,7 @@ class Server:
 
 
 def say(what):
-    print(f"sync.py: {what}", flush=True)
+    print(f"web_sync.py: {what}", flush=True)
 
 
 def main():

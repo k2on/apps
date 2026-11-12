@@ -17,6 +17,7 @@ fn facts(demo: bool) -> SessionFacts {
         version: "0.1 (7)".into(),
         leaves: true,
         adds_devices: true,
+        today: "2026-11-10".into(),
     }
 }
 

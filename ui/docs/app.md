@@ -15,7 +15,8 @@ order.
 ## The Pieces
 
 iced is the desktop's alone. The browser is drawn by Leptos over the real
-DOM (`ui/rust/web`, crate `arkui-web`; money's client is `money/web`);
+DOM (`ui/rust/web`, crate `arkui-web`; an app's page is generated from
+its app.toml: "The Browser's Page");
 money's and harken's iced builds for wasm32 are gone, and harken's Pages
 demo with them until its Leptos client exists. What has no UI stays wasm-capable for it: ark-peer, ark-auth's
 `web`, ark-format, ark-router, ark-app and the modules' `web` impls.
@@ -121,7 +122,7 @@ Each platform has one place and drives the one loop:
 | Platform | Place | Driven by |
 |---|---|---|
 | iPhone, iPad, Mac, Android | ark-ffi's `PhonePlace` (the session's views over the process's peer, the process's modules, the login, the link) | ark-ffi's `Hosted<P>`, the `HostApp` under `ArkHost`; one UniFFI object per screen (`ark_ffi::hosted_screen!`); a register pushed on a stack runs `beside` it |
-| Browser | `money_web::WebPlace` (the page's replica and store; `Seen` to read) | `MoneyWeb` |
+| Browser | arkui-web's `WebPlace` (the page's replica and store; `Seen` to read) | `arkui_web::host::WebHost<W>`, over the app's `Windowed` |
 | Desktop | not yet: the iced window still carries its own requests (`money/iced/src/sections.rs`) | |
 | Tests | `money/app/src/host/tests.rs`'s place over the demo household | `Hosting` |
 
@@ -131,6 +132,20 @@ part (`PhoneApp`) is app.toml's — its name and scheme, the domain its
 replica's log is of, its demo's crate. Its part says the rest
 (`HostedApp`): what it keeps (`KEEPS`), its first run's words
 (`welcome`), how a change is encoded, which native signs out.
+
+**A window its host draws itself** (`ark_app::window::Windowed`): the
+browser's page has no shell of its own as a phone does, so the app's part
+says the whole window, in the views every toolkit draws, once: its shell's
+view (`window`), what each name it hosts shows (`hosted`: money's month in
+the budget's inspector with nothing chosen and who is using it at the
+sidebar's foot are money-app's views, `money_app::window::view`), its
+sheets (`over`), Settings while it shows (`settings`, a window of its own
+with Done), the menu bar's commands, what a field suggests, a page it opens
+in a tab of its own (`opens`), its appearance and its address (`address`).
+One message type reaches every screen (`Windowed::Msg`, money's
+`MoneyMsg`), taken inside the loop (`take`); a native the toolkit's shell
+would carry out is the part's own in a window (`native`: Settings shown is
+its state there). The desktop's window is to be hosted the same way.
 
 ### The Phones' Library
 
@@ -165,6 +180,32 @@ demo remembered and left, a server that is not there, a launch's
 arguments, the replica opened, the demo seeded, a household of two
 devices synced through `ark_ffi::hall::Hall`); `checks.ffi` has UniFFI
 write its Kotlin and Swift.
+
+### The Browser's Page
+
+Generated, never committed, the phones' library's twin: `ui/prebuild.py
+web <app>` writes `<id>-web` (its binary the page's module) — `main.rs`
+and `Cargo.toml` — and the page that loads it, `index.html`, with the
+app's icon beside it (`favicon.svg`), from app.toml: its name, scheme,
+accent and version, and of `[ffi]` its part of its host, its domain and
+its demo. nix/ark-app.nix builds it (`webSrc`, `crates`), flake.nix's
+`<app>-web` binds it (`wasmPage`), and a cargo build of the page adds it to
+the workspace at `<app>/.web` (ignored by git). Its `main.rs` is one
+`arkui_web::host::WebHosted` and `arkui_web::host::run`, with the browser's
+device of each module its crate depends on whose module.toml says `[web]`
+(`device`, `port`: ark-scanner's file input, ark-clipboard's clipboard).
+
+arkui-web's `host` (feature `host`) is the rest, the same for every app:
+`WebPlace` (the page's replica and the views it holds; `Seen` to read),
+`WebHost<W>` driving `Hosting` over it and drawing what the part says
+(`Windowed`), and `live`, the sign-in and the socket: the server is
+whoever served the page, the first run is every app's
+(`ark_app::welcome`), and `?demo` runs the app's demo in the page with no
+server, seeded to `?today=`. The address arrives as a link
+(`HostedApp::link`): a launch when its query names a screen
+(`?screen=budget&inspector=1`), the address itself otherwise
+(`/account/<id>/checking/?inspector=1`). The page's root says where it is
+(`data-ark-address`, the part's `address`) beside its ready signal.
 
 ### Layout: `#[view]`
 
@@ -543,8 +584,9 @@ it last looked. Each shell exposes them:
   the app library probes that once for a screenshot's ready signal
   (ArkUI's `Ready`), ready at a version that stood still.
 - **The browser**: the page's root carries `data-ark-idle="1"` and
-  `data-ark-version="<n>"` after every draw (`MoneyWeb::say_idle`, over
-  `MoneyWeb::is_idle`/`version`, the sum over its three runtimes); a
+  `data-ark-version="<n>"` after every draw (arkui-web's
+  `WebHost::say_idle`, over `Hosting::idle`/`version`, the sum over the
+  app's runtimes); a
   driver waits for `document.documentElement.dataset.arkIdle === "1"`.
 - **The desktop**: the window owns its runtimes in process; a driver
   (arkui-shots, iced_test) asks the window's `App::is_idle()` and
@@ -800,7 +842,7 @@ ark-format's UniFFI exports are an adapter's (ark-format-ffi, namespace
 `ark_format`); ark-module is the runtime's, and the modules money asks
 are ports of it; a view is drawn by the adapter that draws it
 (`arkui::view::element(accounts::view(&page))` in money/iced,
-`arkui_web::render(…)` in money/web) and recorded for the phones by the
+`arkui_web::render(…)` by arkui-web's host) and recorded for the phones by the
 generator's main ui/prebuild.py writes. The allowlist is empty.
 
 ## Generated, Not Committed
@@ -818,15 +860,16 @@ Nothing native of an app is committed. An app is
 └── native/       what is not written in Rust yet (going: see below)
 ```
 
-**`native/`, `iced/` and `web/` are being removed** (`bridge/` is gone).
+**`native/` and `iced/` are being removed** (`bridge/` and `web/` are gone).
 The end state is `app.toml`, `icon.svg`, `core/`, `app/`, `server/` and
 `demo/`, nothing else committed: the layout is this convention, held by
 review, and each of the other directories only shrinks until it is gone.
 The phones' library is generated from app.toml ("The Phones' Library");
 money's part of its host is money-app's; every money screen is Rust, and
 the phones' `Model.swift`, `Bridge.swift`, `Book.kt` and `Start.kt` are
-gone into the app library and the host ("The App Library"). `iced/` and
-`web/` become generated entry points the same way. (`views/`
+gone into the app library and the host ("The App Library"). The
+browser's page is generated from app.toml ("The Browser's Page"), and
+`iced/` becomes a generated entry point the same way. (`views/`
 is gone: the phones' generator's main is written from app.toml's
 `[screens]` and `[views]`.)
 
@@ -846,7 +889,8 @@ If you are an agent, or anyone, about to add to one of these:
   or a key of app.toml's `[ffi]` it reads; never an app's own Rust for
   its library, which has none.
 - **Never** grow `native/`, or
-  copy a screen into `iced/` or `web/`.
+  copy a screen into `iced/`; and never commit a `web/`: the page is
+  generated, and what it draws of the app's own is a view in `app/`.
 
 and nix generates the rest, from app.toml, each listed module's
 `module.toml` and the Rust views (nix/ark-app.nix, ui/prebuild.py):
@@ -859,6 +903,7 @@ and nix generates the rest, from app.toml, each listed module's
 | The phones' library: `<id>-ffi` (lib and UniFFI namespace `<id>_ffi`): the twins, the first run, each screen's runtime and the object the phone holds over the app's crate (ui/prebuild.py's `ffi`), as a static library (the iPhone, the Mac) and a shared one (Android) | app.toml's `[ffi]` and `[screens]` | `<app>-android-lib`, `<app>-ios-kernel*` |
 | The entry points over the app library: the `@main`, the Application and the activity, the screens' holders, and — only with `[background]` — the background's hookup ("The App Library") | app.toml's `[ffi] host`, `[screens]`, `[apple] scene`, `[android] root`, `[background]` | inside both |
 | The generator's main (`ui/prebuild.py views`) | app.toml's `[screens]` and `[views]`, linked with the app's crate | `<app>-ui` |
+| The browser's page: `<id>-web` (`main.rs`, `Cargo.toml`: arkui-web's `WebHost` over the app's part, the modules' browser devices), its `index.html` and `favicon.svg` ("The Browser's Page") | app.toml, `[ffi]`'s `app`, `domain` and `demo`, the modules' `[web]` (`ui/prebuild.py web`) | `<app>-web` |
 | F-Droid's metadata (`<bundle id>.yml`) | app.toml's `[store]` (`ui/prebuild.py fdroid`) | `apps-fdroid`, `fdroid-repo` |
 
 `nix build .#<app>-native` is the projects as a build lays them out
@@ -1033,6 +1078,10 @@ over by script (`ssr`, `hydrate`: "The Browser's Modes", below) — the way
   `suggest`s); a message is **`send(m)`**: the app updates and the page is
   drawn again, Leptos keeping the elements that are the same (a focused
   field keeps its keys and its caret).
+- **`host`** (feature `host`): an Ark app's page whole, its part of its
+  host over a replica in the page, signed in and synced or on its demo
+  (`WebHost<W>`, `WebPlace`, `live`), what an app's generated entry point
+  runs ("The Browser's Page"); `parts::settings_window` is its Settings.
 - **The transient parts** (`menu`, `fields`): a row's context menu at the
   pointer (right click, the menu key, Shift-F10) and a control's menu
   under it (`menu::button`), each with its title, its entries, a check, a
@@ -1123,10 +1172,17 @@ app's routes to them, route → URL → route):
 - **No old spellings.** A URL that names nothing lands on the app's home
   (`Routable::route_of`); there are no redirects from earlier forms.
 
-money's browser address still spells its own path from the shell's state
-(`/budget/2026-10/category/<id>/`) and reads the launch arguments
-(`?screen=…`); folding it onto `money_app::Route` and the launch arguments
-onto routes is what is left.
+money's window says its address itself (`ShellPage.address`, a window's
+`Windowed::address`): the place its path, `money_app::Route`'s where money
+has one (`/budget/`, `/insights/`, `/account/<id>/<slug>/`, Category
+Details as `/category/<id>/<slug>/`) and the shell's own word for Accounts
+and Transactions (`/accounts/`, `/transactions/`; `Route::Accounts` is the
+phones' All Accounts register), Settings as `/settings/?pane=banks`; the
+UI over it its query (`inspector`, `search`, `transaction`, and `month`
+when it is not this one). `ShellMsg::Address` reads it back, so a load of
+it is the same window. The launch arguments (`?screen=…`) are still read
+beside it; folding them onto routes, and the page writing its address
+into the bar as it moves (its own history), are what is left.
 
 ## The Browser's Modes
 
@@ -1143,8 +1199,8 @@ app's crate is the same in each.
 (`modes = ["spa"]`), served by their own servers beside the sync socket
 and sign-in: a household's budget and a person's library are private, so
 there is nothing to write ahead for anybody, and a page that draws itself
-over what it syncs needs no server to draw it. money's page is a client
-like the phones (`money/web/src/live.rs`): it walks the same sign-in
+over what it syncs needs no server to draw it. An app's page is a client
+like the phones (arkui-web's `live`): it walks the same sign-in
 machine (`ark_auth::onboarding`), trades the code at `/auth/session` so
 its session is an `HttpOnly`, `SameSite=Strict` cookie no script reads,
 and holds a replica (an ark-peer in wasm, in memory) synced over the
@@ -1372,12 +1428,14 @@ ui/docs/apps/money.md for money):
    order. harken's design doc and port after it; revelation is not an Ark
    app (plain Kotlin) and stays as it is.
 3. **The browser** — written: `ui/rust/web` (crate `arkui-web`) draws a
-   `View` with Leptos over the real DOM ("The Browser", below) and
-   `money/web` runs money's shell and the Accounts slice, signed in to
-   the server that serves it and synced over its socket as every device
-   is (an ark-peer in wasm; `?demo` is the demo household in the page),
-   its other sections hosted by its own screens as money/iced hosts its;
-   `nix build .#money-web` is the page (`checks.money-web`),
+   `View` with Leptos over the real DOM ("The Browser", below), and its
+   `host` runs an app's part of its host in the page ("The Browser's
+   Page"): money's page, generated from its app.toml, is money's shell
+   and every screen, signed in to the server that serves it and synced
+   over its socket as every device is (an ark-peer in wasm; `?demo` is the
+   demo household in the page), and nothing of it is money's own code
+   but money-app's views; `nix build .#money-web` is the page
+   (`checks.money-web`),
    `checks.money-web-sync` holds it to signing in and syncing with
    another device in Playwright's Chromium, and
    `.github/screens/app-web.sh` photographs the demo.
@@ -1415,7 +1473,7 @@ ui/docs/apps/money.md for money):
    written by hand, the step before that.
 8. **The browser's modes**: money and harken are the SPA alone, served
    by their own server (ark-peer's `web::Site`), and money-web is a
-   client of it, signed in and synced (`money/web/src/live.rs`): the
+   client of it, signed in and synced (arkui-web's `live`): the
    sign-in machine the phones walk, the session an `HttpOnly` cookie the
    socket takes, the replica in memory. Next: a durable replica (ark-peer's
    `Disk` is synchronous and IndexedDB is not), and harken's client.
@@ -1478,11 +1536,12 @@ crate, as the phones' library is generated) with money/iced gone.
   money-app) drawn by ArkUI's `Tile`; money's tab glyphs go into ArkUI's
   glyphs and `ui/theme.toml`. What stays app-committed: the debug key
   app.toml names, and nothing else.
-- **The browser** (money/web): its place and sign-in (`WebPlace`,
-  `live.rs`) are the same for any app over its domain and its demo's
-  crate, and become arkui-web's (`WebHost<H: HostedApp>`); its address
-  becomes the shell's (`ShellPage.address`, read back by
-  `ShellMsg::Address`); what it hosts by name and draws over the window
-  (the budget's empty inspector, the household's foot, Settings as a
-  modal) becomes money-app's views; and `main.rs` is generated from
-  app.toml as the phones' library is.
+- **The browser** — done: money/web is gone. Its place and sign-in are
+  arkui-web's (`host::WebHost<W>`, `WebPlace`, `live`), for any app over
+  its domain and its demo's crate; its address is the shell's
+  (`ShellPage.address`, read back by `ShellMsg::Address`); what it drew by
+  hand (the budget's empty inspector, the household's foot, Settings as a
+  modal) is money-app's views (`money_app::window`) and arkui-web's
+  `parts::settings_window`; and its entry point and index.html are
+  generated from app.toml ("The Browser's Page"). The desktop's window is
+  to be hosted over the same `Windowed`.

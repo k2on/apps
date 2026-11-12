@@ -280,6 +280,15 @@ pub struct ShellPage {
     pub picture: String,
     /// Who is using the budget and where: the account sheet's.
     pub household: Household,
+    /// Where the window is, as an address (`ark_router::Address`'s
+    /// conventions; ui/docs/app.md, "Addresses"): the place in its path,
+    /// money's route where it has one (`/budget/`, `/insights/`,
+    /// `/account/<id>/<slug>/`, Category Details as
+    /// `/category/<id>/<slug>/`) and the shell's own word for Accounts and
+    /// Transactions (`/accounts/`, `/transactions/`); the UI over it in its
+    /// query: the inspector, the search, the transaction inspected, and the
+    /// month when it is not this one. [`ShellMsg::Address`] reads it back.
+    pub address: String,
 }
 
 /// Who is using the budget and where, as the account sheet and a tab's face
@@ -390,8 +399,12 @@ impl App for MoneyShell {
                     s.inspector = false;
                     vec![Command::AfterDraw(ShellMsg::Address { address })]
                 }
-                Some(l) => launch(s, l, data),
-                None => vec![],
+                Some(l) => {
+                    let mut out = launch(s, l, data);
+                    out.extend(address_query(s, &address));
+                    out
+                }
+                None => address_query(s, &address),
             },
             ShellMsg::InspectCategory { id } => {
                 s.category = id;
@@ -517,8 +530,78 @@ impl App for MoneyShell {
             },
             picture: s.settings.facts.picture.clone(),
             household: household(&s.settings.facts, data.rows(&MoneyView::Banks)),
+            address: address(s, shown, data),
         }
     }
+}
+
+/// Where the shell is, as its address ([`ShellPage::address`]).
+fn address(s: &ShellState, shown: Option<&AccountLine>, data: &Data<'_, MoneyView>) -> String {
+    use ark_router::Address;
+    let category = match s.inspector && s.section == SECTIONS[0] {
+        true => inspected(s, data),
+        false => None,
+    };
+    let mut a = match (shown, category) {
+        (Some(acct), _) => Route::Account {
+            id: acct.id.hex(),
+            name: acct.name.clone(),
+        }
+        .address(),
+        (None, Some(l)) => Route::Category {
+            id: l.category_id.hex(),
+            name: l.name.clone(),
+        }
+        .address(),
+        (None, None) => match s.section.as_str() {
+            "budget" => Route::Budget.address(),
+            "insights" => Route::Insights.address(),
+            tag => Address::at(tag.split('/').filter(|p| !p.is_empty())),
+        },
+    };
+    if s.inspector {
+        a = a.with("inspector", "1");
+    }
+    if !s.search.is_empty() {
+        a = a.with("search", s.search.clone());
+    }
+    if let Some(t) = &s.transaction {
+        a = a.with("transaction", t.clone());
+    }
+    let this = s.settings.facts.today.get(..7).unwrap_or_default();
+    if !this.is_empty() && !s.month.is_empty() && s.month != this {
+        a = a.with("month", s.month.clone());
+    }
+    a.url()
+}
+
+/// What an address's query says over the place its path names
+/// ([`ShellPage::address`]): the month (`month=2026-10`), what is searched,
+/// the transaction inspected.
+fn address_query(s: &mut ShellState, address: &str) -> Vec<Command<MoneyShell>> {
+    let query = address.split_once('?').map_or("", |(_, q)| q);
+    let mut out = vec![];
+    for (k, v) in ark_router::Address::query_of(query) {
+        match k.as_str() {
+            "search" => s.search = v,
+            "transaction" if !v.is_empty() => s.transaction = Some(v),
+            "month" if dates::parse_day(&format!("{v}-01")).is_some() && !s.month.is_empty() => {
+                let by = months_between(&s.month, &v);
+                if by != 0 {
+                    out.push(Command::Request(MoneyRequest::StepMonth { by }));
+                }
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
+/// How many months on from `from` `to` is (`2026-10` to `2026-08`: -2).
+fn months_between(from: &str, to: &str) -> i32 {
+    let n =
+        |m: &str| -> i32 { m.get(..4).and_then(|y| y.parse().ok()).unwrap_or(0) * 12 + m.get(5..7).and_then(|m| m.parse::<i32>().ok()).unwrap_or(0) };
+    n(to) - n(from)
 }
 
 /// A message for the Budget's runtime, which the host hands it.

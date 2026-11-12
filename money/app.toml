@@ -99,7 +99,10 @@ dependencies = [
 # the SPA alone, served by money-server beside the sync socket. The budget
 # is private, so no page of it is written ahead (`ssg`), and the server
 # writes none either (`ssr`): the page draws itself over the household it
-# syncs.
+# syncs. The page is generated from this file (ui/prebuild.py's `web`,
+# nix/ark-app.nix's `webSrc`): `money-web`, arkui-web's `WebHost` over
+# `[ffi]`'s app, domain and demo, and its index.html. Nothing of it is
+# committed.
 modes = ["spa"]
 
 # What a store lists of it: F-Droid's metadata (nix/fdroid.nix writes its

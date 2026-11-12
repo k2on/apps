@@ -789,6 +789,19 @@ pub(crate) fn dialog<M: Clone + 'static>(p: Part<M>) -> AnyView {
     modal(title, body, buttons, Rc::new(move || send(dismiss.clone())))
 }
 
+/// An app's Settings in the browser, a window of its own over the app's
+/// (a Mac's `Settings` scene): its panes' view (`settings_panes`), whose
+/// hosted names `hosts` draws, in a modal with Done, which sends `done`.
+pub fn settings_window<M: Clone + 'static>(panes: View<M>, hosts: &dyn Fn(&'static str) -> AnyView, done: M) -> AnyView {
+    let away = done.clone();
+    modal(
+        "Settings".into(),
+        vec![html::div().class("ark-settings-window").child(crate::shell(panes, hosts)).into_any()],
+        vec![push_button("Done", true, true, done)],
+        Rc::new(move || send(away.clone())),
+    )
+}
+
 /// A modal panel: its title, its body, its buttons at its foot.
 pub fn modal(title: String, body: Vec<AnyView>, buttons: Vec<AnyView>, dismiss: crate::Action) -> AnyView {
     let away = dismiss.clone();

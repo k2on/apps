@@ -24,8 +24,21 @@ leptos = { version = "0.8", default-features = false }
 wasm-bindgen = "0.2.129"
 web-sys = { version = "0.3", features = ["Window", "Document", "Element", "HtmlElement", "HtmlInputElement", "KeyboardEvent", "MouseEvent", "Event", "EventTarget", "DomRect", "Location", "UrlSearchParams", "MediaQueryList", "CssStyleDeclaration", "Node", "History", "FocusEvent", "PointerEvent", "ScrollIntoViewOptions", "ScrollLogicalPosition", "Navigator", "NodeList", "HtmlDocument"] }
 
+# An Ark app hosted whole (`host`): its replica, signed in and synced, or
+# its demo (ui/docs/app.md, "The App's Part of Its Host").
+ark = { path = "../../../rust/ark", optional = true }
+ark-peer = { path = "../../../rust/ark-peer", default-features = false, optional = true }
+ark-auth = { path = "../../../rust/ark-auth", default-features = false, optional = true }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+# The sign-in's exchange, awaited in the page (`host`).
+wasm-bindgen-futures = { version = "0.4", optional = true }
+
 [features]
 default = ["csr"]
+# An app's page whole: its part of its host over a replica in the page
+# (`host`, `live`), what an app's generated entry point runs.
+host = ["dep:ark", "dep:ark-peer", "dep:ark-auth", "dep:wasm-bindgen-futures", "web-sys/Storage"]
 csr = ["leptos/csr"]
 hydrate = ["leptos/hydrate"]
 ssr = ["leptos/ssr"]

@@ -117,6 +117,9 @@ button.ark-sidebar-heading:hover, button.ark-sidebar-heading.ark-on { color: var
 .ark-pane-tab { flex: none; white-space: nowrap; display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 4px 12px; border-radius: 8px; font-size: 11px; color: color-mix(in srgb, var(--ark-ink) 65%, transparent); }
 .ark-pane-tab.ark-on { color: var(--ark-accent); background: var(--ark-container); }
 .ark-settings-body { flex: 1; min-height: 0; overflow: auto; }
+/* An app's Settings in a window of its own (`parts::settings_window`): its panes edge to edge under the modal's title. */
+.ark-settings-window { height: 420px; margin: -8px -20px; border-top: 1px solid var(--ark-hairline); }
+.ark-settings-window .ark-shell-root { height: 100%; width: 100%; }
 
 /* * A page */
 .ark-page { height: 100%; overflow-y: auto; }

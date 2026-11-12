@@ -54,6 +54,9 @@ pub struct SessionFacts {
     pub leaves: bool,
     /// This host can make a code for another device (a phone, the desktop).
     pub adds_devices: bool,
+    /// The session's day (`2026-11-10`): what the shell's address leaves
+    /// out of a month that is this one.
+    pub today: String,
 }
 
 /// What Settings is in the middle of.

@@ -17,6 +17,10 @@
 //!   a search field's suggestions ([`fields`]), sheets and dialogs.
 //! - What a hosted screen is laid out of: [`figures`] (charts as inline
 //!   SVG) and [`table`].
+//! - An Ark app hosted whole (feature `host`): [`host::WebHost`] runs its
+//!   part of its host over the page (`ark_app::window::Windowed`), signed
+//!   in to its server and synced ([`live`]) or on its demo, and
+//!   [`host::run`] is what its generated entry point calls.
 //!
 //! A message is sent with [`send`]: the app's one sink takes it, updates,
 //! and the page is drawn again. Everything here runs on the page's one
@@ -37,8 +41,12 @@ pub use leptos::prelude::AnyView;
 
 pub mod fields;
 pub mod figures;
+#[cfg(feature = "host")]
+pub mod host;
 pub mod keys;
 mod layout;
+#[cfg(feature = "host")]
+pub mod live;
 pub mod menu;
 pub mod page;
 pub mod parts;

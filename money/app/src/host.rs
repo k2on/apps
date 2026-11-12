@@ -53,6 +53,9 @@ pub struct Money {
     /// The register the shell shows, where its sections are the window's
     /// places (the browser, the desktop); a phone pushes its own.
     pub register: Option<Screen<Register>>,
+    /// Settings shows, in a window its host draws itself
+    /// (`ark_app::window`); a phone's shell puts up its own.
+    pub settings: bool,
     today: String,
     month: String,
     /// The demo's bank, standing in for Plaid behind Sync.
@@ -103,6 +106,7 @@ pub fn facts(s: &Session) -> SessionFacts {
         version: s.version.clone(),
         leaves: s.leaves,
         adds_devices: s.adds_devices,
+        today: s.today.clone(),
     }
 }
 
@@ -228,6 +232,7 @@ impl HostedApp for Money {
             insights: Screen::new(),
             sheets: Screen::new(),
             register: (!cx.place.stacks()).then(Screen::new),
+            settings: false,
             month: String::new(),
             bank: session.demo.then(Bank::default),
             pending: vec![],
@@ -270,9 +275,14 @@ impl HostedApp for Money {
     }
 
     /// The banks (what wants a look, the account sheet's), the accounts
-    /// (the demo's bank), and the month's budget (a category a launch names).
+    /// (the demo's bank), and the month's budget (a category a launch
+    /// names); in a window, the payees its fields suggest.
     fn holds(&self) -> Vec<MoneyView> {
-        vec![MoneyView::Banks, MoneyView::Accounts, MoneyView::Budget { month: self.month.clone() }]
+        let mut v = vec![MoneyView::Banks, MoneyView::Accounts, MoneyView::Budget { month: self.month.clone() }];
+        if self.register.is_some() {
+            v.push(MoneyView::Payees);
+        }
+        v
     }
 
     fn now_ms(&self, clock_ms: i64) -> i64 {
@@ -435,4 +445,4 @@ macro_rules! has {
 has!(MoneyShell => shell, Accounts => accounts, Budget => budget, Transactions => transactions, Insights => insights, Sheets => sheets);
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
