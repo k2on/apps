@@ -457,16 +457,6 @@ rec {
       # File a bug if you depend on any for non-debug work!
       debug = internal.debugCrate { inherit packageId; };
     };
-    "money-views" = rec {
-      packageId = "money-views";
-      build = internal.buildRustCrateWithFeatures {
-        packageId = "money-views";
-      };
-
-      # Debug support which might change between releases.
-      # File a bug if you depend on any for non-debug work!
-      debug = internal.debugCrate { inherit packageId; };
-    };
     "money-web" = rec {
       packageId = "money-web";
       build = internal.buildRustCrateWithFeatures {
@@ -15519,28 +15509,6 @@ rec {
           {
             name = "tempfile";
             packageId = "tempfile";
-          }
-        ];
-
-      };
-      "money-views" = rec {
-        crateName = "money-views";
-        version = "0.1.0";
-        edition = "2021";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../money/views; };
-        libName = "money_views";
-        dependencies = [
-          {
-            name = "ark-app";
-            packageId = "ark-app";
-          }
-          {
-            name = "ark-ui-gen";
-            packageId = "ark-ui-gen";
-          }
-          {
-            name = "money-app";
-            packageId = "money-app";
           }
         ];
 

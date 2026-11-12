@@ -15,6 +15,9 @@
 #   prebuild.py write <app> [--views DIR] [--icon-png FILE] [--bundle-prefix P] [--root ROOT]
 #   prebuild.py files <app>    what it writes, one a line
 #   prebuild.py check          every app's app.toml and modules hold together
+#   prebuild.py views <app> [--out FILE] [--written DIR]
+#                              the views' generator's main; or that DIR,
+#                              what it wrote, has every view's two files
 #
 # It writes into <app>/.native/ (ignored by git): `ios/` (an XcodeGen
 # project, one multiplatform target for the iPhone, the iPad and the Mac, its
@@ -1187,6 +1190,71 @@ class MainActivity : ArkActivity() {{
 """
 
 
+# ------------------------------------------------------------- the views' generator
+
+# The phones' views are written by ark-ui-gen from the app's #[view]s. Its
+# main, which names each one with its runtime's holders and the names it is
+# written under, is generated from app.toml's `[screens]` and `[views]`
+# (nix/ark-app.nix builds it as `<id>-gen`, linked with the app's crate):
+# nothing of it is committed.
+
+# The first run's screen, every Ark app's (ark_app::welcome), over its host's
+# `WelcomeApp` (the app library's holders).
+WELCOME_VIEW = {"view": "ark_app::welcome::welcome", "source": "ui/rust/app/src/welcome.rs", "msg": "WelcomeMsg",
+                "swift": "WelcomeView", "swift_holder": "FirstRunScreen", "kotlin": "WelcomeScreen", "kotlin_holder": "FirstRunHolder"}
+
+
+def rust_name(crate):
+    return crate.replace("-", "_")
+
+
+def generated_views(a):
+    """Every view the generator writes for the app, in order: its screens',
+    the first run's, then the screens' further views."""
+    crate = rust_name(a["crate"])
+
+    def of(path, sc, kind="view"):
+        module = path.rsplit("::", 1)[0]
+        return {"kind": kind, "view": f"{crate}::{path}", "source": f"{a['dir']}/app/src/{module.replace('::', '/')}.rs",
+                "msg": sc["msg"], "swift_holder": sc["swift"], "kotlin_holder": sc["kotlin"]}
+
+    out = []
+    for name, sc in a.get("screens", {}).items():
+        out.append(of(sc["view"], sc) | {"swift": sc["swift-view"], "kotlin": sc["kotlin-view"]})
+    out.append(WELCOME_VIEW | {"kind": "view"})
+    for name, v in a.get("views", {}).items():
+        sc = a["screens"][v["screen"]]
+        kind = "commands" if "commands" in v else "view"
+        out.append(of(v[kind], sc, kind) | {"swift": v["swift-view"], "kotlin": v["kotlin-view"]})
+    return out
+
+
+def views_main(a):
+    """The generator's main for the app: its views named, handed to
+    ark-ui-gen's command line."""
+    def entry(g):
+        names = (f'Names {{ swift: "{g["swift"]}", swift_holder: "{g["swift_holder"]}", kotlin: "{g["kotlin"]}", '
+                 f'kotlin_holder: "{g["kotlin_holder"]}", source: "{g["source"]}", msg: "{g["msg"]}" }}')
+        fn = g["view"] if g["kind"] == "commands" else g["view"] + "::record"
+        return f"            Generated::{g['kind']}({fn}, {names}),"
+    body = "\n".join(entry(g) for g in generated_views(a))
+    return f"""//! {HEADER.format(app=a['dir'])}
+//! {a['name']}'s views written as SwiftUI and Compose (ark_ui_gen::app), from
+//! app.toml's `[screens]` and `[views]`. Never committed.
+use ark_ui_gen::app::{{App, Generated, Names}};
+
+fn main() {{
+    ark_ui_gen::app::main(App {{
+        // The bridge's namespace, where the messages' twins are.
+        namespace: "{rust_name(a['ffi']['crate'])}",
+        screens: vec![
+{body}
+        ],
+    }})
+}}
+"""
+
+
 # ------------------------------------------------------------- writing
 
 
@@ -1318,6 +1386,18 @@ def check(root):
         for n in a.get("modules", []):
             if n not in every:
                 problems.append(f"{app}/app.toml lists {n}, which is no module (modules/{n}/module.toml)")
+        # Each screen and further view says its #[view] and the names it is
+        # written under: the views' generator's main is made of them.
+        if a.get("crate"):
+            for n, sc in a.get("screens", {}).items():
+                for k in ("view", "swift-view", "kotlin-view"):
+                    if k not in sc:
+                        problems.append(f"{app}/app.toml's screen {n} says no `{k}`")
+            for n, v in a.get("views", {}).items():
+                if v.get("screen") not in a.get("screens", {}):
+                    problems.append(f"{app}/app.toml's view {n} is over no screen of [screens]")
+                if ("view" in v) == ("commands" in v):
+                    problems.append(f"{app}/app.toml's view {n} says one of `view` and `commands`")
         bg = background(a)
         for k, v in bg.items():
             if k not in BACKGROUND:
@@ -1448,6 +1528,11 @@ def main(argv):
     fx = sub.add_parser("fixture")
     fx.add_argument("--kotlin")
     fx.add_argument("--swift")
+    vm = sub.add_parser("views")
+    vm.add_argument("app")
+    vm.add_argument("--root", default=REPO)
+    vm.add_argument("--out")
+    vm.add_argument("--written")
     fd = sub.add_parser("fdroid")
     fd.add_argument("app")
     fd.add_argument("--root", default=REPO)
@@ -1465,6 +1550,18 @@ def main(argv):
         write_fixture(REPO, args.kotlin, args.swift)
     elif args.cmd == "apps":
         print("\n".join(apps(REPO)))
+    elif args.cmd == "views" and args.written:
+        missing = [f for g in generated_views(app_of(args.root, args.app)) for f in (g["swift"] + ".swift", g["kotlin"] + ".kt")
+                   if not os.path.exists(os.path.join(args.written, f))]
+        for f in missing:
+            print(f"{args.written}: no {f}, which app.toml's views name", file=sys.stderr)
+        sys.exit(1 if missing else 0)
+    elif args.cmd == "views":
+        text = views_main(app_of(args.root, args.app))
+        if args.out:
+            write_file(args.out, text)
+        else:
+            sys.stdout.write(text)
     elif args.cmd == "fdroid":
         text = fdroid_yml(app_of(args.root, args.app))
         if args.out:

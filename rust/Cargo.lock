@@ -4709,15 +4709,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "money-views"
-version = "0.1.0"
-dependencies = [
- "ark-app",
- "ark-ui-gen",
- "money-app",
-]
-
-[[package]]
 name = "money-web"
 version = "0.1.0"
 dependencies = [

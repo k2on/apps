@@ -22,15 +22,29 @@ crate = "money-app"
 
 # Each screen's runtime as the bridge exports it, its page and message, and
 # the holder each toolkit's generated views read it through (ui/prebuild.py
-# writes the holders over the app library's `ArkScreen`).
+# writes the holders over the app library's `ArkScreen`); its `#[view]` in
+# the app's crate (`view`, a path in it: its source is that module's file)
+# and the names the phones' generator writes it under (`swift-view`,
+# `kotlin-view`). ui/prebuild.py writes the generator's main from these
+# (`views`; nix/ark-app.nix builds it as `<id>-gen`), the first run's
+# screen, every app's, among them.
 [screens]
-accounts = { runtime = "AccountsApp", page = "AccountsPage", msg = "AccountsMsg", swift = "AccountsScreen", kotlin = "AccountsHolder" }
-budget = { runtime = "BudgetApp", page = "BudgetPage", msg = "BudgetMsg", swift = "BudgetScreen", kotlin = "BudgetHolder" }
-transactions = { runtime = "TransactionsApp", page = "TransactionsPage", msg = "TransactionsMsg", swift = "TransactionsScreen", kotlin = "TransactionsHolder" }
-insights = { runtime = "InsightsApp", page = "InsightsPage", msg = "InsightsMsg", swift = "InsightsScreen", kotlin = "InsightsHolder" }
-register = { runtime = "RegisterApp", page = "RegisterPage", msg = "RegisterMsg", swift = "RegisterScreen", kotlin = "RegisterHolder" }
-sheets = { runtime = "SheetsApp", page = "SheetsPage", msg = "SheetsMsg", swift = "SheetsScreen", kotlin = "SheetsHolder" }
-shell = { runtime = "ShellApp", page = "ShellPage", msg = "ShellMsg", swift = "MoneyShellScreen", kotlin = "MoneyShellHolder" }
+accounts = { runtime = "AccountsApp", page = "AccountsPage", msg = "AccountsMsg", swift = "AccountsScreen", kotlin = "AccountsHolder", view = "accounts::view::accounts", swift-view = "AccountsView", kotlin-view = "AccountsScreen" }
+budget = { runtime = "BudgetApp", page = "BudgetPage", msg = "BudgetMsg", swift = "BudgetScreen", kotlin = "BudgetHolder", view = "budget::view::budget", swift-view = "BudgetView", kotlin-view = "BudgetScreen" }
+transactions = { runtime = "TransactionsApp", page = "TransactionsPage", msg = "TransactionsMsg", swift = "TransactionsScreen", kotlin = "TransactionsHolder", view = "transactions::view::transactions", swift-view = "TransactionsView", kotlin-view = "TransactionsScreen" }
+insights = { runtime = "InsightsApp", page = "InsightsPage", msg = "InsightsMsg", swift = "InsightsScreen", kotlin = "InsightsHolder", view = "insights::view::insights", swift-view = "InsightsView", kotlin-view = "InsightsScreen" }
+register = { runtime = "RegisterApp", page = "RegisterPage", msg = "RegisterMsg", swift = "RegisterScreen", kotlin = "RegisterHolder", view = "register::view::register", swift-view = "RegisterView", kotlin-view = "RegisterScreen" }
+sheets = { runtime = "SheetsApp", page = "SheetsPage", msg = "SheetsMsg", swift = "SheetsScreen", kotlin = "SheetsHolder", view = "sheets::view::sheets", swift-view = "SheetsView", kotlin-view = "SheetsScreen" }
+# The shell's main window.
+shell = { runtime = "ShellApp", page = "ShellPage", msg = "ShellMsg", swift = "MoneyShellScreen", kotlin = "MoneyShellHolder", view = "shell::view::money_shell", swift-view = "MoneyShellView", kotlin-view = "MoneyShell" }
+
+# A screen's further views, over its runtime (`screen`): Settings, Connected
+# Banks alone (where Accounts' Bank Connections opens it), and the menu
+# bar's commands (`commands`: a function of the app's menus, not a view).
+[views]
+settings = { screen = "shell", view = "shell::view::money_settings", swift-view = "MoneySettingsView", kotlin-view = "MoneySettings" }
+banks = { screen = "shell", view = "shell::view::settings_banks", swift-view = "MoneyBanksView", kotlin-view = "MoneyBanks" }
+commands = { screen = "shell", commands = "shell::view::commands", swift-view = "MoneyCommands", kotlin-view = "moneyCommands" }
 
 [icon]
 # icon.svg's full-canvas rectangle is the background; on Android the rest
@@ -102,11 +116,6 @@ It needs a money server to sign in to; there is no account anywhere else. The se
 
 This is a release build signed with a key committed to that repository, so anyone could sign an APK as this app. It is for the household running the server.
 """
-
-[gen]
-# The screens the phones' generator writes (`screens()`): an adapter crate,
-# which nix's generated money-gen links with ark-ui-gen.
-crate = "money-views"
 
 [ffi]
 # The phones' bridge (an adapter crate: the UniFFI twins of money-core's
