@@ -2130,7 +2130,7 @@ impl<M> Part<M> {
             ),
             Part::Tile { glyph, tint } => c("Tile", Some(G::Val(lit(glyph))), vec![("tint", G::Val(lit(tint)))], vec![]),
             Part::StatusBadge { figure, tint } => c("StatusBadge", Some(G::Val(lit(figure))), vec![("tint", G::Val(lit(tint)))], vec![]),
-            Part::Meter { fraction, tint } => c("Meter", Some(G::Val(lit(fraction))), vec![("tint", G::Val(lit(tint)))], vec![]),
+            Part::Meter { fraction, tint } => c("MeterBar", Some(G::Val(lit(fraction))), vec![("tint", G::Val(lit(tint)))], vec![]),
             Part::Detail { content } => c("DetailPage", None, vec![], vec![("", &**content)]),
             Part::Section(s) => {
                 let mut args = vec![];

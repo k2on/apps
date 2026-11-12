@@ -63,7 +63,7 @@ extension StatusBadge {
 
 /// How far, 0 to 1, as the system's bar in a tint a view names (neutral is
 /// the positive's), the width it is given.
-public struct Meter: View {
+public struct MeterBar: View {
     let fraction: Double
     let tint: Tint
 

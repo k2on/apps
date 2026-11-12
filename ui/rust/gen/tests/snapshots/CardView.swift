@@ -38,7 +38,7 @@ struct CardView: View {
             }
             CardSection(title: "Goal") {
                 VStack(alignment: .leading, spacing: Space.xs) {
-                    Meter(p.fraction, tint: p.tint)
+                    MeterBar(p.fraction, tint: p.tint)
                     Text(p.note)
                         .arkType(.footnote)
                         .foregroundStyle(Color.quiet)

@@ -105,7 +105,7 @@ public fun StatusBadge(figure: String, tint: String) {
 
 /** How far, 0 to 1, as a bar in the tint a view names (neutral is the positive's), the width it is given. */
 @Composable
-public fun Meter(fraction: Double, tint: String) {
+public fun MeterBar(fraction: Double, tint: String) {
     val t = tintNamed(tint).let { if (it == Tint.Neutral) Tint.Positive else it }
     ProgressBar(fraction.toFloat(), color = tintInk(t))
 }

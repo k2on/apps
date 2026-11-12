@@ -525,7 +525,7 @@ pub fn status_badge<M>(figure: impl Into<Val<String>>, tint: impl Into<Val<Strin
 }
 
 /// A bar of how far (`fraction`, 0 to 1) in a tint, `neutral` the
-/// positive's (ArkUI's `Meter`).
+/// positive's (ArkUI's `MeterBar`: money's records have a `Meter` of their own).
 pub fn meter<M>(fraction: impl Into<Val<f64>>, tint: impl Into<Val<String>>) -> View<M> {
     Part::Meter {
         fraction: fraction.into(),

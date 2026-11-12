@@ -51,7 +51,7 @@ fun CardScreen(screen: CardHolder) {
         }
         CardSection(title = "Goal") {
             Column(modifier = Modifier.fillMaxWidth().wrapContentWidth(Alignment.Start).padding(vertical = Space.m).padding(horizontal = Space.l), verticalArrangement = Arrangement.spacedBy(Space.xs), horizontalAlignment = Alignment.Start) {
-                Meter(p.fraction, tint = p.tint)
+                MeterBar(p.fraction, tint = p.tint)
                 Text(p.note, style = ArkType.Footnote.style, color = ArkInk.quiet)
             }
         }

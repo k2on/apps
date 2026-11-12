@@ -102,7 +102,7 @@ by the generated views by these names.
 | DetailPage | content | a scrolling column of cards | `List` (grouped) | a scrolling column |
 | HeaderCard | title, figure, tint, glyph?, badge, line, caption, actions | laid out once in Rust of the primitives (ui/docs/primitives.md): a `CardSection` whose first row is its centred face, read as one, then its actions | the same, generated | the same, drawn by `arkui::view::layout` |
 | GoalProgress | fraction, tint, note | of the primitives: a `Meter` and a quiet footnote at a row's inset | the same, generated | the same |
-| Tile, StatusBadge, Meter | glyph/figure/fraction, tint (by name) | `Tile`, `StatusBadge`, `Meter` (`Primitives.kt`) | the same (`Primitives.swift`) | `parts::tile`, `figures::status_badge`, `parts::progress_bar` |
+| Tile, StatusBadge, MeterBar | glyph/figure/fraction, tint (by name) | `Tile`, `StatusBadge`, `MeterBar` (`Primitives.kt`) | the same (`Primitives.swift`) | `parts::tile`, `figures::status_badge`, `parts::progress_bar` |
 | EmptyState, TitleStack | glyph, title, sentence; over, title, under, caption | of the primitives (`empty_state`, `title_stack`) | the same | the same |
 | MenuAction | title, glyph, destructive, shown, onTap | `DropdownMenuItem` | `Button(role:)` with a `Label` | `context_menu::Item` |
 | FormSheet | title, onDismiss, confirm, canConfirm, onConfirm, content | `ModalBottomSheet`, the confirm a full-width button under the form | `.sheet` over a `Form`, Cancel ✕ and the confirming ✓ in its bar | a dialog with Cancel and the confirm |
