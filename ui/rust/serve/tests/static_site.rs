@@ -16,7 +16,7 @@ struct Site {
     changes: u64,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 enum Go {
     To(&'static str),
     Inspector,

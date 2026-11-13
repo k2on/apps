@@ -28,7 +28,7 @@ struct Groups {
     problem: Option<String>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 enum Msg {
     Name(String),
     Add,
