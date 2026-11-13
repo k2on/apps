@@ -141,12 +141,25 @@ public final class Ready {
         held = []
         frames = (0, 0)
         lastFrame = nil
+        spending = [:]
     }
 
     /// Since the trace began: how many frames were looked at, and the
     /// longest time between two (ms): a slow step with nothing waited for
     /// is the main thread's drawing.
     public private(set) var frames: (count: Int, longest: Int) = (0, 0)
+    /// Since the trace began: the main thread's time on each kind of work
+    /// the app said it did (`spent`), how many times and how long in all.
+    public private(set) var spending: [String: (times: Int, ms: Int)] = [:]
+
+    /// `what` took the main thread from `since` (`ProcessInfo`'s uptime) to
+    /// now: what a walk's slow step is told it was spent on.
+    public func spent(_ what: String, since: TimeInterval) {
+        guard Shots.on, tracing != nil else { return }
+        let ms = Int((ProcessInfo.processInfo.systemUptime - since) * 1000)
+        let was = spending[what] ?? (0, 0)
+        spending[what] = (was.times + 1, was.ms + ms)
+    }
     private var lastFrame: TimeInterval?
 
     /// One frame drawn: ready once everything is done and a frame has been

@@ -76,6 +76,8 @@ public final class ArkScreen<Runtime: ArkRuntime>: ObservableObject {
 
     /// `msg` taken by the runtime; the page read again.
     public func send(_ msg: Runtime.Msg) {
+        let began = ProcessInfo.processInfo.systemUptime
+        defer { Ready.shared.spent("\(Runtime.self)'s page", since: began) }
         guard let runtime else { return early.append(msg) }
         runtime.send(msg: msg)
         page = runtime.page()
@@ -84,6 +86,8 @@ public final class ArkScreen<Runtime: ArkRuntime>: ObservableObject {
 
     /// The page read again: something it holds moved.
     public func reload() {
+        let began = ProcessInfo.processInfo.systemUptime
+        defer { Ready.shared.spent("\(Runtime.self)'s page", since: began) }
         guard let runtime else { return }
         page = runtime.page()
         afterDraw()

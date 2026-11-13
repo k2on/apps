@@ -146,9 +146,11 @@ final class ShotsWalk {
             // The theme really switched: the bars drawn in it, not left in
             // the last (iOS 26's glass kept its old one, 43318181211). A
             // one-theme app's are its own.
-            var bar = ""
+            // More than one window drawn (a dialog's, a menu's): how each was.
+            let windows = ShotsWindow.drawn
+            var bar = windows.count > 1 ? ", windows: " + windows.joined(separator: "; ") : ""
             if one == nil, let b = ShotsWindow.barLightness(in: image) {
-                bar = String(format: ", %@ %.2f", b.bar, b.lightness)
+                bar += String(format: ", %@ %.2f", b.bar, b.lightness)
                 if (b.lightness < 0.5) != at.dark {
                     throw Stop(why: "\(id) \(name(at)): its \(b.bar) is drawn \(b.lightness < 0.5 ? "dark" : "light") (\(String(format: "%.2f", b.lightness))): the theme did not switch")
                 }
@@ -275,7 +277,9 @@ final class ShotsWalk {
         let held = Ready.shared.held.map { "\(Int($0.at * 1000)) ms \($0.why)" }
         let f = Ready.shared.frames
         if !held.isEmpty || f.longest > 100 {
-            say("  \(what): ready in \(ms(t)), \(f.count) frames, the longest \(f.longest) ms apart; held by: \(held.joined(separator: " | "))")
+            let spent = Ready.shared.spending.sorted { $0.value.ms > $1.value.ms }.prefix(3)
+                .map { "\($0.key) \($0.value.times)x \($0.value.ms) ms" }.joined(separator: ", ")
+            say("  \(what): ready in \(ms(t)), \(f.count) frames, the longest \(f.longest) ms apart; spent on: \(spent); held by: \(held.joined(separator: " | "))")
         }
     }
 

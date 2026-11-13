@@ -110,6 +110,8 @@ public final class ArkApp<Library: ArkAppHost>: ObservableObject {
     }
 
     private func refresh() {
+        let began = ProcessInfo.processInfo.systemUptime
+        defer { Ready.shared.spent("the app read again", since: began) }
         step = host.step()
         showsApp = host.showsApp()
         if host.scanning() { scanning = true }

@@ -258,22 +258,50 @@ public enum ShotsWindow {
             .sorted { $0.windowLevel < $1.windowLevel }
     }
 
+    /// How each window was drawn into the last picture, lowest first: its
+    /// kind, its level, and whether it drew its hierarchy (else its layer
+    /// was rendered): what a walk logs beside a picture of more than one.
+    public private(set) static var drawn: [String] = []
+
+    /// `w` drawn into `ctx` where it is on the screen: its hierarchy as the
+    /// screen has it now (the ready signal said everything is committed),
+    /// else after the next update, else its layer rendered; whether its
+    /// hierarchy drew.
+    private static func draw(_ w: UIWindow, in ctx: CGContext) -> Bool {
+        if w.drawHierarchy(in: w.frame, afterScreenUpdates: false) { return true }
+        if w.drawHierarchy(in: w.frame, afterScreenUpdates: true) { return true }
+        ctx.saveGState()
+        ctx.translateBy(x: w.frame.minX, y: w.frame.minY)
+        w.layer.render(in: ctx)
+        ctx.restoreGState()
+        return false
+    }
+
     /// The windows drawn as the screen shows them: every window of the
     /// app's scenes from the lowest level up (the app's, then an alert's,
     /// a menu's, a confirmation dialog's, each with what is presented in
     /// it), one over another.
     public static func picture() -> UIImage? {
-        let ws = windows
+        picture(of: windows)
+    }
+
+    private static func picture(of ws: [UIWindow]) -> UIImage? {
         guard let main = ws.first(where: \.isKeyWindow) ?? ws.first else { return nil }
         let format = UIGraphicsImageRendererFormat()
         format.scale = main.screen.scale
         format.opaque = true
         let size = main.windowScene?.coordinateSpace.bounds.size ?? main.bounds.size
-        return UIGraphicsImageRenderer(size: size, format: format).image { ctx in
+        var how: [String] = []
+        let image = UIGraphicsImageRenderer(size: size, format: format).image { ctx in
             UIColor.black.setFill()
             ctx.fill(CGRect(origin: .zero, size: size))
-            for w in ws { w.drawHierarchy(in: w.frame, afterScreenUpdates: true) }
+            for w in ws {
+                let ok = draw(w, in: ctx.cgContext)
+                how.append("\(type(of: w)) \(Int(w.windowLevel.rawValue)) \(ok ? "drawn" : "rendered")")
+            }
         }
+        drawn = how
+        return image
     }
 
     /// Whether anything is presented over the app's own screen: a view
@@ -296,12 +324,13 @@ public enum ShotsWindow {
         Ready.shared.changed()
     }
 
-    /// How light the app's bars are drawn in `image` (0 black, 1 white):
-    /// the middle of the tab bar, or else of the top navigation bar, as the
-    /// windows lay them out; nil with none on the screen. A dark picture's
+    /// How light the app's bars are drawn (0 black, 1 white): the middle
+    /// of the tab bar, or else of the top navigation bar, in its own window
+    /// drawn alone; nil with none on the screen. `image` is the picture,
+    /// whose windows' drawing (`drawn`) it keeps. A dark picture's
     /// bars are dark and a light one's light: a bar the other way kept its
     /// old theme (ArkAppearance).
-    public static func barLightness(in image: UIImage) -> (bar: String, lightness: Double)? {
+    public static func barLightness(in _: UIImage) -> (bar: String, lightness: Double)? {
         func bars(_ v: UIView, _ out: inout [UIView]) {
             if v.isHidden || v.alpha == 0 { return }
             if v is UITabBar || v is UINavigationBar { out.append(v) }
@@ -310,11 +339,14 @@ public enum ShotsWindow {
         var found: [UIView] = []
         for w in windows { bars(w, &found) }
         let sized = found.filter { $0.bounds.width > 40 && $0.bounds.height > 20 && $0.window != nil }
-        guard let bar = sized.first(where: { $0 is UITabBar }) ?? sized.first, let cg = image.cgImage, let w = bar.window else { return nil }
+        // Its own window alone, so what is over it (a dialog's dim, a
+        // sheet) says nothing of the bar's theme.
+        guard let bar = sized.first(where: { $0 is UITabBar }) ?? sized.first, let w = bar.window,
+              let alone = picture(of: [w]), let cg = alone.cgImage else { return nil }
         let r = bar.convert(bar.bounds, to: w).offsetBy(dx: w.frame.minX, dy: w.frame.minY)
         // Its middle: half its height, its width but the ends.
         let band = CGRect(x: r.minX + r.width * 0.15, y: r.midY - r.height * 0.25, width: r.width * 0.7, height: r.height * 0.5)
-        let s = image.scale
+        let s = alone.scale
         let px = CGRect(x: band.minX * s, y: band.minY * s, width: band.width * s, height: band.height * s).integral
             .intersection(CGRect(x: 0, y: 0, width: cg.width, height: cg.height))
         guard px.width >= 1, px.height >= 1, let crop = cg.cropping(to: px) else { return nil }
