@@ -160,9 +160,12 @@ ArkUI's `ShotsWalk` (ui/kotlin/shots) take it, then the process ends.
   theme (Liquid Glass's backdrop, which the windows' speed does not
   reach) is put at its end at once.
 - **Then it draws itself**: its own windows at the screen's scale (iOS:
-  every window of its scenes by `drawHierarchy`, lowest level first, so a
-  sheet, an alert, a confirmation dialog, a menu or a popover is over
-  what it covers; Android: every window of the process by PixelCopy, a
+  every window of its scenes by `drawHierarchy` as the screen has it,
+  lowest level first, so a sheet, an alert, a confirmation dialog, a menu
+  or a popover is over what it covers — but the system's text effects and
+  keyboard windows, which show nothing of the app; a page's sheets and
+  dialogs are drawn behind its list, never as rows of it, so one is up
+  however long the list; Android: every window of the process by PixelCopy, a
   dialog's dim drawn as the system dims it). The status bar is the
   system's and in neither. Each picture is `<id>.png` under its theme,
   with what a step can name beside it (`<id>.tree.txt`).

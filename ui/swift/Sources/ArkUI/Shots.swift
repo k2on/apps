@@ -254,8 +254,18 @@ public enum ShotsWindow {
     private static var windows: [UIWindow] {
         UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
             .flatMap(\.windows)
-            .filter { !$0.isHidden && $0.alpha > 0 }
+            .filter { !$0.isHidden && $0.alpha > 0 && !isSystem($0) }
             .sorted { $0.windowLevel < $1.windowLevel }
+    }
+
+    /// The system's own windows over the app's that show nothing of it:
+    /// the text effects window (the keyboard's place, the loupe), which
+    /// `drawHierarchy` draws as an opaque black sheet over everything
+    /// (app-screens 43444873141: every picture with a dialog up was black),
+    /// and the keyboard's, which is another process's and drawn by none.
+    private static func isSystem(_ w: UIWindow) -> Bool {
+        let kind = "\(type(of: w))"
+        return kind.contains("TextEffects") || kind.contains("Keyboard")
     }
 
     /// How each window was drawn into the last picture, lowest first: its
