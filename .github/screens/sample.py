@@ -25,30 +25,37 @@ def main(path):
     except ValueError:
         print("    no call graph in the sample")
         return
-    # The main thread's block: from its line to the next thread's.
-    block, total, indent = [], 0, None
+    # Each thread's block: a line at the call graph's least depth, and
+    # every line under it. The main thread's is the one so named, else
+    # the first (sample lists it first).
+    rows = []
     for line in lines[start:]:
         if not line.strip():
-            if block:
+            if rows:
                 break
             continue
         m = LINE.match(line)
-        if not m:
-            if block:
-                break
-            continue
-        depth = len(m.group(1))
-        if indent is None or depth <= indent:
-            if block:
-                break
-            if "com.apple.main-thread" in m.group(3):
-                indent, total = depth, int(m.group(2))
-                continue
-            continue
-        block.append((depth, int(m.group(2)), clean(m.group(3))))
-    if not total:
-        print("    no main thread in the sample")
+        if m:
+            rows.append((len(m.group(1)), int(m.group(2)), clean(m.group(3))))
+        elif rows:
+            break
+    if not rows:
+        print("    nothing in the call graph; the file begins:")
+        for line in lines[:20]:
+            print(f"    | {line[:200]}")
         return
+    top = min(d for d, _, _ in rows)
+    threads = [i for i, (d, _, _) in enumerate(rows) if d == top]
+    named = [i for i in threads if re.search(r"main-thread|Main Thread", rows[i][2])]
+    if not named:
+        print("    no thread named the main one; the call graph begins:")
+        for line in lines[start:start + 12]:
+            print(f"    | {line[:200]}")
+    first = (named or threads)[0]
+    after = [i for i in threads if i > first]
+    indent, total = rows[first][0], rows[first][1]
+    block = rows[first + 1:after[0] if after else len(rows)]
+    print(f"    {len(threads)} threads; this one: {rows[first][2][:120]}")
     print(f"    the main thread: {total} samples")
     least = max(1, total // 50)
     shown = 0

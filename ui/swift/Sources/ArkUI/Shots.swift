@@ -361,36 +361,42 @@ public enum ShotsWindow {
         Ready.shared.changed()
     }
 
-    /// How light the app is drawn (0 black, 1 white), and what was looked
-    /// at: the middle of its tab bar, or else of its top navigation bar,
-    /// in its own window drawn alone; with no bar on the screen (a first
-    /// run's page), the app's own window drawn alone, all of it. A dark
-    /// picture's is dark and a light one's light: one the other way kept
-    /// its old theme (ArkAppearance). Nil with no window.
-    public static func lightness() -> (what: String, lightness: Double)? {
+    /// How light the app is drawn in `shown`, the picture just drawn
+    /// (`picture()`; 0 black, 1 white), and what was looked at: the
+    /// middle of its tab bar, or else of its top navigation bar; with no
+    /// bar on the screen (a first run's page), the app's window, all of
+    /// it. Read from the picture itself while it is of one window, so the
+    /// picture kept is the one judged (iOS 26's glass took its new look
+    /// between two drawings ~300 ms apart, app-screens 43467277726); with
+    /// a window over the app's (a dialog's dim) from the app's window
+    /// drawn alone. A dark picture's is dark and a light one's light.
+    /// Nil with no window.
+    public static func lightness(in shown: UIImage) -> (what: String, lightness: Double)? {
         func bars(_ v: UIView, _ out: inout [UIView]) {
             if v.isHidden || v.alpha == 0 { return }
             if v is UITabBar || v is UINavigationBar { out.append(v) }
             for s in v.subviews { bars(s, &out) }
         }
+        let ws = windows
+        let alone = drawn.count <= 1
         var found: [UIView] = []
-        for w in windows { bars(w, &found) }
+        for w in ws { bars(w, &found) }
         let sized = found.filter { $0.bounds.width > 40 && $0.bounds.height > 20 && $0.window != nil }
-        // Its own window alone, so what is over it (a dialog's dim, a
-        // sheet) says nothing of the bar's theme.
-        if let bar = sized.first(where: { $0 is UITabBar }) ?? sized.first, let w = bar.window,
-           let alone = picture(of: [w]), let cg = alone.cgImage {
-            let r = bar.convert(bar.bounds, to: w).offsetBy(dx: w.frame.minX, dy: w.frame.minY)
-            // Its middle: half its height, its width but the ends.
-            let band = CGRect(x: r.minX + r.width * 0.15, y: r.midY - r.height * 0.25, width: r.width * 0.7, height: r.height * 0.5)
-            let s = alone.scale
-            let px = CGRect(x: band.minX * s, y: band.minY * s, width: band.width * s, height: band.height * s).integral
-                .intersection(CGRect(x: 0, y: 0, width: cg.width, height: cg.height))
-            guard px.width >= 1, px.height >= 1, let crop = cg.cropping(to: px) else { return nil }
-            return median(crop).map { ("\(type(of: bar))", $0) }
-        }
-        guard let w = windows.first, let alone = picture(of: [w]), let cg = alone.cgImage else { return nil }
-        return median(cg).map { ("background", $0) }
+        let bar = sized.first(where: { $0 is UITabBar }) ?? sized.first
+        guard let w = bar?.window ?? ws.first else { return nil }
+        let keep = drawn
+        defer { drawn = keep }
+        let image: UIImage? = alone ? shown : picture(of: [w])
+        guard let image, let cg = image.cgImage else { return nil }
+        guard let bar else { return median(cg).map { ("background", $0) } }
+        let r = bar.convert(bar.bounds, to: w).offsetBy(dx: w.frame.minX, dy: w.frame.minY)
+        // Its middle: half its height, its width but the ends.
+        let band = CGRect(x: r.minX + r.width * 0.15, y: r.midY - r.height * 0.25, width: r.width * 0.7, height: r.height * 0.5)
+        let s = image.scale
+        let px = CGRect(x: band.minX * s, y: band.minY * s, width: band.width * s, height: band.height * s).integral
+            .intersection(CGRect(x: 0, y: 0, width: cg.width, height: cg.height))
+        guard px.width >= 1, px.height >= 1, let crop = cg.cropping(to: px) else { return nil }
+        return median(crop).map { ("\(type(of: bar))", $0) }
     }
 
     /// The median lightness of `image`'s points, drawn small into

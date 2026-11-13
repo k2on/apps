@@ -123,12 +123,7 @@ final class ShotsWalk {
         // To another way: the one thing that differs switched, the screen waited for.
         func go(_ to: (dark: Bool, landscape: Bool)) async throws -> String {
             let t = Date()
-            var freed = ""
-            if to.dark != at.dark {
-                ShotsWindow.theme(dark: to.dark)
-                // What in a bar had a style of its own, handed back.
-                if !ArkAppearance.freed.isEmpty { freed = " (bars' own style handed back: \(ArkAppearance.freed.joined(separator: ", ")))" }
-            }
+            if to.dark != at.dark { ShotsWindow.theme(dark: to.dark) }
             if to.landscape != at.landscape {
                 var why = ""
                 ShotsWindow.orient(landscape: to.landscape) { why = $0 }
@@ -144,7 +139,7 @@ final class ShotsWalk {
             }
             at = to
             try await settled("\(name(at))")
-            return ms(t) + freed
+            return ms(t)
         }
         var drawn: [String: [String: Data]] = [:]
         func shoot(_ id: String, _ tree: String) async throws -> String {
@@ -164,7 +159,7 @@ final class ShotsWalk {
                 guard let i = ShotsWindow.picture() else { throw Stop(why: "\(id): no window to draw") }
                 image = i
                 windows = ShotsWindow.drawn
-                guard one == nil, let b = ShotsWindow.lightness() else { break }
+                guard one == nil, let b = ShotsWindow.lightness(in: i) else { break }
                 seen = String(format: ", %@ %.2f", b.what, b.lightness)
                 if (b.lightness < 0.5) == at.dark { break }
                 if Date().timeIntervalSince(t) > Self.theme {

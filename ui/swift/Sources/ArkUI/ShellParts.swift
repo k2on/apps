@@ -32,6 +32,14 @@ private struct ShellAccountKey: EnvironmentKey {
     static let defaultValue: AnyView? = nil
 }
 
+private struct ShownSectionKey: EnvironmentKey {
+    static let defaultValue: String? = nil
+}
+
+private struct SectionShownKey: EnvironmentKey {
+    static let defaultValue = true
+}
+
 extension EnvironmentValues {
     /// The screens a shell hosts, by name: the app's own (hand-written, or
     /// generated apart), until they move into Rust.
@@ -60,6 +68,21 @@ extension EnvironmentValues {
         get { self[ShellAccountKey.self] }
         set { self[ShellAccountKey.self] = newValue }
     }
+
+    /// The tag of the section `AdaptiveTabs` shows (a child's parent when
+    /// compact); nil outside one.
+    var shownSection: String? {
+        get { self[ShownSectionKey.self] }
+        set { self[ShownSectionKey.self] = newValue }
+    }
+
+    /// Whether what is under it is in the section shown now: false in a
+    /// tab the person is not looking at (`SectionStack`), true outside
+    /// the sections.
+    var sectionShown: Bool {
+        get { self[SectionShownKey.self] }
+        set { self[SectionShownKey.self] = newValue }
+    }
 }
 
 /// A section's navigation stack: the app's back stack for its tag, or one of its own.
@@ -67,10 +90,12 @@ struct SectionStack<Content: View>: View {
     let tag: String
     let content: Content
     @Environment(\.sectionPath) private var paths
+    @Environment(\.shownSection) private var shown
     @State private var own = NavigationPath()
 
     var body: some View {
         NavigationStack(path: paths(tag) ?? $own) { content }
+            .environment(\.sectionShown, shown.map { $0 == tag } ?? true)
     }
 }
 
@@ -141,6 +166,7 @@ public struct AdaptiveTabs<Tabs: TabContent<String>, Footer: View, Account: View
             .tabViewSidebarBottomBar { footer }
             .environment(\.shellFooter, compact && !hasAccount ? AnyView(footer) : nil)
             .environment(\.shellAccount, hasAccount ? AnyView(account) : nil)
+            .environment(\.shownSection, shown)
     }
 }
 
@@ -396,6 +422,14 @@ public struct WithInspector<Content: View, Inspector: View>: View {
     let onToggle: (Bool) -> Void
     let content: Content
     let inspector: Inspector
+    /// Whether its section is the one shown: an inspector is the shown
+    /// section's alone. On the iPhone it is a sheet, and every section's
+    /// asked for it at once while it was open: one in a tab not shown,
+    /// made already, came up over that tab when it was next shown, and
+    /// told the app it was open (app-screens 43467277726: the dark walk's
+    /// Transactions had "Nothing Selected" over it, and a row then opened
+    /// the inspector, not its form).
+    @Environment(\.sectionShown) private var sectionShown
 
     public init(
         _ title: String,
@@ -413,7 +447,7 @@ public struct WithInspector<Content: View, Inspector: View>: View {
 
     public var body: some View {
         content
-            .inspector(isPresented: Binding(get: { isShown }, set: onToggle)) {
+            .inspector(isPresented: Binding(get: { isShown && sectionShown }, set: { if sectionShown { onToggle($0) } })) {
                 // Its title is a heading inside it, never a navigation
                 // title: a stack nested in the section's is folded into it,
                 // and its title then named the page (an account's register
