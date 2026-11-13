@@ -273,7 +273,10 @@ final class ShotsWalk {
             throw Stop(why: "\(what): not ready in \(Int(Self.settle)) s (\(Ready.shared.why))")
         }
         let held = Ready.shared.held.map { "\(Int($0.at * 1000)) ms \($0.why)" }
-        if !held.isEmpty { say("  \(what): ready in \(ms(t)), held by: \(held.joined(separator: " | "))") }
+        let f = Ready.shared.frames
+        if !held.isEmpty || f.longest > 100 {
+            say("  \(what): ready in \(ms(t)), \(f.count) frames, the longest \(f.longest) ms apart; held by: \(held.joined(separator: " | "))")
+        }
     }
 
     private func name(_ w: (dark: Bool, landscape: Bool)) -> String {

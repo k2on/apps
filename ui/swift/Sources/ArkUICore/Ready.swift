@@ -139,13 +139,27 @@ public final class Ready {
     public func trace() {
         tracing = Date()
         held = []
+        frames = (0, 0)
+        lastFrame = nil
     }
+
+    /// Since the trace began: how many frames were looked at, and the
+    /// longest time between two (ms): a slow step with nothing waited for
+    /// is the main thread's drawing.
+    public private(set) var frames: (count: Int, longest: Int) = (0, 0)
+    private var lastFrame: TimeInterval?
 
     /// One frame drawn: ready once everything is done and a frame has been
     /// drawn so (what is done is then on the screen, not only in a view).
     public func frame() {
+        let t = ProcessInfo.processInfo.systemUptime
+        if let l = lastFrame { frames.longest = max(frames.longest, Int((t - l) * 1000)) }
+        lastFrame = t
+        frames.count += 1
         let busy = probes.compactMap { $0() }
-        let moves = moving()
+        // What still moves, looked for (every layer of every window) only
+        // once nothing else holds the screen.
+        let moves = waiting.isEmpty && busy.isEmpty ? moving() : nil
         guard waiting.isEmpty, busy.isEmpty, moves == nil else {
             quiet = 0
             let now = (waiting.keys.sorted() + busy + (moves.map { ["moving \($0)"] } ?? [])).joined(separator: ", ")
@@ -156,8 +170,13 @@ public final class Ready {
             }
             return
         }
+        if !why.isEmpty {
+            why = ""
+            if let t = tracing { held.append((Date().timeIntervalSince(t), "nothing waited for, drawing")) }
+        }
         quiet += 1
         guard quiet > 1, !ready else { return }
+        lastFrame = nil
         ready = true
         ticks = false
         ticking?(false)

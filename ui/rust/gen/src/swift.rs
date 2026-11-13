@@ -60,6 +60,25 @@ fn node<M: Debug>(o: &mut Out, v: &View<M>, ctx: Ctx) {
                 o.reopen("} else {", |o| node(o, no, ctx));
             }
         }
+        // A page's sheets, dialogs and alerts are not rows of its list: a
+        // row off the screen is never made, and a question in one never
+        // came up (app-screens 43429292874: Auto-Assign's dialog, the last
+        // row of a long budget, held the iPhone's walk for a minute). They
+        // go behind the list, always there.
+        View::Part(p @ Part::Page { content, .. }) if !overs(content).1.is_empty() => {
+            let (body, over) = overs(content);
+            let c = p.call();
+            let args = args(&c);
+            o.block(format!("{}({}) {{", c.name, args.join(", ")), "}", |o| {
+                body.into_iter().for_each(|v| node(o, v, Ctx::Row))
+            });
+            for (name, v) in c.slots.iter().skip(1) {
+                o.reopen(&format!("}} {name}: {{"), |o| node(o, v, Ctx::Row));
+            }
+            o.indent += 1;
+            o.block(".background {", "}", |o| over.into_iter().for_each(|v| node(o, v, Ctx::Row)));
+            o.indent -= 1;
+        }
         View::Part(p) => {
             call(o, &p.call());
             // Its walk id, which nothing reads aloud.
@@ -71,6 +90,32 @@ fn node<M: Debug>(o: &mut Out, v: &View<M>, ctx: Ctx) {
         }
         View::Layout(l) => layout(o, l, ctx),
     }
+}
+
+/// A page's content, its lists opened out: what is laid out in its list,
+/// and what comes up over it — a sheet, a prompt, a confirmation dialog,
+/// an alert, or a `for`/`if` of nothing else.
+fn overs<M>(v: &View<M>) -> (Vec<&View<M>>, Vec<&View<M>>) {
+    fn over<M>(v: &View<M>) -> bool {
+        match v {
+            View::Part(Part::Sheet { .. } | Part::Prompt { .. } | Part::Confirm { .. } | Part::Alert { .. }) => true,
+            View::List(vs) => !vs.is_empty() && vs.iter().all(over),
+            View::When { yes, no, .. } | View::WhenSome { yes, no, .. } => over(yes) && (matches!(**no, View::Empty) || over(no)),
+            View::Each { body, .. } => over(body),
+            _ => false,
+        }
+    }
+    fn walk<'a, M>(v: &'a View<M>, body: &mut Vec<&'a View<M>>, out: &mut Vec<&'a View<M>>) {
+        match v {
+            View::List(vs) if !over(v) => vs.iter().for_each(|v| walk(v, body, out)),
+            View::Empty => {}
+            v if over(v) => out.push(v),
+            v => body.push(v),
+        }
+    }
+    let (mut body, mut out) = (vec![], vec![]);
+    walk(v, &mut body, &mut out);
+    (body, out)
 }
 
 // * The primitives (ui/docs/primitives.md): SwiftUI's own layout
