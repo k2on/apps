@@ -210,11 +210,11 @@ ArkUI's `ShotsWalk` (ui/kotlin/shots) take it, then the process ends.
 - **Times.** Each shot's steps (each its Rust call and its ready wait),
   switches and pictures are logged (`shots/out/walk.log`, `ArkShots` in
   Android's log, `Shots:` on iOS).
-- **Ids outside the walk.** The same ids are not yet written into each
-  toolkit's accessibility identifiers (SwiftUI's
-  `.accessibilityIdentifier`, Compose's `testTag`, the browser's
-  `data-ark-id`): the walk reads them from the views, and nothing outside
-  the app needs them yet.
+- **Ids outside the walk.** The same ids are each element's identifier in
+  every toolkit but iced (ui/docs/parts.md, "Ids"): SwiftUI's
+  `.accessibilityIdentifier`, Compose's `testTag` (a resource id), the
+  browser's `data-ark-id`, which web-shots.js's `tap` step presses. The
+  desktop's steps still click words: iced has no identifier to find.
 
 An app whose screens are its own rather than ArkUI's views (harken's)
 is still driven from outside, as below.

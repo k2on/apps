@@ -17,16 +17,22 @@ fun ListScreen(screen: ListHolder) {
     ) {
         CardSection(footer = p.footer) {
             for (item in p.items) {
-                ListRow(item.title, glyph = "list", pushes = true, onTap = { screen.send(ListMsg.Open(id = item.id)) })
+                ArkId("list.row:" + arkSlug(item.title)) {
+                    ListRow(item.title, glyph = "list", pushes = true, onTap = { screen.send(ListMsg.Open(id = item.id)) })
+                }
             }
         }
         CardSection {
-            ListRow("Add Thing", glyph = "circle-plus", accent = true, onTap = { screen.send(ListMsg.Add) })
+            ArkId("list.row:add-thing") {
+                ListRow("Add Thing", glyph = "circle-plus", accent = true, onTap = { screen.send(ListMsg.Add) })
+            }
         }
         p.adding?.let { draft ->
             FormSheet("Add Thing", onDismiss = { screen.send(ListMsg.Dismiss) }, confirm = "Add", canConfirm = draft.canSave, onConfirm = { screen.send(ListMsg.Save) }) {
                 FormSection {
-                    NameField("Name", text = draft.name, problem = draft.problem, onChange = { screen.send(ListMsg.Name(name = it)) })
+                    ArkId("list.name") {
+                        NameField("Name", text = draft.name, problem = draft.problem, onChange = { screen.send(ListMsg.Name(name = it)) })
+                    }
                     SearchPicker("Kind", selection = draft.kind, unset = "Needs a Kind", prompt = "Search Kinds", onChange = { screen.send(ListMsg.Kind(key = it)) }) {
                         for (k in draft.kinds) {
                             SearchChoice(k.title, glyph = k.glyph, tag = k.key, group = k.group, detail = k.count, tint = k.tint)

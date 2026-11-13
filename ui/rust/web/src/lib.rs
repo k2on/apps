@@ -182,7 +182,7 @@ pub fn send<M: 'static>(m: M) {
 
 /// A control that sends `m`, wired for the page without script
 /// ([`page::tap`]): `label` is what it says.
-pub fn tapped<M: Clone + 'static>(label: &str, m: &M) -> page::Wired {
+pub fn tapped<M: Clone + std::fmt::Debug + 'static>(label: &str, m: &M) -> page::Wired {
     let m = m.clone();
     page::tap(label, Rc::new(move || send(m.clone())))
 }
@@ -215,7 +215,7 @@ pub fn hit(label: &str, run: Action) -> Option<AnyView> {
 /// be written open and read without script, and it neither takes the keys
 /// nor dims the page. With script it answers as it does over a window:
 /// its buttons close it, and what opens it opens it here.
-pub fn specimen<M: Clone + 'static>(view: ark_app::view::View<M>) -> AnyView {
+pub fn specimen<M: Clone + std::fmt::Debug + 'static>(view: ark_app::view::View<M>) -> AnyView {
     specimen_of(|| render(view))
 }
 
@@ -277,8 +277,44 @@ pub(crate) fn row_drawn(row: Row) -> (usize, bool) {
 }
 
 /// An app the page runs.
+thread_local! {
+    /// The screen being drawn, among the app's (app.toml's `[screens]`
+    /// keys): what its elements' walk ids are under.
+    static SCREEN: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
+}
+
+/// `f` drawn as the screen `name` (a hosted name's last part: `register`
+/// of `accounts.register`).
+pub(crate) fn under<R>(name: &str, f: impl FnOnce() -> R) -> R {
+    let name = name.rsplit('.').next().unwrap_or(name).to_string();
+    let was = SCREEN.with(|s| std::mem::replace(&mut *s.borrow_mut(), name));
+    let r = f();
+    SCREEN.with(|s| *s.borrow_mut() = was);
+    r
+}
+
+/// The walk id of the element `p` is on the screen being drawn
+/// (`ark_app::shots::recorded`, the id a step names it by): written as its
+/// `data-ark-id`, never said.
+pub(crate) fn walk_id<M: std::fmt::Debug>(p: &ark_app::view::Part<M>) -> Option<String> {
+    let screen = SCREEN.with(|s| s.borrow().clone());
+    if screen.is_empty() {
+        return None;
+    }
+    let pieces = ark_app::shots::recorded(&screen, p)?;
+    Some(
+        pieces
+            .into_iter()
+            .map(|x| match x {
+                ark_app::shots::Piece::Text(t) => t,
+                ark_app::shots::Piece::Slug(p) => ark_app::shots::slug(&p),
+            })
+            .collect(),
+    )
+}
+
 pub trait WebApp: 'static {
-    type Msg: Clone + 'static;
+    type Msg: Clone + std::fmt::Debug + 'static;
     /// The window's view: its shell, or a page.
     fn view(&self) -> AnyView;
     /// A message taken.

@@ -13,7 +13,7 @@ use wasm_bindgen::JsCast;
 use crate::{amount, glyph, menu, money, row_drawn, send, Row};
 
 /// `view` drawn: what `#[view]`'s `web(&record)` returns.
-pub fn render<M: Clone + 'static>(view: View<M>) -> AnyView {
+pub fn render<M: Clone + std::fmt::Debug + 'static>(view: View<M>) -> AnyView {
     match view {
         View::Part(Part::Page { top, content, .. }) => page(View::List(vec![*top, *content])),
         v => html::div().class("ark-column").child(nodes(v)).into_any(),
@@ -29,13 +29,13 @@ pub(crate) fn flatten<M>(v: View<M>) -> Vec<View<M>> {
     }
 }
 
-pub(crate) fn nodes<M: Clone + 'static>(v: View<M>) -> Vec<AnyView> {
+pub(crate) fn nodes<M: Clone + std::fmt::Debug + 'static>(v: View<M>) -> Vec<AnyView> {
     flatten(v).into_iter().filter_map(part).collect()
 }
 
 /// A tab's page: a scrolling column, its sheets and prompts over it. Its
 /// title is the toolbar's.
-pub(crate) fn page<M: Clone + 'static>(content: View<M>) -> AnyView {
+pub(crate) fn page<M: Clone + std::fmt::Debug + 'static>(content: View<M>) -> AnyView {
     let mut body = vec![];
     let mut over = vec![];
     for v in flatten(content) {
@@ -50,7 +50,26 @@ pub(crate) fn page<M: Clone + 'static>(content: View<M>) -> AnyView {
         .into_any()
 }
 
-pub(crate) fn part<M: Clone + 'static>(v: View<M>) -> Option<AnyView> {
+pub(crate) fn part<M: Clone + std::fmt::Debug + 'static>(v: View<M>) -> Option<AnyView> {
+    // Its walk id (`data-ark-id`), on an element that lays out as its
+    // content alone.
+    let id = match &v {
+        View::Part(p) => crate::walk_id(p),
+        _ => None,
+    };
+    let drawn = drawn(v)?;
+    Some(match id {
+        Some(id) => html::div()
+            .attr("data-ark-id", id)
+            .attr("style", "display: contents")
+            .child(drawn)
+            .into_any(),
+        None => drawn,
+    })
+}
+
+/// A part as it is drawn.
+fn drawn<M: Clone + std::fmt::Debug + 'static>(v: View<M>) -> Option<AnyView> {
     let p = match v {
         View::Part(p) => p,
         View::Layout(l) => return crate::layout::layout(*l),
@@ -407,7 +426,7 @@ fn fact(label: &'static str, cents: i64) -> AnyView {
 }
 
 /// A choice in a wrapping row, lit when chosen.
-pub fn chip<M: Clone + 'static>(label: String, selected: bool, tap: M) -> AnyView {
+pub fn chip<M: Clone + std::fmt::Debug + 'static>(label: String, selected: bool, tap: M) -> AnyView {
     crate::wired!(html::button(), crate::tapped(&label, &tap))
         .class(if selected { "ark-chip ark-on" } else { "ark-chip" })
         .attr("aria-pressed", if selected { "true" } else { "false" })
@@ -416,7 +435,7 @@ pub fn chip<M: Clone + 'static>(label: String, selected: bool, tap: M) -> AnyVie
         .into_any()
 }
 
-fn section<M: Clone + 'static>(s: Section<M>) -> AnyView {
+fn section<M: Clone + std::fmt::Debug + 'static>(s: Section<M>) -> AnyView {
     let shows = s.shows.as_ref().is_none_or(|b| b.get());
     let total = match s.note.as_ref().and_then(|n| n.get()) {
         Some(words) => Some(html::span().class("ark-caution-words").child(words).into_any()),
@@ -507,7 +526,7 @@ fn section<M: Clone + 'static>(s: Section<M>) -> AnyView {
 /// ArkUI's `ListRow`: its picture, its words, its count, its amount, a
 /// chevron when it pushes; pressed, its message; right-clicked (or the
 /// menu key, Shift-F10 on its cursor), its menu at the pointer.
-pub fn list_row<M: Clone + 'static>(r: ListRow<M>) -> AnyView {
+pub fn list_row<M: Clone + std::fmt::Debug + 'static>(r: ListRow<M>) -> AnyView {
     let title = r.title.get();
     let entries = menu::of_row(&r.menu);
     let open: Option<crate::Action> = r.tap.clone().map(|t| Rc::new(move || send(t.clone())) as crate::Action);
@@ -577,7 +596,7 @@ pub fn list_row<M: Clone + 'static>(r: ListRow<M>) -> AnyView {
 
 /// ArkUI's `MeterRow`: its mark and title over the slim bar and its words,
 /// two figures in columns (when not compact), the status badge at its end.
-pub fn meter_row<M: Clone + 'static>(r: MeterRow<M>) -> AnyView {
+pub fn meter_row<M: Clone + std::fmt::Debug + 'static>(r: MeterRow<M>) -> AnyView {
     let title = r.title.get();
     let entries = menu::of_row(&r.menu);
     let open: Option<crate::Action> = r.tap.clone().map(|t| Rc::new(move || send(t.clone())) as crate::Action);
@@ -666,7 +685,7 @@ pub fn tile(g: &str, class: &'static str) -> AnyView {
 }
 
 /// A labelled text field and the problem with what is in it.
-pub fn field<M: Clone + 'static>(label: &str, value: String, problem: Option<String>, typed: Input<String, M>) -> AnyView {
+pub fn field<M: Clone + std::fmt::Debug + 'static>(label: &str, value: String, problem: Option<String>, typed: Input<String, M>) -> AnyView {
     html::label()
         .class("ark-field")
         .child((
@@ -687,7 +706,7 @@ pub fn field<M: Clone + 'static>(label: &str, value: String, problem: Option<Str
 /// A sheet, a prompt, a question or a notice over the page, centred (a
 /// modal belongs to the window, motion.md), the page dimmed under it;
 /// pressing outside or Esc is its dismissal.
-pub(crate) fn dialog<M: Clone + 'static>(p: Part<M>) -> AnyView {
+pub(crate) fn dialog<M: Clone + std::fmt::Debug + 'static>(p: Part<M>) -> AnyView {
     let (dismiss, title, body, buttons): (M, String, Vec<AnyView>, Vec<AnyView>) = match p {
         Part::Sheet {
             title,
@@ -792,7 +811,7 @@ pub(crate) fn dialog<M: Clone + 'static>(p: Part<M>) -> AnyView {
 /// An app's Settings in the browser, a window of its own over the app's
 /// (a Mac's `Settings` scene): its panes' view (`settings_panes`), whose
 /// hosted names `hosts` draws, in a modal with Done, which sends `done`.
-pub fn settings_window<M: Clone + 'static>(panes: View<M>, hosts: &dyn Fn(&'static str) -> AnyView, done: M) -> AnyView {
+pub fn settings_window<M: Clone + std::fmt::Debug + 'static>(panes: View<M>, hosts: &dyn Fn(&'static str) -> AnyView, done: M) -> AnyView {
     let away = done.clone();
     modal(
         "Settings".into(),
@@ -846,7 +865,7 @@ pub fn modal(title: String, body: Vec<AnyView>, buttons: Vec<AnyView>, dismiss: 
 }
 
 /// A dialog's button: the default one filled in the accent.
-pub fn push_button<M: Clone + 'static>(title: &'static str, enabled: bool, default: bool, tap: M) -> AnyView {
+pub fn push_button<M: Clone + std::fmt::Debug + 'static>(title: &'static str, enabled: bool, default: bool, tap: M) -> AnyView {
     crate::wired!(html::button(), crate::tapped(title, &tap))
         .class(if default { "ark-push ark-default" } else { "ark-push" })
         .prop("disabled", !enabled)
@@ -922,7 +941,7 @@ fn table_cell(c: ark_app::view::TableCell) -> AnyView {
 }
 
 /// A table ([`crate::table::table`]) of the view's columns and rows.
-fn data_table<M: Clone + 'static>(columns: Vec<ark_app::view::TableColumn>, rows: View<M>) -> AnyView {
+fn data_table<M: Clone + std::fmt::Debug + 'static>(columns: Vec<ark_app::view::TableColumn>, rows: View<M>) -> AnyView {
     let columns = table_columns(&columns);
     let n = columns.len();
     let rows: Vec<crate::table::TableRow> = flatten(rows)

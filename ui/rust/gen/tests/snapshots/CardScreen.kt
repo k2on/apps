@@ -47,7 +47,9 @@ fun CardScreen(screen: CardHolder) {
                     Text(p.attention, style = ArkType.Subheadline.style, color = ArkInk.tint(p.tint), textAlign = TextAlign.Center)
                 }
             }
-            ListRow("Add Thing", glyph = "circle-plus", accent = true, onTap = { screen.send(ListMsg.Add) })
+            ArkId("list.row:add-thing") {
+                ListRow("Add Thing", glyph = "circle-plus", accent = true, onTap = { screen.send(ListMsg.Add) })
+            }
         }
         CardSection(title = "Goal") {
             Column(modifier = Modifier.fillMaxWidth().wrapContentWidth(Alignment.Start).padding(vertical = Space.m).padding(horizontal = Space.l), verticalArrangement = Arrangement.spacedBy(Space.xs), horizontalAlignment = Alignment.Start) {

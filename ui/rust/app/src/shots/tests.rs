@@ -223,3 +223,46 @@ fn ids_are_slugs() {
     assert_eq!(action("Select { tag: \"x\" }"), "select");
     assert_eq!(id_of(Role::Tab, "Budget", Some("Select { tag: \"budget\" }".into())), "tab:budget");
 }
+
+/// An element's id as the toolkits write it from a recording is the id a
+/// walk's step names it by on a drawn screen: a row's by its title (a path's
+/// words made a slug when drawn), a chip whose message carries a value by
+/// its words, a field by what its input sends. Falsified by an id worked
+/// out apart from `id_of`: the drawn screen's ids and the recorded ones
+/// differed.
+#[test]
+fn recorded_ids_are_the_walks() {
+    let sent: Sent = Default::default();
+    let drawn: View<Msg> = (
+        list_row("Dining Out").on_tap(Msg::Open("d".into())),
+        chip("To Review (5)", "inbox", true, Msg::Select("review".into())),
+        name_field("Payee", "", None, Msg::Typed),
+    )
+        .into();
+    let targets = compose(vec![screen("budget", drawn.clone(), &sent)]);
+    let ids: Vec<&str> = targets.iter().filter(|t| t.role != Role::Text).map(|t| t.id.as_str()).collect();
+    let View::List(parts) = &drawn else { panic!("a list") };
+    let written: Vec<String> = parts
+        .iter()
+        .filter_map(|v| match v {
+            View::Part(p) => recorded("budget", p),
+            _ => None,
+        })
+        .map(|ps| {
+            ps.into_iter()
+                .map(|p| match p {
+                    Piece::Text(t) => t,
+                    Piece::Slug(p) => panic!("no path in a drawn view: {p}"),
+                })
+                .collect::<String>()
+        })
+        .collect();
+    assert_eq!(ids, written);
+    // A title at a path: its words made a slug where the id says so.
+    let row: View<Msg> = list_row(Val::At("t.payee".into())).on_tap(Msg::New).into();
+    let View::Part(p) = &row else { panic!("a part") };
+    assert_eq!(
+        recorded("transactions", p),
+        Some(vec![Piece::Text("transactions.row:".into()), Piece::Slug("t.payee".into())])
+    );
+}

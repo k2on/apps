@@ -33,6 +33,12 @@ pub trait Windowed: HostedApp {
     fn window(&self, place: &dyn Place<Self::Key, Self::Change>, now_ms: i64) -> View<Self::Msg>;
     /// What the shell's `hosted(name)` shows.
     fn hosted(&self, name: &str, place: &dyn Place<Self::Key, Self::Change>, now_ms: i64) -> View<Self::Msg>;
+    /// The names among the app's screens (app.toml's `[screens]` keys) of
+    /// the window's shell and of what goes over it: what each element's
+    /// walk id is under (`shots::id_of`), as the browser writes it
+    /// (`data-ark-id`). A hosted screen's is its hosted name's last part.
+    const WINDOW: &'static str = "shell";
+    const OVER: &'static str = "";
     /// What goes over the window: its sheets and questions.
     fn over(&self, _place: &dyn Place<Self::Key, Self::Change>, _now_ms: i64) -> View<Self::Msg> {
         View::Empty

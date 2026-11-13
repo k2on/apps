@@ -507,6 +507,65 @@ pub fn id_of(role: Role, label: &str, msg: Option<String>) -> String {
     }
 }
 
+/// A piece of an element's id as a toolkit's generated view writes it
+/// ([`recorded`]): words as they are, or the words the page holds at a
+/// path, made a slug as [`slug`] makes them, when it is drawn.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Piece {
+    Text(String),
+    Slug(String),
+}
+
+/// Where a label held at a path stands in an id while it is worked out:
+/// a word [`slug`] leaves as it is.
+const MARK: &str = "arkpathmark";
+
+/// The id of the element a recorded part is (`ui/rust/gen`'s, from a
+/// `#[view]`'s recording), under its screen's `screen` name, as a step
+/// names it on that screen ([`id_of`], [`compose`]): what each toolkit
+/// writes as the element's accessibility identifier (SwiftUI's
+/// `.accessibilityIdentifier`, Compose's `testTag`). Its label is a path
+/// into the page while the recording has one, made a slug as it is drawn.
+/// The parts a person acts on alone: a row, a meter's row, a chip, a
+/// form's button, a wide button, a switch and the fields; none for any
+/// other. Rows of one title on a screen all carry the same id here (a
+/// step's `~2` is the walk's own count among what shows).
+pub fn recorded<M: Debug>(screen: &str, p: &Part<M>) -> Option<Vec<Piece>> {
+    use crate::view::Val;
+    let of = |role: Role, label: &Val<String>, msg: Option<String>| -> Vec<Piece> {
+        let (words, path) = match label {
+            Val::Is(t) => (t.clone(), None),
+            Val::At(p) => (MARK.to_string(), Some(p.clone())),
+        };
+        let id = format!("{screen}.{}", id_of(role, &words, msg));
+        match (path, id.split_once(MARK)) {
+            (Some(path), Some((before, after))) => {
+                let mut out = vec![Piece::Text(before.into()), Piece::Slug(path)];
+                if !after.is_empty() {
+                    out.push(Piece::Text(after.into()));
+                }
+                out
+            }
+            _ => vec![Piece::Text(id)],
+        }
+    };
+    let typed = |i: &Input<String, M>| Some(format!("{:?}", i.call(String::new())));
+    Some(match p {
+        Part::Row(r) => of(Role::Row, &r.title, r.tap.as_ref().map(|m| format!("{m:?}"))),
+        Part::MeterRow(r) => of(Role::Row, &r.title, r.tap.as_ref().map(|m| format!("{m:?}"))),
+        Part::Chip { label, tap, .. } => of(Role::Button, label, Some(format!("{tap:?}"))),
+        Part::Button { title, tap, .. } => of(Role::Button, &Val::Is(title.to_string()), Some(format!("{tap:?}"))),
+        Part::WideButton { title, tap, .. } => of(Role::Button, title, Some(format!("{tap:?}"))),
+        Part::Toggle { title, change, .. } => of(Role::Button, &Val::Is(title.to_string()), Some(format!("{:?}", change.call(true)))),
+        Part::NameField { label, typed: t, .. } | Part::DateField { label, typed: t, .. } | Part::AddressField { label, typed: t, .. } => {
+            of(Role::Field, &Val::Is(label.to_string()), typed(t))
+        }
+        Part::AmountEntry { label, on_typed, .. } => of(Role::Field, label, typed(on_typed)),
+        Part::AmountField { label, on, .. } => of(Role::Field, label, typed(on)),
+        _ => return None,
+    })
+}
+
 /// A message's variant (its Debug's leading name) in kebab case:
 /// `AutoAssign` is `auto-assign`.
 pub fn action(debug: &str) -> String {

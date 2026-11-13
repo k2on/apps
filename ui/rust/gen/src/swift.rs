@@ -13,7 +13,10 @@ use crate::*;
 /// The Swift file for `view`, whose record is called `root`.
 pub fn emit<M: Debug>(view: &View<M>, s: &Screen) -> String {
     let root = s.root;
-    let mut o = Out::default();
+    let mut o = Out {
+        screen: s.screen,
+        ..Out::default()
+    };
     for l in header("//", s).lines() {
         o.line(l);
     }
@@ -57,7 +60,15 @@ fn node<M: Debug>(o: &mut Out, v: &View<M>, ctx: Ctx) {
                 o.reopen("} else {", |o| node(o, no, ctx));
             }
         }
-        View::Part(p) => call(o, &p.call()),
+        View::Part(p) => {
+            call(o, &p.call());
+            // Its walk id, which nothing reads aloud.
+            if let Some(id) = walk_id(o.screen, p, "ArkId.slug") {
+                o.indent += 1;
+                o.line(format!(".accessibilityIdentifier({id})"));
+                o.indent -= 1;
+            }
+        }
         View::Layout(l) => layout(o, l, ctx),
     }
 }

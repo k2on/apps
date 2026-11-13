@@ -32,6 +32,8 @@ pub struct Generated {
     pub source: &'static str,
     /// The message type its actions send, as UniFFI names it.
     pub msg: &'static str,
+    /// Its walk name (app.toml's `[screens]` key).
+    pub screen: &'static str,
     write: Write,
 }
 
@@ -58,6 +60,7 @@ impl Generated {
             kotlin: (n.kotlin, n.kotlin_holder),
             source: n.source,
             msg: n.msg,
+            screen: n.screen,
             write: Box::new(write),
         }
     }
@@ -72,6 +75,9 @@ pub struct Names {
     pub kotlin_holder: &'static str,
     pub source: &'static str,
     pub msg: &'static str,
+    /// Its walk name (app.toml's `[screens]` key): each element's id is
+    /// under it.
+    pub screen: &'static str,
 }
 
 /// An app's every generated screen, and its UniFFI namespace (its
@@ -99,6 +105,7 @@ pub fn files(app: &App, package: &str) -> Vec<(String, String)> {
             package,
             root: "p",
             imports,
+            screen: g.screen,
         };
         let k = Screen {
             name: g.kotlin.0,

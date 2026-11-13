@@ -3,7 +3,7 @@
 // and `web`, each shot opened by its address (`query`: the launch arguments
 // every shell reads, `?screen=…`, and arkui-web's `?context=`, `?menu=`,
 // `?popover=`, `?command=`, `?keys=`) and then its steps — the desktop's
-// vocabulary: `click` a text on the page, `key` a key, `type` text,
+// vocabulary: `tap` an element by its walk id (`data-ark-id`), `click` a text on the page, `key` a key, `type` text,
 // `await` a text, `wait` seconds — at each size in light and in dark, in
 // Playwright's Chromium: one page for each size and theme, every shot's
 // address taken in it in turn (a `fresh` shot, a page of its own).
@@ -136,6 +136,9 @@ async function main() {
           await ready(page);
           for (const step of shot.steps || []) {
             // `"prefix": true`: a text that begins so (a count after it: "Approve All (5)").
+            // An element by its walk id (ui/docs/shots.md: `budget.auto-assign`), as the
+            // phones' walks name it; its first drawn element is what a pointer presses.
+            if (step.tap) await page.locator(`[data-ark-id="${step.tap}"] > *`).first().click();
             if (step.click) await page.getByText(step.prefix ? new RegExp('^' + step.click.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')) : step.click, { exact: !step.prefix }).first().click({ button: step.button || 'left' });
             if (step.context) await page.getByText(step.context, { exact: true }).first().click({ button: 'right' });
             if (step.hover) await page.getByText(step.hover, { exact: true }).last().hover();

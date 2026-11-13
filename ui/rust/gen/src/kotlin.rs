@@ -14,7 +14,10 @@ use crate::*;
 pub fn emit<M: Debug>(view: &View<M>, s: &Screen) -> String {
     let root = s.root;
     let ty = std::any::type_name::<M>().rsplit("::").next().unwrap_or("Msg").to_string();
-    let mut o = Out::default();
+    let mut o = Out {
+        screen: s.screen,
+        ..Out::default()
+    };
     for l in header("//", s).lines() {
         o.line(l);
     }
@@ -106,7 +109,11 @@ fn node<M: Debug>(o: &mut Out, v: &View<M>, ty: &str, axis: Option<Axis>) {
                 o.block(format!("if ({} == null) {{", path(opt)), "}", |o| node(o, no, ty, axis));
             }
         }
-        View::Part(p) => call(o, &p.call(), ty),
+        View::Part(p) => match walk_id(o.screen, p, "arkSlug") {
+            // Under its walk id, its test tag.
+            Some(id) => o.block(format!("ArkId({id}) {{"), "}", |o| call(o, &p.call(), ty)),
+            None => call(o, &p.call(), ty),
+        },
         View::Layout(l) => layout(o, l, ty, axis),
     }
 }

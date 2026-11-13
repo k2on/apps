@@ -15,7 +15,7 @@ use crate::glyph;
 use crate::parts::{flatten, part};
 
 /// `l` drawn, or nothing (words with `if_any` and none).
-pub(crate) fn layout<M: Clone + 'static>(l: Layout<M>) -> Option<AnyView> {
+pub(crate) fn layout<M: Clone + std::fmt::Debug + 'static>(l: Layout<M>) -> Option<AnyView> {
     if !l.shown() {
         return None;
     }
@@ -83,7 +83,7 @@ pub(crate) fn layout<M: Clone + 'static>(l: Layout<M>) -> Option<AnyView> {
     })
 }
 
-fn held<M: Clone + 'static>(content: View<M>) -> Vec<AnyView> {
+fn held<M: Clone + std::fmt::Debug + 'static>(content: View<M>) -> Vec<AnyView> {
     flatten(content).into_iter().filter_map(part).collect()
 }
 

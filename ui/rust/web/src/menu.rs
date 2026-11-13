@@ -66,7 +66,7 @@ pub enum Entry {
 
 impl Entry {
     /// An entry that sends `m`.
-    pub fn run<M: Clone + 'static>(glyph: Option<&str>, label: impl Into<String>, m: M) -> Entry {
+    pub fn run<M: Clone + std::fmt::Debug + 'static>(glyph: Option<&str>, label: impl Into<String>, m: M) -> Entry {
         Entry::Run {
             glyph: glyph.map(Into::into),
             label: label.into(),
@@ -540,7 +540,7 @@ pub(crate) fn key(key: &str) -> bool {
 }
 
 /// The entries of an `ark_app` row's menu, as this menu offers them.
-pub fn of_row<M: Clone + 'static>(items: &[ark_app::view::MenuItem<M>]) -> Vec<Entry> {
+pub fn of_row<M: Clone + std::fmt::Debug + 'static>(items: &[ark_app::view::MenuItem<M>]) -> Vec<Entry> {
     items
         .iter()
         .filter(|m| m.offered())

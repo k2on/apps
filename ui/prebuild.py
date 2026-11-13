@@ -1244,19 +1244,21 @@ def generated_views(a):
     the first run's, then the screens' further views."""
     crate = rust_name(a["crate"])
 
-    def of(path, sc, kind="view"):
+    def of(path, sc, screen, kind="view"):
         module = path.rsplit("::", 1)[0]
         return {"kind": kind, "view": f"{crate}::{path}", "source": f"{a['dir']}/app/src/{module.replace('::', '/')}.rs",
-                "msg": sc["msg"], "swift_holder": sc["swift"], "kotlin_holder": sc["kotlin"]}
+                "msg": sc["msg"], "swift_holder": sc["swift"], "kotlin_holder": sc["kotlin"], "screen": screen}
 
+    # Each view's walk name (its screen's `[screens]` key; a further view's,
+    # the screen it is over): its elements' ids are under it.
     out = []
     for name, sc in a.get("screens", {}).items():
-        out.append(of(sc["view"], sc) | {"swift": sc["swift-view"], "kotlin": sc["kotlin-view"]})
-    out.append(WELCOME_VIEW | {"kind": "view"})
+        out.append(of(sc["view"], sc, name) | {"swift": sc["swift-view"], "kotlin": sc["kotlin-view"]})
+    out.append(WELCOME_VIEW | {"kind": "view", "screen": "welcome"})
     for name, v in a.get("views", {}).items():
         sc = a["screens"][v["screen"]]
         kind = "commands" if "commands" in v else "view"
-        out.append(of(v[kind], sc, kind) | {"swift": v["swift-view"], "kotlin": v["kotlin-view"]})
+        out.append(of(v[kind], sc, v["screen"], kind) | {"swift": v["swift-view"], "kotlin": v["kotlin-view"]})
     return out
 
 
@@ -1265,7 +1267,7 @@ def views_main(a):
     ark-ui-gen's command line."""
     def entry(g):
         names = (f'Names {{ swift: "{g["swift"]}", swift_holder: "{g["swift_holder"]}", kotlin: "{g["kotlin"]}", '
-                 f'kotlin_holder: "{g["kotlin_holder"]}", source: "{g["source"]}", msg: "{g["msg"]}" }}')
+                 f'kotlin_holder: "{g["kotlin_holder"]}", source: "{g["source"]}", msg: "{g["msg"]}", screen: "{g["screen"]}" }}')
         fn = g["view"] if g["kind"] == "commands" else g["view"] + "::record"
         return f"            Generated::{g['kind']}({fn}, {names}),"
     body = "\n".join(entry(g) for g in generated_views(a))

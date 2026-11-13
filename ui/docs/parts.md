@@ -181,6 +181,15 @@ variant in kebab case (`auto-assign`, `dismiss`; with its words when the
 message carries a value, `toggle:bills`), under its screen's name
 (`budget.auto-assign`). A view writes none: a part's builder needs no
 `.id`, and a copy change, a count in a row's words or another language
-leaves it as it was. What names elements by them today is the screenshot
-walk (ui/docs/shots.md, "In the App"); the toolkits do not yet write them
-as accessibility identifiers.
+leaves it as it was. The screenshot walk names elements by them
+(ui/docs/shots.md, "In the App"), and each toolkit writes them as the
+element's identifier, never said aloud: the phones' generated screens
+(ui/rust/gen, from `shots::recorded`, which is `id_of` over the recording,
+a title held at a path made a slug as it is drawn: `ArkId.slug`,
+`arkSlug`) as SwiftUI's `.accessibilityIdentifier` and Compose's `testTag`
+(`ArkId`, read as the resource id under the activity's
+`testTagsAsResourceId`), and the browser as `data-ark-id`. The parts a
+person acts on alone carry one: rows, meters' rows, chips, form buttons,
+wide buttons, switches and fields; the walk's `~2` for a second row of one
+title is its own count, and every such row carries the plain id. iced
+writes none yet: its widgets take no identifier a test can read.

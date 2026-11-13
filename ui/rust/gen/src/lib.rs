@@ -40,6 +40,30 @@ pub struct Screen {
     pub root: &'static str,
     /// Kotlin imports the app's own pieces need.
     pub imports: &'static [&'static str],
+    /// Its name among the app's screens (app.toml's `[screens]` key: the
+    /// view's own, or the screen a further view is over), which each
+    /// element's walk id is under: what the toolkits write as its
+    /// accessibility identifier (`ark_app::shots::recorded`).
+    pub screen: &'static str,
+}
+
+/// The walk id of the element `p` is on `screen` (`ark_app::shots::
+/// recorded`), as an expression of the language: its pieces joined by `+`,
+/// a path's words made a slug by `slug` (`ArkId.slug`, `arkSlug`).
+pub fn walk_id<M: Debug>(screen: &str, p: &Part<M>, slug: &str) -> Option<String> {
+    use ark_app::shots::Piece;
+    if screen.is_empty() {
+        return None;
+    }
+    let pieces = ark_app::shots::recorded(screen, p)?;
+    let parts: Vec<String> = pieces
+        .iter()
+        .map(|x| match x {
+            Piece::Text(t) => quoted(t),
+            Piece::Slug(p) => format!("{slug}({})", path(p)),
+        })
+        .collect();
+    Some(parts.join(" + "))
 }
 
 /// The line every generated file starts with.
@@ -240,6 +264,9 @@ pub fn arg(a: &Arg, input: &str, none: &str) -> String {
 pub struct Out {
     text: String,
     indent: usize,
+    /// The screen's name among the app's (app.toml's `[screens]` key), each
+    /// element's walk id under it (`ark_app::shots::recorded`).
+    pub screen: &'static str,
 }
 
 impl Out {

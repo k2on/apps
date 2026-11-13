@@ -134,7 +134,7 @@ struct Ctx<'h> {
 
 /// A shell's view in the DOM; each hosted screen is what `hosts` draws for
 /// its name.
-pub fn shell<M: Clone + 'static>(view: View<M>, hosts: &dyn Fn(&'static str) -> AnyView) -> AnyView {
+pub fn shell<M: Clone + std::fmt::Debug + 'static>(view: View<M>, hosts: &dyn Fn(&'static str) -> AnyView) -> AnyView {
     let mut ctx = Ctx {
         back: None,
         back_label: None,
@@ -145,7 +145,7 @@ pub fn shell<M: Clone + 'static>(view: View<M>, hosts: &dyn Fn(&'static str) -> 
     html::div().class("ark-shell-root").child(draw(view, &mut ctx)).into_any()
 }
 
-fn draw<M: Clone + 'static>(v: View<M>, ctx: &mut Ctx<'_>) -> AnyView {
+fn draw<M: Clone + std::fmt::Debug + 'static>(v: View<M>, ctx: &mut Ctx<'_>) -> AnyView {
     let mut body: Vec<AnyView> = vec![];
     let mut over: Vec<AnyView> = vec![];
     for v in flatten(v) {
@@ -219,7 +219,7 @@ fn tabs_of<M>(v: View<M>, group: Option<&'static str>, out: &mut Vec<Tab<M>>, gr
     }
 }
 
-fn shell_part<M: Clone + 'static>(p: Part<M>, ctx: &mut Ctx<'_>) -> AnyView {
+fn shell_part<M: Clone + std::fmt::Debug + 'static>(p: Part<M>, ctx: &mut Ctx<'_>) -> AnyView {
     match p {
         Part::Tabs {
             selected,
@@ -482,7 +482,7 @@ fn shell_part<M: Clone + 'static>(p: Part<M>, ctx: &mut Ctx<'_>) -> AnyView {
 
 /// A detail pushed onto its section: its own toolbar with the way back at
 /// its leading end, or a Back row over it when it has none.
-fn pushed<M: Clone + 'static>(detail: View<M>, back: M, ctx: &mut Ctx<'_>) -> AnyView {
+fn pushed<M: Clone + std::fmt::Debug + 'static>(detail: View<M>, back: M, ctx: &mut Ctx<'_>) -> AnyView {
     let has_bar = flat_ref(&detail).iter().any(|v| matches!(v, View::Part(Part::Toolbar { .. })));
     let go = back.clone();
     if has_bar {
@@ -507,7 +507,7 @@ fn flat_ref<M>(v: &View<M>) -> Vec<&View<M>> {
 }
 
 /// A section's toolbar over its content.
-fn toolbar<M: Clone + 'static>(title: String, items: View<M>, content: View<M>, ctx: &mut Ctx<'_>) -> AnyView {
+fn toolbar<M: Clone + std::fmt::Debug + 'static>(title: String, items: View<M>, content: View<M>, ctx: &mut Ctx<'_>) -> AnyView {
     let content = match content {
         View::Part(Part::Push {
             detail,
@@ -615,7 +615,7 @@ type Found<M> = (&'static str, String, Input<String, M>);
 /// The search field and the inspector's toggle a toolbar takes from what
 /// it is over, and what is left to draw.
 #[allow(clippy::type_complexity)]
-fn peel<M: Clone + 'static>(v: View<M>) -> (Option<Found<M>>, Option<(&'static str, bool, M)>, View<M>) {
+fn peel<M: Clone + std::fmt::Debug + 'static>(v: View<M>) -> (Option<Found<M>>, Option<(&'static str, bool, M)>, View<M>) {
     match v {
         View::Part(Part::Searchable {
             prompt,
@@ -654,7 +654,7 @@ fn peel<M: Clone + 'static>(v: View<M>) -> (Option<Found<M>>, Option<(&'static s
 /// Who is signed in, the toolbar's last item: their picture, round, or
 /// their initial on a tinted circle when there is none; said as "Account"
 /// and their name; opening their account.
-fn account_button<M: Clone + 'static>(name: &str, picture: &str, tap: M) -> AnyView {
+fn account_button<M: Clone + std::fmt::Debug + 'static>(name: &str, picture: &str, tap: M) -> AnyView {
     let said = ark_app::shell::account_label(name);
     let face = match picture.is_empty() {
         true => html::span()
@@ -677,7 +677,7 @@ fn account_button<M: Clone + 'static>(name: &str, picture: &str, tap: M) -> AnyV
         .into_any()
 }
 
-pub fn bar_button<M: Clone + 'static>(title: &'static str, g: &'static str, enabled: bool, tap: M) -> AnyView {
+pub fn bar_button<M: Clone + std::fmt::Debug + 'static>(title: &'static str, g: &'static str, enabled: bool, tap: M) -> AnyView {
     crate::wired!(html::button(), crate::tapped(title, &tap))
         .class("ark-bar-button")
         .attr("title", title)
@@ -688,7 +688,7 @@ pub fn bar_button<M: Clone + 'static>(title: &'static str, g: &'static str, enab
         .into_any()
 }
 
-fn sidebar_item<M: Clone + 'static>(title: &str, g: &str, badge: Option<i64>, selected: bool, tap: M) -> AnyView {
+fn sidebar_item<M: Clone + std::fmt::Debug + 'static>(title: &str, g: &str, badge: Option<i64>, selected: bool, tap: M) -> AnyView {
     let t = tap.clone();
     let (_, lit) = row_drawn(Row {
         title: title.to_string(),
@@ -715,7 +715,7 @@ fn sidebar_item<M: Clone + 'static>(title: &str, g: &str, badge: Option<i64>, se
         .into_any()
 }
 
-fn top_tab<M: Clone + 'static>(title: String, badge: Option<i64>, on: bool, tap: M) -> AnyView {
+fn top_tab<M: Clone + std::fmt::Debug + 'static>(title: String, badge: Option<i64>, on: bool, tap: M) -> AnyView {
     crate::wired!(html::button(), crate::tapped(&title, &tap))
         .class(if on { "ark-top-tab ark-on" } else { "ark-top-tab" })
         .role("tab")
@@ -725,7 +725,7 @@ fn top_tab<M: Clone + 'static>(title: String, badge: Option<i64>, on: bool, tap:
         .into_any()
 }
 
-fn bottom_tab<M: Clone + 'static>(title: String, g: String, badge: Option<i64>, on: bool, tap: M) -> AnyView {
+fn bottom_tab<M: Clone + std::fmt::Debug + 'static>(title: String, g: String, badge: Option<i64>, on: bool, tap: M) -> AnyView {
     crate::wired!(html::button(), crate::tapped(&title, &tap))
         .class(if on { "ark-bottom-tab ark-on" } else { "ark-bottom-tab" })
         .role("tab")
@@ -741,6 +741,6 @@ fn bottom_tab<M: Clone + 'static>(title: String, g: String, badge: Option<i64>, 
 }
 
 /// A search field: what is typed sent as it is typed; `/` comes here.
-pub fn search<M: Clone + 'static>(prompt: &'static str, value: String, typed: Input<String, M>) -> AnyView {
+pub fn search<M: Clone + std::fmt::Debug + 'static>(prompt: &'static str, value: String, typed: Input<String, M>) -> AnyView {
     crate::fields::search_field(prompt, value, Rc::new(move |s| send(typed.call(s))))
 }

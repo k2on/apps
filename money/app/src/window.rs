@@ -128,6 +128,8 @@ impl Windowed for Money {
         }
     }
 
+    const OVER: &'static str = "sheets";
+
     fn over(&self, place: Seen<'_>, now_ms: i64) -> View<MoneyMsg> {
         crate::sheets::view::sheets::view(&self.sheets.page(place, now_ms)).map(MoneyMsg::Sheets)
     }

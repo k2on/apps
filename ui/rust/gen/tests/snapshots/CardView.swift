@@ -35,6 +35,7 @@ struct CardView: View {
                     .accessibilityElement(children: .combine)
                     .listRowInsets(EdgeInsets())
                 ListRow("Add Thing", glyph: "circle-plus", accent: true, onTap: { screen.send(.add) })
+                    .accessibilityIdentifier("list.row:add-thing")
             }
             CardSection(title: "Goal") {
                 VStack(alignment: .leading, spacing: Space.xs) {

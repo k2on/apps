@@ -168,6 +168,7 @@ fn app() -> App {
         kotlin_holder: "ListHolder",
         source: "ui/rust/gen/tests/snapshots.rs",
         msg: "ListMsg",
+        screen: "list",
     };
     App {
         namespace: "things_app",

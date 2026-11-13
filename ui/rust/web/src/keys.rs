@@ -80,7 +80,7 @@ pub fn shortcut_label(s: &ark_app::shell::Shortcut) -> String {
     out
 }
 
-fn commands_of<M: Clone + 'static>(menus: &[CommandMenu<M>]) -> Commands {
+fn commands_of<M: Clone + std::fmt::Debug + 'static>(menus: &[CommandMenu<M>]) -> Commands {
     Commands {
         titles: menus
             .iter()

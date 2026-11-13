@@ -14,13 +14,19 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.browser.customtabs.CustomTabsIntent
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.ExperimentalComposeUiApi
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
@@ -34,6 +40,7 @@ public abstract class ArkActivity : ComponentActivity() {
     /** What the app draws over its app: its first run's pages, then itself. */
     @Composable protected abstract fun Content(app: ArkApp)
 
+    @OptIn(ExperimentalComposeUiApi::class)
     override fun onCreate(savedInstanceState: Bundle?) {
         // Whether this is a screenshot's launch, before the app is made: it goes past the app's pages.
         Shots.read(intent)
@@ -59,8 +66,11 @@ public abstract class ArkActivity : ComponentActivity() {
         // (`dev.arkui.ReducedMotion`), not a jump to every animation's end.
         keepMotion()
         setContent {
-            Frame(app)
-            Content(app)
+            // Each element's walk id, its test tag (dev.arkui.ArkId), read as its resource id.
+            Box(Modifier.fillMaxSize().semantics { testTagsAsResourceId = true }) {
+                Frame(app)
+                Content(app)
+            }
         }
         // The window is there: the launch's screen may open.
         app.shown()
