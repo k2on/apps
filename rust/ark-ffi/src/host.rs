@@ -118,6 +118,12 @@ pub trait HostApp: Send + Sync + 'static {
     fn idle(&self) -> bool {
         true
     }
+    /// Whether the app tells the shell itself whenever what it shows moved
+    /// (its runtimes' versions, its views): then the peer's word alone is
+    /// not news to the shell ([`ArkHost`]'s drain).
+    fn tells_its_changes(&self) -> bool {
+        false
+    }
     /// What of the app's is left to come, said; none when [`HostApp::idle`].
     fn busy(&self) -> Option<String> {
         (!self.idle()).then(|| "the app's runtimes".into())
@@ -503,16 +509,30 @@ impl ArkHost {
             self.lock().denied = true;
             self.event(Event::Denied { reason: d });
         }
-        if let Some(last) = peer.take_rejections().last() {
-            self.lock().notice = Some(format!("Not saved: {}", last.why));
-        }
+        let refused = match peer.take_rejections().last() {
+            Some(last) => {
+                self.lock().notice = Some(format!("Not saved: {}", last.why));
+                true
+            }
+            None => false,
+        };
         // Signed in just now: opening, until the replica has what the server
         // had — or the server cannot be reached, and nothing more is coming.
         if opening && (st.linked || st.cursor > 0 || st.link == "waiting to dial" || st.link == "offline") {
             self.event(Event::Synced);
         }
         self.app.moved();
-        self.changed();
+        // The shell told only when something it shows moved: an app whose
+        // part tells its own changes (its runtimes taking what came, its
+        // views moving) says so itself, and the first run's events do, so
+        // the peer's word that moved nothing drawn — an ack, a sync with
+        // nothing new, the link's own traffic — is no change, and holds no
+        // screenshot (app-screens 43327637228: the iPhone's steps held
+        // 0.2-2.2 s after each tap). An app whose screens read the peer
+        // themselves is told every time.
+        if refused || !self.app.tells_its_changes() {
+            self.changed();
+        }
     }
 }
 

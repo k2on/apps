@@ -496,6 +496,12 @@ where
         lock(&self.open).as_ref().map_or(0, |o| o.hosting.version())
     }
 
+    /// It does: every call that moved a runtime (`Hosted::with`) and every
+    /// view that moved (the session's listener) tells the shell.
+    fn tells_its_changes(&self) -> bool {
+        true
+    }
+
     fn busy(&self) -> Option<String> {
         lock(&self.open).as_ref().and_then(|o| o.hosting.busy(&o.place))
     }
