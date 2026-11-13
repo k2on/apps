@@ -187,7 +187,6 @@ private final class Touched: UIGestureRecognizer, UIGestureRecognizerDelegate {
 #endif
 
 private struct ShotsRoot: ViewModifier {
-    @ObservedObject private var signal = Signal.shared
     /// The theme and the size class: a new theme (the driver's) or a turn
     /// on its side changes everything drawn.
     @Environment(\.colorScheme) private var scheme
@@ -201,23 +200,10 @@ private struct ShotsRoot: ViewModifier {
                     t.animation = nil
                     t.disablesAnimations = true
                 }
-                .overlay(alignment: .topLeading) {
-                    if let label = signal.label {
-                        // A point of text no one sees, there only to be found:
-                        // `ark.ready` while ready, `ark.busy` (and why) while not.
-                        Text(label)
-                            .font(.system(size: 1))
-                            .foregroundStyle(.clear)
-                            .frame(width: 1, height: 1)
-                            .clipped()
-                            .allowsHitTesting(false)
-                            .accessibilityIdentifier(signal.ready ? "ark.ready" : "ark.busy")
-                            .accessibilityLabel(label)
-                            // The theme it draws in, as the window has it: the
-                            // driver's dark pass checks it is dark.
-                            .accessibilityValue(scheme == .dark ? "dark" : "light")
-                    }
-                }
+                // The signal, a view of its own: its label changes several
+                // times a step, and only it is drawn again then, not the
+                // root it sits on.
+                .overlay(alignment: .topLeading) { ReadyMark() }
                 .onAppear(perform: ShotsRoot.still)
                 .onChange(of: scheme) { Ready.shared.changed() }
                 .onChange(of: width) { Ready.shared.changed() }
@@ -231,6 +217,8 @@ private struct ShotsRoot: ViewModifier {
     /// What of the system moves, stilled once: UIKit's animations and the
     /// caret; and every touch said to `Ready`.
     private static func still() {
+        // The signal made, if its mark has not made it yet: it ticks `Ready`.
+        _ = Signal.shared
         #if canImport(UIKit)
         UIView.setAnimationsEnabled(false)
         UITextField.appearance().tintColor = .clear
@@ -248,6 +236,29 @@ private struct ShotsRoot: ViewModifier {
         }
         #endif
         Ready.shared.changed()
+    }
+}
+
+/// The ready signal as a point of text no one sees, there only to be
+/// found: `ark.ready` while ready, `ark.busy` (and why) while not.
+private struct ReadyMark: View {
+    @ObservedObject private var signal = Signal.shared
+    @Environment(\.colorScheme) private var scheme
+
+    var body: some View {
+        if let label = signal.label {
+            Text(label)
+                .font(.system(size: 1))
+                .foregroundStyle(.clear)
+                .frame(width: 1, height: 1)
+                .clipped()
+                .allowsHitTesting(false)
+                .accessibilityIdentifier(signal.ready ? "ark.ready" : "ark.busy")
+                .accessibilityLabel(label)
+                // The theme it draws in, as the window has it: the
+                // driver's dark pass checks it is dark.
+                .accessibilityValue(scheme == .dark ? "dark" : "light")
+        }
     }
 }
 
