@@ -428,7 +428,10 @@ fn draw(app: &Hosted<MoneyPhone>) {
 /// opened instead): each shot's steps taken, and what each shot's screen
 /// could be named by then, by its id.
 fn walk(host: &ArkHost, app: &Hosted<MoneyPhone>) -> Vec<(String, String)> {
-    let plan: serde_json::Value = serde_json::from_str(include_str!("../../demo/shots.json")).unwrap();
+    // Read where the run finds it (money/demo beside this crate), not
+    // compiled in: the crate's build holds only its own directory.
+    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../demo/shots.json");
+    let plan: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(path).expect(path)).unwrap();
     let shots = plan["walk"]["phone"].as_array().unwrap();
     let first = shots.iter().position(|s| s["signIn"] == true).unwrap() + 1;
     let mut out = vec![];

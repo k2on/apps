@@ -276,7 +276,6 @@ pub(crate) fn row_drawn(row: Row) -> (usize, bool) {
     (i, lit)
 }
 
-/// An app the page runs.
 thread_local! {
     /// The screen being drawn, among the app's (app.toml's `[screens]`
     /// keys): what its elements' walk ids are under.
@@ -284,7 +283,8 @@ thread_local! {
 }
 
 /// `f` drawn as the screen `name` (a hosted name's last part: `register`
-/// of `accounts.register`).
+/// of `accounts.register`): the hosted page's (feature `host`).
+#[cfg_attr(not(feature = "host"), allow(dead_code))]
 pub(crate) fn under<R>(name: &str, f: impl FnOnce() -> R) -> R {
     let name = name.rsplit('.').next().unwrap_or(name).to_string();
     let was = SCREEN.with(|s| std::mem::replace(&mut *s.borrow_mut(), name));
@@ -313,6 +313,7 @@ pub(crate) fn walk_id<M: std::fmt::Debug>(p: &ark_app::view::Part<M>) -> Option<
     )
 }
 
+/// An app the page runs.
 pub trait WebApp: 'static {
     type Msg: Clone + std::fmt::Debug + 'static;
     /// The window's view: its shell, or a page.
