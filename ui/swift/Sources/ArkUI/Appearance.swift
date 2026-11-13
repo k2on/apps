@@ -82,6 +82,7 @@ public enum ArkAppearance {
                 MainActor.assumeIsolated { apply() }
             }
         }
+        freed = []
         for scene in UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }) {
             for w in scene.windows { restyle(w) }
         }
@@ -97,7 +98,18 @@ public enum ArkAppearance {
     }
 
     /// What draws a material or a bar under `v`, told to draw again.
-    private static func redraw(_ v: UIView) {
+    /// Inside a bar, a view the system styled itself (iOS 26's floating
+    /// tab bar sets its glass's own style from what it last saw under it,
+    /// app-screens 43451267924: the iPhone's tab bar drawn light, 0.78, in
+    /// the dark) is handed back to the window's style; the system styles
+    /// it afresh from what is under it now.
+    private static func redraw(_ v: UIView, inBar: Bool = false) {
+        let bar = inBar || v is UITabBar || v is UINavigationBar || v is UIToolbar
+        if inBar, let own = ownStyle(v) {
+            freed.append("\(type(of: v)) \(own)")
+            v.overrideUserInterfaceStyle = .unspecified
+            v.traitOverrides.remove(UITraitUserInterfaceStyle.self)
+        }
         if let e = v as? UIVisualEffectView {
             let effect = e.effect
             e.effect = nil
@@ -120,7 +132,54 @@ public enum ArkAppearance {
             v.setNeedsLayout()
             v.setNeedsDisplay()
         }
-        for s in v.subviews { redraw(s) }
+        for s in v.subviews { redraw(s, inBar: bar) }
+    }
+
+    /// The views in a bar whose own style the last switch handed back to
+    /// the window's (each its kind and the style it had): what a
+    /// screenshot walk logs beside a switch.
+    public private(set) static var freed: [String] = []
+
+    /// The style `v` is given of its own, by either of UIKit's ways (its
+    /// override, its trait overrides), if any.
+    private static func ownStyle(_ v: UIView) -> String? {
+        if v.overrideUserInterfaceStyle != .unspecified { return name(v.overrideUserInterfaceStyle) }
+        if v.traitOverrides.contains(UITraitUserInterfaceStyle.self) { return "\(name(v.traitOverrides.userInterfaceStyle)) (trait override)" }
+        return nil
+    }
+
+    private static func name(_ s: UIUserInterfaceStyle) -> String {
+        switch s {
+        case .dark: "dark"
+        case .light: "light"
+        default: "unspecified"
+        }
+    }
+
+    /// Each bar of every window, as the system has it now: its kind, the
+    /// style its traits say, and each view in it with a style of its own
+    /// or a material: what a walk says when a bar is drawn in the other
+    /// theme.
+    public static func describeBars() -> String {
+        var out: [String] = []
+        func walk(_ v: UIView, _ depth: Int, _ inBar: Bool) {
+            let bar = v is UITabBar || v is UINavigationBar || v is UIToolbar
+            if bar || inBar {
+                let own = ownStyle(v).map { " own \($0)" } ?? ""
+                let effect = (v as? UIVisualEffectView).map { " effect \(String(describing: $0.effect.map { type(of: $0) }))" } ?? ""
+                if bar || !own.isEmpty || !effect.isEmpty || depth < 3 {
+                    out.append("\(String(repeating: " ", count: depth))\(type(of: v)) traits \(name(v.traitCollection.userInterfaceStyle))\(own)\(effect)\(v.isHidden ? " hidden" : "")")
+                }
+            }
+            for s in v.subviews { walk(s, bar || inBar ? depth + 1 : 0, bar || inBar) }
+        }
+        for scene in UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }) {
+            for w in scene.windows {
+                out.append("\(type(of: w)) own \(name(w.overrideUserInterfaceStyle)) traits \(name(w.traitCollection.userInterfaceStyle))")
+                walk(w, 0, false)
+            }
+        }
+        return out.joined(separator: "\n")
     }
 }
 #endif

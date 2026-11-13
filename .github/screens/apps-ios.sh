@@ -29,8 +29,8 @@
 # Writes <out>/<app>/ios/<theme>/<id>.png (and .tree.txt) and its
 # device.json, the iPad's <out>/<app>/ipad-portrait/ and ipad-landscape/;
 # each walk's log to $RESULTS (a directory of its own; a temporary one when
-# unset). An app whose build is the iPhone's alone is passed over on the
-# iPad (ios-family.sh).
+# unset), and with SAMPLE set the app's main thread's samples beside it.
+# An app whose build is the iPhone's alone is passed over on the iPad (ios-family.sh).
 #
 # Each device's own, so the iPhone and the iPad can be taken at once:
 # PORT_OFFSET, added to each server's shots.json port (the device's own
@@ -145,6 +145,14 @@ for w in ${walks[@]+"${walks[@]}"}; do
   ph() { echo "  $a: $1 $(( $(date +%s) - p ))s"; p=$(date +%s); }
   pid=$(xcrun simctl launch "$udid" "$bundle" -shots YES 2>&1 | awk -F': ' '/: [0-9]+$/ {print $NF}')
   ph "launched (pid ${pid:-unknown})"
+  # SAMPLE (seconds): what the app's main thread did over its walk's first
+  # SAMPLE seconds, by macOS's `sample` of it, said after its log
+  # (sample.py): where a slow step's time went.
+  sampler=
+  if [ -n "${SAMPLE:-}" ] && [ -n "$pid" ]; then
+    sample "$pid" "$SAMPLE" 1 -mayDie -file "$results/sample-$a-$kind.txt" > /dev/null 2>&1 &
+    sampler=$!
+  fi
   until=$(( $(date +%s) + 1200 ))
   while [ "$(date +%s)" -lt "$until" ]; do
     [ -f "$shots/out/done" ] || [ -f "$shots/out/failed" ] && break
@@ -158,6 +166,11 @@ for w in ${walks[@]+"${walks[@]}"}; do
   sed 's/^/  /' "$shots/out/walk.log" 2> /dev/null || true
   cp "$shots/out/walk.log" "$results/walk-$a-$kind.log" 2> /dev/null || true
   echo "$a $kind: the walk took $(( $(date +%s) - t ))s"
+  if [ -n "$sampler" ]; then
+    wait "$sampler" 2> /dev/null || true
+    echo "  $a $kind: its main thread over the walk's first ${SAMPLE}s:"
+    python3 "$here/sample.py" "$results/sample-$a-$kind.txt" 2>&1 || echo "    no sample"
+  fi
   # The iPhone's pictures under ios/, the iPad's under ipad-portrait/ and
   # ipad-landscape/ (the walk's out/portrait/ and out/landscape/).
   dir=$out/$a/ios

@@ -724,7 +724,7 @@ shows), and "Add a Device".
 
 | | Swift (`ArkApp`) | Kotlin (`dev.arkui.app`) |
 |---|---|---|
-| The process's app host, held for the app's life | `ArkApp<Library>` (an `ObservableObject`: `step`, `showsApp`, `notice`, `moves`), attached to `ArkProcess` while the app runs | `ArkApplication` (makes it at the first launch: `host(launch)`), `ArkApp` (`StateFlow`s: `step`, `showsApp`, `moves`, `notices`) |
+| The process's app host, held for the app's life | `ArkApp<Library>` (an `ObservableObject`: `step`, `showsApp`, `introShown`, `notice`, each published only when it changed; `moves`, told on `moved`), attached to `ArkProcess` while the app runs | `ArkApplication` (makes it at the first launch: `host(launch)`), `ArkApp` (`StateFlow`s: `step`, `showsApp`, `moves`, `notices`) |
 | The root | `ArkRoot(app) { WelcomeView() } content: { … }`: the first run until the app shows, the code scanner, the toast | `ArkActivity`: the splash held until the first screen has what it draws, `Content(app)` |
 | Browser sign-in | `ASWebAuthenticationSession`, `preferredBrowserSession: .shared` | Custom Tabs |
 | Links and the app's phase | `.onOpenURL`, the scene's phase | the launch and new intents (`singleTask`), `ON_START` after `ON_STOP` |

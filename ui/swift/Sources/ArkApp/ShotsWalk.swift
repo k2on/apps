@@ -39,6 +39,9 @@ final class ShotsWalk {
     /// ready after it: guards, which fail the walk, never a wait.
     private static let find = 20.0
     private static let settle = 60.0
+    /// How long a picture in the other theme is taken again before the
+    /// walk fails: a guard.
+    private static let theme = 5.0
 
     /// The plan this launch walks: a screenshot's launch, on a simulator,
     /// with a plan in the app's own directory (`root`, Application
@@ -120,7 +123,12 @@ final class ShotsWalk {
         // To another way: the one thing that differs switched, the screen waited for.
         func go(_ to: (dark: Bool, landscape: Bool)) async throws -> String {
             let t = Date()
-            if to.dark != at.dark { ShotsWindow.theme(dark: to.dark) }
+            var freed = ""
+            if to.dark != at.dark {
+                ShotsWindow.theme(dark: to.dark)
+                // What in a bar had a style of its own, handed back.
+                if !ArkAppearance.freed.isEmpty { freed = " (bars' own style handed back: \(ArkAppearance.freed.joined(separator: ", ")))" }
+            }
             if to.landscape != at.landscape {
                 var why = ""
                 ShotsWindow.orient(landscape: to.landscape) { why = $0 }
@@ -136,25 +144,39 @@ final class ShotsWalk {
             }
             at = to
             try await settled("\(name(at))")
-            return ms(t)
+            return ms(t) + freed
         }
         var drawn: [String: [String: Data]] = [:]
-        func shoot(_ id: String, _ tree: String) throws -> String {
+        func shoot(_ id: String, _ tree: String) async throws -> String {
             let t = Date()
-            guard let image = ShotsWindow.picture(), let png = image.pngData() else { throw Stop(why: "\(id): no window to draw") }
             let theme = at.dark ? "dark" : "light", way = at.landscape ? "landscape" : "portrait"
-            // The theme really switched: the bars drawn in it, not left in
-            // the last (iOS 26's glass kept its old one, 43318181211). A
-            // one-theme app's are its own.
-            // More than one window drawn (a dialog's, a menu's): how each was.
-            let windows = ShotsWindow.drawn
-            var bar = windows.count > 1 ? ", windows: " + windows.joined(separator: "; ") : ""
-            if one == nil, let b = ShotsWindow.barLightness(in: image) {
-                bar += String(format: ", %@ %.2f", b.bar, b.lightness)
-                if (b.lightness < 0.5) != at.dark {
-                    throw Stop(why: "\(id) \(name(at)): its \(b.bar) is drawn \(b.lightness < 0.5 ? "dark" : "light") (\(String(format: "%.2f", b.lightness))): the theme did not switch")
+            // The theme really switched: the bars drawn in it (iOS 26's
+            // glass kept its old one, 43318181211), or with none the page
+            // itself (the iPad's first page kept its old one after a turn,
+            // 43451267924). One that is not yet is waited for, a frame at a
+            // time, as long as `Self.theme` at most: then the walk fails,
+            // saying how each bar is styled. A one-theme app's are its own.
+            var image: UIImage
+            var windows: [String] = []
+            var seen = ""
+            var waited = 0
+            while true {
+                guard let i = ShotsWindow.picture() else { throw Stop(why: "\(id): no window to draw") }
+                image = i
+                windows = ShotsWindow.drawn
+                guard one == nil, let b = ShotsWindow.lightness() else { break }
+                seen = String(format: ", %@ %.2f", b.what, b.lightness)
+                if (b.lightness < 0.5) == at.dark { break }
+                if Date().timeIntervalSince(t) > Self.theme {
+                    throw Stop(why: "\(id) \(name(at)): its \(b.what) is drawn \(b.lightness < 0.5 ? "dark" : "light") (\(String(format: "%.2f", b.lightness))) after \(waited) waits, \(ms(t)): the theme did not switch; the bars:\n\(ArkAppearance.describeBars())")
                 }
+                waited += 1
+                try await settled("\(id) \(name(at)), its \(b.what) still \(String(format: "%.2f", b.lightness))")
             }
+            guard let png = image.pngData() else { throw Stop(why: "\(id): no picture") }
+            // More than one window drawn (a dialog's, a menu's): how each was.
+            var bar = windows.count > 1 ? ", windows: " + windows.joined(separator: "; ") : ""
+            bar += seen + (waited > 0 ? " after \(waited) waits for the theme" : "")
             drawn[id, default: [:]][name(at)] = png
             for th in one == nil ? [theme] : ["light", "dark"] {
                 let dir = turns ? out.appendingPathComponent(way).appendingPathComponent(th) : out.appendingPathComponent(th)
@@ -178,7 +200,7 @@ final class ShotsWalk {
                     let switched = try await go(w)
                     times.append("switched \(switched)")
                 }
-                let took = try shoot(id, tree)
+                let took = try await shoot(id, tree)
                 times.append("\(name(at)) picture \(took)")
             }
             say("\(id): \(times.joined(separator: ", "))")
@@ -213,7 +235,7 @@ final class ShotsWalk {
                 for step in steps { each.append(try await take(step, id)) }
                 let stepped = ms(t)
                 let tree = host.shotsTree()
-                let picture = try shoot(id, tree)
+                let picture = try await shoot(id, tree)
                 say("\(id) \(name(at)): \(steps.count) steps \(stepped) [\(each.joined(separator: "; "))], picture \(picture)")
                 // Within a walk, two shots of one picture: a step that went nowhere.
                 if let same = shots[first...].compactMap({ $0["id"] as? String }).first(where: { $0 != id && drawn[$0]?[name(at)] == drawn[id]?[name(at)] }) {

@@ -50,6 +50,33 @@ private final class Signal: ObservableObject {
         }
         r.moving = Signal.moving
         r.ticking = { [weak self] on in self?.tick(on) }
+        if Shots.on { Signal.watchMainThread() }
+    }
+
+    /// The main thread's time, said to `Ready` as it is spent (`spent`):
+    /// awake (each turn of its run loop from waking, Core Animation's
+    /// commit and SwiftUI's update in it, to going back to sleep, and the
+    /// turns of a second or more again on their own) and asleep. A walk's
+    /// slow step says which: the main thread's own work, or waiting on
+    /// what draws (the render server).
+    private static func watchMainThread() {
+        #if canImport(UIKit)
+        var woke = ProcessInfo.processInfo.systemUptime
+        var slept = woke
+        let wake = CFRunLoopObserverCreateWithHandler(nil, CFRunLoopActivity.afterWaiting.rawValue, true, CFIndex.min) { _, _ in
+            woke = ProcessInfo.processInfo.systemUptime
+            MainActor.assumeIsolated { Ready.shared.spent("the main thread asleep", since: slept) }
+        }
+        let sleep = CFRunLoopObserverCreateWithHandler(nil, CFRunLoopActivity.beforeWaiting.rawValue, true, CFIndex.max) { _, _ in
+            slept = ProcessInfo.processInfo.systemUptime
+            MainActor.assumeIsolated {
+                Ready.shared.spent("the main thread awake", since: woke)
+                if slept - woke >= 1 { Ready.shared.spent("the main thread awake a second or more at once", since: woke) }
+            }
+        }
+        CFRunLoopAddObserver(CFRunLoopGetMain(), wake, .commonModes)
+        CFRunLoopAddObserver(CFRunLoopGetMain(), sleep, .commonModes)
+        #endif
     }
 
     private func tick(_ on: Bool) {
@@ -334,13 +361,13 @@ public enum ShotsWindow {
         Ready.shared.changed()
     }
 
-    /// How light the app's bars are drawn (0 black, 1 white): the middle
-    /// of the tab bar, or else of the top navigation bar, in its own window
-    /// drawn alone; nil with none on the screen. `image` is the picture,
-    /// whose windows' drawing (`drawn`) it keeps. A dark picture's
-    /// bars are dark and a light one's light: a bar the other way kept its
-    /// old theme (ArkAppearance).
-    public static func barLightness(in _: UIImage) -> (bar: String, lightness: Double)? {
+    /// How light the app is drawn (0 black, 1 white), and what was looked
+    /// at: the middle of its tab bar, or else of its top navigation bar,
+    /// in its own window drawn alone; with no bar on the screen (a first
+    /// run's page), the app's own window drawn alone, all of it. A dark
+    /// picture's is dark and a light one's light: one the other way kept
+    /// its old theme (ArkAppearance). Nil with no window.
+    public static func lightness() -> (what: String, lightness: Double)? {
         func bars(_ v: UIView, _ out: inout [UIView]) {
             if v.isHidden || v.alpha == 0 { return }
             if v is UITabBar || v is UINavigationBar { out.append(v) }
@@ -351,27 +378,35 @@ public enum ShotsWindow {
         let sized = found.filter { $0.bounds.width > 40 && $0.bounds.height > 20 && $0.window != nil }
         // Its own window alone, so what is over it (a dialog's dim, a
         // sheet) says nothing of the bar's theme.
-        guard let bar = sized.first(where: { $0 is UITabBar }) ?? sized.first, let w = bar.window,
-              let alone = picture(of: [w]), let cg = alone.cgImage else { return nil }
-        let r = bar.convert(bar.bounds, to: w).offsetBy(dx: w.frame.minX, dy: w.frame.minY)
-        // Its middle: half its height, its width but the ends.
-        let band = CGRect(x: r.minX + r.width * 0.15, y: r.midY - r.height * 0.25, width: r.width * 0.7, height: r.height * 0.5)
-        let s = alone.scale
-        let px = CGRect(x: band.minX * s, y: band.minY * s, width: band.width * s, height: band.height * s).integral
-            .intersection(CGRect(x: 0, y: 0, width: cg.width, height: cg.height))
-        guard px.width >= 1, px.height >= 1, let crop = cg.cropping(to: px) else { return nil }
-        // Drawn small into eight-bit grey: the median of its points.
-        let (cw, ch) = (min(64, Int(px.width)), min(16, Int(px.height)))
+        if let bar = sized.first(where: { $0 is UITabBar }) ?? sized.first, let w = bar.window,
+           let alone = picture(of: [w]), let cg = alone.cgImage {
+            let r = bar.convert(bar.bounds, to: w).offsetBy(dx: w.frame.minX, dy: w.frame.minY)
+            // Its middle: half its height, its width but the ends.
+            let band = CGRect(x: r.minX + r.width * 0.15, y: r.midY - r.height * 0.25, width: r.width * 0.7, height: r.height * 0.5)
+            let s = alone.scale
+            let px = CGRect(x: band.minX * s, y: band.minY * s, width: band.width * s, height: band.height * s).integral
+                .intersection(CGRect(x: 0, y: 0, width: cg.width, height: cg.height))
+            guard px.width >= 1, px.height >= 1, let crop = cg.cropping(to: px) else { return nil }
+            return median(crop).map { ("\(type(of: bar))", $0) }
+        }
+        guard let w = windows.first, let alone = picture(of: [w]), let cg = alone.cgImage else { return nil }
+        return median(cg).map { ("background", $0) }
+    }
+
+    /// The median lightness of `image`'s points, drawn small into
+    /// eight-bit grey.
+    private static func median(_ image: CGImage) -> Double? {
+        let (cw, ch) = (min(64, image.width), min(64, image.height))
         var grey = [UInt8](repeating: 0, count: cw * ch)
         let drew = grey.withUnsafeMutableBytes { buf -> Bool in
             guard let ctx = CGContext(data: buf.baseAddress, width: cw, height: ch, bitsPerComponent: 8, bytesPerRow: cw,
                                       space: CGColorSpaceCreateDeviceGray(), bitmapInfo: CGImageAlphaInfo.none.rawValue) else { return false }
-            ctx.draw(crop, in: CGRect(x: 0, y: 0, width: cw, height: ch))
+            ctx.draw(image, in: CGRect(x: 0, y: 0, width: cw, height: ch))
             return true
         }
         guard drew else { return nil }
         let sorted = grey.sorted()
-        return ("\(type(of: bar))", Double(sorted[sorted.count / 2]) / 255)
+        return Double(sorted[sorted.count / 2]) / 255
     }
 
     /// Every scene turned on its side (`landscape`), or upright: as the

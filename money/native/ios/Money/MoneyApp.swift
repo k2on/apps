@@ -79,8 +79,8 @@ final class MoneyScreens: ObservableObject {
         self.app = app
         shell = MoneyShellScreen(app.library.shell())
         Numbers.install()
-        watching = app.$moves.sink { [weak self] _ in
-            // After the change is published: read on the next turn.
+        watching = app.moved.sink { [weak self] _ in
+            // Read on the next turn, after the app's own reading.
             DispatchQueue.main.async { self?.moved() }
         }
     }

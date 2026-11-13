@@ -85,12 +85,18 @@ public final class ArkScreen<Runtime: ArkRuntime>: ObservableObject {
         afterDraw()
     }
 
-    /// The page read again: something it holds moved.
+    /// The page read again: something it holds moved. Every screen of an
+    /// app is read again whenever anything of the app moved, most of them
+    /// the same as they were: only one that differs is told to its views,
+    /// which are drawn again only then (a page told the same drew every
+    /// screen of the app again on each change: app-screens 43451267924,
+    /// one to eight seconds a step on the iPhone and the iPad).
     public func reload() {
         let began = ProcessInfo.processInfo.systemUptime
         defer { Ready.shared.spent("\(Runtime.self)'s page", since: began) }
         guard let runtime else { return }
-        page = runtime.page()
+        let now = runtime.page()
+        if !Same.values(page, now) { page = now }
         afterDraw()
     }
 
@@ -104,8 +110,25 @@ public final class ArkScreen<Runtime: ArkRuntime>: ObservableObject {
         Task { @MainActor [weak self] in
             try? await Task.sleep(for: .milliseconds(50))
             guard let self, let runtime = self.runtime else { return }
-            if runtime.drawn() { self.page = runtime.page() }
+            if runtime.drawn() {
+                let now = runtime.page()
+                if !Same.values(self.page, now) { self.page = now }
+            }
             self.afterDraw()
         }
+    }
+}
+
+/// Whether two values are the same, when their type can say (a page's
+/// record is `Equatable`, as UniFFI writes every record): else never.
+enum Same {
+    static func values<T>(_ a: T, _ b: T) -> Bool {
+        guard let a = a as? any Equatable else { return false }
+        return equal(a, b)
+    }
+
+    private static func equal<E: Equatable>(_ a: E, _ b: Any) -> Bool {
+        guard let b = b as? E else { return false }
+        return a == b
     }
 }

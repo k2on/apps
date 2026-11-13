@@ -968,6 +968,9 @@ jobs:
         timeout-minutes: 40
         env:
           RESULTS: ${{ runner.temp }}/results
+          # What the main thread did over each walk's first seconds
+          # (apps-ios.sh, sample.py): where a slow step's time goes.
+          SAMPLE: 40
         run: |
           bash .github/screens/meanwhile.sh wait install || echo "an app did not install as the iPhone booted: the walk installs it"
           bash .github/screens/apps-ios.sh "$RUNNER_TEMP/out" "$RUNNER_TEMP/apps" "$(cat "$RUNNER_TEMP/device")" $APPS
@@ -989,6 +992,7 @@ jobs:
         env:
           RESULTS: ${{ runner.temp }}/results
           FAMILY: ipad
+          SAMPLE: 60
         run: |
           # Booted once the iPhone's walk is done and the iPhone shut down:
           # booted beside the iPhone's walk (app-screens 43327637228), the

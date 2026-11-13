@@ -193,9 +193,15 @@ ArkUI's `ShotsWalk` (ui/kotlin/shots) take it, then the process ends.
   `UIRequiresFullScreen` into the simulator's build it installs on the
   iPad, and no build for people has it). Before each picture the walk
   checks the switch happened: the middle of the tab bar (else the top
-  navigation bar) on the iPhone and the iPad, the top of the app's window
-  on Android, is dark in a dark picture and light in a light one, or the
-  walk fails. The sign-in's
+  navigation bar, else with no bar the whole of the app's window) on the
+  iPhone and the iPad, the top of the app's window on Android, is dark in
+  a dark picture and light in a light one. One that is not yet is taken
+  again at the next ready (each wait logged), and after five seconds the
+  walk fails, saying how each bar and what in it is styled. A bar's glass
+  that styled itself from what it last saw under it (iOS 26's floating
+  tab bar) is handed back to the window's style at each switch
+  (`ArkAppearance`, Settings' Appearance too), and the switch's log says
+  which were. The sign-in's
   steps (its shot says `signIn`) are the first walk's alone. Within a walk
   two shots of one picture fail (a step that went nowhere); at the end, so
   do two ways of one shot that drew the same picture, unless the plan says
@@ -212,7 +218,12 @@ ArkUI's `ShotsWalk` (ui/kotlin/shots) take it, then the process ends.
   "sim"`) or Android's on an emulator can.
 - **Times.** Each shot's steps (each its Rust call and its ready wait),
   switches and pictures are logged (`shots/out/walk.log`, `ArkShots` in
-  Android's log, `Shots:` on iOS).
+  Android's log, `Shots:` on iOS). A slow wait on iOS says what the main
+  thread spent it on: each screen's page read, the app read again, and
+  the main thread awake or asleep (a run loop observer); with `SAMPLE`
+  (seconds) apps-ios.sh also samples the app's main thread (macOS's
+  `sample`) over the walk's start and says its hottest stacks
+  (sample.py).
 - **Ids outside the walk.** The same ids are each element's identifier in
   every toolkit but iced (ui/docs/parts.md, "Ids"): SwiftUI's
   `.accessibilityIdentifier`, Compose's `testTag` (a resource id), the

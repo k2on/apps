@@ -13,6 +13,9 @@
 // screens (`ArkScreen`). It replaces each app's own model object owning the
 // sign-in machine, a session and a snapshot (money's `Model.swift` and
 // `Bridge.swift`): the state is Rust's.
+#if canImport(Combine)
+import Combine
+#endif
 import Foundation
 #if canImport(ArkBindings)
 import ArkBindings
@@ -64,8 +67,15 @@ public final class ArkApp<Library: ArkAppHost>: ObservableObject {
     @Published public var notice: String? = nil
     /// The sign-in to open in the browser's sheet, once.
     @Published public var browse: URL? = nil
-    /// Grows whenever anything the app shows moved: its screens read again.
-    @Published public private(set) var moves: UInt64 = 0
+    /// Grows whenever anything the app shows moved: its screens read again
+    /// on `moved`. Not published: what the root draws (`step`, `showsApp`,
+    /// `introShown`, …) is, and only when it changed, so the app's scenes
+    /// are not all made again on every change (app-screens 43451267924).
+    public private(set) var moves: UInt64 = 0
+    /// Told `moves` each time anything the app shows moved.
+    public let moved = PassthroughSubject<UInt64, Never>()
+    /// The pages of what the app is shown over it (their route asked).
+    @Published public private(set) var introShown = false
 
     private let teller = Teller()
     /// A screenshot walk this launch takes inside the app, when it is one
@@ -79,6 +89,7 @@ public final class ArkApp<Library: ArkAppHost>: ObservableObject {
         host = library.host()
         welcome = ArkScreen(library.welcome())
         step = host.step()
+        introShown = welcome.page.intro != nil
         teller.app = { [weak self] in self?.refresh() }
         teller.browse = { [weak self] url in self?.browse = URL(string: url) }
         // A screenshot's: ready once nothing is on its way, at the version
@@ -112,12 +123,19 @@ public final class ArkApp<Library: ArkAppHost>: ObservableObject {
     private func refresh() {
         let began = ProcessInfo.processInfo.systemUptime
         defer { Ready.shared.spent("the app read again", since: began) }
-        step = host.step()
-        showsApp = host.showsApp()
-        if host.scanning() { scanning = true }
+        // Each told only when it changed: a published value set to what it
+        // was still draws again everything that reads the app.
+        let step = host.step()
+        if !Same.values(self.step, step) { self.step = step }
+        let shows = host.showsApp()
+        if shows != showsApp { showsApp = shows }
+        if host.scanning() && !scanning { scanning = true }
         if let n = host.takeNotice() { notice = n }
         welcome.reload()
+        let intro = welcome.page.intro != nil
+        if intro != introShown { introShown = intro }
         moves &+= 1
+        moved.send(moves)
         Ready.shared.changed()
     }
 
@@ -167,8 +185,6 @@ public final class ArkApp<Library: ArkAppHost>: ObservableObject {
         }.value
     }
 
-    /// The pages of what the app is show over it (their route asked).
-    public var introShown: Bool { welcome.page.intro != nil }
 }
 
 /// What the host tells the app, from any thread: on the main one.
