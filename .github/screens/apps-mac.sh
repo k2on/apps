@@ -18,11 +18,15 @@ src=$(cd "$2" && pwd)
 shift 2
 here=$(dirname "$0")
 partial=${PARTIAL:-/dev/null}
+# Each phase said with its time: what the Mac's step costs.
+p=$(date +%s)
+ph() { echo "  $1 $(( $(date +%s) - p ))s"; p=$(date +%s); }
 # The checkout's Mac packages, by name: nothing of them is evaluated.
 names=$(nix eval --json "git+file://$src#packages.aarch64-darwin" --apply builtins.attrNames 2> /dev/null) || {
   echo "the checkout's Mac packages could not be listed; no Mac windows"
   exit 0
 }
+ph "the Mac's packages listed"
 failed=0
 for a in "$@"; do
   if [ -n "${BUILT:-}" ]; then
@@ -31,6 +35,7 @@ for a in "$@"; do
     server=$(jq -r '.server.port // empty | "http://127.0.0.1:\(.)"' "$a/demo/shots.json")
     bash "$here/app-mac.sh" "$out/$a/mac" "$app" "$a" "$server" ||
       { echo "::error::$a's Mac screenshots failed"; echo "$a" >> "$partial"; failed=1; }
+    ph "$a: its Mac window taken"
     continue
   fi
   if ! jq -e --arg p "$a-macos" 'index($p) != null' <<< "$names" > /dev/null; then
@@ -47,7 +52,9 @@ for a in "$@"; do
     continue
   fi
   server=$(jq -r '.server.port // empty | "http://127.0.0.1:\(.)"' "$a/demo/shots.json")
+  ph "$a: built"
   bash "$here/app-mac.sh" "$out/$a/mac" "$app" "$a" "$server" ||
     { echo "::error::$a's Mac screenshots failed"; echo "$a" >> "$partial"; failed=1; }
+  ph "$a: its Mac window taken"
 done
 exit $failed

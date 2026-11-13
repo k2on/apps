@@ -10,7 +10,20 @@
 # the app), writes the pictures beside the plan and exits. Fails, once all
 # are taken, if any app's were not.
 #
-#   apps-ios.sh <out> <apps> <device name> <app>...
+#   [PHASE=install] apps-ios.sh <out> <apps> <device name> <app>...
+#
+# PHASE=install installs each app afresh and writes its plan, and walks
+# nothing: what the workflow runs in the background as soon as the
+# simulator has booted, while the servers start. A later run without it
+# walks what was installed so (each app marked in $INSTALLED, a directory
+# of the device's own), and installs any that was not.
+#
+# On the iPad each app is installed as one that takes the whole screen
+# (UIRequiresFullScreen, written into the simulator's build here alone):
+# iPadOS 26 turns a scene on its side for the app only then ("The current
+# windowing mode does not allow for programmatic changes to interface
+# orientation", app-screens 43327637228). The builds for people are not
+# touched: they take Split View and Slide Over as ever.
 #
 # <apps> holds simulator-<app>/ with the app's .app in it (ios-build.sh).
 # Writes <out>/<app>/ios/<theme>/<id>.png (and .tree.txt) and its
@@ -34,7 +47,9 @@ here=$(cd "$(dirname "$0")" && pwd)
 family=${FAMILY:-iphone}
 partial=${PARTIAL:-/dev/null}
 results=${RESULTS:-$(mktemp -d)}
-mkdir -p "$results" "$out"
+phase=${PHASE:-walk}
+installed=${INSTALLED:-${RUNNER_TEMP:-/tmp}/installed}
+mkdir -p "$results" "$out" "$installed"
 udid=$(xcrun simctl list devices booted -j | jq -r --arg d "$device" '[.devices[][] | select(.state == "Booted")] | (map(select(.name == $d)) + .)[0].udid')
 
 taken=()
@@ -55,28 +70,35 @@ for a in "$@"; do
 done
 [ ${#taken[@]} -gt 0 ] || { echo "no app to take on the $family"; exit 0; }
 
-# The walks, first: each a new install (and the simulator's keychain
-# emptied, so no login of a walk before is remembered), its plan in its
-# container, opened with `-shots YES`, and waited for until it says it is
-# over (`done`, or `failed` and why) or its process ends. Its pictures,
-# drawn upright by the app whichever way it is held, then taken from the
-# container; its log (each shot's step, switch and picture times) said.
-status=0
-for w in ${walks[@]+"${walks[@]}"}; do
-  IFS=: read -r a kind bundle app <<< "$w"
-  list=phone
-  [ "$family" = ipad ] && list=large
-  server=$(jq -r --argjson off "${PORT_OFFSET:-0}" '.server.port // empty | "http://127.0.0.1:\(. + $off)"' "$a/demo/shots.json")
-  t=$(date +%s)
-  # Each phase said with its time: what a walk's start costs.
+# Each app installed afresh (and the simulator's keychain emptied, so no
+# login of a walk before is remembered), what it would ask a person for
+# said yes to, its plan in its container. Each phase said with its time.
+install() {
+  local a=$1 bundle=$2 app=$3 list=$4
+  local p server data shots
   p=$(date +%s)
-  ph() { echo "  $1 $(( $(date +%s) - p ))s"; p=$(date +%s); }
+  ph() { echo "  $a: $1 $(( $(date +%s) - p ))s"; p=$(date +%s); }
+  server=$(jq -r --argjson off "${PORT_OFFSET:-0}" '.server.port // empty | "http://127.0.0.1:\(. + $off)"' "$a/demo/shots.json")
+  if [ "$family" = ipad ]; then
+    # The simulator's build alone, made one that takes the whole screen
+    # (above), and signed again as the simulator's builds are, its
+    # entitlements (the keychain's) kept.
+    local whole
+    whole=$(mktemp -d)/$(basename "$app")
+    cp -R "$app" "$whole"
+    chmod -R u+w "$whole"
+    /usr/libexec/PlistBuddy -c 'Delete :UIRequiresFullScreen' "$whole/Info.plist" > /dev/null 2>&1 || true
+    /usr/libexec/PlistBuddy -c 'Add :UIRequiresFullScreen bool true' "$whole/Info.plist"
+    codesign --force --sign - --preserve-metadata=entitlements "$whole" > /dev/null 2>&1 ||
+      codesign --force --sign - "$whole" > /dev/null
+    app=$whole
+    ph "made to take the whole screen"
+  fi
   xcrun simctl terminate "$udid" "$bundle" > /dev/null 2>&1 || true
   xcrun simctl uninstall "$udid" "$bundle" > /dev/null 2>&1 || true
   xcrun simctl keychain "$udid" reset > /dev/null 2>&1 || true
   ph "uninstalled, keychain emptied"
-  xcrun simctl install "$udid" "$app" || { echo "::error::$a did not install"; echo "$a" >> "$partial"; status=1; continue; }
-  # What the app would ask a person for, said yes to already.
+  xcrun simctl install "$udid" "$app" || { echo "::error::$a did not install"; return 1; }
   ph installed
   xcrun simctl privacy "$udid" grant all "$bundle" > /dev/null 2>&1 || true
   data=$(xcrun simctl get_app_container "$udid" "$bundle" data)
@@ -86,6 +108,41 @@ for w in ${walks[@]+"${walks[@]}"}; do
     '{orientations: (if $l == "large" then ["portrait", "landscape"] else null end), theme: .walk.theme, shots: .walk[$l]} | with_entries(select(.value != null))
      | walk(if type == "string" then gsub("\\{server\\}"; $s) else . end)' "$a/demo/shots.json" > "$shots/plan.json"
   ph "permissions, plan written"
+  touch "$installed/$udid-$a"
+}
+
+status=0
+if [ "$phase" = install ]; then
+  for w in ${walks[@]+"${walks[@]}"}; do
+    IFS=: read -r a kind bundle app <<< "$w"
+    list=phone
+    [ "$family" = ipad ] && list=large
+    rm -f "$installed/$udid-$a"
+    install "$a" "$bundle" "$app" "$list" || status=1
+  done
+  exit $status
+fi
+
+# The walks: each app as installed above (or now, when it was not), opened
+# with `-shots YES`, and waited for until it says it is over (`done`, or
+# `failed` and why) or its process ends. Its pictures, drawn upright by the
+# app whichever way it is held, then taken from the container; its log
+# (each shot's step, switch and picture times) said.
+for w in ${walks[@]+"${walks[@]}"}; do
+  IFS=: read -r a kind bundle app <<< "$w"
+  list=phone
+  [ "$family" = ipad ] && list=large
+  t=$(date +%s)
+  if [ -f "$installed/$udid-$a" ]; then
+    echo "  $a: installed already, as the simulator booted"
+  else
+    install "$a" "$bundle" "$app" "$list" || { echo "$a" >> "$partial"; status=1; continue; }
+  fi
+  rm -f "$installed/$udid-$a"
+  data=$(xcrun simctl get_app_container "$udid" "$bundle" data)
+  shots="$data/Library/Application Support/shots"
+  p=$(date +%s)
+  ph() { echo "  $a: $1 $(( $(date +%s) - p ))s"; p=$(date +%s); }
   pid=$(xcrun simctl launch "$udid" "$bundle" -shots YES 2>&1 | awk -F': ' '/: [0-9]+$/ {print $NF}')
   ph "launched (pid ${pid:-unknown})"
   until=$(( $(date +%s) + 1200 ))

@@ -170,6 +170,9 @@ struct Counts {
     authored: AtomicUsize,
     /// Files whose tags were read.
     read: AtomicUsize,
+    /// Whether the boot's look at everything is done: the library is what
+    /// the media root holds.
+    looked: Arc<AtomicBool>,
 }
 
 impl Drop for Scanner {
@@ -372,6 +375,12 @@ impl Scanner {
     /// How many files' tags this scanner has read since it started.
     pub fn read(&self) -> usize {
         self.counts.read.load(Ordering::Relaxed)
+    }
+
+    /// Whether it has looked at everything once since it started (true
+    /// from then on): what `/healthz` says a server busy before.
+    pub fn looked(&self) -> Arc<AtomicBool> {
+        self.counts.looked.clone()
     }
 }
 
@@ -745,6 +754,9 @@ fn run(
         }
         let (authored, read) = look(p, scan, nudges);
         counts.read.fetch_add(read, Ordering::Relaxed);
+        if job.paths.is_empty() {
+            counts.looked.store(true, Ordering::Release);
+        }
         if authored > 0 {
             counts.authored.fetch_add(authored, Ordering::Relaxed);
             println!("harken-server: library +{authored}");

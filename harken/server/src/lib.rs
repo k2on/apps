@@ -262,12 +262,27 @@ pub fn hub_config(hosted: &Hosted, keep: usize) -> HubConfig {
 
 /// What `/healthz` says, a line each: `ok`; the connections open; the
 /// log's head and its horizon (the snapshot it stands on); the domain it
-/// runs, its schema's hash and its version (§1.16); and every account with
-/// a connection open, with how many — what the fleet and the VM test read.
-/// Answered in front of `ark-peer`'s own `/healthz`, which says `ok` alone.
-pub async fn health(hub: &ark_peer::Handle, hosted: &Hosted) -> Option<String> {
+/// runs, its schema's hash and its version (§1.16); every account with a
+/// connection open, with how many — what the fleet and the VM test read;
+/// and `busy scanning` until the scanner has looked at everything once, so
+/// what waits for the server (the screenshots' app-server.sh) waits for
+/// that and nothing else. Answered in front of `ark-peer`'s own
+/// `/healthz`, which says `ok` alone.
+pub async fn health(
+    hub: &ark_peer::Handle,
+    hosted: &Hosted,
+    scanning: &Scanning,
+) -> Option<String> {
     let hub = hub.clone();
-    let modules = format!("domain {} current\n", hosted.version());
+    let looked = scanning.lock().ok().map(|s| {
+        s.as_ref()
+            .is_none_or(|l| l.load(std::sync::atomic::Ordering::Acquire))
+    });
+    let busy = match looked {
+        Some(false) => "busy scanning\n",
+        _ => "",
+    };
+    let modules = format!("domain {} current\n{busy}", hosted.version());
     tokio::task::spawn_blocking(move || {
         hub.with(move |h| {
             let mut rooms: std::collections::BTreeMap<String, usize> = Default::default();
@@ -292,8 +307,16 @@ pub async fn health(hub: &ark_peer::Handle, hosted: &Hosted) -> Option<String> {
     .flatten()
 }
 
+/// The scanner's [`library::Scanner::looked`] (before it has started, a
+/// flag of its own, false): none while there is no media to scan.
+pub type Scanning = Arc<std::sync::Mutex<Option<Arc<std::sync::atomic::AtomicBool>>>>;
+
 async fn healthz(
-    axum::extract::State((hub, hosted)): axum::extract::State<(ark_peer::Handle, Hosted)>,
+    axum::extract::State((hub, hosted, scanning)): axum::extract::State<(
+        ark_peer::Handle,
+        Hosted,
+        Scanning,
+    )>,
     req: axum::extract::Request,
     next: axum::middleware::Next,
 ) -> axum::response::Response {
@@ -301,7 +324,7 @@ async fn healthz(
     if req.uri().path() != "/healthz" {
         return next.run(req).await;
     }
-    match health(&hub, &hosted).await {
+    match health(&hub, &hosted, &scanning).await {
         Some(text) => text.into_response(),
         None => (
             axum::http::StatusCode::SERVICE_UNAVAILABLE,
@@ -442,8 +465,16 @@ pub async fn start(config: Config) -> Result<Server> {
         ));
     }
     let (hub, router) = server.build()?;
+    // Busy from the start while there is media to scan: the scanner's own
+    // flag in its place once it runs.
+    let scanning: Scanning = Arc::new(std::sync::Mutex::new(
+        config
+            .media
+            .as_ref()
+            .map(|_| Arc::new(std::sync::atomic::AtomicBool::new(false))),
+    ));
     let router = router.layer(axum::middleware::from_fn_with_state(
-        (hub.clone(), hosted.clone()),
+        (hub.clone(), hosted.clone(), scanning.clone()),
         healthz,
     ));
     let running = Running::listen(hub.clone(), router, &config.listen).await?;
@@ -495,6 +526,9 @@ pub async fn start(config: Config) -> Result<Server> {
         }
         None => None,
     };
+    if let (Some(s), Ok(mut slot)) = (&scanner, scanning.lock()) {
+        *slot = Some(s.looked());
+    }
 
     eprintln!(
         "harken-server: one listening session per account, a volatile space on the sync socket"

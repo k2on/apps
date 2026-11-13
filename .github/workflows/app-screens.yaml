@@ -927,6 +927,16 @@ jobs:
         continue-on-error: true
         run: bash .github/screens/ios-build.sh src "$XCODE" "$RUNNER_TEMP/apps" $APPS
 
+      # Each app installed on the iPhone in the background as soon as it has
+      # booted, its plan written (apps-ios.sh's PHASE=install), while the
+      # servers come up; the capture walks what is installed.
+      - if: ${{ !cancelled() && steps.open.outputs.open == 'true' }}
+        name: Install on the iPhone, meanwhile
+        run: |
+          bash .github/screens/meanwhile.sh start install bash -c '
+            bash .github/screens/meanwhile.sh wait boot > /dev/null || exit 1
+            PHASE=install bash .github/screens/apps-ios.sh "$RUNNER_TEMP/out" "$RUNNER_TEMP/apps" "$(cat "$RUNNER_TEMP/device")" $APPS'
+
       # The iPad's apps: those whose build takes it (its Info.plist's
       # UIDeviceFamily has 2: ios-family.sh). With none, no iPad is booted
       # and nothing more is done on this Mac.
@@ -959,6 +969,7 @@ jobs:
         env:
           RESULTS: ${{ runner.temp }}/results
         run: |
+          bash .github/screens/meanwhile.sh wait install || echo "an app did not install as the iPhone booted: the walk installs it"
           bash .github/screens/apps-ios.sh "$RUNNER_TEMP/out" "$RUNNER_TEMP/apps" "$(cat "$RUNNER_TEMP/device")" $APPS
           echo "memory: $(vm_stat | awk '/free|active|wired/ {printf "%s %s ", $1$2, $NF}')"
       - uses: actions/upload-artifact@v4

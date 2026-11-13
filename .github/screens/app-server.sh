@@ -2,8 +2,8 @@
 # An app's own server on this runner, for its screenshots (apps.md): the
 # app's <app>/demo/server.sh, which starts it with dev auth and
 # something in it, on the port its shots.json names. Then waits until it
-# answers /healthz, and until its log's head has stood still for five
-# seconds (a scanner done adding). Nothing here is any one app's.
+# answers /healthz with nothing it is busy with (no `busy` line: harken's
+# while its scanner first looks). Nothing here is any one app's.
 #
 #   app-server.sh <app> <dir> [port]
 #
@@ -34,19 +34,17 @@ if [ -n "$picture" ]; then ARK_DEV_PICTURE=$(realpath "$picture"); export ARK_DE
 bash "$app/demo/server.sh" "$dir" "127.0.0.1:$port"
 
 health() { curl -sf "http://127.0.0.1:$port/healthz" || true; }
-for _ in $(seq 1 60); do
-  [ -n "$(health)" ] && break
-  sleep 1
+# Up as soon as it answers and says it is busy with nothing (a server whose
+# start-up goes on after it answers says `busy <what>` until it is done:
+# harken's scanner's first look): asked every fifth of a second, five
+# minutes at most, which only fails.
+start=$(date +%s)
+said=
+for _ in $(seq 1 1500); do
+  said=$(health)
+  [ -n "$said" ] && ! grep -q '^busy' <<< "$said" && break
+  sleep 0.2
 done
-[ -n "$(health)" ] || { cat "$dir/server.log" || true; echo "::error::$app's server did not answer"; exit 1; }
-
-last=
-still=0
-for _ in $(seq 1 300); do
-  head=$(health | awk '/^head/ {print $2}')
-  if [ "$head" = "$last" ]; then still=$((still + 1)); else still=0; fi
-  [ "$still" -ge 5 ] && break
-  last=$head
-  sleep 1
-done
-echo "$app's server on 127.0.0.1:$port, its log at $(health | awk '/^head/ {print $2}')"
+[ -n "$said" ] || { cat "$dir/server.log" || true; echo "::error::$app's server did not answer"; exit 1; }
+if grep -q '^busy' <<< "$said"; then cat "$dir/server.log" || true; echo "::error::$app's server stayed $(grep '^busy' <<< "$said" | head -1)"; exit 1; fi
+echo "$app's server on 127.0.0.1:$port, ready $(( $(date +%s) - start ))s after it started, its log at $(awk '/^head/ {print $2}' <<< "$said")"

@@ -26,7 +26,9 @@ exe="$bundle_app/Contents/MacOS/$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExe
 tmp=$(mktemp -d)
 mkdir -p "$out"
 # The window of a process, by its pid (window.swift).
+began=$(date +%s)
 xcrun swiftc -O "$here/window.swift" -o "$tmp/window"
+echo "  window.swift compiled in $(( $(date +%s) - began ))s"
 
 # The system's appearance, dark or not (System Events): given twenty
 # seconds, as a prompt for leave to drive System Events would never end.
@@ -62,6 +64,8 @@ shoot() {
   local theme=$1 name=$2
   shift 2
   # In shots mode (ArkUI's `Shots`, ui/docs/shots.md): every move at its end at once.
+  local began
+  began=$(date +%s)
   "$exe" -shots YES "$@" > "$tmp/$theme-$name.log" 2>&1 &
   local pid=$! wid=""
   for _ in $(seq 1 60); do
@@ -75,6 +79,7 @@ shoot() {
     kill "$pid" 2> /dev/null || true
     return 1
   fi
+  local opened=$(( $(date +%s) - began ))
   # Signed in and synced (or the demo opened), then still.
   sleep 8
   # Its front window now, not the first it opened: Settings is a window
@@ -85,6 +90,7 @@ shoot() {
   screencapture -x -o -l "$wid" "$out/$theme/$name.png"
   kill "$pid" 2> /dev/null || true
   wait "$pid" 2> /dev/null || true
+  echo "  $theme $name: its window in ${opened}s, taken and closed in $(( $(date +%s) - began ))s"
 }
 
 failed=0
