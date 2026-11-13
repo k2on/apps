@@ -10,6 +10,7 @@
 // put away before a launch moves a section) is taken once SwiftUI has drawn
 // the page just read: a few frames on, as a task on the main actor may run
 // before the update it follows is committed.
+import ArkUI
 import Foundation
 #if canImport(ArkBindings)
 import ArkBindings
