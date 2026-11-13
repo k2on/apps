@@ -14,8 +14,9 @@ public enum Shots {
 
 /// Whether the screen is what it will stay. Ready when nothing the app said
 /// it waits for is still to come (`begin`/`end`: a picture loading;
-/// `probe`: the runtime idle, the peer settled), nothing on the screen is
-/// on its way anywhere (`moving`), and a frame has been drawn since. Then
+/// `probe`: the runtime idle, the peer settled, each saying what it waits
+/// on), nothing on the screen is on its way anywhere (`moving`), and a
+/// frame has been drawn since. Then
 /// the driver finds `ark.ready`, labelled `ready <generation> <route>`;
 /// anything that may change what is drawn (a touch, a link, a route, a
 /// snapshot from the peer) takes it away and grows the generation, and the
@@ -26,8 +27,9 @@ public final class Ready {
 
     /// Each thing the app waits for, by name, and how many of it.
     private var waiting: [String: Int] = [:]
-    /// Whether the app's own work is done, each asked on every frame.
-    private var probes: [() -> Bool] = []
+    /// What of the app's own work is still to come, each asked on every
+    /// frame: nil once it is done, else what it is (a walk's trace says it).
+    private var probes: [() -> String?] = []
     /// Frames drawn since everything was done.
     private var quiet = 0
     /// Grows each time the screen may change.
@@ -92,11 +94,12 @@ public final class Ready {
         changed()
     }
 
-    /// `idle` asked on each frame, until it says so, whenever the screen
-    /// may have changed.
-    public func probe(_ idle: @escaping () -> Bool) {
+    /// `busy` asked on each frame, until it says nothing is left (nil),
+    /// whenever the screen may have changed; what it says while it is not
+    /// is the reason a walk's trace gives (`held`).
+    public func probe(_ busy: @escaping () -> String?) {
         guard Shots.on else { return }
-        probes.append(idle)
+        probes.append(busy)
         changed()
     }
 
@@ -141,11 +144,11 @@ public final class Ready {
     /// One frame drawn: ready once everything is done and a frame has been
     /// drawn so (what is done is then on the screen, not only in a view).
     public func frame() {
-        let idle = probes.map { $0() }
+        let busy = probes.compactMap { $0() }
         let moves = moving()
-        guard waiting.isEmpty, !idle.contains(false), moves == nil else {
+        guard waiting.isEmpty, busy.isEmpty, moves == nil else {
             quiet = 0
-            let now = (waiting.keys.sorted() + idle.enumerated().filter { !$0.element }.map { "probe \($0.offset)" } + (moves.map { ["moving \($0)"] } ?? [])).joined(separator: ", ")
+            let now = (waiting.keys.sorted() + busy + (moves.map { ["moving \($0)"] } ?? [])).joined(separator: ", ")
             if now != why {
                 why = now
                 if let t = tracing { held.append((Date().timeIntervalSince(t), now)) }

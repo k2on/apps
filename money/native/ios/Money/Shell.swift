@@ -60,11 +60,9 @@ struct Shell: View {
                 screens.reset = { paths = [:] }
             }
             // The launch's `-appearance` or Settings' Light or Dark, over the
-            // device's: the shell's. None (System, the default) asks for
-            // nothing at all, so the window follows the device: a
-            // `preferredColorScheme(nil)` here left app-screens' dark iPhone
-            // and iPad passes drawing light (43131582873).
-            .modifier(Appearing(appearance: screens.shell.page.appearance))
+            // device's (System, none): every window's, bars and glass
+            // drawn again (ArkUI's `arkAppearance`).
+            .arkAppearance(screens.shell.page.appearance.map { $0 == .dark })
             .settingsShown($screens.settings) {
                 MoneySettingsView()
                     .moneySettings(app, screens)
@@ -153,19 +151,6 @@ struct Shell: View {
             MoneyBanksView().environmentObject(screens.shell).environment(\.rowMark) { kind in AnyView(AccountMark(kind: kind)) }
                 .onAppear { screens.shell.send(.openBank(name: name)) }
         default: EmptyView()
-        }
-    }
-}
-
-/// The shell's appearance over the device's, only while it names one.
-private struct Appearing: ViewModifier {
-    let appearance: Appearance?
-
-    func body(content: Content) -> some View {
-        switch appearance {
-        case .dark?: content.preferredColorScheme(.dark)
-        case .light?: content.preferredColorScheme(.light)
-        case nil: content
         }
     }
 }

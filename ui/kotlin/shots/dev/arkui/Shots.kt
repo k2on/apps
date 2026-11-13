@@ -88,16 +88,20 @@ public object Ready {
         changed()
     }
 
-    /** Whether the app's own work is done, each asked on every frame while it waits, by name. */
-    private val probes = mutableMapOf<String, () -> Boolean>()
+    /**
+     * What of the app's own work is still to come, each asked on every frame while it waits, by
+     * name: null once it is done, else what it is (a walk's trace says it).
+     */
+    private val probes = mutableMapOf<String, () -> String?>()
 
     /**
-     * `idle` asked on each frame, until it says so, whenever the screen may have changed: the
-     * app's runtime idle (`Runtime::is_idle`), say. A newer probe of the same name replaces it.
+     * `busy` asked on each frame, until it says nothing is left (null), whenever the screen may
+     * have changed: the app's runtime idle (`Runtime::is_idle`) and its peer settled, say, and
+     * while not, what it waits on. A newer probe of the same name replaces it.
      */
-    public fun probe(name: String, idle: () -> Boolean) {
+    public fun probe(name: String, busy: () -> String?) {
         if (!Shots.on) return
-        synchronized(lock) { probes[name] = idle }
+        synchronized(lock) { probes[name] = busy }
         changed()
     }
 
@@ -143,14 +147,14 @@ public object Ready {
         val drew = drawn
         drawn = false
         val asked = synchronized(lock) { probes.toList() }
-        val idle = asked.map { (name, probe) -> name to probe() }
-        val busy = idle.any { !it.second }
+        val reasons = asked.mapNotNull { (name, probe) -> probe()?.let { "$name: $it" } }
+        val busy = reasons.isNotEmpty()
         // What holds it this frame, for a walk's trace.
         val holding =
             synchronized(lock) {
                 when {
                     waiting.isNotEmpty() -> "waiting ${waiting.keys}"
-                    busy -> "probe ${idle.filter { !it.second }.map { it.first }}"
+                    busy -> "probe ${reasons.joinToString("; ")}"
                     drew && drawing < ENDLESS -> "drawing"
                     else -> "quiet"
                 }

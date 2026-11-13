@@ -150,14 +150,15 @@ public class ArkApp internal constructor(public val host: ArkHost) {
     private var seen = ULong.MAX_VALUE
 
     internal fun start() {
-        // A screenshot is ready once nothing is on its way and the version has stood still.
+        // A screenshot is ready once nothing is on its way and the version has stood still; while
+        // not, what is (`ArkHost.busy`: the peer's, each runtime's), for a walk's trace.
         Ready.probe("app") {
             val v = host.version()
             if (v != seen) {
                 seen = v
                 Ready.changed()
-                false
-            } else host.idle()
+                "the app moved"
+            } else host.busy().ifEmpty { null }
         }
         // A screenshot walk's steps, Rust's: each reaches what it names in the views on the screen
         // and sends the message a tap on it sends (ark_app::shots).

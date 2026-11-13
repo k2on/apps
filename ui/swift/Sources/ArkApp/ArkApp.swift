@@ -81,7 +81,9 @@ public final class ArkApp<Library: ArkAppHost>: ObservableObject {
         step = host.step()
         teller.app = { [weak self] in self?.refresh() }
         teller.browse = { [weak self] url in self?.browse = URL(string: url) }
-        // A screenshot's: ready once nothing is on its way, at the version drawn.
+        // A screenshot's: ready once nothing is on its way, at the version
+        // drawn; while not, what is (`ArkHost.busy`: the peer's, each
+        // runtime's), for a walk's trace.
         var drawn: UInt64 = 0
         let host = host
         Ready.shared.probe {
@@ -89,9 +91,10 @@ public final class ArkApp<Library: ArkAppHost>: ObservableObject {
             if now != drawn {
                 drawn = now
                 Ready.shared.changed()
-                return false
+                return "the app moved"
             }
-            return host.idle()
+            let busy = host.busy()
+            return busy.isEmpty ? nil : busy
         }
         host.start(shell: teller)
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]

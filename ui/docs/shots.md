@@ -150,10 +150,19 @@ ArkUI's `ShotsWalk` (ui/kotlin/shots) take it, then the process ends.
   checked, a code traded, a session opened) keeps the host from idle.
 - **After each step the app waits for its own ready signal** at a newer
   generation (`Ready.untilReady`, `Ready.awaitReady`): its limit only
-  guards.
+  guards. What held it is logged, each probe saying what it waits on
+  (`ArkHost.busy`: work off the shell's thread, the peer's own intents
+  unconfirmed or a call's answer to take, each runtime's message running,
+  module answers, messages after the draw, views not held). While the
+  screen Rust says is up has a sheet, a dialog or an alert in it (its
+  tree's `(modal)`), the iPhone's and the iPad's is not ready until the
+  platform has presented one; and the system's material settling into a
+  theme (Liquid Glass's backdrop, which the windows' speed does not
+  reach) is put at its end at once.
 - **Then it draws itself**: its own windows at the screen's scale (iOS:
-  every window of its scenes by `drawHierarchy`, a sheet, a menu or a
-  popover with them; Android: every window of the process by PixelCopy, a
+  every window of its scenes by `drawHierarchy`, lowest level first, so a
+  sheet, an alert, a confirmation dialog, a menu or a popover is over
+  what it covers; Android: every window of the process by PixelCopy, a
   dialog's dim drawn as the system dims it). The status bar is the
   system's and in neither. Each picture is `<id>.png` under its theme,
   with what a step can name beside it (`<id>.tree.txt`).
@@ -161,13 +170,29 @@ ArkUI's `ShotsWalk` (ui/kotlin/shots) take it, then the process ends.
   sign-in's (`welcome`) are taken every way first, one switch apart. Then
   the rest of the list is walked whole once a way — light, then dark; on
   the iPad then dark on its side, then light on its side — each walk after
-  the first begun by a reset inside the app (`ArkHost.shots_reset`: a
-  launch with no arguments taken as a link, which puts away every sheet,
-  dialog, inspector and pushed page and clears search, then the first
-  section's tab; the session and its data kept) and one switch (the theme:
-  every window's `overrideUserInterfaceStyle`, Android 12's per-app night
-  mode, which an Ark app's activity takes in place, `configChanges`
-  `uiMode`; the iPad's way up: `requestGeometryUpdate`). The sign-in's
+  the first begun by a reset inside the app (`ArkHost.shots_reset`: the
+  app's part made anew over the same session, `Hosting::reopen`, so every
+  screen's state is what a launch already signed in shows — no filter,
+  search, toggle, selection, inspector, sheet, menu or pushed page, the
+  first section, the day's month — with nothing of any screen listed: a
+  field a screen adds is put back with the rest; then a link with no
+  arguments, which puts away the platform's own pages; the session and
+  its data kept. A step that sets something sets it, where it can, rather
+  than turning it over: `transactions.show:all` chooses All) and one
+  switch (the theme: ArkUI's `ArkAppearance` on every window of every
+  scene and every window shown after, an alert's and a menu's, with each
+  bar's appearance handed back and each material's effect set afresh, as
+  Settings' Appearance does it while the app runs — iOS 26's glass bars
+  kept the old theme otherwise, 43318181211 — and Android 12's per-app
+  night mode, which an Ark app's activity takes in place, `configChanges`
+  `uiMode`; the iPad's way up: `requestGeometryUpdate`, which iPadOS 26
+  allows only an app that takes the whole screen, so apps-ios.sh writes
+  `UIRequiresFullScreen` into the simulator's build it installs on the
+  iPad, and no build for people has it). Before each picture the walk
+  checks the switch happened: the middle of the tab bar (else the top
+  navigation bar) on the iPhone and the iPad, the top of the app's window
+  on Android, is dark in a dark picture and light in a light one, or the
+  walk fails. The sign-in's
   steps (its shot says `signIn`) are the first walk's alone. Within a walk
   two shots of one picture fail (a step that went nowhere); at the end, so
   do two ways of one shot that drew the same picture, unless the plan says

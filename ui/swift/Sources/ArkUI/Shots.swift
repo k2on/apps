@@ -93,6 +93,15 @@ private final class Signal: ObservableObject {
                 // at its end already.
                 let runs = Double(max(a.repeatCount, 1)) * a.duration
                 if a.beginTime > 0, now >= a.beginTime + runs + a.timeOffset { continue }
+                // The system's material settling into a new theme (Liquid
+                // Glass's backdrop, 0.25 s, which the window's speed does
+                // not reach: it held the dark switch 0.44 s in app-screens
+                // 43327637228): at its end at once, as everything is in
+                // shots mode. Its model value is already where it ends.
+                if "\(type(of: l))".contains("Backdrop") {
+                    l.removeAnimation(forKey: key)
+                    continue
+                }
                 // Begun again, on the same layer and key, since it was last
                 // seen: one that repeats by being added afresh each time it
                 // ends (money's 0.8 s keyframes in #102's runs), which has no
@@ -249,27 +258,78 @@ public enum ShotsWindow {
             .sorted { $0.windowLevel < $1.windowLevel }
     }
 
-    /// The windows drawn as the screen shows them, as a PNG.
-    public static func picture() -> Data? {
+    /// The windows drawn as the screen shows them: every window of the
+    /// app's scenes from the lowest level up (the app's, then an alert's,
+    /// a menu's, a confirmation dialog's, each with what is presented in
+    /// it), one over another.
+    public static func picture() -> UIImage? {
         let ws = windows
         guard let main = ws.first(where: \.isKeyWindow) ?? ws.first else { return nil }
         let format = UIGraphicsImageRendererFormat()
         format.scale = main.screen.scale
         format.opaque = true
         let size = main.windowScene?.coordinateSpace.bounds.size ?? main.bounds.size
-        return UIGraphicsImageRenderer(size: size, format: format).pngData { ctx in
+        return UIGraphicsImageRenderer(size: size, format: format).image { ctx in
             UIColor.black.setFill()
             ctx.fill(CGRect(origin: .zero, size: size))
             for w in ws { w.drawHierarchy(in: w.frame, afterScreenUpdates: true) }
         }
     }
 
+    /// Whether anything is presented over the app's own screen: a view
+    /// controller presented in a window (a sheet, an alert, a confirmation
+    /// dialog, a popover), or a window over the app's (an alert's, a
+    /// menu's).
+    public static var presenting: Bool {
+        let ws = windows
+        if ws.contains(where: { $0.rootViewController?.presentedViewController != nil }) { return true }
+        let base = ws.first?.windowLevel ?? .normal
+        return ws.contains { $0.windowLevel > base && $0.rootViewController != nil }
+    }
+
     /// Every window drawn dark, or light, whatever the device's appearance:
     /// what the system's switch does to an app, and what follows it (a
-    /// sheet, a menu, the system's own controls).
+    /// sheet, a menu, the system's own controls), its bars and their glass
+    /// drawn again (ArkAppearance).
     public static func theme(dark: Bool) {
-        for w in windows { w.overrideUserInterfaceStyle = dark ? .dark : .light }
+        ArkAppearance.force(dark: dark)
         Ready.shared.changed()
+    }
+
+    /// How light the app's bars are drawn in `image` (0 black, 1 white):
+    /// the middle of the tab bar, or else of the top navigation bar, as the
+    /// windows lay them out; nil with none on the screen. A dark picture's
+    /// bars are dark and a light one's light: a bar the other way kept its
+    /// old theme (ArkAppearance).
+    public static func barLightness(in image: UIImage) -> (bar: String, lightness: Double)? {
+        func bars(_ v: UIView, _ out: inout [UIView]) {
+            if v.isHidden || v.alpha == 0 { return }
+            if v is UITabBar || v is UINavigationBar { out.append(v) }
+            for s in v.subviews { bars(s, &out) }
+        }
+        var found: [UIView] = []
+        for w in windows { bars(w, &found) }
+        let sized = found.filter { $0.bounds.width > 40 && $0.bounds.height > 20 && $0.window != nil }
+        guard let bar = sized.first(where: { $0 is UITabBar }) ?? sized.first, let cg = image.cgImage, let w = bar.window else { return nil }
+        let r = bar.convert(bar.bounds, to: w).offsetBy(dx: w.frame.minX, dy: w.frame.minY)
+        // Its middle: half its height, its width but the ends.
+        let band = CGRect(x: r.minX + r.width * 0.15, y: r.midY - r.height * 0.25, width: r.width * 0.7, height: r.height * 0.5)
+        let s = image.scale
+        let px = CGRect(x: band.minX * s, y: band.minY * s, width: band.width * s, height: band.height * s).integral
+            .intersection(CGRect(x: 0, y: 0, width: cg.width, height: cg.height))
+        guard px.width >= 1, px.height >= 1, let crop = cg.cropping(to: px) else { return nil }
+        // Drawn small into eight-bit grey: the median of its points.
+        let (cw, ch) = (min(64, Int(px.width)), min(16, Int(px.height)))
+        var grey = [UInt8](repeating: 0, count: cw * ch)
+        let drew = grey.withUnsafeMutableBytes { buf -> Bool in
+            guard let ctx = CGContext(data: buf.baseAddress, width: cw, height: ch, bitsPerComponent: 8, bytesPerRow: cw,
+                                      space: CGColorSpaceCreateDeviceGray(), bitmapInfo: CGImageAlphaInfo.none.rawValue) else { return false }
+            ctx.draw(crop, in: CGRect(x: 0, y: 0, width: cw, height: ch))
+            return true
+        }
+        guard drew else { return nil }
+        let sorted = grey.sorted()
+        return ("\(type(of: bar))", Double(sorted[sorted.count / 2]) / 255)
     }
 
     /// Every scene turned on its side (`landscape`), or upright: as the

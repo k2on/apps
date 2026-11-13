@@ -146,13 +146,21 @@ public object ShotsWalk {
         val shoot = { id: String, tree: String ->
             val t = System.currentTimeMillis()
             val picture = picture() ?: throw Stop("$id: no window to draw")
+            // The theme really switched: the app's own window drawn in it at its top (its bar, or
+            // its page's own background), not left in the last. A one-theme app's is its own.
+            val top = topLightness
+            if (one == null && top != null && (top < 0.5) != dark) {
+                val drawnAs = if (top < 0.5) "dark" else "light"
+                val way = if (dark) "dark" else "light"
+                throw Stop("$id $way: its window's top is drawn $drawnAs (${"%.2f".format(top)}): the theme did not switch")
+            }
             drawn.getOrPut(id) { mutableMapOf() }[dark] = picture
             for (th in if (one != null) listOf("light", "dark") else listOf(if (dark) "dark" else "light")) {
                 val dir = File(out, th).apply { mkdirs() }
                 File(dir, "$id.png").outputStream().use { picture.compress(Bitmap.CompressFormat.PNG, 100, it) }
                 File(dir, "$id.tree.txt").writeText(tree)
             }
-            System.currentTimeMillis() - t
+            "${System.currentTimeMillis() - t} ms${top?.let { ", top %.2f".format(it) } ?: ""}"
         }
         // The shots before the sign-in's (its shot says `signIn`): the first run's pages, each
         // taken every way at the start, then back to the first.
@@ -165,7 +173,7 @@ public object ShotsWalk {
             val times = mutableListOf<String>()
             ways.forEachIndexed { k, w ->
                 if (k > 0) times += "switched ${go(w)} ms"
-                times += "${if (dark) "dark" else "light"} picture ${shoot(id, tree)} ms"
+                times += "${if (dark) "dark" else "light"} picture ${shoot(id, tree)}"
             }
             say("$id: ${times.joinToString(", ")}")
         }
@@ -196,7 +204,7 @@ public object ShotsWalk {
                 val tree = this.steps?.tree() ?: ""
                 val took = shoot(id, tree)
                 val way = if (dark) "dark" else "light"
-                say("$id $way: $n steps $stepped ms [${each.joinToString("; ")}], picture $took ms")
+                say("$id $way: $n steps $stepped ms [${each.joinToString("; ")}], picture $took")
                 // Within a walk, two shots of one picture: a step that went nowhere.
                 val mine = drawn[id]?.get(dark)
                 val same = shots.subList(first, shots.size).map { it.getString("id") }.firstOrNull { it != id && drawn[it]?.get(dark)?.sameAs(mine) == true }
@@ -275,8 +283,22 @@ public object ShotsWalk {
         return r!!.getOrThrow()
     }
 
+    /** How light the app's own window is at its top in the last [picture] (0 black, 1 white). */
+    private var topLightness: Double? = null
+
+    /** The median lightness of `b`'s top `rows` rows. */
+    private fun lightness(b: Bitmap, rows: Int): Double? {
+        val h = rows.coerceAtMost(b.height)
+        if (h <= 0 || b.width <= 0) return null
+        val px = IntArray(b.width * h)
+        b.getPixels(px, 0, b.width, 0, 0, b.width, h)
+        val grey = px.map { (Color.red(it) * 299 + Color.green(it) * 587 + Color.blue(it) * 114) / 1000 }.sorted()
+        return grey[grey.size / 2] / 255.0
+    }
+
     /** Every window of the app's, drawn as the screen shows them, at the screen's size. */
     private fun picture(): Bitmap? {
+        topLightness = null
         if (Build.VERSION.SDK_INT < 29) throw Stop("a walk finds the app's windows with Android 10's WindowInspector")
         val roots =
             onMain {
@@ -298,6 +320,7 @@ public object ShotsWalk {
                 canvas.drawColor(Color.argb((lp.dimAmount * 255).toInt(), 0, 0, 0))
             }
             val drawn = window(v) ?: continue
+            if (v === main) topLightness = lightness(drawn, (24 * v.resources.displayMetrics.density).toInt())
             canvas.drawBitmap(drawn, at[0].toFloat(), at[1].toFloat(), null)
         }
         return out

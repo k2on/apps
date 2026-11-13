@@ -57,6 +57,10 @@ final class ShotsWalk {
     private let plan: URL
     private let out: URL
     private var log = ""
+    /// Whether the screen Rust says is up has a sheet, a dialog or an alert
+    /// in it (its tree's `(modal)`): the screen is not ready until the
+    /// platform presents it.
+    private var modal = false
 
     init(host: ArkHost, plan: URL) {
         self.host = host
@@ -66,6 +70,10 @@ final class ShotsWalk {
 
     /// The walk, then the process ended: it is the walk's alone.
     func run() async {
+        Ready.shared.probe { [weak self] in
+            guard let self, self.modal, !ShotsWindow.presenting else { return nil }
+            return "a sheet or a dialog the app shows, not presented yet"
+        }
         try? FileManager.default.removeItem(at: out)
         try? FileManager.default.createDirectory(at: out, withIntermediateDirectories: true)
         let failed: String?
@@ -131,8 +139,18 @@ final class ShotsWalk {
         var drawn: [String: [String: Data]] = [:]
         func shoot(_ id: String, _ tree: String) throws -> String {
             let t = Date()
-            guard let png = ShotsWindow.picture() else { throw Stop(why: "\(id): no window to draw") }
+            guard let image = ShotsWindow.picture(), let png = image.pngData() else { throw Stop(why: "\(id): no window to draw") }
             let theme = at.dark ? "dark" : "light", way = at.landscape ? "landscape" : "portrait"
+            // The theme really switched: the bars drawn in it, not left in
+            // the last (iOS 26's glass kept its old one, 43318181211). A
+            // one-theme app's are its own.
+            var bar = ""
+            if one == nil, let b = ShotsWindow.barLightness(in: image) {
+                bar = String(format: ", %@ %.2f", b.bar, b.lightness)
+                if (b.lightness < 0.5) != at.dark {
+                    throw Stop(why: "\(id) \(name(at)): its \(b.bar) is drawn \(b.lightness < 0.5 ? "dark" : "light") (\(String(format: "%.2f", b.lightness))): the theme did not switch")
+                }
+            }
             drawn[id, default: [:]][name(at)] = png
             for th in one == nil ? [theme] : ["light", "dark"] {
                 let dir = turns ? out.appendingPathComponent(way).appendingPathComponent(th) : out.appendingPathComponent(th)
@@ -140,7 +158,7 @@ final class ShotsWalk {
                 try png.write(to: dir.appendingPathComponent("\(id).png"))
                 try tree.write(to: dir.appendingPathComponent("\(id).tree.txt"), atomically: true, encoding: .utf8)
             }
-            return ms(t)
+            return ms(t) + bar
         }
         // The shots before the sign-in's (its shot says `signIn`): the first
         // run's pages, each taken every way at the start, then back to the
@@ -177,6 +195,7 @@ final class ShotsWalk {
                 case .done: break
                 case let .failed(why), let .notYet(why): throw Stop(why: "reset: \(why)")
                 }
+                modal = host.shotsTree().contains(" (modal)")
                 try await settled("reset")
                 let reset = ms(r)
                 let switched = try await go(w)
@@ -227,6 +246,7 @@ final class ShotsWalk {
             switch took {
             case .done:
                 let w = Date()
+                modal = host.shotsTree().contains(" (modal)")
                 try await settled("\(id) after \(json)")
                 return "\(json) \(rust) + ready \(ms(w))"
             case let .notYet(labels):
