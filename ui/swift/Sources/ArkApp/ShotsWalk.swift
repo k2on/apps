@@ -70,10 +70,12 @@ final class ShotsWalk {
 
     /// The walk, then the process ended: it is the walk's alone.
     func run() async {
+        #if canImport(UIKit)
         Ready.shared.probe { [weak self] in
             guard let self, self.modal, !ShotsWindow.presenting else { return nil }
             return "a sheet or a dialog the app shows, not presented yet"
         }
+        #endif
         try? FileManager.default.removeItem(at: out)
         try? FileManager.default.createDirectory(at: out, withIntermediateDirectories: true)
         let failed: String?
