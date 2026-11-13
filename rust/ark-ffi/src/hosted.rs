@@ -477,12 +477,27 @@ where
         self.with(|o| o.hosting.launched(args, &mut o.place));
     }
 
+    /// The app's part made anew over the session's place
+    /// ([`Hosting::reopen`]), then a link with no arguments: what the
+    /// phone's shell shows of its own (a page pushed, a sheet) put away.
+    fn reset(&self) {
+        self.with(|o| {
+            let facts = o.place.session();
+            o.hosting.reopen(&facts, &mut o.place);
+            o.hosting.link(Link::Launch(vec![]), &mut o.place);
+        });
+    }
+
     fn idle(&self) -> bool {
         lock(&self.open).as_ref().is_none_or(|o| o.hosting.idle(&o.place))
     }
 
     fn version(&self) -> u64 {
         lock(&self.open).as_ref().map_or(0, |o| o.hosting.version())
+    }
+
+    fn busy(&self) -> Option<String> {
+        lock(&self.open).as_ref().and_then(|o| o.hosting.busy(&o.place))
     }
 
     /// Every hosted screen's view, then the newest of each screen run

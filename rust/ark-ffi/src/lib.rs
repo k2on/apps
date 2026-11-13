@@ -631,9 +631,23 @@ impl Peer {
     /// app's own runtime is idle: ui/docs/shots.md), so it never shows a
     /// replica half caught up.
     pub fn settled(&self) -> bool {
+        self.unsettled().is_none()
+    }
+
+    /// What it is still waiting on, said: none when [`Peer::settled`].
+    pub fn unsettled(&self) -> Option<String> {
         let s = self.shared.lock();
         let st = s.peer.status();
-        (st.alone || st.linked) && st.pending == 0 && s.peer.replies_waiting() == 0
+        let replies = s.peer.replies_waiting();
+        let why: Vec<String> = [
+            (!(st.alone || st.linked)).then(|| format!("not linked ({})", st.link)),
+            (st.pending > 0).then(|| format!("{} intent(s) of its own unconfirmed", st.pending)),
+            (replies > 0).then(|| format!("{replies} call answer(s) to take")),
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
+        (!why.is_empty()).then(|| why.join(", "))
     }
 
     pub fn status(&self) -> Status {

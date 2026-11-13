@@ -373,30 +373,105 @@ fn a_walk_goes_through_the_first_run() {
     until("the server's answer", || host.idle());
 }
 
-/// A walk's reset (ui/docs/shots.md, "In the App"): the app put back where
-/// a walk starts — a sheet put away, the platform asked to put away its
-/// own pages — on its first section. Falsified by a sheet left up, or a
-/// section other than Budget's after it.
+/// Every screen's view, as the generated library's `phone_host!` hands
+/// them to a walk's steps.
+fn every_view(app: &Arc<Hosted<MoneyPhone>>) {
+    use ark_app::shots::{nodes, Screen};
+    use money_app::{accounts, budget, insights, sheets, shell, transactions};
+    use std::rc::Rc;
+    fn screen<A>(a: &Arc<Hosted<MoneyPhone>>, name: &str, view: fn(&A::Screen) -> ark_app::view::View<A::Msg>) -> Screen
+    where
+        A: ark_app::App<Key = money_core::MoneyView, Change = MoneyChange, Route = money_app::routes::Route, Request = money_app::MoneyRequest>,
+        A::Msg: 'static,
+        Money: ark_app::host::Has<A>,
+    {
+        let to = a.clone();
+        Screen {
+            name: name.into(),
+            nodes: nodes(&view(&a.page::<A>()), Rc::new(move |m| to.send::<A>(m))),
+        }
+    }
+    let weak = Arc::downgrade(app);
+    app.set_views(Box::new(move || {
+        let Some(a) = weak.upgrade() else { return vec![] };
+        vec![
+            screen::<accounts::Accounts>(&a, "accounts", accounts::view::accounts::view),
+            screen::<budget::Budget>(&a, "budget", budget::view::budget::view),
+            screen::<transactions::Transactions>(&a, "transactions", transactions::view::transactions::view),
+            screen::<insights::Insights>(&a, "insights", insights::view::insights::view),
+            screen::<sheets::Sheets>(&a, "sheets", sheets::view::sheets::view),
+            screen::<shell::MoneyShell>(&a, "shell", shell::view::money_shell::view),
+        ]
+    }));
+}
+
+/// What waits for a page to be drawn, taken as a phone takes it once it
+/// has drawn: until nothing waits.
+fn draw(app: &Hosted<MoneyPhone>) {
+    use money_app::{accounts, budget, insights, sheets, shell, transactions};
+    for _ in 0..16 {
+        let any = [
+            app.drawn::<shell::MoneyShell>(),
+            app.drawn::<accounts::Accounts>(),
+            app.drawn::<budget::Budget>(),
+            app.drawn::<transactions::Transactions>(),
+            app.drawn::<insights::Insights>(),
+            app.drawn::<sheets::Sheets>(),
+        ];
+        if !any.contains(&true) {
+            return;
+        }
+    }
+}
+
+/// The phone's walk of money/demo/shots.json after its sign-in (the demo
+/// opened instead): each shot's steps taken, and what each shot's screen
+/// could be named by then, by its id.
+fn walk(host: &ArkHost, app: &Hosted<MoneyPhone>) -> Vec<(String, String)> {
+    let plan: serde_json::Value = serde_json::from_str(include_str!("../../demo/shots.json")).unwrap();
+    let shots = plan["walk"]["phone"].as_array().unwrap();
+    let first = shots.iter().position(|s| s["signIn"] == true).unwrap() + 1;
+    let mut out = vec![];
+    for shot in &shots[first..] {
+        let id = shot["id"].as_str().unwrap();
+        for step in shot["steps"].as_array().unwrap() {
+            let took = host.shots_step(step.to_string());
+            assert_eq!(took, ShotsTook::Done, "{id}: {step}\n{}", host.shots_tree());
+            draw(app);
+            app.take_natives();
+        }
+        out.push((id.to_string(), host.shots_tree()));
+    }
+    out
+}
+
+/// A walk's reset (ui/docs/shots.md, "In the App"): the app put back as a
+/// launch already signed in shows it, so the walk after it goes as the
+/// first went — every shot's step finds what it names, and every shot's
+/// screen holds the same elements — and the platform is asked to put away
+/// its own pages. Falsified by a reset that put away the sheets and chose
+/// the first tab alone (app-screens 43327637228: Transactions' All kept,
+/// the second walk's review was the first's transaction list, and its
+/// transaction shot found no sheet to dismiss).
 #[test]
 fn a_walk_is_reset() {
     let dir = tempfile::tempdir().unwrap();
-    let (host, app, _) = library(launch(dir.path(), true));
-    // The shell's view, as the generated library's `phone_host!` hands it.
-    let weak = Arc::downgrade(&app);
-    app.set_views(Box::new(move || {
-        let Some(a) = weak.upgrade() else { return vec![] };
-        let view = money_app::shell::view::money_shell::view(&a.page::<MoneyShell>());
-        let to = a.clone();
-        vec![ark_app::shots::Screen {
-            name: "shell".into(),
-            nodes: ark_app::shots::nodes(&view, std::rc::Rc::new(move |m| to.send::<MoneyShell>(m))),
-        }]
-    }));
+    let mut l = launch(dir.path(), true);
+    l.demo_day = Some("2026-11-12".into());
+    let (host, app, _) = library(l);
+    every_view(&app);
     until("the demo shows", || host.shows_app());
-    app.send::<MoneyShell>(ShellMsg::Select { tag: "insights".into() });
-    app.send::<MoneyShell>(ShellMsg::NewTransaction);
-    app.take_natives();
+    until("the budget has its lines", || !app.page::<Budget>().groups.is_empty());
+    let fresh = host.shots_tree();
+    let first = walk(&host, &app);
+    let version = host.version();
     assert_eq!(host.shots_reset(), ShotsTook::Done);
-    assert_eq!(app.page::<MoneyShell>().section, "budget");
     assert!(app.take_natives().contains(&ShellAsk::Reset));
+    assert!(host.version() > version, "a reset is a newer screen");
+    assert_eq!(app.page::<MoneyShell>().section, "budget");
+    assert_eq!(host.shots_tree(), fresh, "the reset is where the walk began");
+    let again = walk(&host, &app);
+    for ((id, a), (_, b)) in first.iter().zip(&again) {
+        assert_eq!(a, b, "{id} differs on the walk after the reset");
+    }
 }

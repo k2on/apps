@@ -253,6 +253,15 @@ where
         self.runtime.version()
     }
 
+    /// What is left to come, said, under the screen's app's name; none
+    /// when idle ([`Runtime::busy`]).
+    pub fn busy(&self, place: &dyn Place<A::Key, A::Change>) -> Option<String> {
+        let mut out = None;
+        place.read(&mut |v| out = self.runtime.busy(v));
+        let name = std::any::type_name::<A>().rsplit("::").next().unwrap_or_default();
+        out.map(|why| format!("{name}: {why}"))
+    }
+
     /// Whether nothing is left to come ([`Runtime::is_idle`]).
     pub fn is_idle(&self, place: &dyn Place<A::Key, A::Change>) -> bool {
         let mut idle = false;
@@ -316,6 +325,7 @@ where
 pub trait Running<H: HostedApp> {
     fn drain(&mut self, cx: &mut Cx<'_, H>) -> bool;
     fn is_idle(&self, place: &dyn Place<H::Key, H::Change>) -> bool;
+    fn busy(&self, place: &dyn Place<H::Key, H::Change>) -> Option<String>;
     fn version(&self) -> u64;
     fn close(&mut self, place: &mut dyn Place<H::Key, H::Change>);
 }
@@ -330,6 +340,9 @@ where
     }
     fn is_idle(&self, place: &dyn Place<H::Key, H::Change>) -> bool {
         Screen::is_idle(self, place)
+    }
+    fn busy(&self, place: &dyn Place<H::Key, H::Change>) -> Option<String> {
+        Screen::busy(self, place)
     }
     fn version(&self) -> u64 {
         Screen::version(self)
@@ -416,6 +429,10 @@ pub struct Hosting<H: HostedApp> {
     natives: Vec<H::Native>,
     held: Vec<H::Key>,
     ran: u64,
+    /// What [`Hosting::version`] counts from: past every version of the
+    /// app's part before it was made anew ([`Hosting::reopen`]), so the
+    /// number only grows.
+    base: u64,
 }
 
 impl<H: HostedApp> Hosting<H> {
@@ -438,9 +455,41 @@ impl<H: HostedApp> Hosting<H> {
             natives,
             held: vec![],
             ran: 0,
+            base: 0,
         };
         h.settle(place);
         h
+    }
+
+    /// The app's part made anew over the same session and place, as a
+    /// launch already signed in makes it: every screen's state its first —
+    /// no filter, search, toggle, selection, inspector, sheet, menu or page
+    /// pushed, the first section, the month the day is in — and the
+    /// session and its data kept. Nothing of a screen's own is listed: its
+    /// state is its `Default` and its `open`'s again, so a field a screen
+    /// adds is put back with the rest. What a screenshot walk does between
+    /// its walks (ui/docs/shots.md, "In the App"). The views the new part
+    /// holds are held before the old part's are let go, so none is read
+    /// afresh; the version keeps growing.
+    pub fn reopen(&mut self, session: &Session, place: &mut dyn Place<H::Key, H::Change>) {
+        let base = self.version() + 1;
+        self.jobs.clear();
+        let now_ms = place.now_ms();
+        let app = {
+            let mut cx = Cx {
+                place: &mut *place,
+                now_ms,
+                jobs: &mut self.jobs,
+                natives: &mut self.natives,
+            };
+            H::open(session, &mut cx)
+        };
+        let mut old = std::mem::replace(&mut self.app, app);
+        self.base = base;
+        self.settle(place);
+        for s in old.screens() {
+            s.close(place);
+        }
     }
 
     /// The app's part, as it is.
@@ -523,9 +572,16 @@ impl<H: HostedApp> Hosting<H> {
         self.app.screens_ref().iter().all(|s| s.is_idle(place))
     }
 
+    /// What of the app's is left to come, each screen's said; none when
+    /// [`Hosting::idle`].
+    pub fn busy(&self, place: &dyn Place<H::Key, H::Change>) -> Option<String> {
+        let why: Vec<String> = self.app.screens_ref().iter().filter_map(|s| s.busy(place)).collect();
+        (!why.is_empty()).then(|| why.join("; "))
+    }
+
     /// Its runtimes' versions summed: grows with every message any took.
     pub fn version(&self) -> u64 {
-        self.app.screens_ref().iter().map(|s| s.version()).sum()
+        self.base + self.app.screens_ref().iter().map(|s| s.version()).sum::<u64>()
     }
 
     /// How many routes and requests were carried out: a host whose shell

@@ -448,6 +448,23 @@ impl<A: App> Runtime<A> {
             && self.holds().iter().all(|k| store.holds(k))
     }
 
+    /// What is left to come, said (a screenshot walk's trace of what held
+    /// a step, ui/docs/shots.md): none when [`Runtime::is_idle`].
+    pub fn busy(&self, store: &dyn Views<A::Key>) -> Option<String> {
+        let unheld: Vec<String> = self.holds().iter().filter(|k| !store.holds(k)).map(|k| format!("{k:?}")).collect();
+        let why: Vec<String> = [
+            self.running.then(|| "a message running".to_string()),
+            (!self.waiting.is_empty()).then(|| format!("{} module answer(s) awaited", self.waiting.len())),
+            (!self.answers.is_empty()).then(|| format!("{} answer(s) to take", self.answers.len())),
+            (!self.after_draw.is_empty()).then(|| format!("{} message(s) after the draw", self.after_draw.len())),
+            (!unheld.is_empty()).then(|| format!("views not held: {}", unheld.join(", "))),
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
+        (!why.is_empty()).then(|| why.join(", "))
+    }
+
     /// Whether a message waits for the screen to be drawn
     /// ([`Command::AfterDraw`]): a host that draws between messages calls
     /// [`Runtime::drawn`] once it has.

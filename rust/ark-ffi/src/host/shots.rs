@@ -133,10 +133,11 @@ impl ArkHost {
     }
 
     /// The app put back where a walk starts once signed in, for the next
-    /// walk (a theme or a way up the next): a launch with no arguments
-    /// taken as a link (`HostApp::link`: every sheet, dialog, inspector and
-    /// pushed page put away, search cleared, the platform's own pages with
-    /// them), then its first section's tab. The session and its data kept.
+    /// walk (a theme or a way up the next): every screen's state as a
+    /// launch already signed in shows it (`HostApp::reset`: its filters,
+    /// search, toggles, selection, inspector, sheets, menus, pages pushed
+    /// and month; the platform's own pages put away), then the launch's
+    /// own arguments again. The session and its data kept.
     pub fn shots_reset(&self) -> ShotsTook {
         if !self.shows_app() {
             return ShotsTook::Failed {
@@ -144,22 +145,9 @@ impl ArkHost {
             };
         }
         self.lock().focus = None;
-        self.app.link(Some(vec![]), String::new());
-        let targets = self.shots_targets();
-        match targets.iter().find(|t| t.role == shots::Role::Tab && t.taps()) {
-            Some(tab) => {
-                let id = tab.id.clone();
-                let mut focus = None;
-                match shots::take(&Step::Tap { id, text: false }, &targets, &mut focus) {
-                    Took::Done => ShotsTook::Done,
-                    Took::NotYet => ShotsTook::NotYet {
-                        labels: shots::tree(&targets),
-                    },
-                    Took::Failed(why) => ShotsTook::Failed { why },
-                }
-            }
-            None => ShotsTook::Done,
-        }
+        self.app.reset();
+        self.app.launched(self.launch.args.clone());
+        ShotsTook::Done
     }
 
     /// What is on the screen now, as a step names it: a line each, written

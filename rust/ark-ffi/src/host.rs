@@ -107,9 +107,20 @@ pub trait HostApp: Send + Sync + 'static {
     fn link(&self, args: Option<Vec<String>>, address: String);
     /// The launch's own arguments, once its runtimes run.
     fn launched(&self, args: Vec<String>);
+    /// Every screen's state put back as a launch already signed in shows
+    /// it (a screenshot walk's reset, ui/docs/shots.md): the session and
+    /// its data kept, the platform's own pages put away. An app whose
+    /// screens are its own has only the link with no arguments for it.
+    fn reset(&self) {
+        self.link(Some(vec![]), String::new())
+    }
     /// Whether nothing of the app's is left to come.
     fn idle(&self) -> bool {
         true
+    }
+    /// What of the app's is left to come, said; none when [`HostApp::idle`].
+    fn busy(&self) -> Option<String> {
+        (!self.idle()).then(|| "the app's runtimes".into())
     }
     /// A number that grows with every message the app's runtimes take.
     fn version(&self) -> u64 {
@@ -693,6 +704,23 @@ impl ArkHost {
     pub fn idle(&self) -> bool {
         let peer = self.lock().open.clone().map(|(p, _)| p);
         self.away.load(std::sync::atomic::Ordering::Acquire) == 0 && peer.is_none_or(|p| p.settled()) && self.app.idle()
+    }
+
+    /// What keeps it from [`ArkHost::idle`], said (empty when idle): work
+    /// off the shell's thread, the peer's, and each runtime's. What a
+    /// screenshot walk logs as having held a step (ui/docs/shots.md).
+    pub fn busy(&self) -> String {
+        let peer = self.lock().open.clone().map(|(p, _)| p);
+        let away = self.away.load(std::sync::atomic::Ordering::Acquire);
+        let why: Vec<String> = [
+            (away > 0).then(|| format!("{away} off the shell's thread")),
+            peer.and_then(|p| p.unsettled()).map(|w| format!("peer: {w}")),
+            self.app.busy().map(|w| format!("app: {w}")),
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
+        why.join("; ")
     }
 
     /// "Add a Device": a join link another device signs in with, made as
