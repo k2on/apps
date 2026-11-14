@@ -277,7 +277,7 @@ jobs:
         run: |
           if [ "$GITHUB_EVENT_NAME" = pull_request ]; then attrs="$APP-ios-kernel-simulator $APP-ios-simulator"
           else attrs="$APP-ios-archive"; fi
-          echo "ATTRS=$attrs" >> "$GITHUB_ENV
+          echo "ATTRS=$attrs" >> "$GITHUB_ENV"
           refs=()
           for a in $attrs; do refs+=("git+file://$PWD#packages.aarch64-darwin.$a"); done
           start=$(date +%s)

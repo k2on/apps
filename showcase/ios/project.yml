@@ -8,7 +8,7 @@ name: Showcase
 options:
   bundleIdPrefix: dev.arkui
   deploymentTarget:
-    iOS: "17.0"
+    iOS: "26.0"
 packages:
   ArkUI:
     path: ../../ui/swift
