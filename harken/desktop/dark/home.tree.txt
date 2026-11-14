@@ -1,0 +1,1083 @@
+"Music" at 20,30 36x14
+"Songs" at 41,54 39x17
+"266" at 152,56 21x14
+"Albums" at 41,82 48x17
+"25" at 159,84 14x14
+"Artists" at 41,110 42x17
+"8" at 166,111 7x14
+"Shows" at 20,147 40x14
+"Podcasts" at 41,171 58x17
+"Sermons" at 41,199 57x17
+"Playlists" at 20,236 52x14
+"Favorites" at 41,260 60x17
+"Songs" at 224,16 74x29
+"266 tracks" at 310,22 64x16
+"Name" at 259,59 32x14
+"Artist" at 713,59 29x14
+"Album" at 985,59 35x14
+"Time" at 1348,59 27x14
+"I. Allegro" at 259,101 58x17
+"Antonio Vivaldi" at 702,101 98x17
+"String Concertos" at 967,101 109x17
+"3:23" at 1321,101 29x17
+"II. Larghetto e spiritoso" at 259,124 151x17
+"Antonio Vivaldi" at 702,124 98x17
+"String Concertos" at 967,124 109x17
+"3:52" at 1321,124 29x17
+"III. Allegro" at 259,147 65x17
+"Antonio Vivaldi" at 702,147 98x17
+"String Concertos" at 967,147 109x17
+"3:09" at 1321,147 29x17
+"I. Allegro – Adagio e spiccato – Allegro" at 259,170 247x17
+"Antonio Vivaldi" at 702,170 98x17
+"String Concertos" at 967,170 109x17
+"3:56" at 1321,170 29x17
+"II. Largo e spiccato" at 259,192 123x17
+"Antonio Vivaldi" at 702,192 98x17
+"String Concertos" at 967,192 109x17
+"2:14" at 1321,192 29x17
+"III. Allegro" at 259,215 65x17
+"Antonio Vivaldi" at 702,215 98x17
+"String Concertos" at 967,215 109x17
+"2:26" at 1321,215 29x17
+"I. Allegro" at 259,238 58x17
+"Antonio Vivaldi" at 702,238 98x17
+"String Concertos" at 967,238 109x17
+"3:16" at 1321,238 29x17
+"II. Largo" at 259,261 53x17
+"Antonio Vivaldi" at 702,261 98x17
+"String Concertos" at 967,261 109x17
+"3:57" at 1321,261 29x17
+"III. Allegro" at 259,284 65x17
+"Antonio Vivaldi" at 702,284 98x17
+"String Concertos" at 967,284 109x17
+"2:39" at 1321,284 29x17
+"I. Stabat mater dolorosa" at 259,307 158x17
+"Antonio Vivaldi" at 702,307 98x17
+"Stabat Mater" at 967,307 84x17
+"2:54" at 1321,307 29x17
+"II. Cujus animam gementem" at 259,330 184x17
+"Antonio Vivaldi" at 702,330 98x17
+"Stabat Mater" at 967,330 84x17
+"1:47" at 1321,330 29x17
+"III. O quam tristis" at 259,353 112x17
+"Antonio Vivaldi" at 702,353 98x17
+"Stabat Mater" at 967,353 84x17
+"1:53" at 1321,353 29x17
+"IV. Quis est homo" at 259,376 115x17
+"Antonio Vivaldi" at 702,376 98x17
+"Stabat Mater" at 967,376 84x17
+"2:50" at 1321,376 29x17
+"V. Quis non posset" at 259,398 122x17
+"Antonio Vivaldi" at 702,398 98x17
+"Stabat Mater" at 967,398 84x17
+"2:04" at 1321,398 29x17
+"VI. Pro peccatis suae gentis" at 259,421 179x17
+"Antonio Vivaldi" at 702,421 98x17
+"Stabat Mater" at 967,421 84x17
+"1:50" at 1321,421 29x17
+"VII. Eja mater, fons amoris" at 259,444 172x17
+"Antonio Vivaldi" at 702,444 98x17
+"Stabat Mater" at 967,444 84x17
+"2:43" at 1321,444 29x17
+"VIII. Fac ut ardeat" at 259,467 115x17
+"Antonio Vivaldi" at 702,467 98x17
+"Stabat Mater" at 967,467 84x17
+"1:38" at 1321,467 29x17
+"IX. Amen" at 259,490 59x17
+"Antonio Vivaldi" at 702,490 98x17
+"Stabat Mater" at 967,490 84x17
+"1:07" at 1321,490 29x17
+"Impromptu in G-flat major, D. 899" at 259,513 221x17
+"Franz Schubert" at 702,513 99x17
+"Impromptus" at 967,513 79x17
+"5:01" at 1321,513 29x17
+"I. Allegro" at 259,536 58x17
+"Antonio Vivaldi" at 702,536 98x17
+"Vivaldi: Concertos" at 967,536 118x17
+"3:19" at 1321,536 29x17
+"II. Largo" at 259,559 53x17
+"Antonio Vivaldi" at 702,559 98x17
+"Vivaldi: Concertos" at 967,559 118x17
+"4:42" at 1321,559 29x17
+"III. Allegro" at 259,582 65x17
+"Antonio Vivaldi" at 702,582 98x17
+"Vivaldi: Concertos" at 967,582 118x17
+"2:08" at 1321,582 29x17
+"Hungarian Dance No. 5" at 259,605 151x17
+"Johannes Brahms" at 702,605 113x17
+"Hungarian Dances" at 967,605 120x17
+"2:55" at 1321,605 29x17
+"Toccata and Fugue in D minor, BWV 565" at 259,627 264x17
+"Johann Sebastian Bach" at 702,627 149x17
+"Organ Works" at 967,627 85x17
+"8:34" at 1321,627 29x17
+"Magnificat" at 259,650 68x17
+"Antonio Vivaldi" at 702,650 98x17
+"Magnificat" at 967,650 68x17
+"1:05" at 1321,650 29x17
+"Et exultavit" at 259,673 74x17
+"Antonio Vivaldi" at 702,673 98x17
+"Magnificat" at 967,673 68x17
+"2:16" at 1321,673 29x17
+"Et misericordia" at 259,696 98x17
+"Antonio Vivaldi" at 702,696 98x17
+"Magnificat" at 967,696 68x17
+"2:30" at 1321,696 29x17
+"Fecit potentiam" at 259,719 102x17
+"Antonio Vivaldi" at 702,719 98x17
+"Magnificat" at 967,719 68x17
+"0:29" at 1321,719 29x17
+"Deposuit potentes" at 259,742 119x17
+"Antonio Vivaldi" at 702,742 98x17
+"Magnificat" at 967,742 68x17
+"0:55" at 1321,742 29x17
+"Esurientes" at 259,765 68x17
+"Antonio Vivaldi" at 702,765 98x17
+"Magnificat" at 967,765 68x17
+"1:40" at 1321,765 29x17
+"Suscepit Israel" at 259,788 95x17
+"Antonio Vivaldi" at 702,788 98x17
+"Magnificat" at 967,788 68x17
+"0:46" at 1321,788 29x17
+"Sicut locutus est" at 259,811 108x17
+"Antonio Vivaldi" at 702,811 98x17
+"Magnificat" at 967,811 68x17
+"2:00" at 1321,811 29x17
+"Gloria Patri" at 259,834 73x17
+"Antonio Vivaldi" at 702,834 98x17
+"Magnificat" at 967,834 68x17
+"2:13" at 1321,834 29x17
+"I. Allegro" at 259,857 58x17
+"Johann Sebastian Bach" at 702,857 149x17
+"Brandenburg Concertos" at 967,857 155x17
+"5:40" at 1321,857 29x17
+"II. Adagio ma non tanto" at 259,879 153x17
+"Johann Sebastian Bach" at 702,879 149x17
+"Brandenburg Concertos" at 967,879 155x17
+"5:12" at 1321,879 29x17
+"II. Adagio" at 259,902 61x17
+"Johann Sebastian Bach" at 702,902 149x17
+"Brandenburg Concertos" at 967,902 155x17
+"0:23" at 1321,902 29x17
+"II. Affettuoso" at 259,925 83x17
+"Johann Sebastian Bach" at 702,925 149x17
+"Brandenburg Concertos" at 967,925 155x17
+"5:55" at 1321,925 29x17
+"II. Andante" at 259,948 71x17
+"Johann Sebastian Bach" at 702,948 149x17
+"Brandenburg Concertos" at 967,948 155x17
+"4:35" at 1321,948 29x17
+"III. Allegro assai" at 259,971 103x17
+"Johann Sebastian Bach" at 702,971 149x17
+"Brandenburg Concertos" at 967,971 155x17
+"3:44" at 1321,971 29x17
+"III. Allegro" at 259,994 65x17
+"Johann Sebastian Bach" at 702,994 149x17
+"Brandenburg Concertos" at 967,994 155x17
+"5:35" at 1321,994 29x17
+"III. Presto" at 259,1017 61x17
+"Johann Sebastian Bach" at 702,1017 149x17
+"Brandenburg Concertos" at 967,1017 155x17
+"4:16" at 1321,1017 29x17
+"IV. Menuetto - Trio - Polacca" at 259,1040 183x17
+"Johann Sebastian Bach" at 702,1040 149x17
+"Brandenburg Concertos" at 967,1040 155x17
+"8:00" at 1321,1040 29x17
+"Concerto in D minor (after Vivaldi), BWV 596" at 259,1063 292x17
+"Johann Sebastian Bach" at 702,1063 149x17
+"3 Concerti after Vivaldi" at 967,1063 150x17
+"12:13" at 1321,1063 37x17
+"Concerto in A minor (after Vivaldi), BWV 593" at 259,1086 291x17
+"Johann Sebastian Bach" at 702,1086 149x17
+"3 Concerti after Vivaldi" at 967,1086 150x17
+"12:45" at 1321,1086 37x17
+"Concerto in C major (after Vivaldi), BWV 594" at 259,1108 291x17
+"Johann Sebastian Bach" at 702,1108 149x17
+"3 Concerti after Vivaldi" at 967,1108 150x17
+"20:45" at 1321,1108 37x17
+"Fugue in B minor on a theme by Corelli, BWV 579" at 259,1131 323x17
+"Johann Sebastian Bach" at 702,1131 149x17
+"3 Concerti after Vivaldi" at 967,1131 150x17
+"6:07" at 1321,1131 29x17
+"Gloria in D major, RV 589" at 259,1154 165x17
+"Antonio Vivaldi" at 702,1154 98x17
+"Gloria" at 967,1154 39x17
+"31:07" at 1321,1154 37x17
+"Dixit Dominus" at 259,1177 92x17
+"Antonio Vivaldi" at 702,1177 98x17
+"Dixit Dominus" at 967,1177 92x17
+"1:38" at 1321,1177 29x17
+"Donec ponam" at 259,1200 91x17
+"Antonio Vivaldi" at 702,1200 98x17
+"Dixit Dominus" at 967,1200 92x17
+"2:55" at 1321,1200 29x17
+"Virgam virtutis" at 259,1223 96x17
+"Antonio Vivaldi" at 702,1223 98x17
+"Dixit Dominus" at 967,1223 92x17
+"2:38" at 1321,1223 29x17
+"Tecum principium" at 259,1246 117x17
+"Antonio Vivaldi" at 702,1246 98x17
+"Dixit Dominus" at 967,1246 92x17
+"1:49" at 1321,1246 29x17
+"Juravit Dominus" at 259,1269 103x17
+"Antonio Vivaldi" at 702,1269 98x17
+"Dixit Dominus" at 967,1269 92x17
+"1:50" at 1321,1269 29x17
+"Dominus a dextris tuis" at 259,1292 146x17
+"Antonio Vivaldi" at 702,1292 98x17
+"Dixit Dominus" at 967,1292 92x17
+"1:56" at 1321,1292 29x17
+"Judicabit in nationibus" at 259,1315 144x17
+"Antonio Vivaldi" at 702,1315 98x17
+"Dixit Dominus" at 967,1315 92x17
+"2:32" at 1321,1315 29x17
+"De torrente" at 259,1337 75x17
+"Antonio Vivaldi" at 702,1337 98x17
+"Dixit Dominus" at 967,1337 92x17
+"3:32" at 1321,1337 29x17
+"Gloria Patri" at 259,1360 73x17
+"Antonio Vivaldi" at 702,1360 98x17
+"Dixit Dominus" at 967,1360 92x17
+"2:06" at 1321,1360 29x17
+"Sicut erat in principio" at 259,1383 139x17
+"Antonio Vivaldi" at 702,1383 98x17
+"Dixit Dominus" at 967,1383 92x17
+"3:09" at 1321,1383 29x17
+"Sinfonia al Santo Sepolcro in B minor" at 259,1406 241x17
+"Antonio Vivaldi" at 702,1406 98x17
+"Dixit Dominus" at 967,1406 92x17
+"4:04" at 1321,1406 29x17
+"Sonata al Santo Sepolcro in E-flat major" at 259,1429 259x17
+"Antonio Vivaldi" at 702,1429 98x17
+"Dixit Dominus" at 967,1429 92x17
+"4:59" at 1321,1429 29x17
+"Aria" at 259,1452 26x17
+"Johann Sebastian Bach" at 702,1452 149x17
+"Goldberg Variations, BWV 988" at 967,1452 197x17
+"5:00" at 1321,1452 29x17
+"Variatio 1 a 1 Clav" at 259,1475 120x17
+"Johann Sebastian Bach" at 702,1475 149x17
+"Goldberg Variations, BWV 988" at 967,1475 197x17
+"1:55" at 1321,1475 29x17
+"Variatio 2 a 1 Clav" at 259,1498 120x17
+"Johann Sebastian Bach" at 702,1498 149x17
+"Goldberg Variations, BWV 988" at 967,1498 197x17
+"2:04" at 1321,1498 29x17
+"Variatio 3 a 1 Clav Canone allUnisuono" at 259,1521 253x17
+"Johann Sebastian Bach" at 702,1521 149x17
+"Goldberg Variations, BWV 988" at 967,1521 197x17
+"1:57" at 1321,1521 29x17
+"Variatio 4 a 1 Clav" at 259,1544 120x17
+"Johann Sebastian Bach" at 702,1544 149x17
+"Goldberg Variations, BWV 988" at 967,1544 197x17
+"1:09" at 1321,1544 29x17
+"Variatio 5 a 1 ovvero 2 Clav" at 259,1566 181x17
+"Johann Sebastian Bach" at 702,1566 149x17
+"Goldberg Variations, BWV 988" at 967,1566 197x17
+"1:34" at 1321,1566 29x17
+"Variatio 6 a 1 Clav Canone alla Seconda" at 259,1589 261x17
+"Johann Sebastian Bach" at 702,1589 149x17
+"Goldberg Variations, BWV 988" at 967,1589 197x17
+"1:38" at 1321,1589 29x17
+"Variatio 7 a 1 ovvero 2 Clav" at 259,1612 181x17
+"Johann Sebastian Bach" at 702,1612 149x17
+"Goldberg Variations, BWV 988" at 967,1612 197x17
+"2:12" at 1321,1612 29x17
+"Variatio 8 a 2 Clav" at 259,1635 120x17
+"Johann Sebastian Bach" at 702,1635 149x17
+"Goldberg Variations, BWV 988" at 967,1635 197x17
+"1:57" at 1321,1635 29x17
+"Variatio 9 a 1 Clav Canone alla Terza" at 259,1658 241x17
+"Johann Sebastian Bach" at 702,1658 149x17
+"Goldberg Variations, BWV 988" at 967,1658 197x17
+"2:06" at 1321,1658 29x17
+"Variatio 10 a 1 Clav Fughetta" at 259,1681 191x17
+"Johann Sebastian Bach" at 702,1681 149x17
+"Goldberg Variations, BWV 988" at 967,1681 197x17
+"1:46" at 1321,1681 29x17
+"Variatio 11 a 2 Clav" at 259,1704 128x17
+"Johann Sebastian Bach" at 702,1704 149x17
+"Goldberg Variations, BWV 988" at 967,1704 197x17
+"2:09" at 1321,1704 29x17
+"Variatio 12 Canone alla Quarta" at 259,1727 201x17
+"Johann Sebastian Bach" at 702,1727 149x17
+"Goldberg Variations, BWV 988" at 967,1727 197x17
+"2:16" at 1321,1727 29x17
+"Variatio 13 a 2 Clav" at 259,1750 128x17
+"Johann Sebastian Bach" at 702,1750 149x17
+"Goldberg Variations, BWV 988" at 967,1750 197x17
+"4:14" at 1321,1750 29x17
+"Variatio 14 a 2 Clav" at 259,1773 128x17
+"Johann Sebastian Bach" at 702,1773 149x17
+"Goldberg Variations, BWV 988" at 967,1773 197x17
+"2:17" at 1321,1773 29x17
+"Variatio 15 a 1 Clav Canone alla Quinta" at 259,1795 257x17
+"Johann Sebastian Bach" at 702,1795 149x17
+"Goldberg Variations, BWV 988" at 967,1795 197x17
+"4:33" at 1321,1795 29x17
+"Variatio 16 a 1 Clav Ouverture" at 259,1818 198x17
+"Johann Sebastian Bach" at 702,1818 149x17
+"Goldberg Variations, BWV 988" at 967,1818 197x17
+"3:09" at 1321,1818 29x17
+"Variatio 17 a 2 Clav" at 259,1841 128x17
+"Johann Sebastian Bach" at 702,1841 149x17
+"Goldberg Variations, BWV 988" at 967,1841 197x17
+"1:44" at 1321,1841 29x17
+"Variatio 18 a 1 Clav Canone alla Sexta" at 259,1864 250x17
+"Johann Sebastian Bach" at 702,1864 149x17
+"Goldberg Variations, BWV 988" at 967,1864 197x17
+"1:49" at 1321,1864 29x17
+"Variatio 19 a 1 Clav" at 259,1887 128x17
+"Johann Sebastian Bach" at 702,1887 149x17
+"Goldberg Variations, BWV 988" at 967,1887 197x17
+"1:25" at 1321,1887 29x17
+"Variatio 20 a 2 Clav" at 259,1910 128x17
+"Johann Sebastian Bach" at 702,1910 149x17
+"Goldberg Variations, BWV 988" at 967,1910 197x17
+"2:05" at 1321,1910 29x17
+"Variatio 21 Canone alla Settima" at 259,1933 207x17
+"Johann Sebastian Bach" at 702,1933 149x17
+"Goldberg Variations, BWV 988" at 967,1933 197x17
+"3:55" at 1321,1933 29x17
+"Variatio 22 a 1 Clav" at 259,1956 128x17
+"Johann Sebastian Bach" at 702,1956 149x17
+"Goldberg Variations, BWV 988" at 967,1956 197x17
+"1:33" at 1321,1956 29x17
+"Variatio 23 a 2 Clav" at 259,1979 128x17
+"Johann Sebastian Bach" at 702,1979 149x17
+"Goldberg Variations, BWV 988" at 967,1979 197x17
+"2:20" at 1321,1979 29x17
+"Variatio 24 a 1 Clav Canone allOttava" at 259,2002 245x17
+"Johann Sebastian Bach" at 702,2002 149x17
+"Goldberg Variations, BWV 988" at 967,2002 197x17
+"2:45" at 1321,2002 29x17
+"Variatio 25 a 2 Clav" at 259,2024 128x17
+"Johann Sebastian Bach" at 702,2024 149x17
+"Goldberg Variations, BWV 988" at 967,2024 197x17
+"9:18" at 1321,2024 29x17
+"Variatio 26 a 2 Clav" at 259,2047 128x17
+"Johann Sebastian Bach" at 702,2047 149x17
+"Goldberg Variations, BWV 988" at 967,2047 197x17
+"2:03" at 1321,2047 29x17
+"Variatio 27 a 2 Clav Canone alla Nona" at 259,2070 247x17
+"Johann Sebastian Bach" at 702,2070 149x17
+"Goldberg Variations, BWV 988" at 967,2070 197x17
+"1:51" at 1321,2070 29x17
+"Variatio 28 a 2 Clav" at 259,2093 128x17
+"Johann Sebastian Bach" at 702,2093 149x17
+"Goldberg Variations, BWV 988" at 967,2093 197x17
+"2:26" at 1321,2093 29x17
+"Variatio 29 a 1 ovvero 2 Clav" at 259,2116 189x17
+"Johann Sebastian Bach" at 702,2116 149x17
+"Goldberg Variations, BWV 988" at 967,2116 197x17
+"2:09" at 1321,2116 29x17
+"Variatio 30 a 1 Clav Quodlibet" at 259,2139 195x17
+"Johann Sebastian Bach" at 702,2139 149x17
+"Goldberg Variations, BWV 988" at 967,2139 197x17
+"2:01" at 1321,2139 29x17
+"Aria da Capo Fine" at 259,2162 115x17
+"Johann Sebastian Bach" at 702,2162 149x17
+"Goldberg Variations, BWV 988" at 967,2162 197x17
+"2:50" at 1321,2162 29x17
+"Prelude No. 1 in C major" at 259,2185 158x17
+"Johann Sebastian Bach" at 702,2185 149x17
+"The Well-Tempered Clavier" at 967,2185 177x17
+"2:43" at 1321,2185 29x17
+"Fugue No. 1 in C major" at 259,2208 149x17
+"Johann Sebastian Bach" at 702,2208 149x17
+"The Well-Tempered Clavier" at 967,2208 177x17
+"1:56" at 1321,2208 29x17
+"Prelude No. 2 in C minor" at 259,2231 159x17
+"Johann Sebastian Bach" at 702,2231 149x17
+"The Well-Tempered Clavier" at 967,2231 177x17
+"1:47" at 1321,2231 29x17
+"Fugue No. 2 in C minor" at 259,2253 150x17
+"Johann Sebastian Bach" at 702,2253 149x17
+"The Well-Tempered Clavier" at 967,2253 177x17
+"1:56" at 1321,2253 29x17
+"Prelude No. 3 in C-sharp major" at 259,2276 200x17
+"Johann Sebastian Bach" at 702,2276 149x17
+"The Well-Tempered Clavier" at 967,2276 177x17
+"1:15" at 1321,2276 29x17
+"Fugue No. 3 in C-sharp major" at 259,2299 191x17
+"Johann Sebastian Bach" at 702,2299 149x17
+"The Well-Tempered Clavier" at 967,2299 177x17
+"2:35" at 1321,2299 29x17
+"Prelude No. 4 in C-sharp minor" at 259,2322 200x17
+"Johann Sebastian Bach" at 702,2322 149x17
+"The Well-Tempered Clavier" at 967,2322 177x17
+"2:58" at 1321,2322 29x17
+"Fugue No. 4 in C-sharp minor" at 259,2345 191x17
+"Johann Sebastian Bach" at 702,2345 149x17
+"The Well-Tempered Clavier" at 967,2345 177x17
+"2:41" at 1321,2345 29x17
+"Prelude No. 5 in D major" at 259,2368 159x17
+"Johann Sebastian Bach" at 702,2368 149x17
+"The Well-Tempered Clavier" at 967,2368 177x17
+"1:33" at 1321,2368 29x17
+"Fugue No. 5 in D major" at 259,2391 150x17
+"Johann Sebastian Bach" at 702,2391 149x17
+"The Well-Tempered Clavier" at 967,2391 177x17
+"1:48" at 1321,2391 29x17
+"Prelude No. 6 in D minor" at 259,2414 160x17
+"Johann Sebastian Bach" at 702,2414 149x17
+"The Well-Tempered Clavier" at 967,2414 177x17
+"1:38" at 1321,2414 29x17
+"Fugue No. 6 in D minor" at 259,2437 151x17
+"Johann Sebastian Bach" at 702,2437 149x17
+"The Well-Tempered Clavier" at 967,2437 177x17
+"2:09" at 1321,2437 29x17
+"Prelude No. 7 in E-flat major" at 259,2460 184x17
+"Johann Sebastian Bach" at 702,2460 149x17
+"The Well-Tempered Clavier" at 967,2460 177x17
+"3:34" at 1321,2460 29x17
+"Fugue No. 7 in E-flat major" at 259,2482 174x17
+"Johann Sebastian Bach" at 702,2482 149x17
+"The Well-Tempered Clavier" at 967,2482 177x17
+"1:49" at 1321,2482 29x17
+"Prelude No. 8 in E-flat minor" at 259,2505 184x17
+"Johann Sebastian Bach" at 702,2505 149x17
+"The Well-Tempered Clavier" at 967,2505 177x17
+"3:58" at 1321,2505 29x17
+"Fugue No. 8 in D-sharp minor" at 259,2528 192x17
+"Johann Sebastian Bach" at 702,2528 149x17
+"The Well-Tempered Clavier" at 967,2528 177x17
+"3:55" at 1321,2528 29x17
+"Prelude No. 9 in E major" at 259,2551 158x17
+"Johann Sebastian Bach" at 702,2551 149x17
+"The Well-Tempered Clavier" at 967,2551 177x17
+"1:45" at 1321,2551 29x17
+"Fugue No. 9 in E major" at 259,2574 149x17
+"Johann Sebastian Bach" at 702,2574 149x17
+"The Well-Tempered Clavier" at 967,2574 177x17
+"1:21" at 1321,2574 29x17
+"Prelude No. 10 in E minor" at 259,2597 166x17
+"Johann Sebastian Bach" at 702,2597 149x17
+"The Well-Tempered Clavier" at 967,2597 177x17
+"2:01" at 1321,2597 29x17
+"Fugue No. 10 in E minor" at 259,2620 157x17
+"Johann Sebastian Bach" at 702,2620 149x17
+"The Well-Tempered Clavier" at 967,2620 177x17
+"1:30" at 1321,2620 29x17
+"Prelude No. 11 in F major" at 259,2643 165x17
+"Johann Sebastian Bach" at 702,2643 149x17
+"The Well-Tempered Clavier" at 967,2643 177x17
+"1:04" at 1321,2643 29x17
+"Fugue No. 11 in F major" at 259,2666 156x17
+"Johann Sebastian Bach" at 702,2666 149x17
+"The Well-Tempered Clavier" at 967,2666 177x17
+"1:27" at 1321,2666 29x17
+"Prelude No. 12 in F minor" at 259,2688 165x17
+"Johann Sebastian Bach" at 702,2688 149x17
+"The Well-Tempered Clavier" at 967,2688 177x17
+"2:53" at 1321,2688 29x17
+"Fugue No. 12 in F minor" at 259,2711 156x17
+"Johann Sebastian Bach" at 702,2711 149x17
+"The Well-Tempered Clavier" at 967,2711 177x17
+"3:57" at 1321,2711 29x17
+"Prelude No. 13 in F-sharp major" at 259,2734 206x17
+"Johann Sebastian Bach" at 702,2734 149x17
+"The Well-Tempered Clavier" at 967,2734 177x17
+"1:40" at 1321,2734 29x17
+"Fugue No. 13 in F-sharp major" at 259,2757 197x17
+"Johann Sebastian Bach" at 702,2757 149x17
+"The Well-Tempered Clavier" at 967,2757 177x17
+"2:06" at 1321,2757 29x17
+"Prelude No. 14 in F-sharp minor" at 259,2780 207x17
+"Johann Sebastian Bach" at 702,2780 149x17
+"The Well-Tempered Clavier" at 967,2780 177x17
+"1:05" at 1321,2780 29x17
+"Fugue No. 14 in F-sharp minor" at 259,2803 198x17
+"Johann Sebastian Bach" at 702,2803 149x17
+"The Well-Tempered Clavier" at 967,2803 177x17
+"3:16" at 1321,2803 29x17
+"Prelude No. 15 in G major" at 259,2826 168x17
+"Johann Sebastian Bach" at 702,2826 149x17
+"The Well-Tempered Clavier" at 967,2826 177x17
+"0:55" at 1321,2826 29x17
+"Fugue No. 15 in G major" at 259,2849 159x17
+"Johann Sebastian Bach" at 702,2849 149x17
+"The Well-Tempered Clavier" at 967,2849 177x17
+"2:36" at 1321,2849 29x17
+"Prelude No. 16 in G minor" at 259,2872 168x17
+"Johann Sebastian Bach" at 702,2872 149x17
+"The Well-Tempered Clavier" at 967,2872 177x17
+"2:14" at 1321,2872 29x17
+"Fugue No. 16 in G minor" at 259,2895 159x17
+"Johann Sebastian Bach" at 702,2895 149x17
+"The Well-Tempered Clavier" at 967,2895 177x17
+"1:53" at 1321,2895 29x17
+"Prelude No. 17 in A-flat major" at 259,2917 193x17
+"Johann Sebastian Bach" at 702,2917 149x17
+"The Well-Tempered Clavier" at 967,2917 177x17
+"1:33" at 1321,2917 29x17
+"Fugue No. 17 in A-flat major" at 259,2940 183x17
+"Johann Sebastian Bach" at 702,2940 149x17
+"The Well-Tempered Clavier" at 967,2940 177x17
+"2:00" at 1321,2940 29x17
+"Prelude No. 18 in G-sharp minor" at 259,2963 209x17
+"Johann Sebastian Bach" at 702,2963 149x17
+"The Well-Tempered Clavier" at 967,2963 177x17
+"2:02" at 1321,2963 29x17
+"Fugue No. 18 in G-sharp minor" at 259,2986 200x17
+"Johann Sebastian Bach" at 702,2986 149x17
+"The Well-Tempered Clavier" at 967,2986 177x17
+"2:17" at 1321,2986 29x17
+"Prelude No. 19 in A major" at 259,3009 167x17
+"Johann Sebastian Bach" at 702,3009 149x17
+"The Well-Tempered Clavier" at 967,3009 177x17
+"1:31" at 1321,3009 29x17
+"Fugue No. 19 in A major" at 259,3032 158x17
+"Johann Sebastian Bach" at 702,3032 149x17
+"The Well-Tempered Clavier" at 967,3032 177x17
+"1:57" at 1321,3032 29x17
+"Prelude No. 20 in A minor" at 259,3055 167x17
+"Johann Sebastian Bach" at 702,3055 149x17
+"The Well-Tempered Clavier" at 967,3055 177x17
+"1:25" at 1321,3055 29x17
+"Fugue No. 20 in A minor" at 259,3078 158x17
+"Johann Sebastian Bach" at 702,3078 149x17
+"The Well-Tempered Clavier" at 967,3078 177x17
+"4:05" at 1321,3078 29x17
+"Prelude No. 21 in B-flat major" at 259,3101 193x17
+"Johann Sebastian Bach" at 702,3101 149x17
+"The Well-Tempered Clavier" at 967,3101 177x17
+"1:19" at 1321,3101 29x17
+"Fugue No. 21 in B-flat major" at 259,3124 183x17
+"Johann Sebastian Bach" at 702,3124 149x17
+"The Well-Tempered Clavier" at 967,3124 177x17
+"1:56" at 1321,3124 29x17
+"Prelude No. 22 in B-flat minor" at 259,3146 193x17
+"Johann Sebastian Bach" at 702,3146 149x17
+"The Well-Tempered Clavier" at 967,3146 177x17
+"2:28" at 1321,3146 29x17
+"Fugue No. 22 in B-flat minor" at 259,3169 184x17
+"Johann Sebastian Bach" at 702,3169 149x17
+"The Well-Tempered Clavier" at 967,3169 177x17
+"3:18" at 1321,3169 29x17
+"Prelude No. 23 in B major" at 259,3192 167x17
+"Johann Sebastian Bach" at 702,3192 149x17
+"The Well-Tempered Clavier" at 967,3192 177x17
+"1:00" at 1321,3192 29x17
+"Fugue No. 23 in B major" at 259,3215 158x17
+"Johann Sebastian Bach" at 702,3215 149x17
+"The Well-Tempered Clavier" at 967,3215 177x17
+"1:49" at 1321,3215 29x17
+"Prelude No. 24 in B minor" at 259,3238 167x17
+"Johann Sebastian Bach" at 702,3238 149x17
+"The Well-Tempered Clavier" at 967,3238 177x17
+"2:28" at 1321,3238 29x17
+"Fugue No. 24 in B minor" at 259,3261 158x17
+"Johann Sebastian Bach" at 702,3261 149x17
+"The Well-Tempered Clavier" at 967,3261 177x17
+"8:02" at 1321,3261 29x17
+"Clair de lune" at 259,3284 82x17
+"Claude Debussy" at 702,3284 105x17
+"Suite bergamasque" at 967,3284 127x17
+"5:04" at 1321,3284 29x17
+"Concerto No. 1 in F major, RV 433 \"La tempesta di mare\"" at 259,3307 373x17
+"Antonio Vivaldi" at 702,3307 98x17
+"6 Flute Concertos, Op. 10" at 967,3307 166x17
+"6:50" at 1321,3307 29x17
+"Concerto No. 2 in G minor, RV 439 \"La notte\"" at 259,3330 294x17
+"Antonio Vivaldi" at 702,3330 98x17
+"6 Flute Concertos, Op. 10" at 967,3330 166x17
+"8:50" at 1321,3330 29x17
+"Concerto No. 3 in D major, RV 428 \"Il gardellino\"" at 259,3353 317x17
+"Antonio Vivaldi" at 702,3353 98x17
+"6 Flute Concertos, Op. 10" at 967,3353 166x17
+"10:01" at 1321,3353 37x17
+"Concerto No. 4 in G major, RV 435" at 259,3375 224x17
+"Antonio Vivaldi" at 702,3375 98x17
+"6 Flute Concertos, Op. 10" at 967,3375 166x17
+"6:52" at 1321,3375 29x17
+"Concerto No. 5 in F major, RV 434" at 259,3398 222x17
+"Antonio Vivaldi" at 702,3398 98x17
+"6 Flute Concertos, Op. 10" at 967,3398 166x17
+"9:22" at 1321,3398 29x17
+"Concerto No. 6 in G major, RV 437" at 259,3421 224x17
+"Antonio Vivaldi" at 702,3421 98x17
+"6 Flute Concertos, Op. 10" at 967,3421 166x17
+"8:08" at 1321,3421 29x17
+"Sinfony" at 259,3444 49x17
+"George Frideric Handel" at 702,3444 151x17
+"Messiah" at 967,3444 53x17
+"5:17" at 1321,3444 29x17
+"Comfort ye my people" at 259,3467 145x17
+"George Frideric Handel" at 702,3467 151x17
+"Messiah" at 967,3467 53x17
+"3:58" at 1321,3467 29x17
+"Ev'ry valley shall be exalted" at 259,3490 183x17
+"George Frideric Handel" at 702,3490 151x17
+"Messiah" at 967,3490 53x17
+"3:30" at 1321,3490 29x17
+"And the glory of the Lord" at 259,3513 163x17
+"George Frideric Handel" at 702,3513 151x17
+"Messiah" at 967,3513 53x17
+"2:47" at 1321,3513 29x17
+"Thus saith the Lord of hosts" at 259,3536 181x17
+"George Frideric Handel" at 702,3536 151x17
+"Messiah" at 967,3536 53x17
+"2:00" at 1321,3536 29x17
+"But who may abide the day of His coming" at 259,3559 272x17
+"George Frideric Handel" at 702,3559 151x17
+"Messiah" at 967,3559 53x17
+"4:35" at 1321,3559 29x17
+"And he shall purify the sons of Levi" at 259,3582 229x17
+"George Frideric Handel" at 702,3582 151x17
+"Messiah" at 967,3582 53x17
+"2:04" at 1321,3582 29x17
+"Behold, a virgin shall conceive" at 259,3604 198x17
+"George Frideric Handel" at 702,3604 151x17
+"Messiah" at 967,3604 53x17
+"0:46" at 1321,3604 29x17
+"O thou that tellest good tidings to Zion" at 259,3627 253x17
+"George Frideric Handel" at 702,3627 151x17
+"Messiah" at 967,3627 53x17
+"5:22" at 1321,3627 29x17
+"For behold, darkness shall cover the earth" at 259,3650 275x17
+"George Frideric Handel" at 702,3650 151x17
+"Messiah" at 967,3650 53x17
+"4:09" at 1321,3650 29x17
+"The people that walked in darkness have seen a great light" at 259,3673 387x17
+"George Frideric Handel" at 702,3673 151x17
+"Messiah" at 967,3673 53x17
+"4:49" at 1321,3673 29x17
+"For unto us a child is born" at 259,3696 169x17
+"George Frideric Handel" at 702,3696 151x17
+"Messiah" at 967,3696 53x17
+"3:25" at 1321,3696 29x17
+"Pifa (Pastoral Symphony)" at 259,3719 164x17
+"George Frideric Handel" at 702,3719 151x17
+"Messiah" at 967,3719 53x17
+"1:56" at 1321,3719 29x17
+"There were shepherds abiding in the fields" at 259,3742 278x17
+"George Frideric Handel" at 702,3742 151x17
+"Messiah" at 967,3742 53x17
+"0:26" at 1321,3742 29x17
+"And lo, the angel of the Lord" at 259,3765 186x17
+"George Frideric Handel" at 702,3765 151x17
+"Messiah" at 967,3765 53x17
+"0:54" at 1321,3765 29x17
+"And the angel said unto them" at 259,3788 194x17
+"George Frideric Handel" at 702,3788 151x17
+"Messiah" at 967,3788 53x17
+"1:03" at 1321,3788 29x17
+"And suddenly there was with the angel" at 259,3811 254x17
+"George Frideric Handel" at 702,3811 151x17
+"Messiah" at 967,3811 53x17
+"0:15" at 1321,3811 29x17
+"Glory to God in the highest" at 259,3833 176x17
+"George Frideric Handel" at 702,3833 151x17
+"Messiah" at 967,3833 53x17
+"2:14" at 1321,3833 29x17
+"Rejoice greatly, O daughter of Zion" at 259,3856 229x17
+"George Frideric Handel" at 702,3856 151x17
+"Messiah" at 967,3856 53x17
+"4:23" at 1321,3856 29x17
+"Then shall the eyes of the blind be opened" at 259,3879 278x17
+"George Frideric Handel" at 702,3879 151x17
+"Messiah" at 967,3879 53x17
+"0:41" at 1321,3879 29x17
+"He shall feed his flock like a shepherd" at 259,3902 247x17
+"George Frideric Handel" at 702,3902 151x17
+"Messiah" at 967,3902 53x17
+"5:45" at 1321,3902 29x17
+"His yoke is easy" at 259,3925 105x17
+"George Frideric Handel" at 702,3925 151x17
+"Messiah" at 967,3925 53x17
+"2:16" at 1321,3925 29x17
+"Behold the Lamb of God" at 259,3948 158x17
+"George Frideric Handel" at 702,3948 151x17
+"Messiah" at 967,3948 53x17
+"4:22" at 1321,3948 29x17
+"He was despised and rejected of men" at 259,3971 245x17
+"George Frideric Handel" at 702,3971 151x17
+"Messiah" at 967,3971 53x17
+"9:46" at 1321,3971 29x17
+"Surely he hath borne our griefs and carried our sorrows" at 259,3994 362x17
+"George Frideric Handel" at 702,3994 151x17
+"Messiah" at 967,3994 53x17
+"4:07" at 1321,3994 29x17
+"And with his stripes we are healed" at 259,4017 224x17
+"George Frideric Handel" at 702,4017 151x17
+"Messiah" at 967,4017 53x17
+"4:03" at 1321,4017 29x17
+"All we like sheep have gone astray" at 259,4040 227x17
+"George Frideric Handel" at 702,4040 151x17
+"Messiah" at 967,4040 53x17
+"5:03" at 1321,4040 29x17
+"All they that see him laugh to scorn" at 259,4062 233x17
+"George Frideric Handel" at 702,4062 151x17
+"Messiah" at 967,4062 53x17
+"1:26" at 1321,4062 29x17
+"He trusted in God that he would deliver him" at 259,4085 286x17
+"George Frideric Handel" at 702,4085 151x17
+"Messiah" at 967,4085 53x17
+"2:14" at 1321,4085 29x17
+"Thy rebuke hath broken his heart" at 259,4108 218x17
+"George Frideric Handel" at 702,4108 151x17
+"Messiah" at 967,4108 53x17
+"2:05" at 1321,4108 29x17
+"Behold and see if there be any sorrow" at 259,4131 248x17
+"George Frideric Handel" at 702,4131 151x17
+"Messiah" at 967,4131 53x17
+"1:40" at 1321,4131 29x17
+"He was cut off" at 259,4154 93x17
+"George Frideric Handel" at 702,4154 151x17
+"Messiah" at 967,4154 53x17
+"0:26" at 1321,4154 29x17
+"But thou didst not leave his soul in hell" at 259,4177 254x17
+"George Frideric Handel" at 702,4177 151x17
+"Messiah" at 967,4177 53x17
+"2:53" at 1321,4177 29x17
+"Lift up your heads, O ye gates" at 259,4200 196x17
+"George Frideric Handel" at 702,4200 151x17
+"Messiah" at 967,4200 53x17
+"3:26" at 1321,4200 29x17
+"Unto which of the angels" at 259,4223 162x17
+"George Frideric Handel" at 702,4223 151x17
+"Messiah" at 967,4223 53x17
+"0:26" at 1321,4223 29x17
+"Let all the angels of God worship Him" at 259,4246 244x17
+"George Frideric Handel" at 702,4246 151x17
+"Messiah" at 967,4246 53x17
+"1:23" at 1321,4246 29x17
+"Thou art gone up on high" at 259,4269 165x17
+"George Frideric Handel" at 702,4269 151x17
+"Messiah" at 967,4269 53x17
+"5:59" at 1321,4269 29x17
+"The Lord gave the word" at 259,4291 155x17
+"George Frideric Handel" at 702,4291 151x17
+"Messiah" at 967,4291 53x17
+"1:00" at 1321,4291 29x17
+"How beautiful are the feet" at 259,4314 171x17
+"George Frideric Handel" at 702,4314 151x17
+"Messiah" at 967,4314 53x17
+"2:29" at 1321,4314 29x17
+"Their sound is gone out" at 259,4337 153x17
+"George Frideric Handel" at 702,4337 151x17
+"Messiah" at 967,4337 53x17
+"3:07" at 1321,4337 29x17
+"Why do the nations so furiously rage together" at 259,4360 299x17
+"George Frideric Handel" at 702,4360 151x17
+"Messiah" at 967,4360 53x17
+"2:34" at 1321,4360 29x17
+"Let us break their bonds asunder" at 259,4383 216x17
+"George Frideric Handel" at 702,4383 151x17
+"Messiah" at 967,4383 53x17
+"1:50" at 1321,4383 29x17
+"He that dwelleth in heaven" at 259,4406 176x17
+"George Frideric Handel" at 702,4406 151x17
+"Messiah" at 967,4406 53x17
+"0:21" at 1321,4406 29x17
+"Thou shalt break them with a rod of iron" at 259,4429 263x17
+"George Frideric Handel" at 702,4429 151x17
+"Messiah" at 967,4429 53x17
+"2:07" at 1321,4429 29x17
+"Hallelujah" at 259,4452 65x17
+"George Frideric Handel" at 702,4452 151x17
+"Messiah" at 967,4452 53x17
+"3:21" at 1321,4452 29x17
+"I know that my Redeemer liveth" at 259,4475 209x17
+"George Frideric Handel" at 702,4475 151x17
+"Messiah" at 967,4475 53x17
+"10:04" at 1321,4475 37x17
+"Since by man came death" at 259,4498 170x17
+"George Frideric Handel" at 702,4498 151x17
+"Messiah" at 967,4498 53x17
+"2:20" at 1321,4498 29x17
+"Behold, I tell you a mystery" at 259,4520 179x17
+"George Frideric Handel" at 702,4520 151x17
+"Messiah" at 967,4520 53x17
+"0:48" at 1321,4520 29x17
+"The trumpet shall sound" at 259,4543 159x17
+"George Frideric Handel" at 702,4543 151x17
+"Messiah" at 967,4543 53x17
+"8:55" at 1321,4543 29x17
+"Then shall be brought to pass" at 259,4566 194x17
+"George Frideric Handel" at 702,4566 151x17
+"Messiah" at 967,4566 53x17
+"0:17" at 1321,4566 29x17
+"O death, where is thy sting" at 259,4589 176x17
+"George Frideric Handel" at 702,4589 151x17
+"Messiah" at 967,4589 53x17
+"0:54" at 1321,4589 29x17
+"But thanks be to God" at 259,4612 138x17
+"George Frideric Handel" at 702,4612 151x17
+"Messiah" at 967,4612 53x17
+"2:01" at 1321,4612 29x17
+"If God be for us, who can be against us" at 259,4635 254x17
+"George Frideric Handel" at 702,4635 151x17
+"Messiah" at 967,4635 53x17
+"7:46" at 1321,4635 29x17
+"Worthy is the Lamb. Amen" at 259,4658 173x17
+"George Frideric Handel" at 702,4658 151x17
+"Messiah" at 967,4658 53x17
+"10:06" at 1321,4658 37x17
+"I. Nisi Dominus" at 259,4681 97x17
+"Antonio Vivaldi" at 702,4681 98x17
+"Nisi Dominus" at 967,4681 85x17
+"2:36" at 1321,4681 29x17
+"II. Vanum est vobis" at 259,4704 124x17
+"Antonio Vivaldi" at 702,4704 98x17
+"Nisi Dominus" at 967,4704 85x17
+"1:24" at 1321,4704 29x17
+"III. Surgite" at 259,4727 67x17
+"Antonio Vivaldi" at 702,4727 98x17
+"Nisi Dominus" at 967,4727 85x17
+"1:35" at 1321,4727 29x17
+"IV. Cum dederit" at 259,4749 102x17
+"Antonio Vivaldi" at 702,4749 98x17
+"Nisi Dominus" at 967,4749 85x17
+"4:40" at 1321,4749 29x17
+"V. Sicut sagittae" at 259,4772 106x17
+"Antonio Vivaldi" at 702,4772 98x17
+"Nisi Dominus" at 967,4772 85x17
+"1:47" at 1321,4772 29x17
+"VI. Beatus vir" at 259,4795 87x17
+"Antonio Vivaldi" at 702,4795 98x17
+"Nisi Dominus" at 967,4795 85x17
+"0:59" at 1321,4795 29x17
+"VII. Gloria Patri" at 259,4818 97x17
+"Antonio Vivaldi" at 702,4818 98x17
+"Nisi Dominus" at 967,4818 85x17
+"4:39" at 1321,4818 29x17
+"VIII. Sicut erat in principio" at 259,4841 168x17
+"Antonio Vivaldi" at 702,4841 98x17
+"Nisi Dominus" at 967,4841 85x17
+"1:08" at 1321,4841 29x17
+"IX. Amen" at 259,4864 59x17
+"Antonio Vivaldi" at 702,4864 98x17
+"Nisi Dominus" at 967,4864 85x17
+"1:53" at 1321,4864 29x17
+"I. Overture" at 259,4887 70x17
+"George Frideric Handel" at 702,4887 151x17
+"Music for the Royal Fireworks" at 967,4887 192x17
+"2:15" at 1321,4887 29x17
+"II. Bourrée" at 259,4910 67x17
+"George Frideric Handel" at 702,4910 151x17
+"Music for the Royal Fireworks" at 967,4910 192x17
+"1:24" at 1321,4910 29x17
+"III. La Paix" at 259,4933 66x17
+"George Frideric Handel" at 702,4933 151x17
+"Music for the Royal Fireworks" at 967,4933 192x17
+"2:43" at 1321,4933 29x17
+"IV. La Réjouissance" at 259,4956 123x17
+"George Frideric Handel" at 702,4956 151x17
+"Music for the Royal Fireworks" at 967,4956 192x17
+"1:38" at 1321,4956 29x17
+"V. Menuet" at 259,4978 66x17
+"George Frideric Handel" at 702,4978 151x17
+"Music for the Royal Fireworks" at 967,4978 192x17
+"1:55" at 1321,4978 29x17
+"Ballade No. 1 in G minor, Op. 23" at 259,5001 210x17
+"Frédéric Chopin" at 702,5001 101x17
+"Ballades" at 967,5001 55x17
+"11:19" at 1321,5001 37x17
+"Ballade No. 2 in F major, Op. 38" at 259,5024 207x17
+"Frédéric Chopin" at 702,5024 101x17
+"Ballades" at 967,5024 55x17
+"7:00" at 1321,5024 29x17
+"Sonata No. 12 in D minor, RV 63 \"La Follia\"" at 259,5047 281x17
+"Antonio Vivaldi" at 702,5047 98x17
+"Trio Sonatas, Op. 1" at 967,5047 125x17
+"11:22" at 1321,5047 37x17
+"Concerto No. 6 in A minor, RV 356" at 259,5070 223x17
+"Antonio Vivaldi" at 702,5070 98x17
+"L'estro armonico" at 967,5070 109x17
+"7:20" at 1321,5070 29x17
+"Concerto No. 8 in A minor, RV 522" at 259,5093 223x17
+"Antonio Vivaldi" at 702,5093 98x17
+"L'estro armonico" at 967,5093 109x17
+"10:32" at 1321,5093 37x17
+"Concerto No. 10 in B minor, RV 580" at 259,5116 232x17
+"Antonio Vivaldi" at 702,5116 98x17
+"L'estro armonico" at 967,5116 109x17
+"9:10" at 1321,5116 29x17
+"Concerto No. 11 in D minor, RV 565" at 259,5139 233x17
+"Antonio Vivaldi" at 702,5139 98x17
+"L'estro armonico" at 967,5139 109x17
+"8:22" at 1321,5139 29x17
+"I. Allegro (ma molto moderato)" at 259,5162 201x17
+"Antonio Vivaldi" at 702,5162 98x17
+"Concertos" at 967,5162 66x17
+"4:35" at 1321,5162 29x17
+"II. Larghetto" at 259,5185 79x17
+"Antonio Vivaldi" at 702,5185 98x17
+"Concertos" at 967,5185 66x17
+"3:51" at 1321,5185 29x17
+"III. Allegro" at 259,5207 65x17
+"Antonio Vivaldi" at 702,5207 98x17
+"Concertos" at 967,5207 66x17
+"3:07" at 1321,5207 29x17
+"I. Allegro" at 259,5230 58x17
+"Antonio Vivaldi" at 702,5230 98x17
+"Concertos" at 967,5230 66x17
+"5:02" at 1321,5230 29x17
+"II. Andante" at 259,5253 71x17
+"Antonio Vivaldi" at 702,5253 98x17
+"Concertos" at 967,5253 66x17
+"3:03" at 1321,5253 29x17
+"III. Allegro" at 259,5276 65x17
+"Antonio Vivaldi" at 702,5276 98x17
+"Concertos" at 967,5276 66x17
+"4:20" at 1321,5276 29x17
+"I. Allegro" at 259,5299 58x17
+"Antonio Vivaldi" at 702,5299 98x17
+"Concertos" at 967,5299 66x17
+"2:37" at 1321,5299 29x17
+"II. Largo" at 259,5322 53x17
+"Antonio Vivaldi" at 702,5322 98x17
+"Concertos" at 967,5322 66x17
+"2:12" at 1321,5322 29x17
+"III. Allegro" at 259,5345 65x17
+"Antonio Vivaldi" at 702,5345 98x17
+"Concertos" at 967,5345 66x17
+"1:47" at 1321,5345 29x17
+"I. Allegro molto" at 259,5368 99x17
+"Antonio Vivaldi" at 702,5368 98x17
+"Concertos" at 967,5368 66x17
+"5:34" at 1321,5368 29x17
+"II. Andante molto" at 259,5391 112x17
+"Antonio Vivaldi" at 702,5391 98x17
+"Concertos" at 967,5391 66x17
+"2:58" at 1321,5391 29x17
+"III. Allegro" at 259,5414 65x17
+"Antonio Vivaldi" at 702,5414 98x17
+"Concertos" at 967,5414 66x17
+"3:02" at 1321,5414 29x17
+"I. Allegro" at 259,5436 58x17
+"Antonio Vivaldi" at 702,5436 98x17
+"Concertos" at 967,5436 66x17
+"4:11" at 1321,5436 29x17
+"II. Largo-Larghetto" at 259,5459 121x17
+"Antonio Vivaldi" at 702,5459 98x17
+"Concertos" at 967,5459 66x17
+"3:19" at 1321,5459 29x17
+"III. Allegro" at 259,5482 65x17
+"Antonio Vivaldi" at 702,5482 98x17
+"Concertos" at 967,5482 66x17
+"3:27" at 1321,5482 29x17
+"Mandolin Concerto in C major" at 259,5505 193x17
+"Antonio Vivaldi" at 702,5505 98x17
+"Concertos" at 967,5505 66x17
+"8:19" at 1321,5505 29x17
+"I. Allegro" at 259,5528 58x17
+"Antonio Vivaldi" at 702,5528 98x17
+"The Four Seasons" at 967,5528 115x17
+"3:34" at 1321,5528 29x17
+"II. Largo" at 259,5551 53x17
+"Antonio Vivaldi" at 702,5551 98x17
+"The Four Seasons" at 967,5551 115x17
+"2:58" at 1321,5551 29x17
+"III. Allegro" at 259,5574 65x17
+"Antonio Vivaldi" at 702,5574 98x17
+"The Four Seasons" at 967,5574 115x17
+"4:18" at 1321,5574 29x17
+"I. Allegro non molto" at 259,5597 128x17
+"Antonio Vivaldi" at 702,5597 98x17
+"The Four Seasons" at 967,5597 115x17
+"5:28" at 1321,5597 29x17
+"II. Adagio" at 259,5620 61x17
+"Antonio Vivaldi" at 702,5620 98x17
+"The Four Seasons" at 967,5620 115x17
+"2:04" at 1321,5620 29x17
+"III. Presto" at 259,5643 61x17
+"Antonio Vivaldi" at 702,5643 98x17
+"The Four Seasons" at 967,5643 115x17
+"2:56" at 1321,5643 29x17
+"I. Allegro" at 259,5665 58x17
+"Antonio Vivaldi" at 702,5665 98x17
+"The Four Seasons" at 967,5665 115x17
+"5:29" at 1321,5665 29x17
+"II. Adagio molto" at 259,5688 102x17
+"Antonio Vivaldi" at 702,5688 98x17
+"The Four Seasons" at 967,5688 115x17
+"3:20" at 1321,5688 29x17
+"III. Allegro" at 259,5711 65x17
+"Antonio Vivaldi" at 702,5711 98x17
+"The Four Seasons" at 967,5711 115x17
+"3:22" at 1321,5711 29x17
+"I. Allegro non molto" at 259,5734 128x17
+"Antonio Vivaldi" at 702,5734 98x17
+"The Four Seasons" at 967,5734 115x17
+"3:25" at 1321,5734 29x17
+"II. Largo" at 259,5757 53x17
+"Antonio Vivaldi" at 702,5757 98x17
+"The Four Seasons" at 967,5757 115x17
+"2:43" at 1321,5757 29x17
+"III. Allegro" at 259,5780 65x17
+"Antonio Vivaldi" at 702,5780 98x17
+"The Four Seasons" at 967,5780 115x17
+"2:58" at 1321,5780 29x17
+"Overture" at 259,5803 58x17
+"George Frideric Handel" at 702,5803 151x17
+"Water Music" at 967,5803 80x17
+"3:46" at 1321,5803 29x17
+"Adagio e staccato" at 259,5826 116x17
+"George Frideric Handel" at 702,5826 151x17
+"Water Music" at 967,5826 80x17
+"2:40" at 1321,5826 29x17
+"Allegro – Andante – Allegro" at 259,5849 175x17
+"George Frideric Handel" at 702,5849 151x17
+"Water Music" at 967,5849 80x17
+"9:01" at 1321,5849 29x17
+"Presto" at 259,5872 41x17
+"George Frideric Handel" at 702,5872 151x17
+"Water Music" at 967,5872 80x17
+"2:41" at 1321,5872 29x17
+"Air" at 259,5894 18x17
+"George Frideric Handel" at 702,5894 151x17
+"Water Music" at 967,5894 80x17
+"4:11" at 1321,5894 29x17
+"Minuet" at 259,5917 44x17
+"George Frideric Handel" at 702,5917 151x17
+"Water Music" at 967,5917 80x17
+"2:54" at 1321,5917 29x17
+"Bourrée – Hornpipe" at 259,5940 125x17
+"George Frideric Handel" at 702,5940 151x17
+"Water Music" at 967,5940 80x17
+"1:27" at 1321,5940 29x17
+"Allegro moderato" at 259,5963 113x17
+"George Frideric Handel" at 702,5963 151x17
+"Water Music" at 967,5963 80x17
+"3:21" at 1321,5963 29x17
+"Alla Hornpipe" at 259,5986 88x17
+"George Frideric Handel" at 702,5986 151x17
+"Water Music" at 967,5986 80x17
+"3:49" at 1321,5986 29x17
+"Minuet" at 259,6009 44x17
+"George Frideric Handel" at 702,6009 151x17
+"Water Music" at 967,6009 80x17
+"3:15" at 1321,6009 29x17
+"Lentement" at 259,6032 71x17
+"George Frideric Handel" at 702,6032 151x17
+"Water Music" at 967,6032 80x17
+"2:16" at 1321,6032 29x17
+"Bourrée" at 259,6055 51x17
+"George Frideric Handel" at 702,6055 151x17
+"Water Music" at 967,6055 80x17
+"1:16" at 1321,6055 29x17
+"Sarabande" at 259,6078 70x17
+"George Frideric Handel" at 702,6078 151x17
+"Water Music" at 967,6078 80x17
+"2:48" at 1321,6078 29x17
+"Rigaudon" at 259,6101 62x17
+"George Frideric Handel" at 702,6101 151x17
+"Water Music" at 967,6101 80x17
+"2:36" at 1321,6101 29x17
+"Menuet" at 259,6123 49x17
+"George Frideric Handel" at 702,6123 151x17
+"Water Music" at 967,6123 80x17
+"3:47" at 1321,6123 29x17
+"Gigue" at 259,6146 38x17
+"George Frideric Handel" at 702,6146 151x17
+"Water Music" at 967,6146 80x17
+"1:25" at 1321,6146 29x17
+"Für Elise" at 259,6169 55x17
+"Ludwig van Beethoven" at 702,6169 149x17
+"Bagatelles" at 967,6169 68x17
+"2:57" at 1321,6169 29x17
+"nothing playing — pick a track (the desktop build has no audio device yet)" at 16,860 448x16

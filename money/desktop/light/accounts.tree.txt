@@ -1,0 +1,162 @@
+"Budget" at 41,15 47x17
+"Accounts" at 41,43 59x17
+"Transactions" at 41,71 83x17
+"6" at 166,72 7x14
+"Insights" at 41,99 51x17
+"Budget Accounts" at 20,136 105x14
+"Checking" at 41,160 60x17
+"Savings" at 41,188 51x17
+"Cash" at 41,216 32x17
+"Chase Sapphire" at 41,244 102x17
+"6" at 166,245 7x14
+"Tracking Accounts" at 20,280 114x14
+"Mortgage" at 41,305 62x17
+"Retirement" at 41,333 73x17
+"Checking" at 220,16 77x20
+"A" at 1082,21 5x10
+"Search" [field] at 1108,12 320x29
+"Cleared" at 218,61 46x16
+"$14,166.90" at 218,78 89x18
+"Uncleared" at 329,61 61x16
+"-$100.86" at 329,78 70x18
+"Working Balance" at 420,61 101x16
+"$14,066.04" at 420,78 89x18
+"Checking · Not connected to a bank" at 236,100 197x9
+"Date ⌄" at 216,120 39x14
+"Payee" at 328,120 33x14
+"Category" at 668,120 50x14
+"Memo" at 1009,120 34x14
+"Amount" at 1305,120 43x14
+"Cleared" at 1362,120 43x14
+"Nov 12, 2026" at 216,154 87x17
+"City Power & Light" at 342,154 120x17
+"Electric" at 668,154 48x17
+"-$100.86" at 1290,154 58x17
+"Nov 8, 2026" at 216,178 79x17
+"Sonic Fiber" at 342,178 72x17
+"Internet" at 668,178 52x17
+"-$70.00" at 1298,178 50x17
+"Nov 5, 2026" at 216,202 79x17
+"Transfer : Chase Sapphire" at 342,202 169x17
+"Transfer" at 668,202 54x17
+"-$1,887.94" at 1277,202 71x17
+"Nov 3, 2026" at 216,226 79x17
+"State Farm" at 342,226 72x17
+"Insurance" at 668,226 64x17
+"-$160.00" at 1290,226 58x17
+"Nov 2, 2026" at 216,250 79x17
+"Transfer : Savings" at 342,250 118x17
+"Transfer" at 668,250 54x17
+"-$250.00" at 1290,250 58x17
+"Nov 1, 2026" at 216,274 79x17
+"Greenway Property Mgmt" at 342,274 167x17
+"Rent" at 668,274 30x17
+"-$1,850.00" at 1277,274 71x17
+"Nov 1, 2026" at 216,298 79x17
+"Riverside Schools" at 342,298 114x17
+"Ready to Assign" at 668,298 105x17
+"+$2,240.00" at 1271,298 77x17
+"Nov 1, 2026" at 216,322 79x17
+"Acme Corp" at 342,322 71x17
+"Ready to Assign" at 668,322 105x17
+"+$3,150.00" at 1271,322 77x17
+"Oct 21, 2026" at 216,346 84x17
+"Mint Mobile" at 342,346 75x17
+"Phone" at 668,346 40x17
+"-$85.00" at 1298,346 50x17
+"Oct 18, 2026" at 216,370 84x17
+"Walgreens" at 342,370 69x17
+"Health" at 668,370 43x17
+"-$26.14" at 1298,370 50x17
+"Oct 18, 2026" at 216,394 84x17
+"Municipal Water" at 342,394 105x17
+"Water" at 668,394 39x17
+"-$43.65" at 1298,394 50x17
+"Oct 15, 2026" at 216,418 84x17
+"Acme Corp" at 342,418 71x17
+"Ready to Assign" at 668,418 105x17
+"+$3,150.00" at 1271,418 77x17
+"Oct 12, 2026" at 216,442 84x17
+"City Power & Light" at 342,442 120x17
+"Electric" at 668,442 48x17
+"-$100.72" at 1290,442 58x17
+"Oct 9, 2026" at 216,466 76x17
+"Jiffy Lube" at 342,466 60x17
+"Car Maintenance" at 668,466 110x17
+"-$89.99" at 1298,466 50x17
+"Oct 8, 2026" at 216,490 76x17
+"Sonic Fiber" at 342,490 72x17
+"Internet" at 668,490 52x17
+"-$70.00" at 1298,490 50x17
+"Oct 5, 2026" at 216,514 76x17
+"Transfer : Chase Sapphire" at 342,514 169x17
+"Transfer" at 668,514 54x17
+"-$1,656.43" at 1277,514 71x17
+"Oct 3, 2026" at 216,538 76x17
+"State Farm" at 342,538 72x17
+"Insurance" at 668,538 64x17
+"-$160.00" at 1290,538 58x17
+"Oct 2, 2026" at 216,562 76x17
+"Transfer : Savings" at 342,562 118x17
+"Transfer" at 668,562 54x17
+"-$250.00" at 1290,562 58x17
+"Oct 1, 2026" at 216,586 76x17
+"Greenway Property Mgmt" at 342,586 167x17
+"Rent" at 668,586 30x17
+"-$1,850.00" at 1277,586 71x17
+"Oct 1, 2026" at 216,610 76x17
+"Riverside Schools" at 342,610 114x17
+"Ready to Assign" at 668,610 105x17
+"+$2,240.00" at 1271,610 77x17
+"Oct 1, 2026" at 216,634 76x17
+"Acme Corp" at 342,634 71x17
+"Ready to Assign" at 668,634 105x17
+"+$3,150.00" at 1271,634 77x17
+"Sep 21, 2026" at 216,658 87x17
+"Mint Mobile" at 342,658 75x17
+"Phone" at 668,658 40x17
+"-$85.00" at 1298,658 50x17
+"Sep 18, 2026" at 216,682 87x17
+"Walgreens" at 342,682 69x17
+"Health" at 668,682 43x17
+"-$28.45" at 1298,682 50x17
+"Sep 18, 2026" at 216,706 87x17
+"Municipal Water" at 342,706 105x17
+"Water" at 668,706 39x17
+"-$36.73" at 1298,706 50x17
+"Sep 15, 2026" at 216,730 87x17
+"Acme Corp" at 342,730 71x17
+"Ready to Assign" at 668,730 105x17
+"+$3,150.00" at 1271,730 77x17
+"Sep 12, 2026" at 216,754 87x17
+"City Power & Light" at 342,754 120x17
+"Electric" at 668,754 48x17
+"-$115.55" at 1290,754 58x17
+"Sep 8, 2026" at 216,778 78x17
+"Sonic Fiber" at 342,778 72x17
+"Internet" at 668,778 52x17
+"-$70.00" at 1298,778 50x17
+"Sep 3, 2026" at 216,802 78x17
+"State Farm" at 342,802 72x17
+"Insurance" at 668,802 64x17
+"-$160.00" at 1290,802 58x17
+"Sep 2, 2026" at 216,826 78x17
+"Transfer : Savings" at 342,826 118x17
+"Transfer" at 668,826 54x17
+"-$250.00" at 1290,826 58x17
+"Sep 1, 2026" at 216,850 78x17
+"Greenway Property Mgmt" at 342,850 167x17
+"Rent" at 668,850 30x17
+"-$1,850.00" at 1277,850 71x17
+"Sep 1, 2026" at 216,874 78x17
+"Riverside Schools" at 342,874 114x17
+"Ready to Assign" at 668,874 105x17
+"+$2,240.00" at 1271,874 77x17
+"Sep 1, 2026" at 216,898 78x17
+"Acme Corp" at 342,898 71x17
+"Ready to Assign" at 668,898 105x17
+"+$3,150.00" at 1271,898 77x17
+"Sep 1, 2026" at 216,922 78x17
+"Starting Balance" at 342,922 108x17
+"Ready to Assign" at 668,922 105x17
+"+$2,842.50" at 1271,922 77x17

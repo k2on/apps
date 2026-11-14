@@ -1,0 +1,70 @@
+"Music" at 20,30 36x14
+"Songs" at 41,54 39x17
+"266" at 152,56 21x14
+"Albums" at 41,82 48x17
+"25" at 159,84 14x14
+"Artists" at 41,110 42x17
+"8" at 166,111 7x14
+"Shows" at 20,147 40x14
+"Podcasts" at 41,171 58x17
+"Sermons" at 41,199 57x17
+"Playlists" at 20,236 52x14
+"Favorites" at 41,260 60x17
+"String Concertos" at 230,202 168x17
+"Advent Chamber Orchestra, Jacques Israelievitch, Roxana Pavel Goldstein" at 230,223 168x62
+"Stabat Mater" at 430,202 168x17
+"Andreas Scholl, Ensemble 415, Chiara Banchini  ·  1995" at 430,223 168x47
+"Impromptus" at 630,202 168x17
+"Andriy Bondarenko  ·  2016" at 630,223 168x16
+"Vivaldi: Concertos" at 830,202 168x17
+"Angel Romero, Academy of St Martin in the Fields  ·  1995" at 830,223 168x47
+"Hungarian Dances" at 1030,202 168x17
+"Arthur Nikisch  ·  1906" at 1030,223 168x16
+"Organ Works" at 1230,202 168x17
+"Ashtar Moïra  ·  2006" at 1230,223 168x16
+"Magnificat" at 230,489 168x17
+"Associazione Culturale Panharmonikon  ·  2009" at 230,510 168x31
+"Brandenburg Concertos" at 430,489 168x17
+"Advent Chamber Orchestra" at 430,510 168x16
+"3 Concerti after Vivaldi" at 630,489 168x17
+"Daniel Chorzempa  ·  1984" at 630,510 168x16
+"Gloria" at 830,489 168x17
+"Ensemble vocal de Lausanne, Orchestre de chambre de Lausanne, Michel Corboz  ·  1975" at 830,510 168x62
+"Dixit Dominus" at 1030,489 168x17
+"Escola Superior de Música de Catalunya  ·  2018" at 1030,510 168x31
+"Goldberg Variations, BWV 988" at 1230,489 168x34
+"Kimiko Ishizaka  ·  2012" at 1230,527 168x16
+"The Well-Tempered Clavier" at 230,777 168x34
+"Kimiko Ishizaka  ·  2015" at 230,814 168x16
+"Suite bergamasque" at 430,777 168x17
+"Laurens Goedhart  ·  2011" at 430,798 168x16
+"6 Flute Concertos, Op. 10" at 630,777 168x17
+"Lisa Beznosiuk, The English Concert, Trevor Pinnock  ·  1988" at 630,798 168x47
+"Messiah" at 830,777 168x17
+"London Symphony Orchestra, Hermann Scherchen" at 830,798 168x47
+"Nisi Dominus" at 1030,777 168x17
+"Maarten Engeltjes, PRJCT Amsterdam  ·  2024" at 1030,798 168x31
+"Music for the Royal Fireworks" at 1230,777 168x34
+"Paul Ayres  ·  2011" at 1230,814 168x16
+"Ballades" at 230,1048 168x17
+"Frédéric Chopin" at 230,1069 168x16
+"Trio Sonatas, Op. 1" at 430,1048 168x17
+"Salvatore Accardo, Franco Gulli, Rohan de Saram, Bruno Canino  ·  1977" at 430,1069 168x47
+"L'estro armonico" at 630,1048 168x17
+"Simon Standage, The English Concert, Trevor Pinnock  ·  1987" at 630,1069 168x47
+"Concertos" at 830,1048 168x17
+"The Modena Chamber Orchestra" at 830,1069 168x31
+"The Four Seasons" at 1030,1048 168x17
+"The Modena Chamber Orchestra" at 1030,1069 168x31
+"Water Music" at 1230,1048 168x17
+"George Frideric Handel" at 1230,1069 168x16
+"Bagatelles" at 230,1320 168x17
+"Ludwig van Beethoven  ·  2006" at 230,1341 168x31
+"nothing playing — pick a track (the desktop build has no audio device yet)" at 16,860 448x16
+"z" at 1136,715 6x14
+"zz" at 1136,737 56x16
+"scroll: the cursor in the middle" at 1200,737 184x16
+"zt" at 1136,757 56x16
+"scroll: the cursor at the top" at 1200,757 164x16
+"zb" at 1136,776 56x16
+"scroll: the cursor at the foot" at 1200,776 168x16
