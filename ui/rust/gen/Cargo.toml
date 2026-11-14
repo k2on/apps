@@ -1,0 +1,10 @@
+[package]
+name = "ark-ui-gen"
+workspace = "../../../rust"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+description = "SwiftUI and Compose written from a recorded `ark_app::view::View`: a view laid out once in Rust, drawn natively on the phones. No parsing: the recording is the view function run over paths."
+
+[dependencies]
+ark-app = { path = "../app" }

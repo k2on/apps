@@ -5,7 +5,10 @@
 // Two caches: the encoded original on disk, under the app's cache
 // directory, keyed by the URL's FNV-1a (a cache: the system may sweep it,
 // and losing it costs a fetch); and decoded bitmaps in memory, bounded by
-// bytes. The decode is bounded too: `inSampleSize` is chosen from the
+// bytes, each by its URL and the pixels it was decoded for — so a cover
+// drawn at one size is always the same bitmap, not whichever size of it was
+// decoded first (the full player's cover was a row's, blurred, in one run's
+// screenshot and sharp in the next's). The decode is bounded too: `inSampleSize` is chosen from the
 // image's own bounds so a 3000-pixel scan becomes a few hundred pixels
 // before it is ever a bitmap — a cover is drawn at most a few hundred
 // pixels across, and a full-size one is tens of megabytes. A failure is
@@ -67,8 +70,14 @@ class Covers(context: Context, private val server: String) : CoverLoader {
     /** The URL a record's `art` is at, or null when it has none. */
     override fun urlOf(art: String): String? = if (art.isBlank()) null else Media.url(server, art)
 
-    /** A cover already decoded, without waiting. */
-    override fun cached(url: String): ImageBitmap? = memory.get(url)
+    /** A cover already decoded for `side`, without waiting. */
+    override fun cached(url: String, side: Dp): ImageBitmap? = memory.get(key(url, pixels(side)))
+
+    /** The pixels a cover `side` across is decoded for: at least 64, never past [BOUND]. */
+    private fun pixels(side: Dp): Int = minOf(BOUND, (side.value * density).toInt().coerceAtLeast(64))
+
+    /** A decoded cover's place in memory, and in [loading]: its URL and its pixels. */
+    private fun key(url: String, want: Int): String = "$want $url"
 
     /**
      * Start decoding the covers of a list that has just arrived, `side` across each, so the rows
@@ -79,7 +88,8 @@ class Covers(context: Context, private val server: String) : CoverLoader {
     fun warm(arts: List<Pair<String, Dp>>) {
         for ((art, side) in arts) {
             val url = urlOf(art) ?: continue
-            if (memory.get(url) != null || url in missing || loading.containsKey(url)) continue
+            val key = key(url, pixels(side))
+            if (memory.get(key) != null || url in missing || loading.containsKey(key)) continue
             warming.incrementAndGet()
             scope.launch {
                 try {
@@ -96,26 +106,30 @@ class Covers(context: Context, private val server: String) : CoverLoader {
 
     /** The cover at `url`, decoded to about `side` (and never past [BOUND] pixels), or null. */
     override suspend fun load(url: String, side: Dp): ImageBitmap? {
-        memory.get(url)?.let { return it }
+        val want = pixels(side)
+        val key = key(url, want)
+        memory.get(key)?.let { return it }
         if (url in missing) return null
-        val want = minOf(BOUND, (side.value * density).toInt().coerceAtLeast(64))
         // Started only once it is the one in the map, so its `finally` cannot run before it is
         // there and leave a finished one behind.
         val shared =
-            loading.computeIfAbsent(url) {
+            loading.computeIfAbsent(key) {
                 scope.async(start = CoroutineStart.LAZY) {
+                    // A screenshot waits for the cover (ArkUI's `Ready`, ui/docs/shots.md).
+                    dev.arkui.Ready.waiting("cover", true)
                     try {
                         // Asked again here, where it is the one in the map: a row that missed
                         // both before the last load ended must not start another.
-                        memory.get(url)?.let { return@async it }
+                        memory.get(key)?.let { return@async it }
                         if (url in missing) return@async null
                         val bytes = onDisk(url) ?: return@async null.also { missing.add(url) }
                         decodes.incrementAndGet()
                         val bitmap = decode(bytes, want)?.asImageBitmap()
-                        if (bitmap == null) missing.add(url) else memory.put(url, bitmap)
+                        if (bitmap == null) missing.add(url) else memory.put(key, bitmap)
                         bitmap
                     } finally {
-                        loading.remove(url)
+                        loading.remove(key)
+                        dev.arkui.Ready.waiting("cover", false)
                     }
                 }
             }

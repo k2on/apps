@@ -10,6 +10,17 @@ serde = { version = "1", features = ["derive"] }
 serde_json = { workspace = true }
 percent-encoding = "2"
 ark = { path = "../ark" }
+# The first run's pages, any app's (`first_run`): ark-app's records and view.
+ark-app = { path = "../../ui/rust/app" }
+# A login kept in the secure store (`keep`), through its port: the module's
+# plumbing and ports, no module.
+ark-module = { path = "../../ui/rust/module" }
+# The sign-in machine (`onboarding`) through UniFFI, for a phone's bridge
+# (`ark-ffi`, which turns it on): its types, the machine and its helpers.
+uniffi = { version = "0.32.2", default-features = false, optional = true }
+# A join link drawn as a QR code ("Add a Device"): its modules, which each
+# platform's ArkUI draws; no image or SVG renderer.
+qrcode = { version = "0.14", default-features = false }
 
 # Natively: the relying party, the tokens (HMAC-SHA256), the routes as an
 # axum Router (the `server` feature: a phone links none of axum); and getting a login through a loopback listener and the
@@ -25,19 +36,24 @@ ureq = { version = "2", default-features = false, features = ["tls"] }
 # The relying party: discovery, the code exchange and the ID token's checks,
 # over the ureq agent above (its `SyncHttpClient`), never reqwest.
 openidconnect = { version = "4.0.1", default-features = false, features = ["ureq"] }
+# An ID token's payload, read once verified, for the groups claim.
+base64 = "0.22"
 
 # In a browser: the page's own address, fetch, and localStorage.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 js-sys = "0.3"
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
-web-sys = { version = "0.3", features = ["Headers", "History", "Location", "Request", "RequestInit", "Response", "Storage", "Window"] }
+web-sys = { version = "0.3", features = ["Headers", "History", "Location", "Request", "RequestCredentials", "RequestInit", "Response", "Storage", "Window"] }
 
 [features]
 default = ["server"]
 server = ["dep:axum", "dep:tokio", "dep:tower-http"]
+ffi = ["dep:uniffi"]
 
 [dev-dependencies]
+# The secure store's fake, which `tests/keep.rs` keeps a login in.
+ark-secure-store = { path = "../../modules/ark-secure-store" }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net"] }
 ureq = { version = "2", default-features = false }
 # A provider in `tests/oidc.rs`: its ID tokens signed HS256 with the client secret.

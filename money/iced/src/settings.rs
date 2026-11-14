@@ -4,11 +4,10 @@
 //! banks (`crate::banks`), and Amazon and Costco (`crate::stores`).
 
 use arkui::account::{Account, Who};
-use arkui::{hero, style};
-use iced::widget::{column, container, scrollable, text};
-use iced::{Element, Length, Padding, Task};
+use arkui::hero;
+use iced::widget::column;
+use iced::{Element, Length, Task};
 
-use crate::view::{dim, quiet, PAD};
 use crate::{live, App, Message, Page};
 
 impl App {
@@ -59,57 +58,101 @@ impl App {
     /// replica stays, and what is done now is the same person's when they
     /// sign in again.
     pub fn sign_out(&mut self) {
-        let Some(s) = &mut self.server else { return };
-        if s.login.take().is_some() {
+        let Some(s) = &self.server else { return };
+        if s.login.is_some() {
             let _ = self.peer.client.sign_out();
         }
-        if let Some(logins) = &s.logins {
-            logins.forget(&s.url);
-        }
+        let _ = self.onboard(ark_auth::onboarding::Event::SignOut);
         self.note = "signed out \u{2014} what you do now stays on this device; reload to sign in".into();
     }
 
+    /// "Add a Device": a one-time code made as this login, on a thread —
+    /// the server is asked — for the join link another device scans or
+    /// opens (`ark_auth::onboarding::join_link`).
+    pub fn add_device(&mut self) -> Task<Message> {
+        let Some(s) = &self.server else { return Task::none() };
+        let Some(token) = s.login.as_ref().map(|l| l.token.clone()) else {
+            return Task::none();
+        };
+        let server = s.url.clone();
+        {
+            let (tx, rx) = iced::futures::channel::oneshot::channel();
+            std::thread::spawn(move || {
+                let _ = tx.send(ark_auth::client::device_code(&server, &token).map(|(code, _)| code));
+            });
+            Task::perform(
+                async move { rx.await.unwrap_or_else(|_| Err("the thread went away".into())) },
+                Message::DeviceCode,
+            )
+        }
+    }
+
+    /// The code made, as the link to show; or why not.
+    pub fn device_coded(&mut self, made: Result<String, String>) {
+        let Some(s) = &mut self.server else { return };
+        let app = live::app();
+        s.device = Some(made.map(|code| ark_auth::onboarding::join_link(app.scheme, s.url.clone(), Some(code))));
+    }
+
+    /// Who is signed in where, as Settings says it (`ShellMsg::Session`):
+    /// this window's server and login, or the demo in the window alone.
+    pub fn facts(&self) -> money_app::shell::SessionFacts {
+        let version = env!("CARGO_PKG_VERSION").to_string();
+        let Some(s) = &self.server else {
+            return money_app::shell::SessionFacts {
+                demo: true,
+                today: self.today.clone(),
+                version,
+                ..Default::default()
+            };
+        };
+        let status = self.peer.client.status();
+        money_app::shell::SessionFacts {
+            who: s.login.as_ref().map(live::who).unwrap_or_default(),
+            login: s.login.as_ref().map(|l| l.user.email.clone()).unwrap_or_default(),
+            picture: self.account_picture_url().unwrap_or_default(),
+            demo: false,
+            today: self.today.clone(),
+            server: ark_auth::onboarding::display(&s.url),
+            linked: Some(status.linked),
+            pending: status.pending as i64,
+            version,
+            leaves: s.login.is_some(),
+            adds_devices: s.login.is_some(),
+        }
+    }
+
+    /// What the desktop adds to Settings' General (`hosted("settings.more")`):
+    /// Add a Device's code once asked for — the shared page
+    /// (`ark_app::welcome::add_device`) — its store logins, and how it draws.
     pub fn view_settings(&self) -> Element<'_, Message> {
-        let account: Element<'_, Message> = match &self.server {
-            None => dim("A demo: no server, no sign-in. Nothing here leaves this window.", 13).into(),
-            Some(s) => {
-                let who = match &s.login {
-                    Some(l) => format!("Signed in as {} on {}", live::who(l), s.url),
-                    None => format!("Not signed in to {}", s.url),
-                };
-                let mut c = column![text(who).size(14).style(style::faint(0.8))].spacing(12);
-                if s.login.is_some() {
-                    c = c.push(quiet("Sign out", Message::SignOut));
-                }
-                c.into()
+        let account: Element<'_, Message> = match self.server.as_ref().and_then(|s| s.device.clone()) {
+            None => column![].into(),
+            Some(made) => {
+                let link = made.as_ref().ok().cloned().unwrap_or_default();
+                let made = made.and_then(|l| {
+                    ark_auth::onboarding::qr_code(l.clone())
+                        .map(|q| (l, q))
+                        .ok_or_else(|| "the link is too long for a code".to_string())
+                });
+                let page = ark_auth::first_run::add_device_page(Some(made));
+                arkui::view::element(ark_app::welcome::add_device::view(&page).map(move |m| match m {
+                    ark_app::welcome::AddDeviceMsg::Share => Message::CopyLink(link.clone()),
+                    ark_app::welcome::AddDeviceMsg::Again => Message::AddDevice,
+                }))
             }
         };
         let page = column![
-            container(crate::view::page_title("Settings")).padding(Padding {
-                bottom: 4.0,
-                ..Padding::ZERO
-            }),
-            hero::heading("Banks"),
-            self.banks_section(),
             hero::heading("Amazon"),
             self.amazon_section(),
             hero::heading("Costco"),
             self.costco_section(),
-            hero::heading("Account"),
             account,
             hero::heading("Display"),
             arkui::renderer::about(),
         ]
         .width(Length::Fill);
-        arkui::scroll::elastic(
-            scrollable(crate::view::under_face(
-                container(page).padding(PAD).max_width(980),
-                crate::view::page_ground,
-            ))
-            .id(crate::look::PAGE_TOP)
-            .on_scroll(|v| Message::TopScrolled(v.absolute_offset().y))
-            .height(Length::Fill)
-            .style(style::bars),
-        )
+        // Inside the pane's own page, which scrolls.
+        page.into()
     }
 }

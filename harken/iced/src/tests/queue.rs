@@ -10,7 +10,7 @@ use crate::domain::Id;
 
 use super::{alone, device, song};
 use crate::listening::{Active, Clock, Kind, Listening, Output, Track};
-use crate::places::Focus;
+use crate::routes::Focus;
 use crate::{App, Message};
 
 fn track(t: &str, n: u8) -> Track {

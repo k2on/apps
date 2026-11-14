@@ -24,6 +24,7 @@
 //! the code comes back to: a loopback port the desktop listens on, or this
 //! page's own address.
 use ark::peer::Who;
+use ark_auth::keep::ServerLogins;
 use ark_auth::Login;
 use ark_peer::Logins;
 
@@ -39,10 +40,23 @@ pub const DEFAULT_SERVER: &str = "http://127.0.0.1:8787";
 #[cfg_attr(feature = "demo", allow(dead_code))]
 pub const LOCAL: &str = "local";
 
-/// The logins this device remembers, one per server.
+/// The logins this device keeps, one per server: in the secure store
+/// (ark-secure-store: the Secret Service on Linux), each moved there once
+/// from the logins directory they were kept in before. With no Secret
+/// Service, a login lasts the run, and the next launch signs in again.
+/// Made once a run, so what is held for the run is the same everywhere.
 #[cfg_attr(feature = "demo", allow(dead_code))]
-pub fn logins() -> Logins {
-    Logins::new("harken")
+pub fn logins() -> ServerLogins {
+    static LOGINS: std::sync::OnceLock<ServerLogins> = std::sync::OnceLock::new();
+    LOGINS
+        .get_or_init(|| {
+            #[allow(unused_mut)]
+            let mut m = ark_auth::keep::Modules::new();
+            #[cfg(target_os = "linux")]
+            m.register::<dyn ark_secure_store::SecureStore>(std::sync::Arc::new(ark_secure_store::SecretService::new("harken")));
+            Logins::new("harken").secured(m)
+        })
+        .clone()
 }
 
 /// Where the server is, if anybody said, and a name to offer a dev server.
@@ -50,20 +64,10 @@ pub fn logins() -> Logins {
 /// No server named is a window alone — or the one [`joined`] remembers.
 #[cfg_attr(feature = "demo", allow(dead_code))]
 pub fn config() -> (Option<String>, Option<String>) {
-    #[cfg(not(target_arch = "wasm32"))]
     {
         let args: Vec<String> = std::env::args().collect();
         let flag = |name: &str| args.iter().position(|a| a == name).and_then(|i| args.get(i + 1)).cloned();
         (flag("--server").map(|s| s.trim_end_matches('/').to_string()), flag("--user"))
-    }
-    #[cfg(target_arch = "wasm32")]
-    {
-        let location = web_sys::window().map(|w| w.location());
-        let query = location.as_ref().and_then(|l| l.search().ok()).unwrap_or_default();
-        (
-            ark_auth::query_value(&query, "server").map(|s| s.trim_end_matches('/').to_string()),
-            ark_auth::query_value(&query, "user"),
-        )
     }
 }
 
@@ -109,45 +113,12 @@ pub fn decide(named: Option<String>, joined: Option<String>, origin: Option<Stri
 /// desktop and for a page opened from a file.
 #[cfg_attr(feature = "demo", allow(dead_code))]
 pub fn origin() -> Option<String> {
-    #[cfg(not(target_arch = "wasm32"))]
     {
         None
     }
-    #[cfg(target_arch = "wasm32")]
-    {
-        let origin = web_sys::window()?.location().origin().ok()?;
-        origin.starts_with("http").then(|| origin.trim_end_matches('/').to_string())
-    }
-}
-
-/// Whether `url` answers a GET with a success within a second and a half.
-/// One fetch, and a timeout, because a page from somewhere that is not a
-/// server must not sit waiting to find out.
-#[cfg(target_arch = "wasm32")]
-pub fn answers(url: String) -> impl std::future::Future<Output = bool> {
-    use wasm_bindgen::prelude::*;
-    #[wasm_bindgen(inline_js = r#"
-export function probe(url, ms, done) {
-  const stop = new AbortController();
-  const timer = setTimeout(() => stop.abort(), ms);
-  fetch(url, { signal: stop.signal, cache: "no-store" })
-    .then((r) => { clearTimeout(timer); done(r.ok); })
-    .catch(() => { clearTimeout(timer); done(false); });
-}
-"#)]
-    extern "C" {
-        fn probe(url: &str, ms: u32, done: &JsValue);
-    }
-    let (tx, rx) = iced::futures::channel::oneshot::channel();
-    let done = Closure::once_into_js(move |ok: bool| {
-        let _ = tx.send(ok);
-    });
-    probe(&url, 1_500, &done);
-    async move { rx.await.unwrap_or(false) }
 }
 
 /// The desktop never asks: it has no origin ([`origin`]).
-#[cfg(not(target_arch = "wasm32"))]
 #[cfg_attr(feature = "demo", allow(dead_code))]
 pub fn answers(_: String) -> impl std::future::Future<Output = bool> {
     std::future::ready(false)
@@ -158,36 +129,23 @@ pub fn answers(_: String) -> impl std::future::Future<Output = bool> {
 /// would be leaving it.
 #[cfg_attr(feature = "demo", allow(dead_code))]
 pub fn joined() -> Option<String> {
-    #[cfg(not(target_arch = "wasm32"))]
     {
         std::fs::read_to_string(data_dir(LOCAL).join("joined"))
             .ok()
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty())
     }
-    #[cfg(target_arch = "wasm32")]
-    {
-        ark_auth::web::storage().and_then(|s| s.get_item("harken:local:joined").ok().flatten())
-    }
 }
 
 /// Remember that the `local` replica now belongs to `server`.
 #[cfg_attr(feature = "demo", allow(dead_code))]
 pub fn remember_joined(server: &str) -> Result<(), String> {
-    #[cfg(not(target_arch = "wasm32"))]
     {
         let dir = data_dir(LOCAL);
         std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
         let tmp = dir.join(".joined.tmp");
         std::fs::write(&tmp, server).map_err(|e| format!("{}: {e}", tmp.display()))?;
         std::fs::rename(&tmp, dir.join("joined")).map_err(|e| format!("{}: {e}", dir.display()))
-    }
-    #[cfg(target_arch = "wasm32")]
-    {
-        ark_auth::web::storage()
-            .ok_or_else(|| "this page has no localStorage".to_string())?
-            .set_item("harken:local:joined", server)
-            .map_err(|e| format!("{e:?}"))
     }
 }
 
@@ -200,63 +158,15 @@ pub fn open_alone() -> Result<Replica, String> {
     Ok(r)
 }
 
-/// What a window on a server, with nobody signed in, does as it opens.
-///
-/// **Nobody is asked.** There is no sign-in button: a window that has a
-/// server and no login goes to sign in — the page to the server's
-/// `/auth/login` and back, the desktop through its browser hand-off — and
-/// the only question is whether this load is already the way back.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Arrival {
-    /// Back from signing in with a code: trade it for the login.
-    Exchange(String),
-    /// Back from signing in without one — the provider refused, or the back
-    /// button. Said, and not tried again until a reload: going again would
-    /// come back the same way, for ever.
-    CameBack,
-    /// Neither: go.
-    Go,
-}
-
-/// The code in the address, if any, and whether this load is one that went
-/// to sign in and came back ([`came_back`]).
-#[cfg_attr(feature = "demo", allow(dead_code))]
-pub fn arrival(code: Option<String>, returned: bool) -> Arrival {
-    match (code, returned) {
-        (Some(code), _) => Arrival::Exchange(code),
-        (None, true) => Arrival::CameBack,
-        (None, false) => Arrival::Go,
+/// Who harken is, to the sign-in machine (`ark_auth::onboarding`): no
+/// demo to try on a server's page — the demo is a build of its own.
+pub fn app() -> ark_auth::onboarding::AppInfo {
+    ark_auth::onboarding::AppInfo {
+        name: "Harken".into(),
+        scheme: "harken".into(),
+        demo: false,
+        what: "your library".into(),
     }
-}
-
-/// The mark a page leaves as it goes to sign in: in the tab's own
-/// `sessionStorage`, so a reload in another tab is not mistaken for coming
-/// back, and taken by the load that comes back.
-#[cfg(target_arch = "wasm32")]
-const LEAVING: &str = "harken:signing-in";
-
-#[cfg(target_arch = "wasm32")]
-fn session() -> Option<web_sys::Storage> {
-    web_sys::window()?.session_storage().ok()?
-}
-
-/// This page is going to sign in.
-#[cfg(all(target_arch = "wasm32", not(feature = "demo")))]
-pub fn leaving() {
-    if let Some(s) = session() {
-        let _ = s.set_item(LEAVING, "1");
-    }
-}
-
-/// Whether this load is the way back from signing in — taken, so the reload
-/// after it is not.
-#[cfg(target_arch = "wasm32")]
-#[cfg_attr(feature = "demo", allow(dead_code))]
-pub fn came_back() -> bool {
-    let Some(s) = session() else { return false };
-    let back = s.get_item(LEAVING).ok().flatten().is_some();
-    let _ = s.remove_item(LEAVING);
-    back
 }
 
 /// Who a login is, as the server verifies it and an entry carries it.
@@ -283,28 +193,17 @@ pub fn open(server: &str, login: Option<&Login>) -> Result<Replica, String> {
 /// Where a place's replica is kept.
 #[cfg_attr(feature = "demo", allow(dead_code))]
 fn disk(place: &str) -> Result<Box<dyn ark_peer::Disk>, String> {
-    #[cfg(not(target_arch = "wasm32"))]
     {
         let dir = data_dir(place);
         ark_peer::Files::new(&dir)
             .map(|f| Box::new(f) as Box<dyn ark_peer::Disk>)
             .map_err(|e| format!("{}: {e}", dir.display()))
     }
-    #[cfg(target_arch = "wasm32")]
-    {
-        // In memory for now: the page fills from its server at every load.
-        // `localStorage` cannot hold a library (a few megabytes, written
-        // whole at every append), and the page's IndexedDB is not yet a
-        // disk that leaves the page alone while it fills.
-        let _ = place;
-        Ok(Box::new(ark_peer::Memory::default()) as Box<dyn ark_peer::Disk>)
-    }
 }
 
 /// `$XDG_DATA_HOME/harken/<server>`, or `~/.local/share/…`, or the temp
 /// directory on a machine with neither. One directory per server: the
 /// replica is a copy of that server's log.
-#[cfg(not(target_arch = "wasm32"))]
 pub fn data_dir(server: &str) -> std::path::PathBuf {
     use std::path::PathBuf;
     let base = std::env::var_os("XDG_DATA_HOME")
@@ -316,7 +215,6 @@ pub fn data_dir(server: &str) -> std::path::PathBuf {
 
 /// A server's address as one path segment: its letters and digits, the rest
 /// as `_`. `http://127.0.0.1:8787` is `http___127_0_0_1_8787`.
-#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 pub fn server_key(server: &str) -> String {
     server
         .trim_end_matches('/')
@@ -331,20 +229,6 @@ pub fn who(login: &Login) -> String {
     match login.user.name.is_empty() {
         true => login.user.id.clone(),
         false => login.user.name.clone(),
-    }
-}
-
-/// This window is staying: the splash over it goes (`web/index.html` fades
-/// `#boot.done`). Not before — a page still asking whether it has a server,
-/// or about to go to sign in, shows the mark rather than a player it is
-/// about to leave. Nothing on the desktop.
-pub fn reveal() {
-    #[cfg(target_arch = "wasm32")]
-    {
-        let boot = web_sys::window().and_then(|w| w.document()).and_then(|d| d.get_element_by_id("boot"));
-        if let Some(boot) = boot {
-            let _ = boot.class_list().add_1("done");
-        }
     }
 }
 

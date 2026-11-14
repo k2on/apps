@@ -53,20 +53,31 @@
 mod login;
 mod util;
 
+#[cfg(feature = "ffi")]
+uniffi::setup_scaffolding!();
+
 #[cfg(not(target_arch = "wasm32"))]
 pub mod client;
+pub mod device_accounts;
+pub mod first_run;
+pub mod keep;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod oidc;
+pub mod onboarding;
+pub mod probe;
 pub mod remember;
-pub mod rows;
+/// The two tables and the functions over them are the kernel's
+/// (`ark::auth`): a domain embeds them without depending on sign-in.
+pub use ark::auth as rows;
+pub use ark::auth_tables as install;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod server;
 #[cfg(target_arch = "wasm32")]
 pub mod web;
 
 pub use login::{Account, Login};
-pub use rows::{feed, register, AuthTables, Grant, Revoke, Role, SignIn, Welcome, ADMIN};
-pub use util::{login_url, percent_decode, percent_encode, picture_url, query_value, socket_url, with_code};
+pub use rows::{feed, register, AuthTables, Grant, Push, Revoke, Role, SetPush, SignIn, Welcome, ADMIN};
+pub use util::{cookie_token, login_url, percent_decode, percent_encode, picture_url, query_value, socket_url, with_code, COOKIE, COOKIE_HELLO};
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests;

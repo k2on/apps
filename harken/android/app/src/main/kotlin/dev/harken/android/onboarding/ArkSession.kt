@@ -28,7 +28,7 @@
 package dev.harken.android.onboarding
 
 import dev.arkdb.ffi.Listener
-import dev.arkdb.ffi.Login
+import dev.arkdb.auth.Login
 import dev.arkdb.ffi.Refusal
 import dev.arkdb.ffi.socketUrl
 import dev.harken.android.gen.Device
@@ -166,6 +166,9 @@ private constructor(
         val now = SessionStatus(s.linked, link, s.pending.toInt(), s.linked || s.cursor > 0)
         if (now != _status.value) _status.value = now
         for (l in listeners) runCatching { l(h) }
+        // A screenshot waits while the peer has anything on its way, and again for what this drew.
+        dev.arkui.Ready.still("peer", !h.peer.settled())
+        dev.arkui.Ready.changed()
         val denied = s.denied
         if (denied != null && !deniedSaid) {
             deniedSaid = true

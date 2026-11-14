@@ -77,18 +77,7 @@ private struct LibraryChips: View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: Space.s) {
                 ForEach(LibraryTab.allCases) { t in
-                    let on = t == tab
-                    Button { tab = t } label: {
-                        Text(t.rawValue)
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(on ? Color.onAccent : Color.ink)
-                            .padding(.horizontal, Space.l)
-                            .frame(minHeight: 36)
-                            .background(Capsule().fill(on ? Color.accent : Color.containerHigh))
-                            .contentShape(Capsule())
-                    }
-                    .buttonStyle(.press)
-                    .accessibilityAddTraits(on ? .isSelected : [])
+                    Chip(t.rawValue, selected: t == tab) { tab = t }
                 }
             }
             .padding(.horizontal, Space.page)
@@ -122,7 +111,7 @@ private struct PlaylistsList: View {
                     .listRowSeparator(.hidden)
             }
             ForEach(model.playlists) { p in
-                let r = Route.page(.playlist(p.id))
+                let r = Route.playlist(id: p.id.hex, name: p.name)
                 Button { open(r) } label: {
                     HStack(spacing: Space.l) {
                         CoverView(seed: p.name, url: "", side: 56).frame(width: 56, height: 56).zoomSource(r, zoom)
@@ -154,7 +143,7 @@ private struct AlbumsGrid: View {
             ScrollView {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: Space.l)], spacing: Space.xl) {
                     ForEach(model.albums) { a in
-                        let r = Route.page(.album(a.id))
+                        let r = Route.album(key: a.id, title: a.name)
                         Button { open(r) } label: {
                             VStack(alignment: .leading, spacing: 2) {
                                 CoverView(seed: a.name, url: RowCover.url(model, a.art), side: 180)
@@ -221,7 +210,7 @@ private struct ShowsGrid: View {
                     }
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: Space.l)], spacing: Space.xl) {
                         ForEach(shows) { s in
-                            let r = Route.page(.show(s.id))
+                            let r = Route.show(key: s.id, title: s.title)
                             Button { open(r) } label: {
                                 VStack(alignment: .leading, spacing: 2) {
                                     CoverView(seed: s.title, url: RowCover.url(model, s.art), side: 180)
@@ -229,7 +218,7 @@ private struct ShowsGrid: View {
                                         .zoomSource(r, zoom)
                                         .padding(.bottom, Space.s - 2)
                                     Text(s.title).font(.subheadline.weight(.semibold)).lineLimit(2)
-                                    Text(s.author.isEmpty ? Spell.count(Int(s.episodes), "episode") : s.author).font(.caption).foregroundStyle(.quiet).lineLimit(1)
+                                    Text(s.author.isEmpty ? formatCount(n: s.episodes, word: "episode") : s.author).font(.caption).foregroundStyle(.quiet).lineLimit(1)
                                 }
                             }
                             .buttonStyle(.press)
@@ -282,8 +271,8 @@ private struct ArtistsList: View {
                 if !composers.isEmpty {
                     Section("Composers") {
                         ForEach(composers) { c in
-                            let life = Catalogue.life(born: c.born, died: c.died)
-                            PersonRow(name: c.name, art: c.art, under: life.isEmpty ? Spell.count(Int(c.works), "work") : life, to: .page(.artist(c.name)))
+                            let life = formatSpan(born: c.born, died: c.died)
+                            PersonRow(name: c.name, art: c.art, under: life.isEmpty ? formatCount(n: c.works, word: "work") : life, to: .artist(name: c.name))
                         }
                     }
                 }
@@ -300,7 +289,7 @@ private struct ArtistsList: View {
 
     private func artists(_ list: [ArtistsEntry]) -> some View {
         ForEach(list) { a in
-            PersonRow(name: a.name, art: a.art, under: Spell.count(Int(a.tracks), "song"), to: .page(.artist(a.name)))
+            PersonRow(name: a.name, art: a.art, under: formatCount(n: a.tracks, word: "song"), to: .artist(name: a.name))
         }
     }
 }

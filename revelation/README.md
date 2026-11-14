@@ -14,9 +14,14 @@ and the app parses it at launch.
 
 ## What is here
 
-    android/                        the gradle project (one module, :app)
-      app/src/main/assets/bsb.txt   the Berean Standard Bible, as published
-      app/src/main/kotlin/dev/revelation/android/
+    app.toml                        what it is to Android: its id, its theme, its dependencies; its
+                                    gradle project is generated from it (ui/docs/app.md,
+                                    "Generated, Not Committed"): `nix run .#revelation-prebuild`
+    icon.svg                        its icon (the launcher's adaptive and themed icon are made from it)
+    native/android/
+      assets/bsb.txt                the Berean Standard Bible, as published
+      res/values/                   its own theme and colours (the first frame black)
+      main/dev/revelation/android/
         Bible.kt      the text as one String with IntArray indices; Ref <-> verse; search; typed references
         Layout.kt     the reference layout at reading size: tokens measured once, greedy breaks, the line table
         Camera.kt     (y, scale), the screen transform, the clamps, pinch about a focal point, the rubber band
@@ -27,24 +32,24 @@ and the app parses it at launch.
         Shell.kt      the Compose chrome: header, picker, search, About
         Theme.kt      the one palette, white on black, shared by the View and Compose
         MainActivity.kt
-      app/src/test/kotlin/dev/revelation/android/   JUnit 4 tests and the Paparazzi screens
       debug.keystore                the key every build signs with (see below)
-      fdroid/                       the F-Droid metadata and icon
+      deps.json                     the Maven graph gradle replays offline
+    fdroid/                         the F-Droid metadata
 
 The pieces that decide things (`Bible`, `Layout`, `Camera`, `FlyTo`,
-`Levels`, `Gestures`) are pure Kotlin with no Android types, and are tested
-on the JVM. `BibleView` and the activity are kept thin.
+`Levels`, `Gestures`) are pure Kotlin with no Android types. `BibleView`
+and the activity are kept thin.
 
 ## Building on a laptop
 
 You need JDK 21, Gradle 8.x (there is no wrapper, as in harken), and an
 Android SDK with **platform 35** and **build-tools 35.0.0**. The toolchain
 is the same as `harken/android`'s: AGP 8.7.3, Kotlin 2.0.21, Compose BOM
-2024.12.01 and Paparazzi 1.3.5. From `revelation/android`:
+2024.12.01. `nix run .#revelation-prebuild`, then from
+`revelation/.native/android`:
 
     export ANDROID_HOME=/path/to/sdk ANDROID_SDK_ROOT=/path/to/sdk
-    gradle :app:testDebugUnitTest :app:assembleRelease   # the tests, and app/build/outputs/apk/release/app-release.apk
-    gradle :app:recordPaparazziDebug                     # the screens, app/src/test/snapshots/images/*.png
+    gradle :app:assembleRelease   # app/build/outputs/apk/release/app-release.apk
     adb install app/build/outputs/apk/release/app-release.apk
 
 `versionCode` and `versionName` come from gradle properties
@@ -52,65 +57,17 @@ is the same as `harken/android`'s: AGP 8.7.3, Kotlin 2.0.21, Compose BOM
 harken. AGP reads `-Pandroid.aapt2FromMavenOverride=…` itself, so a nix
 derivation can point it at an `aapt2` it built.
 
-The screenshots take under a minute. Layoutlib's text measurement is
-slow, so the whole Bible is measured with it once, and every later
-surface shot reuses that layout. `BibleView` keeps the last layout for the
-process.
-
-**One key, committed, and public on purpose.** `android/debug.keystore`
+**One key, committed, and public on purpose.** `native/android/debug.keystore`
 signs both the debug and the release builds, so that one APK installs over
 the previous one. The reason is the same as harken's, and is written next
 to `signingConfigs` in `app/build.gradle.kts`. Anyone can read the key, so
 anyone can sign an APK as this app. It must never sign anything published
 as trusted.
 
-## What is proven on the JVM
+## Built, not run
 
-`gradle :app:testDebugUnitTest` checks the following:
-
-- **The text.** 66 books, 1,189 chapters and 31,102 verses. Genesis 1:1
-  begins "In the beginning". The last verse is Revelation 22:21. John 3:16
-  and Psalm 23 are where their references say. Every verse's reference
-  round-trips through its index. The two attribution lines are kept.
-  Search ignores case, finds each verse once, never matches across two
-  verses, and scans the whole text in milliseconds. Typed references work
-  ("john 3:16", "Ps 23", "1 cor 13:4").
-- **The layout.** These checks run over the whole text with a fake
-  measurer. Every character of every verse is in exactly one line. No
-  line is wider than the column. Breaks are greedy. `y` is monotonic and
-  the blocks add up. Each verse's first line is where its `Ref` says.
-  Each distinct token is measured once (about 35,000 of them). The whole
-  Bible lays out in about 100 ms on this machine, with a 300 ms bound in
-  the test. At a Pixel 5's width that is about 99,600 lines and 2.76
-  million dp of document.
-- **The camera.** Screen and document coordinates round-trip. Zoom stops
-  at its bounds. The document never leaves the screen, and is centred
-  with its pad when it fits. A drag past an end reports the overscroll
-  for the edge effect. A pinch keeps the document point under the
-  fingers still, and the focal drift pans. The rubber band gives a
-  little and no more.
-- **The fly-to.** The endpoints are exact. `w` rises and then falls,
-  zooming out about as far as the whole Bible to cross it. `y` only moves
-  toward the target. A short move barely zooms out. The degenerate case
-  (no distance) is a plain zoom. The duration is clamped to 300–1200 ms.
-- **The levels.** The thresholds are 5, 1.2, 6, 4, 24 and 20 px. The
-  crossfades sum to one, and no level moves by a visible step across the
-  whole range of zoom. The column's ink is the bars' coverage (0.5) and
-  rises to full as it narrows to the line. The line at the far end is one
-  whole pixel, centred. Rules appear only where their thresholds allow.
-  Labels never overlap, and the longest books win. The header reads
-  "Psalm 23", then "Psalms", then "Job – Isaiah"-like ranges, and
-  "Genesis – Revelation" at the far end.
-- **The gestures.** The state machine's transitions are tested: a touch
-  stops a fling or an animation where it is, the finger left after a
-  pinch neither drags nor flings, and no animation starts while a finger
-  is driving the camera.
-- **The screens.** Paparazzi draws the real `BibleView` over the real
-  text inside the real Compose shell, at a Pixel 5's size, in the app's
-  one dark look. These are the six camera states (`01_reading`, `02_small_glyphs`,
-  `03_greeked`, `04_chapters`, `05_books`, `06_line`) and the chrome
-  (`07_picker`, `08_picker_chapters`, `09_search`, `10_search_reference`,
-  `11_about`), each named `-dark`.
+`nix build .#revelation-apk` compiles it and assembles the APK, and
+nothing more is checked by a build.
 
 ## What only a phone can show
 
@@ -131,8 +88,7 @@ one does:
   to the view's render node, and the glow before Android 12.
 - Whether the fly-to reads as one motion, and whether the crossfades
   between levels pop under a moving pinch.
-- Double-tap, the two-finger tap and taps on labels. The touch routing in
-  `BibleView` has no automated test, only the state machine under it does.
+- Double-tap, the two-finger tap and taps on labels.
 
 ## Not done in the prototype
 
@@ -140,7 +96,7 @@ one does:
   scale 1. It does not lay the text out again at a larger font. There is
   no font-size setting.
 - **A bundled serif.** The text is in `Typeface.SERIF`, the system's
-  serif. It renders under layoutlib, so the screenshots use it too.
+  serif.
 - **No accessibility yet.** TalkBack cannot read a canvas.
   `ExploreByTouchHelper` over the visible verses is the planned answer.
 - Selection, bookmarks, highlights and a second translation.

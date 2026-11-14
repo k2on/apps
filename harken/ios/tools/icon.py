@@ -4,7 +4,7 @@ PNG, opaque (App Store Connect refuses an icon with alpha), harken's mark on
 the dark scheme's page — the trumpet the Android launcher, the desktop's
 favicon and the docs carry (Pictogrammers' Material Design Icons, Apache
 2.0), turned 18 degrees, in the dark scheme's gold — placed as the favicon
-places it (harken/iced/web/favicon.svg), at twice its size. Rasterized here
+places it (harken/iced/icon.svg), at twice its size. Rasterized here
 from the path itself: its curves flattened to lines, each pixel's coverage
 counted by scanlines, four to a pixel, each span's ends to the fraction, and
 the fill the nonzero winding's, as an SVG's is. Run from harken/ios:

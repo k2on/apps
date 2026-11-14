@@ -1,0 +1,678 @@
+{
+  "_": "money's screenshots (.github/screens/apps.md; which phones it is on is flake.nix's list, `publish`): its server is server.sh, seeded up to the run's day (DEMO_DAY), signed in to as `user`, who goes by `name`. `walk`: the phones' and the larger screens' (each a list), walked inside the app from a new install (ui/docs/shots.md, \"In the App\"): `welcome`, the first run's page a new install opens on; then signed in through the first run (`welcome.next`, the server's address typed into `welcome.typed` — `{server}` is the run's — `welcome.check`), landing on the budget; and every shot after reached by tapping from where the last left it, each step naming an element by its id (ui/docs/shots.md: `tab:budget`, `budget.row:dining-out`, `shell.new-transaction`; a shot's `<id>.tree.txt` lists them). `welcome` is taken every way at the start; the rest is walked whole once a way (light, then dark; on the iPad then dark and light on its side), the app reset in it between walks (`ArkHost.shotsReset`), the sign-in's steps (`signIn`) on the first walk alone. A category and a transaction are opened in the platform's way: on a phone Category Details' sheet and the transaction's form; on a larger screen the inspector (Transaction Details shown first). `desktop` is the iced window's (ui/rust/shots): its size, and its shots, each clicking what a text on the screen says, in one window. Its accounts are Checking's register, its transactions all accounts'. `screens` and `launch` are the Mac's and the browser's: each screen opened by its launch arguments (the Mac's own window, app-mac.sh; the browser's address, app-web.sh), as no walk takes them.",
+  "server": {
+    "port": 8788,
+    "user": "alex",
+    "name": "Alex",
+    "picture": "nix/demo/alex.jpg"
+  },
+  "walk": {
+    "phone": [
+      {
+        "id": "welcome",
+        "steps": []
+      },
+      {
+        "id": "budget",
+        "signIn": true,
+        "steps": [
+          {
+            "tap": "welcome.next"
+          },
+          {
+            "tap": "welcome.typed"
+          },
+          {
+            "type": "{server}"
+          },
+          {
+            "tap": "welcome.check"
+          },
+          {
+            "await": "tab:budget"
+          }
+        ]
+      },
+      {
+        "id": "category",
+        "steps": [
+          {
+            "tap": "budget.row:dining-out"
+          }
+        ]
+      },
+      {
+        "id": "accounts",
+        "steps": [
+          {
+            "tap": "shell.inspector:category-details"
+          },
+          {
+            "tap": "tab:accounts"
+          }
+        ]
+      },
+      {
+        "id": "account",
+        "steps": [
+          {
+            "tap": "tab:accounts/checking"
+          }
+        ]
+      },
+      {
+        "id": "review",
+        "steps": [
+          {
+            "tap": "shell.back"
+          },
+          {
+            "tap": "tab:transactions"
+          }
+        ]
+      },
+      {
+        "id": "transaction",
+        "steps": [
+          {
+            "tap": "transactions.show:all"
+          },
+          {
+            "tap": "transactions.row:target"
+          }
+        ]
+      },
+      {
+        "id": "add-transaction",
+        "steps": [
+          {
+            "tap": "sheets.dismiss"
+          },
+          {
+            "tap": "shell.new-transaction"
+          }
+        ]
+      },
+      {
+        "id": "insights",
+        "steps": [
+          {
+            "tap": "sheets.dismiss"
+          },
+          {
+            "tap": "tab:insights"
+          }
+        ]
+      },
+      {
+        "id": "auto-assign-menu",
+        "steps": [
+          {
+            "tap": "tab:budget"
+          },
+          {
+            "tap": "budget.auto-assign"
+          }
+        ]
+      },
+      {
+        "id": "settings",
+        "steps": [
+          {
+            "tap": "budget.cancel-auto"
+          },
+          {
+            "tap": "shell.account"
+          }
+        ]
+      }
+    ],
+    "large": [
+      {
+        "id": "welcome",
+        "steps": []
+      },
+      {
+        "id": "budget",
+        "signIn": true,
+        "steps": [
+          {
+            "tap": "welcome.next"
+          },
+          {
+            "tap": "welcome.typed"
+          },
+          {
+            "type": "{server}"
+          },
+          {
+            "tap": "welcome.check"
+          },
+          {
+            "await": "tab:budget"
+          }
+        ]
+      },
+      {
+        "id": "category",
+        "steps": [
+          {
+            "tap": "budget.row:dining-out"
+          }
+        ]
+      },
+      {
+        "id": "accounts",
+        "steps": [
+          {
+            "tap": "shell.inspector:category-details"
+          },
+          {
+            "tap": "tab:accounts"
+          }
+        ]
+      },
+      {
+        "id": "account",
+        "steps": [
+          {
+            "tap": "tab:accounts/checking"
+          }
+        ]
+      },
+      {
+        "id": "review",
+        "steps": [
+          {
+            "tap": "tab:transactions"
+          }
+        ]
+      },
+      {
+        "id": "transaction",
+        "steps": [
+          {
+            "tap": "transactions.show:all"
+          },
+          {
+            "tap": "shell.inspector:transaction-details"
+          },
+          {
+            "tap": "transactions.row:target"
+          }
+        ]
+      },
+      {
+        "id": "add-transaction",
+        "steps": [
+          {
+            "tap": "shell.inspector:transaction-details"
+          },
+          {
+            "tap": "shell.new-transaction"
+          }
+        ]
+      },
+      {
+        "id": "insights",
+        "steps": [
+          {
+            "tap": "sheets.dismiss"
+          },
+          {
+            "tap": "tab:insights"
+          }
+        ]
+      },
+      {
+        "id": "auto-assign-menu",
+        "steps": [
+          {
+            "tap": "tab:budget"
+          },
+          {
+            "tap": "budget.auto-assign"
+          }
+        ]
+      },
+      {
+        "id": "settings",
+        "steps": [
+          {
+            "tap": "budget.cancel-auto"
+          },
+          {
+            "tap": "shell.account"
+          }
+        ]
+      }
+    ]
+  },
+  "desktop": {
+    "window": [
+      1440,
+      900
+    ],
+    "scale": 2,
+    "shots": [
+      {
+        "id": "budget",
+        "steps": [
+          {
+            "click": "Budget"
+          }
+        ]
+      },
+      {
+        "id": "accounts",
+        "steps": [
+          {
+            "click": "Accounts"
+          },
+          {
+            "click": "Checking"
+          }
+        ]
+      },
+      {
+        "id": "transactions",
+        "steps": [
+          {
+            "click": "Transactions"
+          }
+        ]
+      },
+      {
+        "id": "insights",
+        "steps": [
+          {
+            "click": "Insights"
+          }
+        ]
+      },
+      {
+        "id": "keys",
+        "steps": [
+          {
+            "click": "Budget"
+          },
+          {
+            "key": "j"
+          },
+          {
+            "key": "z"
+          },
+          {
+            "wait": 1
+          }
+        ]
+      }
+    ]
+  },
+  "hero": {
+    "name": "Money",
+    "line": "A household's budget, shared, on every device and offline",
+    "logo": "money/icon.svg",
+    "screen": "budget"
+  },
+  "_screens": "`screens`: the Mac's and the browser's, each screen opened by its launch arguments alone (ark_app::shell::Launch: .github/screens/apps.md) on the sizes it is `on` (`mac`, and the browser's `ios`, `ipad-portrait`, `ipad-landscape`), under one id on all of them, the same ids as the walk's. A category and a transaction are two entries, one id: on the larger sizes in the inspector (`-inspector 1`), on a phone's as the platform shows them. The Mac takes them but for the menu and the pages: it has no step driver and no fresh launch, and no browser to sign it in, so `launch.mac` opens the demo's household before each (at 1440x900), on the run's day (app-mac.sh gives `-demo` DEMO_DAY), the same household the server is seeded with.",
+  "launch": {
+    "mac": [
+      "-demo",
+      "2026-11-18",
+      "-window",
+      "1440x900",
+      "-ApplePersistenceIgnoreState",
+      "YES"
+    ]
+  },
+  "screens": [
+    {
+      "id": "budget",
+      "args": [
+        "-screen",
+        "budget"
+      ],
+      "route": "/budget",
+      "on": [
+        "ios",
+        "ipad-portrait",
+        "ipad-landscape",
+        "mac"
+      ]
+    },
+    {
+      "id": "category",
+      "args": [
+        "-screen",
+        "category:dining"
+      ],
+      "route": "/category/dining",
+      "on": [
+        "ios"
+      ]
+    },
+    {
+      "id": "category",
+      "args": [
+        "-screen",
+        "category:dining",
+        "-inspector",
+        "1"
+      ],
+      "route": "/category/dining?inspector=1",
+      "on": [
+        "ipad-portrait",
+        "ipad-landscape",
+        "mac"
+      ]
+    },
+    {
+      "id": "accounts",
+      "args": [
+        "-screen",
+        "accounts"
+      ],
+      "route": "/accounts",
+      "on": [
+        "ios",
+        "ipad-portrait",
+        "ipad-landscape",
+        "mac"
+      ]
+    },
+    {
+      "id": "account",
+      "args": [
+        "-screen",
+        "account:checking"
+      ],
+      "route": "/account/checking",
+      "on": [
+        "ios",
+        "ipad-portrait",
+        "ipad-landscape",
+        "mac"
+      ]
+    },
+    {
+      "id": "review",
+      "args": [
+        "-screen",
+        "review"
+      ],
+      "route": "/inbox",
+      "on": [
+        "ios",
+        "ipad-portrait",
+        "ipad-landscape",
+        "mac"
+      ]
+    },
+    {
+      "id": "transaction",
+      "args": [
+        "-screen",
+        "transaction:receipt"
+      ],
+      "route": "/transaction/receipt",
+      "on": [
+        "ios"
+      ]
+    },
+    {
+      "id": "transaction",
+      "args": [
+        "-screen",
+        "transaction:receipt",
+        "-inspector",
+        "1"
+      ],
+      "route": "/transaction/receipt?inspector=1",
+      "on": [
+        "ipad-portrait",
+        "ipad-landscape",
+        "mac"
+      ]
+    },
+    {
+      "id": "add-transaction",
+      "args": [
+        "-screen",
+        "add-transaction"
+      ],
+      "route": "/transactions?sheet=new-transaction",
+      "on": [
+        "ios",
+        "ipad-portrait",
+        "ipad-landscape",
+        "mac"
+      ]
+    },
+    {
+      "id": "insights",
+      "args": [
+        "-screen",
+        "insights"
+      ],
+      "route": "/insights",
+      "on": [
+        "ios",
+        "ipad-portrait",
+        "ipad-landscape",
+        "mac"
+      ]
+    },
+    {
+      "id": "settings",
+      "args": [
+        "-screen",
+        "settings"
+      ],
+      "route": "/settings",
+      "on": [
+        "ios",
+        "ipad-portrait",
+        "ipad-landscape",
+        "mac"
+      ]
+    },
+    {
+      "id": "auto-assign-menu",
+      "args": [
+        "-screen",
+        "budget"
+      ],
+      "route": "/budget",
+      "steps": [
+        {
+          "tap": "Auto-Assign",
+          "role": "button",
+          "where": "bottom",
+          "optional": true
+        },
+        {
+          "wait": 1
+        }
+      ],
+      "on": [
+        "ios",
+        "ipad-portrait",
+        "ipad-landscape"
+      ]
+    },
+    {
+      "id": "welcome",
+      "fresh": true,
+      "route": "welcome/",
+      "on": [
+        "ios",
+        "ipad-portrait",
+        "ipad-landscape"
+      ]
+    }
+  ],
+  "web": {
+    "_": "The browser's (app-web.sh, web-shots.js): money-web over the demo household in the page (`query`'s `demo`: no server to sign in to) seeded to `today`, at each of `sizes` (named as `screens`' `on`) in light and dark. Every one of `screens` is taken on the sizes it is `on`, its launch arguments as the page's address (`-screen budget` is `?screen=budget`); `shots` are the browser's own besides, on every size unless they say: the transient parts, each opened by its address — arkui-web's `context` (a row's menu), `menu` (a control's), `popover` (a field's), `command` (the command box), `keys` (the keys panel) — then its steps in the desktop's vocabulary (click, key, type, await, wait).",
+    "query": "demo",
+    "today": "2026-11-10",
+    "sizes": {
+      "mac": [
+        1440,
+        900
+      ],
+      "ipad-landscape": [
+        1366,
+        1024
+      ],
+      "ipad-portrait": [
+        900,
+        1100
+      ],
+      "ios": [
+        400,
+        860
+      ]
+    },
+    "shots": [
+      {
+        "id": "settings-household",
+        "query": "screen=settings&pane=household"
+      },
+      {
+        "id": "context-menu",
+        "query": "screen=budget&context=Groceries"
+      },
+      {
+        "id": "submenu",
+        "query": "screen=budget&context=Groceries",
+        "steps": [
+          {
+            "key": "ArrowDown"
+          },
+          {
+            "key": "ArrowDown"
+          },
+          {
+            "key": "ArrowRight"
+          }
+        ]
+      },
+      {
+        "id": "auto-assign-menu",
+        "query": "screen=budget&menu=auto-assign"
+      },
+      {
+        "id": "date-picker",
+        "query": "screen=add-transaction&popover=date"
+      },
+      {
+        "id": "search-suggestions",
+        "query": "screen=transactions",
+        "steps": [
+          {
+            "key": "/"
+          },
+          {
+            "type": "Tar"
+          }
+        ],
+        "sizes": [
+          "mac",
+          "ipad-portrait"
+        ]
+      },
+      {
+        "id": "approve-all",
+        "query": "screen=transactions",
+        "steps": [
+          {
+            "click": "Approve All",
+            "prefix": true
+          }
+        ]
+      },
+      {
+        "id": "command-box",
+        "query": "command=Month"
+      },
+      {
+        "id": "keys-panel",
+        "query": "screen=budget&keys=1",
+        "sizes": [
+          "mac",
+          "ipad-portrait"
+        ]
+      },
+      {
+        "id": "categorize-submenu",
+        "query": "screen=transactions&context=Target",
+        "steps": [
+          {
+            "key": "ArrowDown"
+          },
+          {
+            "key": "ArrowDown"
+          },
+          {
+            "key": "ArrowDown"
+          },
+          {
+            "key": "ArrowDown"
+          },
+          {
+            "key": "ArrowRight"
+          },
+          {
+            "key": "ArrowDown"
+          },
+          {
+            "key": "ArrowDown"
+          },
+          {
+            "key": "ArrowDown"
+          },
+          {
+            "key": "ArrowRight"
+          },
+          {
+            "key": "ArrowDown"
+          }
+        ]
+      },
+      {
+        "id": "category-picker",
+        "query": "screen=add-transaction&menu=category",
+        "steps": [
+          {
+            "key": "ArrowDown"
+          },
+          {
+            "key": "ArrowDown"
+          },
+          {
+            "key": "ArrowDown"
+          },
+          {
+            "key": "ArrowRight"
+          }
+        ]
+      },
+      {
+        "id": "keys-cursor",
+        "query": "screen=budget",
+        "steps": [
+          {
+            "key": "j"
+          },
+          {
+            "key": "j"
+          },
+          {
+            "key": "j"
+          }
+        ]
+      }
+    ]
+  }
+}

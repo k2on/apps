@@ -10,9 +10,14 @@
 //!                                                                          ─┘    said of it is delivered
 //! ```
 //!
-//! A token proving nobody is closed with code 4401. The server
+//! A page's first message is empty: its session is the cookie
+//! (`ark_auth::COOKIE`) its browser sent with the upgrade, taken only from
+//! a page of this server's own origin. A token proving nobody is closed
+//! with code 4401. The server
 //! pings every `keepalive` and closes a socket that leaves three
-//! unanswered.
+//! unanswered. The app's web ([`web::Site`], [`Server::site`]) is merged
+//! beside them and the app's own middleware ([`Server::layer`]) is over
+//! all of it: one process answers the socket, sign-in and every page.
 
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -22,6 +27,7 @@ use std::time::Duration;
 use anyhow::Result;
 use axum::extract::ws::{CloseFrame, Message, WebSocket, WebSocketUpgrade};
 use axum::extract::State;
+use axum::http::HeaderMap;
 use axum::response::Response;
 use axum::routing::get;
 use axum::Router;
@@ -40,10 +46,21 @@ pub struct Server {
     pub data: Option<PathBuf>,
     pub authenticate: Authenticate,
     pub auth: Option<Arc<ark_auth::server::Auth>>,
-    pub web: Option<(PathBuf, Option<String>)>,
+    /// The app's web ([`web::Site`]): its build's files and the pages it
+    /// writes, beside the socket and sign-in.
+    pub web: web::Site,
     pub routes: Router,
+    /// The app's own middleware over every route (`/healthz` said in more
+    /// words, a header), each given the hub: in order, the last outermost.
+    pub layers: Vec<Layer>,
     pub keepalive: Duration,
+    /// Who is woken when the app's rows change and they are not connected
+    /// ([`Server::push`]).
+    pub push: Option<(Arc<dyn ark_push::PushSender>, ark_push::Wake)>,
 }
+
+/// Middleware over every route a server answers, given the hub.
+pub type Layer = Box<dyn FnOnce(Router, &Handle) -> Router + Send>;
 
 /// A server listening, until [`Running::stop`].
 pub struct Running {
@@ -66,10 +83,21 @@ impl Server {
             data: None,
             authenticate: Arc::new(dev),
             auth: None,
-            web: None,
+            web: web::Site::default(),
             routes: Router::new(),
+            layers: vec![],
             keepalive: Duration::from_secs(20),
+            push: None,
         }
+    }
+
+    /// The devices of sessions not connected woken through `sender` when
+    /// the app's rows change, with `wake` (`crate::push`): a wake and
+    /// nothing of the rows. Only with sign-in ([`Server::auth`]): a device
+    /// is woken by its session's push row.
+    pub fn push(mut self, sender: Arc<dyn ark_push::PushSender>, wake: ark_push::Wake) -> Self {
+        self.push = Some((sender, wake));
+        self
     }
 
     /// Sign-in: its routes, each sign-in a session row the hub writes, a
@@ -77,6 +105,20 @@ impl Server {
     /// watching for sessions to close — all `ark_auth::server::Auth`'s.
     pub fn auth(mut self, auth: Arc<ark_auth::server::Auth>) -> Self {
         self.auth = Some(auth);
+        self
+    }
+
+    /// The app's web mounted beside the socket and sign-in: its files, and
+    /// the pages it writes, if any (`web::Site`).
+    pub fn site(mut self, site: web::Site) -> Self {
+        self.web = site;
+        self
+    }
+
+    /// Middleware over every route, the web's included: `f` is given the
+    /// router and the hub.
+    pub fn layer(mut self, f: impl FnOnce(Router, &Handle) -> Router + Send + 'static) -> Self {
+        self.layers.push(Box::new(f));
         self
     }
 
@@ -98,7 +140,21 @@ impl Server {
             None => Box::new(Memory::default()),
         };
         let peer = Peer::serve(self.config, disk, now_ms());
-        let hub = Handle::watched(peer, self.auth.as_ref().map(|a| a.watcher()));
+        let slot = Arc::new(std::sync::OnceLock::new());
+        let watch = self.auth.as_ref().map(|a| {
+            let mut closes = a.watcher();
+            let mut pusher = self.push.take().map(|(s, w)| crate::push::Pusher::start(s, w, slot.clone()));
+            Box::new(
+                move |store: &ark::store::Store, changes: Option<&[ark::store::Change]>, open: &[ark::peer::Who], now: i64| {
+                    if let Some(p) = pusher.as_mut() {
+                        p.seen(store, changes, open, now)
+                    }
+                    closes(store, changes, open, now)
+                },
+            ) as ark_auth::server::Watch
+        });
+        let hub = Handle::watched(peer, watch);
+        let _ = slot.set(hub.clone());
         if let Some(auth) = &self.auth {
             auth.serve(Box::new(hub.clone()));
             self.authenticate = auth.authenticate();
@@ -113,8 +169,9 @@ impl Server {
         if let Some(auth) = self.auth {
             router = router.merge(ark_auth::server::router(auth));
         }
-        if let Some((dir, module)) = self.web {
-            router = router.merge(web::router(dir, module));
+        router = router.merge(self.web.router(&hub));
+        for layer in self.layers {
+            router = layer(router, &hub);
         }
         Ok((hub, router))
     }
@@ -180,15 +237,43 @@ impl Running {
     }
 }
 
-async fn sync(ws: WebSocketUpgrade, State(s): State<Shared>) -> Response {
-    ws.on_upgrade(move |socket| connection(socket, s))
+async fn sync(ws: WebSocketUpgrade, headers: HeaderMap, State(s): State<Shared>) -> Response {
+    let cookie = page_session(&headers);
+    ws.on_upgrade(move |socket| connection(socket, s, cookie))
 }
 
-/// One socket: the token, then frames both ways and the pings.
-async fn connection(mut socket: WebSocket, s: Shared) {
+/// The session cookie a page's socket was opened with
+/// (`ark_auth::COOKIE`), when the page is this server's own: the upgrade's
+/// `Origin` is its `Host`. A browser sends a site's cookies with a socket
+/// any page opens to it, so the origin is what keeps another site's page
+/// from opening one as the person (cross-site WebSocket hijacking), beside
+/// the cookie's `SameSite=Strict`.
+fn page_session(headers: &HeaderMap) -> Option<String> {
+    let said = |h: axum::http::HeaderName| headers.get(h).and_then(|v| v.to_str().ok());
+    let host = said(axum::http::header::HOST)?;
+    let origin = said(axum::http::header::ORIGIN)?;
+    let (_, from) = origin.split_once("://")?;
+    if !from.eq_ignore_ascii_case(host) {
+        return None;
+    }
+    let cookies = headers.get_all(axum::http::header::COOKIE);
+    cookies
+        .iter()
+        .filter_map(|v| v.to_str().ok())
+        .find_map(ark_auth::cookie_token)
+        .map(String::from)
+}
+
+/// One socket: the token (or, said as nothing, the page's session cookie),
+/// then frames both ways and the pings.
+async fn connection(mut socket: WebSocket, s: Shared, cookie: Option<String>) {
     let token = match socket.recv().await {
         Some(Ok(Message::Binary(b))) => String::from_utf8(b).unwrap_or_default(),
         _ => return,
+    };
+    let token = match (token.as_str() == ark_auth::COOKIE_HELLO, cookie) {
+        (true, Some(c)) => c,
+        _ => token,
     };
     let authenticate = s.authenticate.clone();
     let judged = tokio::task::spawn_blocking(move || authenticate(&token)).await;

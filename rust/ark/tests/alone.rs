@@ -3,6 +3,9 @@
 //! pending intents, pushed to a server that judges each as a push — at
 //! the fork or after what it has since — so one refused loses that entry
 //! and not the chain.
+// A test reads its fixtures and times itself: the kernel's and the core's
+// purity (clippy.toml) is their library's, not their tests'.
+#![allow(clippy::disallowed_methods, clippy::disallowed_types)]
 
 #[path = "demo.rs"]
 mod demo;

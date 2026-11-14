@@ -27,7 +27,7 @@ const TYPED: &[&str] = &["LibraryEntry", "Playlist"];
 /// `TYPED`: the Kotlin declared `Playlist` again and read its views as JSON.
 #[test]
 fn the_phones_types_are_the_domains() {
-    let w = walk("harken", &Catalog::of(&harken_domain::domain())).typed("uniffi.harken_domain", TYPED);
+    let w = walk("harken", &Catalog::of(&harken_domain::domain())).typed("dev.harken.ffi", TYPED);
     held(KOTLIN, kotlin::write(&w, "dev.harken.android.gen"));
     held(SWIFT, swift::write(&w));
 }

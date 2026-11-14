@@ -1,0 +1,70 @@
+# Which crate may depend on which (ui/docs/app.md, Layers). Read by
+# tools/layers.py over `cargo metadata` (rust/Cargo.toml's workspace) and
+# held by `checks.layers`: every member is in exactly one layer, and each of
+# its dependencies — normal and build, optional or not, never dev — is a
+# crate of a layer it may use, or an external crate its layer allows.
+#
+# Lowest first. A layer may use its own crates, the layers it lists in
+# `uses`, and the external crates in `external` (`"*"`: any). The kernel and
+# the core are pure: no I/O, no clock, no thread, no platform — clippy.toml
+# beside each of their crates holds that inside the code too.
+
+[layers.kernel]
+# The database's kernel: the log, the format, the hash.
+crates = ["ark", "ark-macros"]
+uses = []
+external = ["serde", "serde_json", "sha2", "memcomparable", "postcard", "proc-macro2", "quote", "syn"]
+
+[layers.core]
+# The domains: what a household's budget and a listener's library are, and
+# their rules. Nothing of how they are drawn, stored, routed or carried.
+crates = ["money-core", "harken-domain"]
+uses = ["kernel"]
+external = ["serde", "serde_json"]
+
+[layers.runtime]
+# What an app is written against: the runtime and its commands, routes as
+# paths, the words numbers and days are written in, the #[view] macro.
+crates = ["ark-app", "ark-module", "ark-router", "ark-router-macros", "ark-format", "arkui-macros"]
+uses = ["kernel", "core"]
+external = ["proc-macro2", "quote", "syn"]
+
+[layers.modules]
+# The device modules: each a port's implementations, its fake by default,
+# a platform's behind a feature (`ffi`, `desktop`, `web`). An app depends
+# on the ones it asks, and that is how it takes them on (ui/docs/app.md,
+# How an App Opts In).
+crates = [
+  "ark-haptics", "ark-clipboard", "ark-share", "ark-camera", "ark-scanner",
+  "ark-media-player", "ark-notifications", "ark-background", "ark-secure-store",
+  # Web Push's keys and sealing: the notifications' on a phone, the server's
+  # sender's other end.
+  "ark-push",
+]
+uses = ["kernel", "runtime"]
+external = ["*"]
+
+[layers.app]
+# An app: its screens' state, messages, update and page records; where it
+# can be (its routes); the device modules it asks.
+crates = ["money-app", "harken-app"]
+uses = ["kernel", "core", "runtime", "modules"]
+external = ["serde_json"]
+
+[layers.adapters]
+# Everything that touches the world: the peer and its disk, sign-in, the
+# bridge to the phones, the toolkits, the device modules, the servers, the
+# shells and what generates code. They may use anything below them.
+crates = [
+  "ark-peer", "arkdb", "ark-auth", "ark-ffi", "ark-format-ffi",
+  "ark-ui-gen", "arkui", "arkui-glyphs", "arkui-web", "arkui-serve", "arkui-shots",
+  "money-iced", "money-server", "money-seed",
+  "harken-server", "harken-player", "harken-iced", "harken-seed", "harken-ffi",
+]
+uses = ["kernel", "core", "runtime", "modules", "app"]
+external = ["*"]
+
+# Today's violations, each `"<crate> -> <dependency>"` with what removes
+# it. The check fails on a violation not listed here, and on a line here
+# that is no longer a violation: delete the line in the change that fixes it.
+[allow]

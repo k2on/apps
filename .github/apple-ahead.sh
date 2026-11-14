@@ -25,6 +25,11 @@ for attr in "$@"; do
       echo "$attr: no such Mac package here; passed over"
       continue
     fi
+    # A package that is a source path (harken-covers), built by nothing.
+    if grep -q "is not an attribute set" "${TMPDIR:-/tmp}/apple-ahead.err"; then
+      echo "$attr: a path, not a derivation; passed over"
+      continue
+    fi
     cat "${TMPDIR:-/tmp}/apple-ahead.err" >&2
     echo "::error::$attr did not evaluate"
     exit 1

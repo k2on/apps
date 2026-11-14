@@ -11,9 +11,9 @@
 use std::path::{Path, PathBuf};
 
 use ark_peer::Peer;
-use money_domain::schema::{Photo, PhotoRead};
-use money_domain::setup::{PaperLine, PaperReceipt};
-use money_domain::types::{MatchReceipt, ReceiptImport, StoreItem, StoreReceipt};
+use money_core::schema::{Photo, PhotoRead};
+use money_core::setup::{PaperLine, PaperReceipt};
+use money_core::types::{MatchReceipt, ReceiptImport, StoreItem, StoreReceipt};
 
 use crate::paper;
 
@@ -31,7 +31,7 @@ pub fn receipt(photo: &Photo, r: &PaperReceipt) -> StoreReceipt {
     let due = r.due.or(r.target).unwrap_or(r.sum + r.tax);
     StoreReceipt {
         order_id: photo.id.hex(),
-        date: r.date.clone().unwrap_or_else(|| money_domain::dates::day_of_ms(photo.taken_ms)),
+        date: r.date.clone().unwrap_or_else(|| money_core::dates::day_of_ms(photo.taken_ms)),
         place: r.store.clone(),
         total: -due,
         items: r.items.iter().chain(&r.discounts).map(item).collect(),
@@ -44,9 +44,9 @@ pub fn read(p: &mut Peer, program: &Path, data: &Path, photo: &Photo) -> Result<
     let readings = paper::ocr(program, data, &bytes).map_err(|e| format!("{e:#}"))?;
     let told = paper::read(&readings).told();
     let got = receipt(photo, &told);
-    let receipt_id = format!("{}:{}", money_domain::stores::PAPER, got.order_id);
+    let receipt_id = format!("{}:{}", money_core::stores::PAPER, got.order_id);
     let import = ReceiptImport {
-        store: money_domain::stores::PAPER.into(),
+        store: money_core::stores::PAPER.into(),
         receipts: vec![got],
     };
     p.mutate("receipts.add_receipts", &import)?;

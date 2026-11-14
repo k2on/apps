@@ -305,12 +305,12 @@ in
     web = lib.mkOption {
       type = lib.types.nullOr lib.types.package;
       default = null;
-      example = lib.literalExpression "harken.packages.\${system}.harken-web";
       description = ''
         The browser client to serve at `/`, with the build as its validator
         (a store path's hash, since nix dates every file in one 1970). Null
         serves the socket alone, for a deployment that only wants the phone
-        and the desktop.
+        and the desktop — and until the Leptos client (ui/docs/app.md)
+        exists, there is no other.
       '';
     };
 

@@ -20,7 +20,23 @@ them in with two fields, one line and one registration.
 - **server** (natively): the one relying party. `Auth::open::<App>(mode,
   public_url, data)` (or `Auth::new::<App>(.., key)`) holds the mode (`Mode::Oidc(Provider)` or `Mode::Dev`), the pending
   logins and the one-minute single-use codes; `server::router(auth)` is
-  `/auth/login`, `/auth/callback`, `/auth/exchange` as an axum 0.7 `Router`.
+  `/auth/login`, `/auth/callback`, `/auth/exchange` as an axum 0.7 `Router`,
+  and a page's two: `/auth/session` (the code traded for the login without
+  its token, which is set as the session cookie, `ark-session`: `HttpOnly`,
+  `SameSite=Strict`, `Path=/`, `Secure` over https, as long as the session
+  lasts — `Auth::session_cookie`) and `/auth/logout` (the cookie set empty).
+  `ark-peer`'s sync socket takes a page's session from that cookie when the
+  socket's first message is empty (`COOKIE_HELLO`) and its upgrade's
+  `Origin` is the server's own `Host`.
+- **onboarding** (everywhere; through UniFFI with the `ffi` feature, which
+  `ark-ffi` turns on): the one sign-in machine every app's shell walks —
+  `Onboarding::new(AppInfo)`, `.step()`, `.next(Event) -> Vec<Effect>`,
+  `.said()` — pure, its rules and sentences written once: the browser
+  opens by itself once a launch, a denial signs in again once, a join link
+  (`join_link`, `join_of`, `qr_code`) is asked about before it is used.
+  The server's half of a join link is `Auth::device_code` and
+  `Auth::redeem_device_code` (`/auth/device-code`, `/auth/redeem`):
+  one-time, ten minutes (`DEVICE_CODE_TTL_MS`), kept hashed.
 - **sessions**: a session is one login on one device, and a `SignIn` row
   the hub writes (`server::Hub`, which `ark-peer`'s `Handle` is) before the
   token goes out (`Auth::issue`; a server's own peer, `Auth::own`, keeps
@@ -66,7 +82,10 @@ them in with two fields, one line and one registration.
   code; `exchange`, `open_browser`. In a browser,
   `web::go_sign_in` sends the page to sign in and back to itself,
   `web::take_code` takes `?code=` out of the address bar, and
-  `web::exchange` trades it (fetch). `remember` is a local schema of this
+  `web::session` trades it (fetch) for a login whose token stays in the
+  `HttpOnly` cookie, so no script on the page can read it and nothing
+  secret is in `localStorage` (`web::forget_session` signs the cookie out;
+  `web::exchange` is the bearer's trade). `remember` is a local schema of this
   crate's (`Remembered`: the `login` table, one row per server — its
   account, session and token) and `recall`/`remember`/`forget` over it;
   `ark_peer::Logins::new("app")` opens it as a local instance, under
@@ -117,9 +136,10 @@ ark_peer::Logins::new("myapp").remember(&server, &login);
 peer.login(ark_peer::who(&login), login.token.clone());
 peer.connect(&ark_auth::socket_url(&server));
 
-// browser
+// browser, on the page its server serves: the token is the cookie's
 if let Some(code) = ark_auth::web::take_code() {
-    let login = ark_auth::web::exchange(&server, &code).await?;
+    let login = ark_auth::web::session(&server, &code).await?; // login.token is ""
+    peer.login(ark_peer::who(&login), ark_auth::COOKIE_HELLO.into());
 } else {
     ark_auth::web::go_sign_in(&server, None); // the page goes, and comes back with ?code=
 }
@@ -182,6 +202,11 @@ another login's nonce, for a signature not made with the secret, and a
 state never started. The same over real sockets and a hub — a sign-out
 closing the session's other connection, expiry, a grant — is
 `harken/server/tests/sessions.rs`.
+
+`tests/flow.rs` also holds a page's session to its cookie (the login
+answered without its token, the cookie's attributes, once, signed out), and
+`money/server/tests/server.rs` the socket's half: a page's cookie is its
+session from the server's own origin and nobody from another.
 
 Not verified: a real OpenID Connect provider (the test's is HS256 and a few
 routes; RS256 against a provider's key set is the crate's, untested here);

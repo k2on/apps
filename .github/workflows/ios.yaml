@@ -1,8 +1,9 @@
 # harken and money for iOS: each app's archive built by nix (flake.nix,
-# `<app>-ios-archive`), signed and sent to TestFlight from main. The same
+# `<app>-ios-archive`), signed and sent to TestFlight from a `v*` tag
+# (a release, docs/releasing.md) and from nothing else. The same
 # derivations as the apps' iPhone screenshots (`<app>-ios-simulator`): one
 # kernel, each slice built only where linked (the simulator's,
-# `<app>-ios-kernel-simulator`, for the tests and the shots; the phone's for
+# `<app>-ios-kernel-simulator`, for the shots; the phone's for
 # the archive), one pinned Xcode.
 #
 # **Built by nix, Xcode pinned by its version.** flake.nix pins the Xcode of
@@ -27,14 +28,32 @@
 # ../ios-upload.sh's export signs for the App Store with the cloud's
 # certificate (automatic signing with an App Store Connect API key) and
 # sends it with `destination: upload`, after which it appears in TestFlight.
-# Off main it is signed the same way and sent nowhere (`destination:
-# export`): what a branch checks. money's tests run on a simulator against
-# the demo's household, over the same kernel.
+# A tag's archive also takes the tag as its version (`v1.2` is 1.2).
 #
-# **The apps are the flake's list** (`publish.ios`), one job each: an app is
-# sent only when its archive is new to TestFlight (its key, its derivation's
-# hash, not seen sent before, as build.yaml's APKs), and only when the list
-# says it goes there; its tests run when the list says so.
+# **Main is the unstable channel and goes nowhere.** A push to main (and a
+# run by hand on a branch) archives and signs the same way and sends
+# nothing (`destination: export`): what proves the signing still works
+# before a release needs it, and all it does, to keep the Mac's minutes
+# low. A pull request builds each app's simulator kernel and the
+# screenshots' app (app-screens.yaml fetches them from the cache) and signs
+# nothing. No app has iOS unit tests, so nothing here runs any.
+#
+# **The unstable TestFlight app is a hook, off for every app.** The
+# flake's list says `unstable` for an app whose app.toml has
+# `[channels] ios-unstable = true` (nix/channels.nix). For such an app a
+# push to main would send its archive to TestFlight as a second app, the
+# unstable channel's: ../ios-archive.sh given CHANNEL=unstable makes its
+# bundle id `<bundle>.unstable` (and each extension's under it) and its
+# name "<Name> Unstable" before it is signed. Before turning it on: the
+# App Store Connect record for `<bundle>.unstable` (and its extensions'
+# ids, app groups and push capability) must exist, and the banded icon is
+# not drawn for the iPhone yet (the asset catalog is compiled into the
+# archive; ui/prebuild.py's asset catalog is where it would go).
+# docs/releasing.md says the same.
+#
+# **The apps are the flake's list** (`publish.ios`), one job each: a tag
+# sends an app when the list says it goes to TestFlight, and every other
+# app of a tag is signed and sent nowhere.
 #
 # Repository secrets (Settings > Secrets and variables > Actions > Secrets):
 #   ASC_KEY_ID          the API key's Key ID
@@ -49,21 +68,25 @@
 # the flake's list.)
 name: ios
 
-# Main's pushes (TestFlight) and pull requests: not every branch's push,
-# each holding a macOS runner per app for an archive nothing uploads.
+# Releases (`v*` tags: TestFlight), main's pushes (the signing checked,
+# nothing sent) and pull requests: not every branch's push, each holding a
+# macOS runner per app for an archive nothing uploads. GitHub does not
+# apply `paths` to a tag's push, so every release runs.
 on:
   push:
     branches: [main]
+    tags: ["v*"]
     paths: &paths
       - "harken/ios/**"
       - "harken/ffi/**"
       - "harken/domain/**"
       - "harken/player/**"
-      - "money/ios/**"
-      - "money/ffi/**"
-      - "money/domain/**"
+      - "money/app.toml"
+      - "money/icon.svg"
+      - "ui/prebuild.py"
+      - "nix/ark-app.nix"
+      - "money/core/**"
       # The demo's household, which money's library links for its demo.
-      - "money/seed/**"
       # The crates the phones link, not the whole workspace: arkui, arkdb
       # and the desktop apps are none of an iPhone's.
       - "rust/ark/**"
@@ -71,9 +94,18 @@ on:
       - "rust/ark-auth/**"
       - "rust/ark-peer/**"
       - "rust/ark-ffi/**"
+      - "rust/ark-format/**"
+      - "ui/rust/router/**"
+      - "ui/rust/router-macros/**"
+      # money's screens run in Rust, and the device modules it lists.
+      - "money/app/**"
+      - "ui/rust/app/**"
+      - "ui/rust/arkui-macros/**"
+      - "ui/rust/module/**"
+      - "modules/**"
       - "rust/Cargo.lock"
       - "rust/Cargo.toml"
-      - "swift/ArkUI/**"
+      - "ui/swift/**"
       - ".github/workflows/ios.yaml"
       - ".github/ios-upload.sh"
       - ".github/ios-archive.sh"
@@ -91,11 +123,11 @@ on:
 permissions:
   contents: read
 
-# A newer push supersedes a build still running; TestFlight only wants the
-# latest.
+# A newer push supersedes a build still running; a tag's upload is never
+# cut off.
 concurrency:
   group: ios-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
 
 # nix's macOS sandbox, relaxed: every build is sandboxed but the one that
 # says __noChroot, each app's own xcodebuild (flake.nix says why).
@@ -118,10 +150,6 @@ jobs:
       - id: plan
         run: |
           nix eval --json .#publish.x86_64-linux.ios > ios.json
-          # A pull request's: only the apps with tests to run. Each app's
-          # Swift is built for the simulator by the PR's screenshots
-          # (app-screens.yaml) anyway, and off main an archive goes nowhere.
-          if [ "$GITHUB_EVENT_NAME" = pull_request ]; then jq -c 'map(select(.test))' ios.json > t && mv t ios.json; fi
           jq . ios.json
           echo "ios=$(jq -c . ios.json)" >> "$GITHUB_OUTPUT"
 
@@ -158,7 +186,7 @@ jobs:
           attrs=()
           for a in $APPS; do
             if [ "$GITHUB_EVENT_NAME" = pull_request ]; then attrs+=("$a-ios-simulator" "$a-ios-kernel-simulator")
-            else attrs+=("$a-ios-archive" "$a-ios-kernel-simulator"); fi
+            else attrs+=("$a-ios-archive"); fi
           done
           bash .github/apple-ahead.sh . "$RUNNER_TEMP/kernels.txt" "${attrs[@]}"
           nix copy --to "file://$RUNNER_TEMP/kernels" $(cat "$RUNNER_TEMP/kernels.txt")
@@ -182,32 +210,26 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Whether this archive was sent before: its key is its derivation's
-      # hash, which moves only with what it is built from, so an app whose
-      # inputs have not moved is not sent again (as build.yaml's APKs).
-      - id: seen
-        if: github.ref == 'refs/heads/main'
-        uses: actions/cache/restore@v4
-        with:
-          path: ios-seen
-          key: ios-${{ matrix.app.name }}-${{ matrix.app.key }}
-          lookup-only: true
-
-      # Where it goes: to TestFlight from main, when it is new and the list
-      # says so; off main, signed and sent nowhere, to check the signing.
-      - name: Where it goes (PRs nowhere, other branches signed only, main to TestFlight)
+      # Where it goes: to TestFlight from a `v*` tag when the list says so;
+      # anywhere else (main, a branch run by hand), signed and sent nowhere,
+      # to check the signing. The hook (top of this file): main's push of an
+      # app the list says `unstable` for goes to TestFlight as its unstable
+      # app; no app says so yet.
+      - name: Where it goes (PRs nowhere, main and branches signed only, tags to TestFlight)
         env:
-          SEEN: ${{ steps.seen.outputs.cache-hit }}
           TESTFLIGHT: ${{ matrix.app.testflight }}
+          UNSTABLE: ${{ matrix.app.unstable }}
         run: |
-          # A pull request's is built and tested, and signed by nothing: a
+          # A pull request's is built, and signed by nothing: a
           # fork's has no keys, and what an export would prove the archive
           # already has.
+          channel=stable
           if [ "$GITHUB_EVENT_NAME" = pull_request ]; then send=
-          elif [ "$GITHUB_REF" != refs/heads/main ]; then send="export"
-          elif [ "$TESTFLIGHT" = true ] && [ "$SEEN" != true ]; then send="upload"
-          else send=; fi
+          elif [[ "$GITHUB_REF" == refs/tags/v* ]] && [ "$TESTFLIGHT" = true ]; then send="upload"
+          elif [ "$GITHUB_EVENT_NAME" = push ] && [ "$GITHUB_REF" = refs/heads/main ] && [ "$UNSTABLE" = true ]; then send="upload" channel=unstable
+          else send="export"; fi
           echo "SEND=$send" | tee -a "$GITHUB_ENV"
+          echo "CHANNEL=$channel" | tee -a "$GITHUB_ENV"
 
       - name: The pinned Xcode
         run: bash .github/xcode-pinned.sh .
@@ -247,98 +269,49 @@ jobs:
       - name: The kernels, from Linux
         run: nix copy --no-check-sigs --from "file://$RUNNER_TEMP/kernels" $(cat "$RUNNER_TEMP/kernels/paths.txt")
 
+      # What this run builds: a pull request's the simulator's kernel and
+      # the screenshots' app; otherwise the archive.
       - name: The packages, evaluated
         env:
           APP: ${{ matrix.app.name }}
         run: |
           if [ "$GITHUB_EVENT_NAME" = pull_request ]; then attrs="$APP-ios-kernel-simulator $APP-ios-simulator"
-          else attrs="$APP-ios-archive $APP-ios-kernel-simulator"; fi
+          else attrs="$APP-ios-archive"; fi
+          echo "ATTRS=$attrs" >> "$GITHUB_ENV
           refs=()
           for a in $attrs; do refs+=("git+file://$PWD#packages.aarch64-darwin.$a"); done
           start=$(date +%s)
           nix build --dry-run "${refs[@]}" 2> /dev/null || echo "::warning::not all evaluated; the build says why"
           echo "evaluated in $(( $(date +%s) - start ))s"
 
-      # The tests' simulator, booting under the nix build (meanwhile.sh), as
-      # app-screens' does: a cold boot after the build was up to nine
-      # minutes before the first test. Started once nix is installed and the
-      # packages evaluated: a booting CoreSimulator slowed both (the
-      # evaluation to four minutes). The newest iPhone the image has for the
-      # newest iOS 26 runtime, its id left in $RUNNER_TEMP/udid.
-      - if: matrix.app.test
-        name: Start booting the tests' simulator
-        run: |
-          bash .github/screens/meanwhile.sh start boot bash -c '
-            id=$(xcrun simctl list devices available -j | python3 -c "
-          import json, sys
-          d = json.load(sys.stdin)[\"devices\"]
-          rts = sorted((k for k in d if \"iOS-26\" in k), key=lambda k: [int(x) for x in k.split(\"iOS-\")[1].split(\"-\")])
-          phones = [x for k in reversed(rts) for x in d[k] if x[\"name\"].startswith(\"iPhone\")]
-          print(phones[0][\"udid\"] if phones else \"\")")
-            [ -n "$id" ] || { echo "no iOS 26 iPhone simulator on this image"; exit 1; }
-            echo "$id" > "$RUNNER_TEMP/udid"
-            echo "Booting $id"
-            xcrun simctl boot "$id" && xcrun simctl bootstatus "$id" -b'
-
       # nix's archive (flake.nix, `<app>-ios-archive`, over the phone's
-      # slice alone), the cache's when nothing it is built from moved, and
-      # the simulator's slice for the tests (`<app>-ios-kernel-simulator`);
-      # the archive given its build number, the commit's time in seconds.
+      # slice alone), the cache's when nothing it is built from moved (a
+      # pull request's: the simulator's slice and the screenshots' app);
+      # the archive given its build number, the commit's time in seconds,
+      # and on a `v*` tag its version, the tag's (`v1.2` is 1.2).
       #
       # **One kernel per commit.** A pull request's of this repository's
       # goes to the cache too (the push above; a fork's has no token), with
       # the screenshots' app over the same slice: app-screens takes a PR's
       # iPhone shots once this run has ended, so its Mac fetches both rather
       # than build them a second time.
-      - name: Build the kernel, and the archive (not on PRs), with nix
+      - name: Build the archive (on PRs the simulator's kernel and app), with nix
         env:
           APP: ${{ matrix.app.name }}
           NAME: ${{ matrix.app.App }}
         run: |
-          # A pull request's: the kernel its tests link and the screenshots'
+          # A pull request's: the simulator's kernel and the screenshots'
           # app, and no archive, which nothing would sign or send.
-          if [ "$GITHUB_EVENT_NAME" = pull_request ]; then
-            bash .github/nix-xcode.sh . "$XCODE" "$APP-ios-kernel-simulator" "$APP-ios-simulator" > "$RUNNER_TEMP/built"
-          else
-            bash .github/nix-xcode.sh . "$XCODE" "$APP-ios-archive" "$APP-ios-kernel-simulator" > "$RUNNER_TEMP/built"
-          fi
+          # shellcheck disable=SC2086
+          bash .github/nix-xcode.sh . "$XCODE" $ATTRS > "$RUNNER_TEMP/built"
           cat "$RUNNER_TEMP/built"
           if [ "$GITHUB_EVENT_NAME" != pull_request ]; then
-            bash .github/ios-archive.sh "$NAME" "$(awk -v p="$APP-ios-archive" '$1 == p {print $2}' "$RUNNER_TEMP/built")" "$(git log -1 --format=%ct)"
+            version=
+            if [[ "$GITHUB_REF" == refs/tags/v* ]]; then version=${GITHUB_REF_NAME#v}; fi
+            bash .github/ios-archive.sh "$NAME" "$(awk -v p="$APP-ios-archive" '$1 == p {print $2}' "$RUNNER_TEMP/built")" "$(git log -1 --format=%ct)" $version
           fi
-          kernel=$(awk -v p="$APP-ios-kernel-simulator" '$1 == p {print $2}' "$RUNNER_TEMP/built")
-          mkdir -p "$APP/ffi/ios" && cp -R "$kernel"/*.xcframework "$kernel"/swift "$APP/ffi/ios/" && chmod -R u+w "$APP/ffi/ios"
 
-      # Its tests, when the list says it has them run: on the simulator
-      # booted meanwhile, the app built here over the same kernel (the
-      # simulator's slice, as the screenshots' app links).
-      - name: Test
-        if: matrix.app.test
-        working-directory: ${{ matrix.app.name }}/ios
-        env:
-          NAME: ${{ matrix.app.App }}
-        run: |
-          # XcodeGen from the flake (the cache's), as the screens jobs have it: no Homebrew.
-          "$(nix build --no-link --print-out-paths "$GITHUB_WORKSPACE#xcodegen")/bin/xcodegen" generate
-          # The simulator booted under the build.
-          bash "$GITHUB_WORKSPACE/.github/screens/meanwhile.sh" wait boot
-          id=$(cat "$RUNNER_TEMP/udid")
-          xcodebuild test \
-            -project "$NAME.xcodeproj" \
-            -scheme "$NAME" \
-            -destination "id=$id" \
-            -resultBundlePath "$RUNNER_TEMP/$NAME-tests.xcresult" \
-            CODE_SIGNING_ALLOWED=NO
-
-      - name: Keep the test results
-        if: always() && matrix.app.test
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ matrix.app.App }}-tests.xcresult
-          path: ${{ runner.temp }}/${{ matrix.app.App }}-tests.xcresult
-          if-no-files-found: ignore
-
-      - name: Sign (not on PRs), and send to TestFlight (main only)
+      - name: Sign (not on PRs), and send to TestFlight (v* tags; main only by the unstable hook)
         if: env.SEND != ''
         env:
           DESTINATION: ${{ env.SEND }}
@@ -351,13 +324,3 @@ jobs:
       - name: Remove the API key (not on PRs)
         if: always()
         run: rm -rf "$RUNNER_TEMP/asc"
-
-      # Remember it as sent, once it has been.
-      - name: Mark this archive as sent to TestFlight (main only)
-        if: success() && env.SEND == 'upload'
-        run: mkdir -p ios-seen && git rev-parse HEAD > ios-seen/commit
-      - if: success() && env.SEND == 'upload'
-        uses: actions/cache/save@v4
-        with:
-          path: ios-seen
-          key: ios-${{ matrix.app.name }}-${{ matrix.app.key }}

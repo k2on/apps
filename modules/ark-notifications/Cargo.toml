@@ -1,0 +1,26 @@
+[package]
+name = "ark-notifications"
+workspace = "../../rust"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+description = "Notifications, as an Ark module: local notices and push, the port's fake, and the phones' foreign trait (UNUserNotificationCenter and APNs; NotificationManager, AlarmManager and a UnifiedPush distributor beside it, swift/ and kotlin/)."
+
+# A device module (ui/docs/app.md, The Device): what it is to an app's
+# projects is its module.toml. An app takes it on by depending on this
+# crate, directly or through another; ui/prebuild.py and nix/ark-app.nix
+# find it so, and no app lists it anywhere else.
+[package.metadata.ark]
+module = "module.toml"
+
+[dependencies]
+ark-module = { path = "../../ui/rust/module" }
+uniffi = { version = "0.32.2", default-features = false, optional = true }
+# A UnifiedPush message opened on Android (Web Push, RFC 8291): the device's
+# keys and the decryption, the server's sealing's other end.
+ark-push = { path = "../../rust/ark-push", default-features = false, optional = true }
+
+[features]
+# The trait as a UniFFI foreign trait, for the phones, and Android's Web
+# Push keys and decryption.
+ffi = ["dep:uniffi", "dep:ark-push"]

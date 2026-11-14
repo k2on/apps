@@ -5,14 +5,14 @@
 mod common;
 
 use common::*;
-use money_domain::*;
+use money_core::*;
 use money_server::importer::Outcome;
 use money_server::stores::{AmazonOrders, Stores};
 
-/// An export the domain's tests read the stores from (money/domain/tests/stores),
+/// An export the domain's tests read the stores from (money/core/tests/stores),
 /// read as the test runs: a crate is compiled from its own directory alone.
 fn domain_store(name: &str) -> String {
-    let path = format!("{}/../domain/tests/stores/{name}", env!("CARGO_MANIFEST_DIR"));
+    let path = format!("{}/../core/tests/stores/{name}", env!("CARGO_MANIFEST_DIR"));
     std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{path}: {e}"))
 }
 
@@ -92,7 +92,7 @@ fn the_stores_receipts_are_imported() {
 /// and the importer's own account sets up nothing.
 #[test]
 fn settings_keep_amazons_login_off_the_budget() {
-    use money_domain::setup::{self as calls, AmazonLogin, BrowserPage, Stores};
+    use money_core::setup::{self as calls, AmazonLogin, BrowserPage, Stores};
     let rt = runtime();
     let data = tempfile::tempdir().unwrap();
     let server = serve(&rt, data.path(), |_| {});
@@ -181,7 +181,7 @@ fn walk(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
 /// and a server with no receipt-ocr says so.
 #[test]
 fn a_paper_receipt_is_read_from_its_photo() {
-    use money_domain::setup::{self as calls, PaperReceipt, ReceiptPhoto};
+    use money_core::setup::{self as calls, PaperReceipt, ReceiptPhoto};
     let rt = runtime();
     let (data, bin) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
     let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/paper/foodlion-2025-06-15");
@@ -219,7 +219,7 @@ fn a_paper_receipt_is_read_from_its_photo() {
 /// that opens it.
 #[test]
 fn a_receipt_photo_taken_offline_is_read_by_the_server_once_it_arrives() {
-    use money_domain::types::{AddPhoto, PhotoLine, ReceiptLine};
+    use money_core::types::{AddPhoto, PhotoLine, ReceiptLine};
     let rt = runtime();
     let (data, bin) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
     let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/paper/foodlion-2025-06-15");

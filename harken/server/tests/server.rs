@@ -177,6 +177,8 @@ fn a_server_that_cannot_sign_anybody_in_does_not_start() {
             client_id: "harken".into(),
             secret_file: file.into(),
             scopes: vec!["openid".into()],
+            trusted_clients: vec!["harken".into()],
+            groups: vec![],
         };
         c
     };

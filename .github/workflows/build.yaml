@@ -1,8 +1,21 @@
-# Everything a push to main publishes, in one run: each page at
-# https://k2on.github.io/apps/<name>/ (the browser peer at harken/, arkui's
-# docs at docs/, …) and every Android app in one F-Droid repository at
-# https://k2on.github.io/apps/fdroid/repo. A `v*` tag builds the APKs alone
-# and attaches them to a release.
+# Everything the site publishes, in two release channels
+# (docs/releasing.md, .github/channels.sh), each deploy one of them:
+#
+#   a push to main  the unstable channel: every Android app's `.unstable`
+#                   twin (" Unstable", its icon banded) in the F-Droid
+#                   repository https://k2on.github.io/apps/fdroid/unstable/repo,
+#                   each browser app's page at /apps/unstable/<app>/, and
+#                   the docs at /apps/docs/.
+#   a `v*` tag      the stable channel: every Android app under its own id
+#                   in https://k2on.github.io/apps/fdroid/repo, each browser
+#                   app's page at /apps/<app>/, and the APKs attached to a
+#                   GitHub release.
+#
+# Pages deploys the site whole, so each deploy carries the other channel
+# forward from the live site unchanged. A pull request, and any other
+# branch, deploys nothing: a PR builds the stable APKs whose inputs moved
+# (app-screens.yaml photographs them), and a run by hand builds the
+# channel it is asked for (stable when not).
 #
 # **What there is to publish is not written here.** It is the flake's
 # `publish` output (flake.nix): a list of pages and a list of APKs, each with
@@ -51,12 +64,20 @@ on:
       - "harken/**"
       - "money/**"
       - "revelation/**"
-      - "kotlin/**"
+      - "ui/**"
+      - "modules/**"
       - "rust/**"
       - "nix/**"
       - "flake.nix"
       - "flake.lock"
+      - "docs/site/**"
   workflow_dispatch:
+    inputs:
+      channel:
+        description: "Which channel's APKs and pages to build (nothing is deployed off main and tags)"
+        type: choice
+        options: [stable, unstable]
+        default: stable
 
 permissions:
   # A tag's release is created with GITHUB_TOKEN.
@@ -67,31 +88,45 @@ permissions:
   actions: write
 
 # A newer push supersedes a run still building; deploys are serialised below.
+# A run by hand on a branch is keyed by its commit too: two dispatches at
+# two commits (two agents' pushes to one branch) both finish, so a dry run
+# of app-screens waiting on one for its APKs (published.sh) is never left
+# with a cancelled run (43069089760, cancelled by 43070587909); a second
+# dispatch at the same commit still supersedes the first. main's and a
+# PR's runs are as they were.
 concurrency:
-  group: build-${{ github.ref }}
+  group: build-${{ github.ref }}${{ github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/main' && format('-{0}', github.sha) || '' }}
   cancel-in-progress: true
 
 jobs:
   # What there is to build, and the key each is built under: evaluated, not
   # built, so this takes the time to install nix and read the flake.
+  # The run's channel picks each APK's package (the app's own, or its
+  # `.unstable` twin's) and the pages it builds (.github/channels.sh).
   plan:
     runs-on: ubuntu-latest
     outputs:
+      channel: ${{ steps.plan.outputs.channel }}
       pages: ${{ steps.plan.outputs.pages }}
+      all-pages: ${{ steps.plan.outputs.all-pages }}
       apks: ${{ steps.plan.outputs.apks }}
     steps:
       - uses: actions/checkout@v4
       - uses: DeterminateSystems/nix-installer-action@main
       - id: plan
+        env:
+          CHANNEL_INPUT: ${{ inputs.channel }}
         run: |
           nix eval --json .#publish.x86_64-linux > plan.json
           jq . plan.json
-          echo "pages=$(jq -c .pages plan.json)" >> "$GITHUB_OUTPUT"
-          echo "apks=$(jq -c .apks plan.json)" >> "$GITHUB_OUTPUT"
+          bash .github/channels.sh plan plan.json | tee -a "$GITHUB_OUTPUT"
 
+  # After `crates`, which has built every crate of the docs (docs-site
+  # builds the same page), or without it if it failed. The run's channel's
+  # pages: main's and a tag's, which deploy them, and a run by hand's.
   page:
-    needs: plan
-    if: github.ref == 'refs/heads/main'
+    needs: [plan, crates]
+    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.pages != '[]' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch') }}
     strategy:
       fail-fast: false
       matrix:
@@ -140,16 +175,60 @@ jobs:
           path: page-out
           if-no-files-found: error
 
+  # The docs site (docs/site, an ArkUI app written as static HTML): built
+  # as it is published, and every page shot at a phone's width and a
+  # desktop's, light and dark, with script and without. With script a page
+  # fails on any console error or word of hydration (docs-shots.js).
+  # Nothing is published: the shots are this run's artifact. After `crates`,
+  # as `page` (which builds the same site on main).
+  docs-site:
+    needs: crates
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: DeterminateSystems/nix-installer-action@main
+
+      - if: vars.CACHIX_NAME != ''
+        uses: cachix/cachix-action@v15
+        with:
+          name: ${{ vars.CACHIX_NAME }}
+          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
+
+      - name: Build the site
+        run: nix build .#docs --out-link "$RUNNER_TEMP/docs" --print-build-logs
+
+      - name: Playwright's Chromium
+        run: |
+          mkdir -p "$RUNNER_TEMP/pw" && cd "$RUNNER_TEMP/pw"
+          npm install --no-save --no-audit --no-fund playwright@1.63.0
+          npx playwright install --with-deps chromium
+
+      - name: Every page, with script and without
+        run: NODE_PATH="$RUNNER_TEMP/pw/node_modules" node .github/screens/docs-shots.js "$RUNNER_TEMP/docs" docs-site
+
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: docs-site
+          path: docs-site
+          if-no-files-found: ignore
+
   # The flake's Linux checks: each member's tests and lints a derivation of
   # its own over the crates' (flake.nix, nix/rust.nix), so with Cachix a
   # commit compiles and runs only what its change reaches. First `crates`:
-  # every crate the checks' test and lint builds depend on (flake.nix,
-  # `checks-crates`; resolved once for the whole workspace, as `cargo test
-  # --workspace` resolves them, so each is one build), compiled once and
-  # pushed. Then the checks fan out, a job per group, each fetching those
-  # crates and building only its own tests and lints: no crate is compiled
-  # by two jobs. They were one job of 16 to 22 minutes, nearly all of it one
-  # step on one runner's four cores.
+  # every crate the checks' test and lint builds depend on (resolved once
+  # for the whole workspace, as `cargo test --workspace` resolves them, so
+  # each is one build), the docs' crates, and every crate two of the run's
+  # other jobs both reach (`server`, the APKs: flake.nix, `ci-crates`),
+  # compiled once and pushed. Then the checks fan out, a job per group, and
+  # the server, the docs and the APKs start, each fetching those crates and
+  # building only what is its own: no crate is compiled by two jobs. The
+  # checks were one job of 16 to 22 minutes, nearly all of it one step on
+  # one runner's four cores; and before `ci-crates` the APKs, the server and
+  # the checks each compiled the crates they share at once (build
+  # 42923951723: 107 crates compiled twice or more).
   crates:
     runs-on: ubuntu-latest
     steps:
@@ -170,8 +249,8 @@ jobs:
             echo "::error::rust/Cargo.nix or docs/site/Cargo.nix is not the lockfile's: nix run .#update-cargo-nix"
             exit 1
           }
-      - name: Build the checks' crates
-        run: nix build --print-build-logs --no-link .#checks-crates
+      - name: Build the run's shared crates
+        run: nix build --print-build-logs --no-link .#ci-crates
 
   checks:
     needs: crates
@@ -186,7 +265,8 @@ jobs:
           - { name: clippy, checks: "clippy" }
           - { name: ffi, checks: "ffi harken-domain harken-module traces vectors fuzz-smoke versions" }
           - { name: docs, checks: "docs" }
-          - { name: lint, checks: "fmt theme theme-contrast" }
+          - { name: lint, checks: "fmt theme theme-contrast layers channels" }
+          - { name: apps, checks: "prebuild money-native revelation-native money-web-sync" }
     name: checks (${{ matrix.group.name }})
     runs-on: ubuntu-latest
     steps:
@@ -208,15 +288,13 @@ jobs:
   # What a server runs — the harken and money NixOS modules' packages — built and
   # pushed to Cachix, which ark substitutes from: a deploy of a commit this
   # job has built downloads them rather than compiling them on the host.
-  # With the seeds the screenshots' servers start on (<app>/screens/server.sh):
+  # No browser client yet: iced is the desktop's alone, and the web client
+  # (Leptos, ui/docs/app.md) is not written, so a server serves the socket.
+  # With the seeds the screenshots' servers start on (<app>/demo/server.sh):
   # each of app-screens' Linux jobs, a dozen at once, then fetches them
   # rather than every one compiling the same seed and its crates.
-  # After the pages: the web directory it serves is the browser peer's
-  # crates compiled to wasm, the page's own, which it then substitutes
-  # rather than compiling beside it. On a tag no page is built, and it runs
-  # all the same.
   server:
-    needs: page
+    needs: crates
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     steps:
@@ -228,10 +306,32 @@ jobs:
           name: ${{ vars.CACHIX_NAME }}
           authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
       - name: Build what the server runs
-        run: nix build --print-build-logs --no-link .#harken-server .#harken-web-server .#money-server .#money-web-server .#arkdb .#harken-seed .#money-seed
+        run: nix build --print-build-logs --no-link .#harken-server .#money-server .#arkdb .#harken-seed .#money-seed
 
-  apk:
+  # ArkUI's Kotlin (ui/kotlin), each of its libraries compiled once
+  # (flake.nix, `arkuiKotlin`) and pushed, before the APKs, which link it:
+  # compiled here, not once in each of their jobs. A
+  # commit that leaves ui/kotlin alone fetches it from Cachix in seconds.
+  arkui-kotlin:
     needs: plan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@main
+      - if: vars.CACHIX_NAME != ''
+        uses: cachix/cachix-action@v15
+        with:
+          name: ${{ vars.CACHIX_NAME }}
+          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
+          pushFilter: "(android-sdk-for-gradle|platform-35_r01\\.zip|build-tools_r35_linux\\.zip)"
+      - name: Build ArkUI's Kotlin
+        run: nix build --print-build-logs --no-link .#arkui-kotlin-shots .#arkui-kotlin
+
+  # After `crates` too (the crates both apps' libraries and the checks
+  # share), or without it if it failed: an APK is not held back by a check.
+  apk:
+    needs: [plan, crates, arkui-kotlin]
+    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.arkui-kotlin.result == 'success' }}
     strategy:
       fail-fast: false
       matrix:
@@ -296,11 +396,20 @@ jobs:
             nix build ".#$p" --out-link "$RUNNER_TEMP/first-$p" --print-build-logs
           done
 
+      # The version the phone shows (flake.nix, `versionFlags`): a `v*`
+      # tag's own (`v1.2` is 1.2), and anything else
+      # `<last tag>-unstable+<commit>` (.github/channels.sh). The version
+      # code is the commit's time either way.
+      - name: The version name
+        if: steps.seen.outputs.cache-hit != 'true'
+        run: echo "APPS_VERSION_NAME=$(bash .github/channels.sh version-name)" | tee -a "$GITHUB_ENV"
+
+      # Impure only so that the version name above is read.
       - name: Build ${{ matrix.apk.package }}
         id: build
         if: steps.seen.outputs.cache-hit != 'true'
         run: |
-          nix build .#${{ matrix.apk.package }} --print-build-logs
+          nix build --impure .#${{ matrix.apk.package }} --print-build-logs
           cp result/${{ matrix.apk.file }} ${{ matrix.apk.file }}
 
       - if: steps.build.outcome == 'success'
@@ -310,96 +419,27 @@ jobs:
           path: ${{ matrix.apk.file }}
           if-no-files-found: error
 
-  # Each APK's unit tests, beside its build rather than inside it: the APK
-  # is up (for its screenshots) while they run. An APK goes to F-Droid only
-  # once its tests have passed (deploy reads `tested-<app>`).
-  tests:
-    needs: plan
-    strategy:
-      fail-fast: false
-      matrix:
-        apk: ${{ fromJSON(needs.plan.outputs.apks) }}
-    name: tests (${{ matrix.apk.name }})
-    runs-on: ubuntu-latest
-    env:
-      GH_TOKEN: ${{ github.token }}
-    steps:
-      - uses: actions/checkout@v4
-
-      # Built, and so tested, before under these inputs: nothing to do.
-      - id: seen
-        if: "!startsWith(github.ref, 'refs/tags/v')"
-        uses: actions/cache/restore@v4
-        with:
-          path: apk-seen
-          key: apk-${{ matrix.apk.name }}-${{ matrix.apk.key }}
-          lookup-only: true
-
-      - name: Free disk space
-        if: steps.seen.outputs.cache-hit != 'true'
-        run: nohup sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL /usr/local/share/boost > /dev/null 2>&1 &
-
-      - if: steps.seen.outputs.cache-hit != 'true'
-        uses: DeterminateSystems/nix-installer-action@main
-
-      - if: steps.seen.outputs.cache-hit != 'true' && vars.CACHIX_NAME != ''
-        uses: cachix/cachix-action@v15
-        with:
-          name: ${{ vars.CACHIX_NAME }}
-          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
-          pushFilter: "(android-sdk-for-gradle|platform-35_r01\\.zip|build-tools_r35_linux\\.zip)"
-
-      # The APK job's store, read and not written: one job keeps it.
-      - if: steps.seen.outputs.cache-hit != 'true'
-        uses: nix-community/cache-nix-action@v6
-        with:
-          primary-key: nix-apk-${{ matrix.apk.name }}-${{ runner.os }}-${{ hashFiles('flake.nix', 'flake.lock', 'nix/**', 'rust/Cargo.lock', format('{0}/android/deps.json', matrix.apk.name)) }}
-          restore-prefixes-first-match: nix-apk-${{ matrix.apk.name }}-${{ runner.os }}-
-          save: false
-
-      - name: Test ${{ matrix.apk.name }}
-        id: test
-        if: steps.seen.outputs.cache-hit != 'true'
-        run: nix build .#${{ matrix.apk.tests }} --print-build-logs --no-link
-
-      - if: steps.test.outcome == 'success'
-        run: mkdir -p tested && echo "${{ matrix.apk.name }}" > "tested/${{ matrix.apk.name }}"
-      - if: steps.test.outcome == 'success'
-        uses: actions/upload-artifact@v4
-        with:
-          name: tested-${{ matrix.apk.name }}
-          path: tested
-
       # Remember these inputs as published, so the next push does not build
-      # them again: only main's (a PR's APK is published nowhere), and only
-      # once both the tests and the APK's build have succeeded, so either
-      # failing is tried again on the next push.
+      # them again: only main's pushes (a PR's APK is published nowhere, and
+      # a tag builds whatever it finds), and only once the APK has built, so
+      # a failed build is tried again on the next push. The key is the
+      # unstable twin's, which only main builds.
+      - if: steps.build.outcome == 'success' && github.ref == 'refs/heads/main' && github.event_name == 'push'
+        run: mkdir -p apk-seen && git rev-parse HEAD > apk-seen/commit
       - name: Mark these inputs as built
-        id: mark
-        if: steps.test.outcome == 'success' && github.ref == 'refs/heads/main'
-        run: |
-          job="apk (${{ matrix.apk.name }})"
-          for _ in $(seq 1 120); do
-            state=$(gh api "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/jobs" --paginate \
-              --jq ".jobs[] | select(.name == \"$job\") | .conclusion // \"\"")
-            [ -n "$state" ] && break
-            sleep 15
-          done
-          [ "$state" = success ] || { echo "the APK's build did not succeed ($state); not marked"; exit 0; }
-          mkdir -p apk-seen && git rev-parse HEAD > apk-seen/commit
-          echo "built=true" >> "$GITHUB_OUTPUT"
-      - if: steps.mark.outputs.built == 'true'
+        if: steps.build.outcome == 'success' && github.ref == 'refs/heads/main' && github.event_name == 'push'
         uses: actions/cache/save@v4
         with:
           path: apk-seen
-          key: ${{ steps.seen.outputs.cache-primary-key }}
+          key: apk-${{ matrix.apk.name }}-${{ matrix.apk.key }}
 
-  # A tag is a release: every APK, attached to it, by one job so the builds
-  # never race to create the same release. The keys are public, so the APKs
-  # install anywhere and belong nowhere public (harken/android/README.md).
+  # A tag is a release: every APK (the stable channel's, the apps' own
+  # ids), attached to it, by one job so the builds never race to create
+  # the same release. The keys are public, so the APKs install anywhere
+  # and belong nowhere public (harken/android/README.md). The same APKs go
+  # to the stable F-Droid repository (`deploy`).
   release:
-    # Released only once every APK's tests have passed.
-    needs: [apk, tests]
+    needs: apk
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:
@@ -413,14 +453,20 @@ jobs:
           files: apks/*.apk
           generate_release_notes: true
 
+  # A push to main deploys the unstable channel, a `v*` tag the stable
+  # one; each carries the other forward from the live site
+  # (.github/channels.sh). Nothing else deploys: not a run by hand on
+  # main, whose channel is whatever it was asked.
   deploy:
-    needs: [plan, page, apk, tests]
-    # Every page, or none: Pages deploys the site whole, so a page that failed
-    # would vanish from it. A failed APK does not hold the site back: it goes
-    # up with the repository as it was, plus whichever APKs did build.
-    if: ${{ !cancelled() && github.ref == 'refs/heads/main' && needs.page.result == 'success' }}
+    needs: [plan, page, apk]
+    # Every page of the channel, or none: Pages deploys the site whole, so
+    # a page that failed would vanish from it. A failed APK does not hold
+    # the site back: it goes up with the repository as it was, plus
+    # whichever APKs did build.
+    if: ${{ !cancelled() && ((github.event_name == 'push' && github.ref == 'refs/heads/main') || startsWith(github.ref, 'refs/tags/v')) && (needs.page.result == 'success' || (needs.page.result == 'skipped' && needs.plan.outputs.pages == '[]')) }}
     runs-on: ubuntu-latest
-    # One deployment at a time; a deploy in flight finishes before the next.
+    # One deployment at a time; a deploy in flight finishes before the next,
+    # so each reads the other channel as the last deploy left it.
     concurrency:
       group: pages
       cancel-in-progress: false
@@ -442,29 +488,6 @@ jobs:
           pattern: apk-*
           merge-multiple: true
           path: ${{ runner.temp }}/apk
-      - uses: actions/download-artifact@v4
-        continue-on-error: true
-        with:
-          pattern: tested-*
-          merge-multiple: true
-          path: ${{ runner.temp }}/tested
-      # Of those, only the ones whose tests passed.
-      - name: Only tested APKs
-        run: |
-          shopt -s nullglob
-          for f in "$RUNNER_TEMP"/apk/*.apk; do
-            a=$(basename "$f" .apk)
-            [ -f "$RUNNER_TEMP/tested/$a" ] || { echo "::warning::$a's tests did not pass; its APK is not deployed"; rm -f "$f"; }
-          done
-
-      - name: Lay out the pages
-        env:
-          PAGES: ${{ needs.plan.outputs.pages }}
-        run: |
-          mkdir -p _site
-          for name in $(jq -r '.[].name' <<<"$PAGES"); do
-            cp -r "$RUNNER_TEMP/pages/page-$name" "_site/$name"
-          done
 
       - uses: DeterminateSystems/nix-installer-action@main
 
@@ -474,73 +497,25 @@ jobs:
           name: ${{ vars.CACHIX_NAME }}
           authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
 
-      # The phones' F-Droid repository, one for every app
-      # (harken/android/fdroid/README.md).
-      #
-      # Pages deploys the site whole, so the versions the live repository
-      # already offers are fetched back and kept, of each app the newest
-      # three by version code, and the index is signed again over all of
-      # them: with the committed key, or with FDROID_KEYSTORE when that
+      # The whole site (.github/channels.sh): this channel's pages and
+      # F-Droid repository from this run, the other channel's as the live
+      # site has them, and the front page over both. Each F-Droid index is
+      # signed with the committed key, or with FDROID_KEYSTORE when that
       # secret is set (nix/fdroid.nix says why). An app with no new APK (its
-      # inputs had not moved, or its build failed) is offered as it was.
-      #
-      # Nothing here fails the deploy. No APK anywhere, the live repository
-      # unreachable, or fdroid itself failing, and the site goes up without
-      # fdroid/, saying so.
-      - name: Lay out the F-Droid repository
+      # inputs had not moved, or its build failed) is offered as it was. A
+      # channel that could not be carried forward fails the deploy rather
+      # than vanish from the site.
+      - name: Lay out the site
         env:
+          CHANNEL: ${{ needs.plan.outputs.channel }}
+          PAGES: ${{ needs.plan.outputs.all-pages }}
+          PAGES_DIR: ${{ runner.temp }}/pages
+          APK_DIR: ${{ runner.temp }}/apk
+          SITE_URL: https://k2on.github.io/apps
           FDROID_KEYSTORE: ${{ secrets.FDROID_KEYSTORE }}
           FDROID_KEYSTORE_PASS: ${{ secrets.FDROID_KEYSTORE_PASS }}
           FDROID_KEY_ALIAS: ${{ secrets.FDROID_KEY_ALIAS }}
-        run: |
-          shopt -s nullglob
-          apks=("$RUNNER_TEMP"/apk/*.apk)
-          if [ ${#apks[@]} -eq 0 ]; then
-            echo "::notice::No new APK in this run; the F-Droid repository offers what it already had."
-          fi
-          if [ -z "$FDROID_KEYSTORE" ]; then
-            echo "Signing the F-Droid index with the committed key; FDROID_KEYSTORE is not set."
-          fi
-          if nix run .#apps-fdroid -- repo --keep https://k2on.github.io/apps/fdroid/repo \
-            "$RUNNER_TEMP/fdroid" "${apks[@]}"; then
-            mkdir -p _site/fdroid
-            cp -r "$RUNNER_TEMP/fdroid" _site/fdroid/repo
-          else
-            echo "::warning::No F-Droid repository in this deploy; the site goes up without fdroid/."
-          fi
-
-      # The site's front page: what this is, then a line per page from the
-      # plan, then the F-Droid repository if this deploy has one.
-      - name: Assemble the site
-        env:
-          PAGES: ${{ needs.plan.outputs.pages }}
-        run: |
-          chmod -R u+w _site
-          {
-            cat <<'HTML'
-          <!doctype html>
-          <html lang="en">
-          <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>apps</title>
-          <style>body{font:16px/1.5 system-ui,sans-serif;max-width:40em;margin:4em auto;padding:0 1em;color-scheme:light dark}</style></head>
-          <body>
-          <h1>apps</h1>
-          <p>ArkDB is a local-first sync engine: one runtime in Rust, a domain
-          written in plain Rust, and the phones embedding the same kernel.
-          harken, a music library with playlists, is the first app on it.
-          Revelation, the second app, is the Bible as one scroll zoomed like
-          a map: an Android app in plain Kotlin, on none of ArkDB. The source
-          is at <a href="https://github.com/k2on/apps">github.com/k2on/apps</a>.</p>
-          <ul>
-          HTML
-            jq -r '.[] | "<li><a href=\"\(.name)/\">\(.title)</a>: \(.about)</li>"' <<<"$PAGES"
-            echo '</ul>'
-            if [ -d _site/fdroid/repo ]; then
-              echo '<p><a href="fdroid/repo/">fdroid/repo</a> is every Android app as an F-Droid repository: add that address in F-Droid and each APK built from main arrives as an update.</p>'
-            fi
-            echo '</body>'
-            echo '</html>'
-          } > _site/index.html
-          cat _site/index.html
+        run: bash .github/channels.sh deploy _site
 
       - uses: actions/configure-pages@v5
 

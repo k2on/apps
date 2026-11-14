@@ -4,8 +4,7 @@
 // its title; what a performance's line says; an album's tracks in runs of
 // one work; and who is on a performance. The desktop's (`harken/iced`'s
 // `known`, `listed_works`, `view_composer`, `view_work`, `view_tracks`,
-// `view_recording`), which the pages (Pages.swift) draw and `CatalogueTests`
-// hold to it. Only sorting and filtering of what the domain's views say.
+// `view_recording`), which the pages (Pages.swift) draw. Only sorting and filtering of what the domain's views say.
 import Foundation
 
 enum Catalogue {
@@ -48,7 +47,7 @@ enum Catalogue {
 
     /// The featured work's line: its catalogue number and how many performances of it there are.
     static func featuredFacts(_ w: WorkSummary) -> String {
-        Spell.facts([w.catalogue, Spell.count(Int(w.recordings), "recording")])
+        Spell.facts([w.catalogue, formatCount(n: w.recordings, word: "recording")])
     }
 
     /// What a work is, under its title: its catalogue number (unless the
@@ -72,12 +71,6 @@ enum Catalogue {
         return out.joined(separator: " ")
     }
 
-    /// When somebody lived, as a catalogue heads a person: `1685–1750`,
-    /// `1950–` for the living, nothing when neither year is known.
-    static func life(born: Int64, died: Int64) -> String {
-        if born == 0 && died == 0 { return "" }
-        return (born == 0 ? "" : "\(born)") + "\u{2013}" + (died == 0 ? "" : "\(died)")
-    }
 
     /// Who played a performance — or, when nobody is credited on it, that
     /// nobody is, rather than a guess.
@@ -88,8 +81,8 @@ enum Catalogue {
     /// A performance's line: when, how many tracks, how long —
     /// "1992 · 3 tracks · 40 min".
     static func facts(_ r: RecordingsEntry) -> String {
-        Spell.facts([r.recorded > 0 ? "\(r.recorded)" : nil, Spell.count(Int(r.tracks), "track"),
-                     r.durationMs > 0 ? Spell.length(r.durationMs) : nil])
+        Spell.facts([r.recorded > 0 ? "\(r.recorded)" : nil, formatCount(n: r.tracks, word: "track"),
+                     r.durationMs > 0 ? formatLength(ms: r.durationMs) : nil])
     }
 
     /// The terms a page of tracks was given on, a line each, for its foot

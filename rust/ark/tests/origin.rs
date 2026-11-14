@@ -3,6 +3,9 @@
 //! the rows it drew theirs; the authority stamps the actor, session and
 //! roles of the connection it judged the intent on, and binds an origin to
 //! the actor whose intents first came from it.
+// A test reads its fixtures and times itself: the kernel's and the core's
+// purity (clippy.toml) is their library's, not their tests'.
+#![allow(clippy::disallowed_methods, clippy::disallowed_types)]
 
 #[path = "demo.rs"]
 mod demo;

@@ -8,6 +8,9 @@
 //! [`timings`] is the benchmark Part 3's measurement protocol reads
 //! (`docs/plan-v5.md`): ignored by default; run with
 //! `cargo test -p harken-domain --release --test costs -- --ignored --nocapture`.
+// A test reads its fixtures and times itself: the kernel's and the core's
+// purity (clippy.toml) is their library's, not their tests'.
+#![allow(clippy::disallowed_methods, clippy::disallowed_types)]
 
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;

@@ -4,6 +4,9 @@
 //! duplicates and drops — no sockets, no threads, no sleeps, and a seed
 //! that reproduces the run exactly. Every peer runs the domain in Rust
 //! (§1.16); converging is one chain and one state on every peer.
+// A test reads its fixtures and times itself: the kernel's and the core's
+// purity (clippy.toml) is their library's, not their tests'.
+#![allow(clippy::disallowed_methods, clippy::disallowed_types)]
 
 mod common;
 

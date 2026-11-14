@@ -68,16 +68,16 @@ struct HomeView: View {
                 .font(.subheadline).foregroundStyle(.quiet).padding(.horizontal, Space.page)
         } else {
             CoverShelf(items: s.playlists) { p in
-                CoverCard(seed: p.name, url: "", title: p.name, under: "Playlist", side: Space.shelf, opens: .page(.playlist(p.id))) {
-                    open(.page(.playlist(p.id)))
+                CoverCard(seed: p.name, url: "", title: p.name, under: "Playlist", side: Space.shelf, opens: .playlist(id: p.id.hex, name: p.name)) {
+                    open(.playlist(id: p.id.hex, name: p.name))
                 }
             }
         }
         if !s.albums.isEmpty {
             Heading(title: "Albums", action: "See All") { showTab(.library, .albums) }
             CoverShelf(items: s.albums) { a in
-                CoverCard(seed: a.name, url: RowCover.url(model, a.art), title: a.name, under: a.playedBy, side: Space.shelf, opens: .page(.album(a.id))) {
-                    open(.page(.album(a.id)))
+                CoverCard(seed: a.name, url: RowCover.url(model, a.art), title: a.name, under: a.playedBy, side: Space.shelf, opens: .album(key: a.id, title: a.name)) {
+                    open(.album(key: a.id, title: a.name))
                 }
             }
         }

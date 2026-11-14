@@ -1,0 +1,153 @@
+{
+  "_": "harken's screenshots (.github/screens/apps.md; which phones it is on is flake.nix's list, `publish`): its server is server.sh, signed in to as `user`; the app opened once for each device and theme and every shot taken in that one launch, in order, each its steps done from where the last left it; `search` from Home, as iOS 26's tab bar shows the tab it was opened from. `player` is `fresh`: it plays a song (from Home's Recently added, which the shot before it is not on), and the app is opened again for it; it is paused and put halfway before it is taken, so that what it shows is the same each run. `devices` goes on from it, the player open, and opens its device picker. `desktop` is the iced window's (ui/rust/shots): its size, and its shots, each clicking or typing what a text on the screen says, in one window, each shot opening its own section first (`search` its command box over Songs, as it was taken in a window of its own); `keys` is `fresh`, as `search` leaves the command box open. It has no player shot: nothing on the desktop can play.",
+  "server": {
+    "port": 8787,
+    "user": "alex",
+    "name": "Alex",
+    "picture": "nix/demo/alex.jpg"
+  },
+  "shots": [
+    {
+      "id": "home",
+      "steps": [
+        {
+          "tap": "Home",
+          "role": "tab"
+        }
+      ]
+    },
+    {
+      "id": "library",
+      "steps": [
+        {
+          "tap": "Library",
+          "role": "tab"
+        }
+      ]
+    },
+    {
+      "id": "search",
+      "steps": [
+        {
+          "tap": "Home",
+          "role": "tab"
+        },
+        {
+          "tap": "Search",
+          "role": "tab"
+        }
+      ]
+    },
+    {
+      "id": "player",
+      "fresh": true,
+      "steps": [
+        {
+          "tap": "Für Elise",
+          "where": "bottom"
+        },
+        {
+          "await": "Pause|Close the player"
+        },
+        {
+          "relaunch": true
+        },
+        {
+          "tap": "Für Elise",
+          "where": "bottom"
+        },
+        {
+          "await": "Close the player"
+        },
+        {
+          "tap": "Pause",
+          "optional": true
+        },
+        {
+          "tap": "Position",
+          "optional": true
+        },
+        {
+          "wait": 2
+        }
+      ]
+    },
+    {
+      "id": "devices",
+      "steps": [
+        {
+          "tap": "Playing on|iPhone 17 Pro|iPad Pro 13-inch (M5)"
+        },
+        {
+          "wait": 2
+        }
+      ]
+    }
+  ],
+  "desktop": {
+    "window": [
+      1440,
+      900
+    ],
+    "scale": 2,
+    "shots": [
+      {
+        "id": "home",
+        "steps": [
+          {
+            "click": "Songs"
+          }
+        ]
+      },
+      {
+        "id": "library",
+        "steps": [
+          {
+            "click": "Albums"
+          }
+        ]
+      },
+      {
+        "id": "search",
+        "steps": [
+          {
+            "click": "Songs"
+          },
+          {
+            "key": "ctrl+k"
+          },
+          {
+            "type": "Elise"
+          },
+          {
+            "await": "Für Elise"
+          }
+        ]
+      },
+      {
+        "id": "keys",
+        "fresh": true,
+        "steps": [
+          {
+            "click": "Songs"
+          },
+          {
+            "key": "l"
+          },
+          {
+            "key": "z"
+          },
+          {
+            "wait": 1
+          }
+        ]
+      }
+    ]
+  },
+  "hero": {
+    "name": "Harken",
+    "line": "Music, podcasts and sermons, from your own server, on every device",
+    "logo": "harken/ios/Harken/Assets.xcassets/AppIcon.appiconset/icon-1024.png",
+    "screen": "home"
+  }
+}

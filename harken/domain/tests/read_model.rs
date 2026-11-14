@@ -2,6 +2,9 @@
 //! `harken/domain/tests/read_model.rs`, assertion for assertion. Each test
 //! was falsified once by breaking the function it names; the doc comment
 //! says how.
+// A test reads its fixtures and times itself: the kernel's and the core's
+// purity (clippy.toml) is their library's, not their tests'.
+#![allow(clippy::disallowed_methods, clippy::disallowed_types)]
 
 mod common;
 
@@ -949,7 +952,7 @@ fn the_whole_library_onto_a_playlist() {
 #[test]
 fn the_welcome_is_the_servers_and_makes_one_favorites() {
     let mut c = Lib::new();
-    let alice = ark_auth::Welcome {
+    let alice = ark::auth::Welcome {
         user: "alice".into(),
         name: "Alice".into(),
     };

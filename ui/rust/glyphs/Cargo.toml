@@ -1,0 +1,7 @@
+[package]
+name = "arkui-glyphs"
+workspace = "../../../rust"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+description = "ArkUI's glyphs, Lucide's paths as SVG by their shared names: toolkit-free, drawn by iced (arkui) and the DOM (arkui-web)."

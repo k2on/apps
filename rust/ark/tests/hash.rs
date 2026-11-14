@@ -4,6 +4,9 @@
 //! state hash, `sha256(schema_hash ‖ durable digests in schema order)`.
 //! Written to `spec/vectors/hash/` when `ARK_WRITE_VECTORS` is set, and
 //! otherwise held to what is there.
+// A test reads its fixtures and times itself: the kernel's and the core's
+// purity (clippy.toml) is their library's, not their tests'.
+#![allow(clippy::disallowed_methods, clippy::disallowed_types)]
 
 #[path = "demo.rs"]
 mod demo;

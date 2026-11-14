@@ -46,6 +46,9 @@ is right. `RUNNERS.md` says what `arkdb` does with `protocol/`, `trace/`,
 | 1.16 | `db.rs` | the typed store a function reads and writes, a run reading its own writes, a refusal undoing them |
 | 1.16 | `domain.rs` | a `Domain`: the schema and functions by name — mutators, live transitions, queries, views, scopes |
 | — | `file.rs` | `FileRef`, how a row names a file: the hex sha256 of its bytes, their size and media type, an ordinary record column; the files a value names (`named`), and whether a store holds a row naming one (`held`, who may read a file) |
+| — | `auth.rs` | who is signed in, as rows a domain embeds: `SignIn` and `Role`, the functions over them (revoke, grant, who am I) and the scope that feeds a connection only its person's; how a person comes to sign in is `ark-auth`'s |
+| — | `views.rs` | the views an app names (`ViewKey`, `Opening`: a function by name, its input, the rows' type) and what it reads of those held (`Views`), the port a peer's store implements |
+| — | `twin.rs` | a type's fields by position (`Field`), for an adapter to write its UniFFI twin from; the derive and `twins!` are `rust/ark-macros` |
 | — | `lib.rs` | `Refusal` and the prelude a domain uses; the derives and attributes are `rust/ark-macros` |
 
 The drivers are the reference reading, not the specification:

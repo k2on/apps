@@ -3,7 +3,7 @@
 `kotlin/ark-ui` is what an Ark app on Android looks like and how it moves,
 with nothing of any app in it (`kotlin/ark-ui/README.md`,
 `docs/plan-android.md`, "ark-ui"). This is the same library for iOS, in
-SwiftUI, under `swift/ArkUI`, so that harken on an iPhone — and the next Ark
+SwiftUI, under `ui/swift`, so that harken on an iPhone — and the next Ark
 app on either phone — moves by the same numbers and draws the same squares.
 **A plan; no Swift is written yet.** Nothing here has been built or run.
 
@@ -11,7 +11,7 @@ app on either phone — moves by the same numbers and draws the same squares.
 
 `swift/Package.swift` is the runtime and the client, built on Linux by
 `checks.swift` with nixpkgs' Swift 5.8, which has no SwiftUI. So ArkUI is a
-package of its own, `swift/ArkUI/Package.swift`, with two targets:
+package of its own, `ui/swift/Package.swift`, with two targets:
 
 - **`ArkUICore`** — no SwiftUI, no UIKit: the spring numbers and their
   conversion, the preview curve, the cap, `Art.hash` and `Art.pick`,
@@ -142,7 +142,7 @@ SwiftUI, and the same shape is available:
   reads the hash as unsigned, as the Kotlin does.
 - `Square`: a `Canvas` drawing the gradient and the note in a 100-unit box,
   the tint from an `ArkTheme` in the environment (`@Environment(\.arkTheme)`),
-  neutral by default with `rust/arkui`'s three pairs.
+  neutral by default with `ui/rust/arkui`'s three pairs.
 - `Cover` and `CoverLoader`: a protocol with `url(of:)`, `cached(_:)` and an
   `async load(_:side:)`; the app injects one through the environment. Not
   `AsyncImage`, which neither shares a decode between rows nor decodes to
@@ -193,7 +193,7 @@ nothing re-evaluated per position tick — is then the same assertion.
 - **Velocity units** are distance-relative in SwiftUI; the conversion is in
   one function, not at every call site.
 - **No predictive back for the expanding card**; its dismiss is a drag.
-- **Measurement.** The Kotlin numbers are HotSpot and layoutlib's; the
+- **Measurement.** The Kotlin numbers are HotSpot's; the
   Swift ones will be Instruments' on a device. Neither phone has been timed.
 
 ## Tests
@@ -202,6 +202,5 @@ nothing re-evaluated per position tick — is then the same assertion.
 cap, the splash's four cases — the Kotlin `ArtTests`, `SpringsTests` and
 `SplashTests` value for value. The views: snapshot tests in `harken/ios`
 (rendered on macOS by `ImageRenderer`, light and dark), and the motion
-tests driven by a `UIHostingController` with a stepped clock, the iOS
-counterpart of `MotionTests` — written when there is a macOS runner to
+tests driven by a `UIHostingController` with a stepped clock — written when there is a macOS runner to
 build them on, which this repository does not have today.

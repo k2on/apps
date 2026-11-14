@@ -1,0 +1,646 @@
+/* ArkUI's parts in the DOM (arkui-web), over the theme's variables
+   (theme.css, generated from ui/theme.toml). A colour, a measure of the
+   window or a spring here is always a variable; what is written as a
+   number is a part's own measure, the desktop's (arkui's `panel`,
+   `sidebar`, `view`), so the two toolkits draw one window. */
+
+*, *::before, *::after { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body {
+  background: var(--ark-background);
+  color: var(--ark-ink);
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, "Segoe UI", "DejaVu Sans", sans-serif;
+  font-size: 13px;
+  line-height: var(--ark-line-height);
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+}
+button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: default; text-align: inherit; }
+/* A control that waits for script (`data-ark-off`, page.rs) looks as it
+   will once it answers: only what the app disabled is drawn so. */
+button:disabled:not([data-ark-off]) { color: var(--ark-disabled); }
+input { font: inherit; color: inherit; }
+h1, h2, h3, p { margin: 0; font: inherit; }
+:focus-visible { outline: 2px solid var(--ark-accent); outline-offset: -2px; }
+
+.ark-window, .ark-frame, .ark-shell-root { height: 100vh; width: 100vw; }
+.ark-frame { position: relative; }
+.ark-column { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.ark-fill { flex: 1 1 auto; height: 100%; min-height: 0; }
+.ark-stack { position: relative; }
+.ark-glyph { display: inline-flex; flex: none; line-height: 0; }
+.ark-glyph-space { display: inline-block; width: 16px; flex: none; }
+.ark-caption { color: var(--ark-quiet); font-size: 12px; }
+.ark-amount { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ark-negative { color: var(--ark-error); }
+.ark-quiet { color: var(--ark-quiet); }
+.ark-empty { display: flex; height: 100%; align-items: center; justify-content: center; color: var(--ark-quiet); }
+
+/* * The shell */
+.ark-split-sidebar { display: flex; height: 100%; }
+.ark-sidebar {
+  width: var(--ark-sidebar-width); flex: none; display: flex; flex-direction: column;
+  background: var(--ark-container-low); border-right: 1px solid var(--ark-hairline);
+}
+.ark-sidebar-places { flex: 1; overflow-y: auto; padding: 10px 10px; display: flex; flex-direction: column; gap: 1px; }
+.ark-sidebar-heading { font-size: 11px; font-weight: 600; color: var(--ark-quiet); padding: 14px 10px 4px; }
+button.ark-sidebar-heading { width: 100%; border-radius: 6px; }
+button.ark-sidebar-heading:hover, button.ark-sidebar-heading.ark-on { color: var(--ark-ink); }
+.ark-sidebar-item {
+  display: flex; align-items: center; gap: 6px; padding: 5px 10px; border-radius: 6px; width: 100%;
+  color: var(--ark-ink); transition: background-color var(--ark-fade-ms) var(--ark-fade);
+}
+.ark-sidebar-item .ark-glyph { color: var(--ark-accent); }
+.ark-sidebar-item:hover { background: var(--ark-container); }
+.ark-sidebar-item.ark-selected { background: var(--ark-container-highest); }
+.ark-sidebar[data-focused] .ark-sidebar-item.ark-cursor { background: var(--ark-accent); color: var(--ark-on-accent); }
+.ark-sidebar[data-focused] .ark-sidebar-item.ark-cursor .ark-glyph { color: var(--ark-on-accent); }
+.ark-sidebar-label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ark-count { font-size: 11px; color: var(--ark-quiet); background: var(--ark-container-high); border-radius: 8px; padding: 0 6px; }
+.ark-sidebar-footer { padding: 8px 10px; }
+.ark-shell-main { flex: 1 1 auto; min-width: 0; min-height: 0; display: flex; flex-direction: column; height: 100%; }
+
+.ark-toolbar {
+  height: var(--ark-toolbar-height); flex: none; display: flex; align-items: center; gap: 8px; padding: 0 12px;
+  border-bottom: 1px solid var(--ark-hairline); background: var(--ark-surface);
+}
+.ark-bar-lead, .ark-bar-trailing { display: flex; align-items: center; gap: 2px; flex: none; }
+.ark-bar-title { font-size: 15px; font-weight: 700; white-space: nowrap; }
+.ark-bar-middle { flex: 1; display: flex; justify-content: center; min-width: 0; }
+.ark-bar-search { width: var(--ark-search-width); flex: none; }
+.ark-bar-button {
+  width: 30px; height: 30px; display: inline-flex; align-items: center; justify-content: center; border-radius: 6px;
+  color: color-mix(in srgb, var(--ark-ink) 75%, transparent);
+}
+.ark-bar-button:hover { background: var(--ark-container); }
+.ark-bar-button:active { background: var(--ark-container-highest); transition: none; }
+.ark-bar-button.ark-on { color: var(--ark-accent); }
+/* Who is signed in, the toolbar's last item: their picture, or their initial on the accent's tint. */
+.ark-account { border-radius: 50%; }
+.ark-account-picture { width: 24px; height: 24px; border-radius: 50%; object-fit: cover; }
+.ark-account-initial { width: 24px; height: 24px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 600; background: var(--ark-container-highest); color: var(--ark-accent); }
+.ark-bar-button:disabled:not([data-ark-off]) { color: color-mix(in srgb, var(--ark-ink) 30%, transparent); background: none; }
+/* Short of a sidebar, the title is the page's own, large under the bar
+   (an iPhone's large title), and the bar over it has no rule of its own:
+   the title is what parts the bar from the page. */
+.ark-large-title { font-size: 30px; line-height: 1.15; font-weight: 700; padding: 14px 18px 10px; }
+.ark-toolbar:has(+ .ark-large-title) { border-bottom-color: transparent; }
+.ark-bar-button.ark-bar-back { width: auto; padding: 0 8px 0 2px; gap: 2px; color: var(--ark-accent-text); }
+.ark-under-search { padding: 0 18px 8px; }
+.ark-search-row { padding: 6px 12px; }
+.ark-back-row { padding: 4px 8px; }
+.ark-toolbar-content { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+.ark-toolbar-content > * { flex: 1 1 auto; min-height: 0; }
+
+.ark-top-tabs { display: flex; gap: 2px; padding: 3px; border-radius: 999px; background: var(--ark-container); }
+.ark-top-tab { padding: 5px 12px; border-radius: 999px; display: inline-flex; gap: 4px; align-items: center; white-space: nowrap; }
+.ark-top-tab.ark-on { background: var(--ark-surface); color: var(--ark-accent); box-shadow: 0 1px 2px rgb(0 0 0 / 0.12); }
+.ark-count-badge { font-size: 10px; line-height: 14px; min-width: 14px; padding: 0 4px; border-radius: 7px; background: var(--ark-error); color: var(--ark-on-error); text-align: center; }
+.ark-bottom-tabs { display: flex; flex: none; border-top: 1px solid var(--ark-hairline); background: var(--ark-surface); padding: 2px 8px; }
+.ark-bottom-tab { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 6px 0; color: color-mix(in srgb, var(--ark-ink) 60%, transparent); }
+.ark-bottom-tab.ark-on { color: var(--ark-accent); }
+.ark-bottom-mark { display: inline-flex; gap: 2px; align-items: flex-start; }
+.ark-bottom-title { font-size: 10px; }
+
+.ark-with-inspector { display: flex; height: 100%; min-height: 0; }
+.ark-inspected { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; }
+.ark-inspected > * { flex: 1 1 auto; min-height: 0; }
+.ark-inspector {
+  width: var(--ark-inspector-width); flex: none; border-left: 1px solid var(--ark-hairline);
+  background: var(--ark-surface); overflow-y: auto;
+}
+.ark-split { display: flex; height: 100%; }
+.ark-split-content { width: var(--ark-content-width); flex: none; border-right: 1px solid var(--ark-hairline); overflow: auto; }
+.ark-split-detail { flex: 1; min-width: 0; overflow: auto; }
+
+.ark-pane-tabs { display: flex; justify-content: safe center; gap: 4px; padding: 6px 12px; border-bottom: 1px solid var(--ark-hairline); overflow-x: auto; scrollbar-width: none; }
+.ark-pane-tab { flex: none; white-space: nowrap; display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 4px 12px; border-radius: 8px; font-size: 11px; color: color-mix(in srgb, var(--ark-ink) 65%, transparent); }
+.ark-pane-tab.ark-on { color: var(--ark-accent); background: var(--ark-container); }
+.ark-settings-body { flex: 1; min-height: 0; overflow: auto; }
+/* An app's Settings in a window of its own (`parts::settings_window`): its panes edge to edge under the modal's title. */
+.ark-settings-window { height: 420px; margin: -8px -20px; border-top: 1px solid var(--ark-hairline); }
+.ark-settings-window .ark-shell-root { height: 100%; width: 100%; }
+
+/* * A page */
+.ark-page { height: 100%; overflow-y: auto; }
+.ark-page-column { max-width: 720px; margin: 0 auto; padding: 18px; display: flex; flex-direction: column; gap: 10px; }
+.ark-hero-label { font-size: 13px; color: color-mix(in srgb, var(--ark-ink) 55%, transparent); }
+.ark-hero-figure { font-size: 34px; }
+.ark-hero-note { font-size: 12px; color: var(--ark-quiet); }
+.ark-card { background: var(--ark-container-low); border: 1px solid var(--ark-hairline); border-radius: 8px; }
+.ark-summary { padding: 12px 14px; display: flex; flex-direction: column; gap: 4px; }
+.ark-headline { font-size: 28px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.ark-summary-foot { display: flex; align-items: flex-end; justify-content: space-between; }
+.ark-facts { display: flex; gap: 18px; }
+.ark-fact .ark-caption { font-size: 11px; }
+.ark-section { display: flex; flex-direction: column; }
+.ark-section-header { display: flex; justify-content: space-between; align-items: baseline; padding: 10px 4px 6px; font-size: 13px; font-weight: 700; color: color-mix(in srgb, var(--ark-ink) 55%, transparent); }
+.ark-group { padding: 4px 14px; }
+.ark-row-divider { height: 1px; background: var(--ark-hairline); }
+.ark-section-footer { padding: 6px 4px; font-size: 12px; color: var(--ark-quiet); }
+.ark-row {
+  display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px 0; min-height: 44px;
+  border-radius: 6px; transition: background-color var(--ark-fade-ms) var(--ark-fade);
+}
+.ark-row:active { background: var(--ark-container-highest); transition: none; }
+.ark-row.ark-cursor { background: var(--ark-container-high); box-shadow: 0 0 0 4px var(--ark-container-high); }
+.ark-row-words { flex: 1; min-width: 0; }
+.ark-row-title { font-size: 14px; }
+.ark-row-subtitle { font-size: 12px; color: var(--ark-quiet); }
+.ark-accent-row { color: var(--ark-accent-text); }
+.ark-row-glyph { color: var(--ark-accent); display: inline-flex; }
+.ark-tile { width: 28px; height: 28px; border-radius: 7px; display: inline-flex; align-items: center; justify-content: center; flex: none; background: var(--ark-container-high); color: var(--ark-quiet); }
+.ark-tile-accent { background: var(--ark-accent-container); color: var(--ark-accent); }
+.ark-badge { font-size: 11px; padding: 0 6px; border-radius: 8px; background: var(--ark-accent); color: var(--ark-on-accent); }
+.ark-chevron { color: var(--ark-quiet); display: inline-flex; }
+
+.ark-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.ark-chip { padding: 5px 10px; border-radius: 999px; border: 1px solid var(--ark-hairline); font-size: 13px; }
+.ark-chip:hover { background: var(--ark-container); }
+.ark-chip.ark-on { background: var(--ark-accent-container); color: var(--ark-on-accent-container); border-color: transparent; }
+.ark-form-section { display: flex; flex-direction: column; gap: 6px; }
+.ark-field { display: flex; flex-direction: column; gap: 4px; }
+.ark-input, .ark-search-input, .ark-command-input {
+  border: 1px solid var(--ark-hairline); border-radius: 6px; background: var(--ark-container-lowest);
+  padding: 6px 10px; font-size: 13px; outline: none;
+}
+.ark-input:focus, .ark-search-input:focus { border-color: var(--ark-accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ark-accent) 25%, transparent); }
+.ark-problem { color: var(--ark-error); font-size: 12px; }
+.ark-toggle { display: flex; gap: 8px; align-items: flex-start; }
+.ark-toggle > span { display: flex; flex-direction: column; }
+.ark-toggle input { accent-color: var(--ark-accent); }
+.ark-button, .ark-push {
+  padding: 4px 12px; border-radius: 6px; border: 1px solid var(--ark-hairline); background: var(--ark-surface);
+  box-shadow: 0 1px 1px rgb(0 0 0 / 0.06);
+}
+.ark-push:active, .ark-button:active { background: var(--ark-container-high); }
+.ark-push.ark-default { background: var(--ark-accent); color: var(--ark-on-accent); border-color: transparent; }
+.ark-push.ark-destructive { color: var(--ark-error); }
+.ark-push:disabled:not([data-ark-off]) { opacity: 0.5; }
+
+/* * Search, and what it suggests */
+.ark-search { position: relative; display: flex; align-items: center; }
+.ark-search > .ark-glyph { position: absolute; left: 9px; color: var(--ark-quiet); pointer-events: none; }
+.ark-search-input { width: 100%; padding-left: 28px; padding-right: 26px; background: var(--ark-container); border-color: transparent; }
+.ark-search-input::-webkit-search-cancel-button { display: none; }
+.ark-search-clear { position: absolute; right: 6px; width: 16px; height: 16px; border-radius: 8px; display: inline-flex; align-items: center; justify-content: center; background: var(--ark-disabled); color: var(--ark-surface); }
+.ark-suggestions, .ark-menu, .ark-popover, .ark-command, .ark-keys-panel {
+  background: var(--ark-glass); border: 1px solid var(--ark-hairline); border-radius: 6px;
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.18), 0 1px 3px rgb(0 0 0 / 0.12);
+}
+.ark-suggestions { position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 30; padding: 4px; }
+.ark-suggestion { display: flex; gap: 8px; align-items: center; height: 27px; padding: 0 10px; border-radius: 4px; }
+.ark-suggestion .ark-glyph { color: var(--ark-quiet); }
+.ark-suggestion:hover, .ark-suggestion.ark-lit { background: var(--ark-accent); color: var(--ark-on-accent); }
+.ark-suggestion:hover .ark-glyph, .ark-suggestion.ark-lit .ark-glyph { color: var(--ark-on-accent); }
+
+/* * Menus (arkui's panel: 4 padding, 27 entries, 24 title, 6 radius) */
+.ark-menu-layer { position: fixed; inset: 0; z-index: 50; }
+.ark-menu-catch { position: absolute; inset: 0; }
+.ark-menu { position: absolute; padding: 4px; user-select: none; }
+.ark-menu-title { height: 24px; padding: 0 10px; display: flex; align-items: center; font-size: 12px; font-weight: 600; color: var(--ark-quiet); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ark-menu-entry { height: 27px; padding: 0 10px; display: flex; align-items: center; gap: 8px; border-radius: 4px; white-space: nowrap; }
+.ark-menu-entry .ark-glyph { color: var(--ark-quiet); }
+.ark-menu-entry.ark-lit { background: var(--ark-accent); color: var(--ark-on-accent); }
+.ark-menu-entry.ark-lit .ark-glyph, .ark-menu-entry.ark-lit .ark-menu-key { color: var(--ark-on-accent); }
+.ark-menu-entry.ark-destructive { color: var(--ark-error); }
+.ark-menu-entry.ark-destructive .ark-glyph { color: var(--ark-error); }
+.ark-menu-entry.ark-destructive.ark-lit { background: var(--ark-error); color: var(--ark-on-error); }
+.ark-menu-label { flex: 1; overflow: hidden; text-overflow: ellipsis; }
+.ark-menu-key { color: var(--ark-quiet); font-size: 12px; }
+.ark-menu-separator { height: 1px; margin: 4px 10px; background: var(--ark-hairline); }
+/* A menu written open in the page (menu::written): its panels side by
+   side, a submenu overlapping the menu by the panel's padding; on a
+   phone's width, under it. */
+.ark-menu-shown { display: flex; align-items: flex-start; }
+.ark-menu.ark-menu-written { position: relative; flex: none; max-width: 100%; }
+.ark-menu-written + .ark-menu-written { margin-left: -4px; z-index: 1; }
+.ark-menu-written .ark-menu-entry:not(.ark-lit):hover { background: var(--ark-container); }
+@media (max-width: 600px) {
+  .ark-menu-shown { flex-direction: column; }
+  .ark-menu-written + .ark-menu-written { margin: 4px 0 0 28px !important; }
+}
+
+/* * Popovers: a calendar */
+.ark-popover-anchor { position: relative; display: inline-block; }
+.ark-popover-layer { position: absolute; top: calc(100% + 4px); left: 0; z-index: 40; }
+.ark-popover-catch { position: fixed; inset: 0; }
+.ark-popover { position: relative; padding: 8px; }
+.ark-calendar { width: 236px; outline: none; }
+.ark-cal-head { display: flex; align-items: center; gap: 2px; padding: 0 2px 6px 6px; }
+.ark-cal-month { flex: 1; font-weight: 700; }
+.ark-cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; text-align: center; }
+.ark-cal-weekday { font-size: 11px; color: var(--ark-quiet); padding: 2px 0; }
+.ark-cal-day { height: 28px; border-radius: 14px; text-align: center; font-variant-numeric: tabular-nums; }
+.ark-cal-day:hover { background: var(--ark-container); }
+.ark-cal-day.ark-lit { box-shadow: inset 0 0 0 2px var(--ark-accent); }
+.ark-cal-day.ark-on { background: var(--ark-accent); color: var(--ark-on-accent); }
+.ark-date-button, .ark-picker {
+  display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 6px;
+  border: 1px solid var(--ark-hairline); background: var(--ark-surface); box-shadow: 0 1px 1px rgb(0 0 0 / 0.06);
+}
+.ark-picker-face { display: inline-flex; align-items: center; gap: 6px; }
+
+/* * A search picker (fields.rs): its field, and its list anchored under it
+   on a wide window or a sheet from the foot on a compact one. */
+.ark-combo-anchor { display: block; }
+.ark-combo-face {
+  display: flex; align-items: center; gap: var(--ark-space-s); width: 100%; padding: 4px 10px; border-radius: 6px; text-align: start;
+  border: 1px solid var(--ark-hairline); background: var(--ark-surface); box-shadow: 0 1px 1px rgb(0 0 0 / 0.06);
+}
+.ark-combo-face > .ark-glyph { color: var(--ark-quiet); }
+.ark-combo-face.ark-unset, .ark-combo-face.ark-unset > .ark-glyph:first-child { color: var(--ark-caution); }
+.ark-combo-value { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ark-combo { display: flex; flex-direction: column; gap: var(--ark-space-xs); width: var(--ark-dropdown-width); max-width: calc(100vw - 2 * var(--ark-space-s)); padding: var(--ark-space-xs); }
+.ark-combo-list { max-height: var(--ark-dropdown-height); overflow-y: auto; }
+.ark-combo-heading { height: 24px; padding: 0 10px; display: flex; align-items: center; font-size: 11px; font-weight: 600; color: var(--ark-quiet); }
+.ark-combo-option { height: 27px; padding: 0 10px; display: flex; align-items: center; gap: var(--ark-space-s); border-radius: 4px; cursor: default; }
+.ark-combo-option > .ark-glyph { color: var(--ark-quiet); }
+.ark-combo-option.ark-lit { background: var(--ark-container); }
+.ark-combo-title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ark-combo-check { visibility: hidden; color: var(--ark-accent-text); display: inline-flex; }
+.ark-combo-check.ark-on { visibility: visible; }
+.ark-combo-empty { padding: var(--ark-space-m); text-align: center; color: var(--ark-quiet); }
+.ark-combo-head { display: flex; align-items: center; justify-content: space-between; padding: var(--ark-space-s) var(--ark-space-s) 0 var(--ark-space-l); font-weight: 600; }
+.ark-combo-sheet {
+  position: absolute; left: 0; right: 0; bottom: 0; width: auto; max-width: none; max-height: 85vh;
+  padding: var(--ark-space-s) var(--ark-space-l) var(--ark-space-xl); background: var(--ark-surface);
+  border-radius: var(--ark-card-corner) var(--ark-card-corner) 0 0;
+}
+.ark-combo-sheet .ark-combo-list { max-height: none; flex: 1; min-height: 0; }
+.ark-combo-sheet .ark-combo-option { height: auto; min-height: var(--ark-row-height); }
+
+/* * Dialogs and sheets: centred, the page dimmed */
+.ark-modal-layer { position: fixed; inset: 0; z-index: 45; display: flex; align-items: center; justify-content: center; }
+.ark-scrim { position: absolute; inset: 0; background: color-mix(in srgb, var(--ark-scrim) 32%, transparent); animation: ark-fade var(--ark-fade-ms) var(--ark-fade); }
+.ark-scrim.ark-clear { background: transparent; }
+.ark-dialog {
+  position: relative; width: 420px; max-width: calc(100vw - 32px);
+  background: var(--ark-surface); border: 1px solid var(--ark-hairline); border-radius: 10px; padding: 20px;
+  display: flex; flex-direction: column; gap: 12px; box-shadow: 0 16px 48px rgb(0 0 0 / 0.25);
+}
+.ark-modal-layer:has(.ark-dialog-sheet) { align-items: flex-end; }
+.ark-dialog.ark-dialog-sheet { width: 100%; max-width: 100%; max-height: 92vh; border-radius: 12px 12px 0 0; border-bottom: 0; }
+.ark-dialog-title { font-size: 18px; font-weight: 700; }
+.ark-dialog-message { color: var(--ark-quiet); }
+.ark-dialog-body { display: flex; flex-direction: column; gap: 12px; }
+.ark-dialog-buttons { display: flex; justify-content: flex-end; gap: 8px; }
+.ark-inspector-sheet {
+  position: absolute; left: 0; right: 0; bottom: 0; height: 75%; background: var(--ark-surface);
+  border-radius: 12px 12px 0 0; display: flex; flex-direction: column; box-shadow: 0 -8px 32px rgb(0 0 0 / 0.2);
+}
+.ark-sheet-bar { display: flex; align-items: center; padding: 8px 12px; }
+.ark-sheet-title { flex: 1; font-size: 15px; font-weight: 700; }
+.ark-sheet-body { flex: 1; overflow-y: auto; }
+
+/* * A specimen (arkui_web::specimen): what goes over a window drawn in its
+   frame instead, as written, so a page can show it open. */
+.ark-specimen { position: relative; contain: layout; display: flex; flex-direction: column; gap: 10px; }
+.ark-specimen:has(> * .ark-modal-layer) { min-height: 360px; }
+.ark-specimen .ark-modal-layer { position: absolute; z-index: 1; border-radius: inherit; overflow: hidden; }
+.ark-specimen .ark-dialog { max-width: calc(100% - 32px); }
+.ark-specimen .ark-dialog.ark-dialog-sheet { max-width: 100%; }
+
+/* * The command box and the keys panel: opened by a key, no motion */
+.ark-command-layer { align-items: flex-start; padding-top: 14vh; }
+.ark-command { position: relative; width: 520px; max-width: calc(100vw - 32px); padding: 6px; }
+.ark-command-input { width: 100%; font-size: 15px; padding: 8px 10px; border: 0; background: transparent; }
+.ark-command-list { max-height: 50vh; overflow-y: auto; border-top: 1px solid var(--ark-hairline); padding-top: 4px; margin-top: 4px; }
+.ark-command-row { height: 27px; padding: 0 10px; display: flex; align-items: center; justify-content: space-between; border-radius: 4px; }
+.ark-command-row.ark-lit { background: var(--ark-accent); color: var(--ark-on-accent); }
+.ark-command-row.ark-lit .ark-menu-key { color: var(--ark-on-accent); }
+.ark-keys-panel { position: fixed; right: 16px; bottom: 16px; z-index: 44; padding: 12px 16px; display: flex; gap: 24px; }
+.ark-keys-column h3 { font-weight: 700; margin-bottom: 6px; }
+.ark-key-row { display: flex; gap: 12px; padding: 2px 0; }
+.ark-key-row kbd { font: inherit; font-variant-numeric: tabular-nums; min-width: 110px; color: var(--ark-accent-text); }
+/* Written open in the page (keys::command_written, keys::panel_written). */
+.ark-command.ark-command-written { width: 100%; max-width: 520px; }
+.ark-command-written .ark-command-list { max-height: 240px; }
+.ark-command-written .ark-command-row:not(.ark-lit):hover { background: var(--ark-container); }
+.ark-keys-panel.ark-keys-written { position: relative; right: auto; bottom: auto; z-index: auto; flex-wrap: wrap; max-width: 100%; }
+
+/* * Tables (arkui::table): headings, then rows a grid of cells */
+.ark-table { display: grid; align-content: start; grid-auto-rows: max-content; overflow-y: auto; height: 100%; }
+.ark-table-head, .ark-table-row { display: grid; grid-template-columns: subgrid; grid-column: 1 / -1; align-items: center; }
+.ark-table-head { position: sticky; top: 0; z-index: 1; background: var(--ark-surface); border-bottom: 1px solid var(--ark-hairline); font-size: 11px; color: var(--ark-quiet); }
+.ark-table-head .ark-table.ark-compact .ark-goal { width: 100%; }
+/* A compact table is a list: two lines a row, a hairline between. */
+.ark-table.ark-listed .ark-table-row { border-bottom: 1px solid var(--ark-hairline); background: none; }
+.ark-table.ark-listed .ark-table-row.ark-cursor, .ark-table.ark-listed .ark-table-row.ark-selected { background: var(--ark-container-high); color: inherit; }
+.ark-table.ark-listed .ark-cell { padding-top: 8px; padding-bottom: 8px; }
+.ark-table.ark-listed .ark-heading { border-bottom: 0; }
+.ark-list-title { font-size: 15px; display: flex; flex-direction: column; gap: 3px; }
+.ark-list-sub { font-size: 13px; color: var(--ark-quiet); overflow: hidden; text-overflow: ellipsis; }
+.ark-list-figure { font-size: 15px; font-variant-numeric: tabular-nums; }
+.ark-cell { padding: 5px 8px; }
+.ark-table-row { min-height: 24px; }
+.ark-table-row.ark-odd { background: var(--ark-container-low); }
+.ark-table-row:hover { background: var(--ark-container); }
+.ark-table-row.ark-selected { background: var(--ark-container-highest); }
+.ark-table-row.ark-cursor { background: var(--ark-accent); color: var(--ark-on-accent); }
+.ark-table-row.ark-cursor .ark-negative, .ark-table-row.ark-cursor .ark-quiet { color: var(--ark-on-accent); }
+.ark-table-row.ark-heading { font-weight: 600; color: color-mix(in srgb, var(--ark-ink) 70%, transparent); }
+.ark-table-row.ark-heading .ark-cell { padding-top: 14px; padding-bottom: 4px; }
+.ark-table-row.ark-heading:hover { background: none; }
+.ark-table-top { grid-column: 1 / -1; padding: 12px 18px 6px; }
+.ark-table-head .ark-cell:first-child, .ark-table-row .ark-cell:first-child { padding-left: 18px; }
+.ark-table-head .ark-cell:last-child, .ark-table-row .ark-cell:last-child { padding-right: 18px; }
+.ark-cell { padding: 3px 8px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ark-cell.ark-end { text-align: right; justify-self: stretch; }
+.ark-cell.ark-center { text-align: center; }
+
+/* * An inspector's and a settings pane's body: rows of a label and a figure in cards */
+.ark-inspector-body { padding: 18px; display: flex; flex-direction: column; gap: 12px; }
+.ark-inspector-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+.ark-inspector-title { font-size: 17px; font-weight: 700; }
+/* The sign-in page (`welcome`): the machine's words centred in the window */
+.ark-welcome { height: 100%; display: flex; align-items: center; justify-content: center; padding: 24px 16px; }
+.ark-welcome-card { width: 100%; max-width: 360px; display: flex; flex-direction: column; align-items: center; gap: 10px; text-align: center; }
+.ark-welcome-title { font-size: 28px; font-weight: 700; }
+.ark-welcome-status:empty { display: none; }
+.ark-welcome-error { font-size: 13px; }
+.ark-welcome-actions { display: flex; flex-direction: column; align-items: stretch; gap: 8px; margin-top: 18px; width: 100%; }
+.ark-welcome-mark { width: 72px; height: 72px; display: flex; align-items: center; justify-content: center; border-radius: 20px; color: var(--ark-accent); background: color-mix(in srgb, var(--ark-accent) 15%, transparent); margin-bottom: 12px; }
+.ark-welcome-sentence { font-size: 15px; }
+.ark-wide { width: 100%; }
+.ark-status { display: flex; flex-direction: column; gap: 4px; text-align: center; }
+.ark-status:empty { display: none; }
+.ark-code { width: 220px; height: 220px; align-self: center; }
+/* A code is dark on light in every theme: a scanner reads no other. */
+.ark-code-ground { fill: #ffffff; }
+.ark-code-ink { fill: #000000; }
+
+/* A photo (`photo`): fitted to its width; zoomed (`zoom_photo`), the room it is given, scrolled at its own size once wider. */
+.ark-photo { display: block; max-width: 100%; height: auto; border-radius: var(--ark-corner); }
+.ark-photo-zoom { width: 100%; max-height: 80vh; object-fit: contain; }
+.ark-photo-waiting { text-align: center; padding: var(--ark-space-l); }
+/* A slip of paper (`paper`): a receipt as it was printed, dark on white in every theme as the paper is. */
+.ark-paper { background: #ffffff; color: #1c1c1c; font-family: "SF Mono", ui-monospace, "Fira Mono", monospace; font-size: 13px; padding: var(--ark-space-l); border-radius: var(--ark-corner); box-shadow: 0 2px 6px rgba(0, 0, 0, 0.18); display: flex; flex-direction: column; gap: var(--ark-space-xs); }
+.ark-paper-heading { font-weight: 700; text-align: center; }
+.ark-paper-date { text-align: center; }
+.ark-paper-rule { border: none; border-top: 1px dashed rgba(0, 0, 0, 0.5); margin: var(--ark-space-xs) 0; width: 100%; }
+.ark-paper-line { display: flex; justify-content: space-between; gap: var(--ark-space-m); }
+.ark-paper-note { color: rgba(0, 0, 0, 0.55); padding-left: 2ch; }
+.ark-paper-total { font-weight: 700; }
+
+/* An inspector's page of cards (`detail_page`) */
+.ark-detail { gap: 14px; }
+.ark-tile-large { width: 36px; height: 36px; border-radius: 9px; }
+.ark-tile.ark-tint-positive { background: color-mix(in srgb, var(--ark-positive) 16%, transparent); color: var(--ark-positive); }
+.ark-tile.ark-tint-negative { background: color-mix(in srgb, var(--ark-error) 16%, transparent); color: var(--ark-error); }
+.ark-tile.ark-tint-caution { background: color-mix(in srgb, var(--ark-caution) 16%, transparent); color: var(--ark-caution); }
+.ark-tile.ark-tint-accent { background: var(--ark-accent-container); color: var(--ark-accent); }
+.ark-meter .ark-goal { width: 100%; }
+
+/* The layout primitives (ui/docs/primitives.md, `layout.rs`): every gap, inset and corner a
+   `[layout]` token's, every face a `type-*`, every colour a role's. Start and end are the
+   flex box's, so a right-to-left page flips them. */
+.ark-stack { display: flex; min-width: 0; }
+.ark-stack.ark-v { flex-direction: column; }
+.ark-stack.ark-h { flex-direction: row; }
+.ark-stack.ark-z { display: grid; }
+.ark-stack.ark-z > * { grid-area: 1 / 1; }
+.ark-v.ark-align-start { align-items: flex-start; }
+.ark-v.ark-align-center { align-items: center; }
+.ark-v.ark-align-end { align-items: flex-end; }
+.ark-h.ark-align-start { align-items: flex-start; }
+.ark-h.ark-align-center { align-items: center; }
+.ark-h.ark-align-end { align-items: flex-end; }
+.ark-z.ark-align-start { justify-items: start; align-items: center; }
+.ark-z.ark-align-center { place-items: center; }
+.ark-z.ark-align-end { justify-items: end; align-items: center; }
+.ark-scroll.ark-v { overflow-y: auto; }
+.ark-scroll.ark-h { overflow-x: auto; }
+.ark-spacer { flex: 1 1 0; }
+.ark-gap-xs { gap: var(--ark-space-xs); }
+.ark-gap-s { gap: var(--ark-space-s); }
+.ark-gap-m { gap: var(--ark-space-m); }
+.ark-gap-l { gap: var(--ark-space-l); }
+.ark-gap-xl { gap: var(--ark-space-xl); }
+.ark-gap-xxl { gap: var(--ark-space-xxl); }
+.ark-gap-page { gap: var(--ark-page-margin); }
+.ark-gap-section { gap: var(--ark-section-gap); }
+.ark-min-xs { min-width: var(--ark-space-xs); min-height: var(--ark-space-xs); }
+.ark-min-s { min-width: var(--ark-space-s); min-height: var(--ark-space-s); }
+.ark-min-m { min-width: var(--ark-space-m); min-height: var(--ark-space-m); }
+.ark-min-l { min-width: var(--ark-space-l); min-height: var(--ark-space-l); }
+.ark-min-xl { min-width: var(--ark-space-xl); min-height: var(--ark-space-xl); }
+.ark-min-xxl { min-width: var(--ark-space-xxl); min-height: var(--ark-space-xxl); }
+.ark-min-page { min-width: var(--ark-page-margin); min-height: var(--ark-page-margin); }
+.ark-min-section { min-width: var(--ark-section-gap); min-height: var(--ark-section-gap); }
+.ark-pad-all-xs { padding: var(--ark-space-xs); }
+.ark-pad-h-xs { padding-inline: var(--ark-space-xs); }
+.ark-pad-v-xs { padding-block: var(--ark-space-xs); }
+.ark-pad-top-xs { padding-top: var(--ark-space-xs); }
+.ark-pad-bottom-xs { padding-bottom: var(--ark-space-xs); }
+.ark-pad-start-xs { padding-inline-start: var(--ark-space-xs); }
+.ark-pad-end-xs { padding-inline-end: var(--ark-space-xs); }
+.ark-pad-all-s { padding: var(--ark-space-s); }
+.ark-pad-h-s { padding-inline: var(--ark-space-s); }
+.ark-pad-v-s { padding-block: var(--ark-space-s); }
+.ark-pad-top-s { padding-top: var(--ark-space-s); }
+.ark-pad-bottom-s { padding-bottom: var(--ark-space-s); }
+.ark-pad-start-s { padding-inline-start: var(--ark-space-s); }
+.ark-pad-end-s { padding-inline-end: var(--ark-space-s); }
+.ark-pad-all-m { padding: var(--ark-space-m); }
+.ark-pad-h-m { padding-inline: var(--ark-space-m); }
+.ark-pad-v-m { padding-block: var(--ark-space-m); }
+.ark-pad-top-m { padding-top: var(--ark-space-m); }
+.ark-pad-bottom-m { padding-bottom: var(--ark-space-m); }
+.ark-pad-start-m { padding-inline-start: var(--ark-space-m); }
+.ark-pad-end-m { padding-inline-end: var(--ark-space-m); }
+.ark-pad-all-l { padding: var(--ark-space-l); }
+.ark-pad-h-l { padding-inline: var(--ark-space-l); }
+.ark-pad-v-l { padding-block: var(--ark-space-l); }
+.ark-pad-top-l { padding-top: var(--ark-space-l); }
+.ark-pad-bottom-l { padding-bottom: var(--ark-space-l); }
+.ark-pad-start-l { padding-inline-start: var(--ark-space-l); }
+.ark-pad-end-l { padding-inline-end: var(--ark-space-l); }
+.ark-pad-all-xl { padding: var(--ark-space-xl); }
+.ark-pad-h-xl { padding-inline: var(--ark-space-xl); }
+.ark-pad-v-xl { padding-block: var(--ark-space-xl); }
+.ark-pad-top-xl { padding-top: var(--ark-space-xl); }
+.ark-pad-bottom-xl { padding-bottom: var(--ark-space-xl); }
+.ark-pad-start-xl { padding-inline-start: var(--ark-space-xl); }
+.ark-pad-end-xl { padding-inline-end: var(--ark-space-xl); }
+.ark-pad-all-xxl { padding: var(--ark-space-xxl); }
+.ark-pad-h-xxl { padding-inline: var(--ark-space-xxl); }
+.ark-pad-v-xxl { padding-block: var(--ark-space-xxl); }
+.ark-pad-top-xxl { padding-top: var(--ark-space-xxl); }
+.ark-pad-bottom-xxl { padding-bottom: var(--ark-space-xxl); }
+.ark-pad-start-xxl { padding-inline-start: var(--ark-space-xxl); }
+.ark-pad-end-xxl { padding-inline-end: var(--ark-space-xxl); }
+.ark-pad-all-page { padding: var(--ark-page-margin); }
+.ark-pad-h-page { padding-inline: var(--ark-page-margin); }
+.ark-pad-v-page { padding-block: var(--ark-page-margin); }
+.ark-pad-top-page { padding-top: var(--ark-page-margin); }
+.ark-pad-bottom-page { padding-bottom: var(--ark-page-margin); }
+.ark-pad-start-page { padding-inline-start: var(--ark-page-margin); }
+.ark-pad-end-page { padding-inline-end: var(--ark-page-margin); }
+.ark-pad-all-section { padding: var(--ark-section-gap); }
+.ark-pad-h-section { padding-inline: var(--ark-section-gap); }
+.ark-pad-v-section { padding-block: var(--ark-section-gap); }
+.ark-pad-top-section { padding-top: var(--ark-section-gap); }
+.ark-pad-bottom-section { padding-bottom: var(--ark-section-gap); }
+.ark-pad-start-section { padding-inline-start: var(--ark-section-gap); }
+.ark-pad-end-section { padding-inline-end: var(--ark-section-gap); }
+.ark-fill-w { width: 100%; box-sizing: border-box; }
+.ark-fill-w.ark-fill-start { align-self: stretch; }
+.ark-fill-h { height: 100%; }
+.ark-surface-card { background: var(--ark-container-low); }
+.ark-surface-raised { background: var(--ark-container-high); }
+/* The desktop's measures: a card is rounded by `corner` here, as `.ark-card` is. */
+.ark-corner-card, .ark-corner-small { border-radius: var(--ark-corner); overflow: hidden; }
+.ark-text { min-width: 0; overflow-wrap: anywhere; }
+.ark-one-line { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ark-centred { text-align: center; }
+.ark-type-large-title { font-size: var(--ark-type-large-title); font-weight: 700; }
+.ark-type-title { font-size: var(--ark-type-title); font-weight: 700; }
+.ark-type-headline { font-size: var(--ark-type-headline); font-weight: 700; }
+.ark-type-body { font-size: var(--ark-type-body); }
+.ark-type-subheadline { font-size: var(--ark-type-subheadline); }
+.ark-type-footnote { font-size: var(--ark-type-footnote); }
+.ark-type-caption { font-size: var(--ark-type-caption); }
+.ark-type-figure { font-size: var(--ark-type-figure); font-weight: 700; font-variant-numeric: tabular-nums; }
+.ark-glyphed { display: inline-flex; flex: none; }
+.ark-glyphed svg { width: 1em; height: 1em; }
+.ark-ink { color: var(--ark-ink); }
+.ark-ink-quiet { color: var(--ark-quiet); }
+.ark-ink-accent { color: var(--ark-accent-text); }
+.ark-ink-tint.ark-tint-neutral { color: var(--ark-quiet); }
+.ark-ink-figure.ark-tint-neutral { color: var(--ark-ink); }
+.ark-ink-tint.ark-tint-positive, .ark-ink-figure.ark-tint-positive { color: var(--ark-positive); }
+.ark-ink-tint.ark-tint-negative, .ark-ink-figure.ark-tint-negative { color: var(--ark-error); }
+.ark-ink-tint.ark-tint-caution, .ark-ink-figure.ark-tint-caution { color: var(--ark-caution); }
+.ark-ink-tint.ark-tint-accent, .ark-ink-figure.ark-tint-accent { color: var(--ark-accent-text); }
+
+.ark-row-value { font-size: 14px; color: var(--ark-quiet); flex: none; }
+.ark-panel { padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; }
+.ark-panel-title { font-weight: 700; font-size: 14px; }
+.ark-figure-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; font-size: 12px; width: 100%; }
+.ark-link-row { padding: 2px 0; border-radius: 4px; }
+.ark-link-row:hover { background: var(--ark-container); }
+.ark-link { color: var(--ark-accent-text); text-align: start; padding: 2px 0; }
+.ark-link:hover { text-decoration: underline; }
+.ark-form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.ark-swatch { width: 18px; height: 18px; border-radius: 5px; display: inline-flex; align-items: center; justify-content: center; color: #FFFFFF; flex: none; }
+.ark-unread-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--ark-accent); margin-right: 6px; flex: none; }
+.ark-check-button { display: inline-flex; color: var(--ark-quiet); }
+.ark-check-button.ark-on { color: var(--ark-positive); }
+.ark-text-negative { color: var(--ark-error); }
+.ark-text-caution { color: var(--ark-caution); }
+.ark-text-positive { color: var(--ark-positive); }
+.ark-text-accent { color: var(--ark-accent); }
+.ark-cell-words { display: inline-flex; align-items: center; gap: 4px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ark-marked { display: inline-flex; align-items: center; min-width: 0; }
+.ark-text-quiet { color: var(--ark-quiet); }
+.ark-search.ark-plain .ark-input { width: 100%; }
+
+/* * Figures (arkui::figures) */
+.ark-status { display: inline-flex; align-items: center; gap: 3px; padding: 1px 8px; border-radius: 999px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.ark-status.ark-tint-positive { background: color-mix(in srgb, var(--ark-positive) 18%, transparent); color: var(--ark-positive); }
+.ark-status.ark-tint-negative { background: var(--ark-error); color: var(--ark-on-error); }
+.ark-status.ark-tint-caution { background: var(--ark-caution-container); color: var(--ark-on-caution-container); }
+.ark-status.ark-tint-neutral { background: var(--ark-container-high); color: var(--ark-quiet); }
+.ark-status.ark-tint-accent { background: var(--ark-accent-container); color: var(--ark-on-accent-container); }
+.ark-goal { width: var(--ark-progress-width); max-width: 100%; height: 4px; border-radius: 2px; background: var(--ark-container-highest); overflow: hidden; }
+.ark-goal-fill { height: 100%; border-radius: 2px; background: var(--ark-positive); }
+.ark-goal.ark-tint-negative .ark-goal-fill { background: var(--ark-error); }
+.ark-goal.ark-tint-caution .ark-goal-fill { background: var(--ark-caution); }
+.ark-goal.ark-tint-accent .ark-goal-fill { background: var(--ark-accent); }
+.ark-goal.ark-tint-neutral .ark-goal-fill { background: var(--ark-quiet); }
+.ark-headline-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.ark-headline.ark-tint-positive { color: var(--ark-positive); }
+.ark-headline.ark-tint-negative { color: var(--ark-error); }
+.ark-headline.ark-tint-caution { color: var(--ark-caution); }
+.ark-capsule { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px; border: 1px solid var(--ark-hairline); background: var(--ark-surface); white-space: nowrap; }
+.ark-capsule:hover { background: var(--ark-container); }
+.ark-capsule.ark-prominent { background: var(--ark-accent); color: var(--ark-on-accent); border-color: transparent; }
+.ark-notice { display: flex; align-items: center; gap: 10px; padding: 6px 12px; background: var(--ark-container-low); border-bottom: 1px solid var(--ark-hairline); }
+.ark-notice-glyph { color: var(--ark-accent); display: inline-flex; }
+.ark-notice-words { flex: 1; }
+.ark-notice-actions { display: flex; gap: 6px; }
+.ark-strip { display: flex; gap: 24px; }
+.ark-strip-figure { font-size: 15px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.ark-strip-figure.ark-tint-negative { color: var(--ark-error); }
+.ark-strip-figure.ark-tint-positive { color: var(--ark-positive); }
+.ark-stat { padding: 10px 12px; display: flex; flex-direction: column; gap: 2px; }
+.ark-stat-figure { font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.ark-chart-card { display: flex; flex-direction: column; gap: 6px; }
+.ark-chart-title { font-weight: 700; }
+.ark-chart-body { padding: 10px; }
+.ark-grid { display: grid; }
+.ark-lbars { display: flex; flex-direction: column; gap: 10px; }
+.ark-lbar { display: grid; grid-template-columns: 160px 1fr 110px; gap: 12px; align-items: center; }
+.ark-lbar-track { height: 10px; border-radius: 5px; background: var(--ark-container-high); overflow: hidden; }
+.ark-lbar-fill { display: block; height: 100%; border-radius: 5px; }
+.ark-lbar-said { text-align: right; font-variant-numeric: tabular-nums; }
+.ark-columns { display: flex; flex-direction: column; gap: 8px; }
+.ark-legends { display: flex; gap: 14px; }
+.ark-legend { display: inline-flex; gap: 6px; align-items: center; font-size: 12px; color: var(--ark-quiet); }
+.ark-legend-swatch { width: 10px; height: 10px; border-radius: 2px; }
+.ark-column-groups { display: flex; gap: 12px; align-items: stretch; }
+.ark-column-group { flex: 1; display: flex; flex-direction: column; gap: 4px; align-items: center; }
+.ark-column-bars { flex: 1; width: 100%; display: flex; gap: 3px; align-items: flex-end; justify-content: center; }
+.ark-column-bar { flex: 1; max-width: 22px; border-radius: 3px 3px 0 0; }
+.ark-line-chart { color: var(--ark-accent); width: 100%; }
+
+/* * Motion (ui/docs/motion.md): what comes in grows from 0.95 (never from
+   nothing) on the move spring; by a key, nothing moves; reduced, only
+   the fade is left (theme.css's data-motion="reduced"). */
+@keyframes ark-fade { from { opacity: 0; } }
+@keyframes ark-grow { from { opacity: 0; transform: scale(var(--ark-enter-scale)); } }
+@keyframes ark-rise { from { transform: translateY(100%); } }
+[data-motion="grow"] { animation: ark-grow var(--ark-move-ms) var(--ark-move); }
+[data-motion="rise"] { animation: ark-rise var(--ark-move-ms) var(--ark-move); }
+[data-motion="none"] { animation: none; }
+/* A screenshot's page (`?shots=1`, ui/docs/shots.md): nothing moves at
+   all, a fade included, and the caret is clear, so what is drawn never
+   depends on when. */
+:root[data-motion="shots"] *, :root[data-motion="shots"] *::before, :root[data-motion="shots"] *::after {
+  animation: none !important;
+  transition: none !important;
+  caret-color: transparent !important;
+}
+:root[data-motion="reduced"] [data-motion="rise"] { animation-name: ark-fade; }
+
+/* * A page written as HTML (src/page.rs, ui/docs/app.md "The Browser's
+   Modes"). A part that is no button is pressed through a button over all
+   of it; what only works with script (`.ark-js`) is put away until script
+   runs, and what stands in for it without (`.ark-nojs`) once it does. A
+   control's menu is the browser's own popover, in the menu's panel. */
+:has(> .ark-hit) { position: relative; }
+.ark-hit { position: absolute; inset: 0; margin: 0; padding: 0; border: 0; background: none; opacity: 0; cursor: default; }
+.ark-hit:focus-visible { opacity: 1; outline: 2px solid var(--ark-accent); outline-offset: -2px; }
+:root[data-ark-mode]:not([data-ark-js]) .ark-js { display: none; }
+:root[data-ark-js] .ark-nojs { display: none; }
+.ark-menu-popover:popover-open { position: fixed; inset: 0; margin: auto; width: max-content; height: max-content; min-width: 198px; display: flex; flex-direction: column; }
+.ark-menu-popover .ark-menu-entry { text-align: start; }
+:root[data-ark-mode] button[disabled]:not(.ark-hit) { cursor: default; }
+/* The page a written control is already on is disabled, not dimmed. */
+:root[data-ark-mode] :is(.ark-selected, .ark-on, [aria-current])[disabled] { color: inherit; opacity: 1; }
+
+/* Why a form a server was sent was not taken (arkui-serve): the domain's
+   own words, over the page, in the error roles. */
+.ark-notice {
+  margin: 0;
+  padding: 10px 16px;
+  background: var(--ark-error-container);
+  color: var(--ark-on-error-container);
+}
+/* A section's figures in columns, a collapsible heading, a row toward a goal (MeterRow). */
+.ark-section-header.ark-toggles { cursor: default; }
+.ark-section-header .ark-chevron { margin-right: 4px; }
+.ark-figure-cols { display: inline-flex; gap: 12px; }
+.ark-figure-col { display: inline-flex; flex-direction: column; align-items: flex-end; width: var(--ark-amount-column-width, 96px); flex: none; }
+.ark-figure-col-title { font-size: 10px; font-weight: 400; opacity: .7; }
+.ark-caution-words { color: var(--ark-caution); }
+.ark-meter-row { align-items: center; gap: 12px; }
+.ark-meter-row .ark-row-words { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.ark-meter-row .ark-row-title { display: flex; align-items: center; gap: 8px; }
+.ark-meter-notes { display: flex; justify-content: space-between; font-size: 11px; }
+.ark-meter-note.ark-tint-positive { color: var(--ark-positive); }
+.ark-meter-note.ark-tint-negative { color: var(--ark-error); }
+.ark-meter-note.ark-tint-caution { color: var(--ark-caution); }
+.ark-meter-note.ark-tint-neutral { color: var(--ark-quiet); }
+.ark-tile-small { width: 20px; height: 20px; }

@@ -10,11 +10,20 @@ use wasm_bindgen_futures::JsFuture;
 use crate::util::{login_url, query_value};
 use crate::Login;
 
-/// Send the page to sign in, coming back to where it is now.
+/// The mark a page leaves as it goes to sign in: in the tab's own
+/// `sessionStorage`, so a reload in another tab is not mistaken for coming
+/// back, and taken by the load that comes back ([`came_back`]).
+const LEAVING: &str = "ark:signing-in";
+
+/// Send the page to sign in, coming back to where it is now — marked as
+/// gone, so the load that comes back knows it is the way back.
 pub fn go_sign_in(server: &str, user: Option<&str>) {
     let Some(window) = web_sys::window() else {
         return;
     };
+    if let Ok(Some(s)) = window.session_storage() {
+        let _ = s.set_item(LEAVING, "1");
+    }
     let here = window
         .location()
         .href()
@@ -24,6 +33,18 @@ pub fn go_sign_in(server: &str, user: Option<&str>) {
         .unwrap_or_default()
         .to_string();
     let _ = window.location().assign(&login_url(server, &here, user));
+}
+
+/// Whether this load is the way back from signing in ([`go_sign_in`]) —
+/// taken, so the reload after it is not. What the sign-in machine's
+/// `Event::Launched` is told as `returned`.
+pub fn came_back() -> bool {
+    let Some(s) = web_sys::window().and_then(|w| w.session_storage().ok().flatten()) else {
+        return false;
+    };
+    let back = s.get_item(LEAVING).ok().flatten().is_some();
+    let _ = s.remove_item(LEAVING);
+    back
 }
 
 /// The code in this page's URL, if it just came back from signing in —
@@ -55,7 +76,58 @@ pub async fn exchange(server: &str, code: &str) -> Result<Login, String> {
     serde_json::from_str(&text).map_err(|e| format!("the login did not parse: {e}"))
 }
 
-/// The browser's storage, for keeping a login between loads.
+/// The code, for this page's session: the server keeps its token in the
+/// session cookie (`/auth/session`, [`crate::COOKIE`]), `HttpOnly`, where
+/// no script on the page reads it, and answers the login without it — its
+/// `token` empty, which the socket says as its first message
+/// ([`crate::COOKIE_HELLO`]) so the server takes the cookie. Same origin
+/// only: the page the server serves.
+pub async fn session(server: &str, code: &str) -> Result<Login, String> {
+    let url = format!("{}/auth/session", server.trim_end_matches('/'));
+    let body = serde_json::json!({ "code": code }).to_string();
+    let init = web_sys::RequestInit::new();
+    init.set_method("POST");
+    init.set_credentials(web_sys::RequestCredentials::SameOrigin);
+    init.set_body(&wasm_bindgen::JsValue::from_str(&body));
+    let headers = web_sys::Headers::new().map_err(js)?;
+    headers.set("Content-Type", "application/json").map_err(js)?;
+    init.set_headers(&headers);
+    // The server's sentence, without its status: what the page says.
+    let text = fetch_text(&url, &init)
+        .await
+        .map_err(|e| e.split_once(' ').map_or(e.clone(), |(_, t)| t.to_string()))?;
+    serde_json::from_str(&text).map_err(|e| format!("the login did not parse: {e}"))
+}
+
+/// This page's session cookie forgotten (`/auth/logout`). The session
+/// itself is ended over the socket first (`session.revoke`).
+pub async fn forget_session(server: &str) -> Result<(), String> {
+    let url = format!("{}/auth/logout", server.trim_end_matches('/'));
+    let init = web_sys::RequestInit::new();
+    init.set_method("POST");
+    init.set_credentials(web_sys::RequestCredentials::SameOrigin);
+    fetch_text(&url, &init).await.map(|_| ())
+}
+
+/// A device code (a join link's), for a login of this page's own; the
+/// error is the server's sentence.
+pub async fn redeem(server: &str, code: &str) -> Result<Login, String> {
+    let url = format!("{}/auth/redeem", server.trim_end_matches('/'));
+    let body = serde_json::json!({ "code": code }).to_string();
+    let init = web_sys::RequestInit::new();
+    init.set_method("POST");
+    init.set_body(&wasm_bindgen::JsValue::from_str(&body));
+    let headers = web_sys::Headers::new().map_err(js)?;
+    headers.set("Content-Type", "application/json").map_err(js)?;
+    init.set_headers(&headers);
+    let text = fetch_text(&url, &init)
+        .await
+        .map_err(|e| e.split_once(' ').map_or(e.clone(), |(_, t)| t.to_string()))?;
+    serde_json::from_str(&text).map_err(|e| format!("the login did not parse: {e}"))
+}
+
+/// The browser's storage, for keeping a login between loads: what of it
+/// is no secret — a page's session token is its cookie's ([`session`]).
 pub fn storage() -> Option<web_sys::Storage> {
     web_sys::window()?.local_storage().ok()?
 }

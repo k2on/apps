@@ -30,19 +30,32 @@ ended() {
   jobs=$(gh api "repos/$repo/actions/runs/$run/jobs" --paginate --jq ".jobs[] | select(.name == \"apk ($app)\") | .status")
   grep -qx completed <<< "$jobs"
 }
-for _ in $(seq 1 240); do
+# The artifact downloaded, asked again a few times: the API, asked by
+# every job at once, can refuse for a while (app-screens 42959400546:
+# "API rate limit exceeded", the APK there).
+download() {
+  for try in 1 2 3 4 5; do
+    gh run download "$run" --repo "$repo" --name "apk-$app" --dir "$dir/apk-$app" && return 0
+    rm -rf "${dir:?}/apk-$app"
+    sleep $((try * 30))
+  done
+  return 1
+}
+# Asked every half minute (an error asking is only a wait), whether it
+# has ended every other time.
+for i in $(seq 1 120); do
   if has; then
-    gh run download "$run" --repo "$repo" --name "apk-$app" --dir "$dir/apk-$app"
+    download || break
     echo "$app: the run's APK, taken as soon as it was up"
     exit 0
   fi
   # Ended: looked for once more, as the upload is the job's last step.
-  if ended; then
-    has && { gh run download "$run" --repo "$repo" --name "apk-$app" --dir "$dir/apk-$app"; exit 0; }
+  if [ $((i % 2)) = 0 ] && ended; then
+    has && { download && exit 0; break; }
     echo "$app: the run built no APK for it; nothing to take"
     exit 3
   fi
-  sleep 15
+  sleep 30
 done
 echo "::error::$app: no APK from run $run within an hour"
 exit 1

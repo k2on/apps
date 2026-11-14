@@ -25,6 +25,8 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -39,6 +41,7 @@ import dev.arkui.Space
 import dev.arkui.quiet
 import dev.arkui.pressable
 import dev.arkui.rememberDestinationScrollState
+import uniffi.ark_format.formatClock
 
 /** What Settings draws. */
 data class SettingsData(
@@ -57,28 +60,20 @@ data class SettingsData(
 @Immutable
 data class Who(val name: String, val picture: String = "") {
     companion object {
-        /**
-         * What a face says without a picture: the first letters of the name's first and last words
-         * (`Ada Lovelace` is `AL`, `Ada` is `A`), upper case — the desktop's `Who::initials`.
-         */
-        fun initials(name: String): String {
-            fun first(w: String): Char? = w.firstOrNull { it.isLetterOrDigit() }
-            val words = name.split(Regex("\\s+")).filter { first(it) != null }
-            val letters = when (words.size) {
-                0 -> emptyList()
-                1 -> listOfNotNull(first(words[0]))
-                else -> listOfNotNull(first(words.first()), first(words.last()))
-            }
-            return letters.joinToString("") { it.uppercase() }
-        }
-
         /** Black or white, whichever reads on `fill`: the desktop's rule, on the same colours. */
         fun inkOn(fill: Color): Color = if (0.2126f * fill.red + 0.7152f * fill.green + 0.0722f * fill.blue > 0.55f) Color.Black else Color.White
     }
 }
 
 @Composable
-fun SettingsScreen(data: SettingsData, onBack: () -> Unit, onSignOut: () -> Unit, onVersion: () -> Unit, onDiagnostics: () -> Unit) {
+fun SettingsScreen(
+    data: SettingsData,
+    onBack: () -> Unit,
+    onSignOut: () -> Unit,
+    onVersion: () -> Unit,
+    onDiagnostics: () -> Unit,
+    addDevice: suspend () -> dev.arkui.DeviceLinkShown = { dev.arkui.DeviceLinkShown(null, 0, emptyList(), "Sign in first.") },
+) {
     Column(Modifier.fillMaxSize()) {
         PageBar("Settings", onBack)
         Column(Modifier.fillMaxWidth().verticalScroll(rememberDestinationScrollState("settings")).padding(horizontal = Space.page)) {
@@ -96,6 +91,10 @@ fun SettingsScreen(data: SettingsData, onBack: () -> Unit, onSignOut: () -> Unit
                 Line(hostOf(data.server), if (data.linked) "Connected" else "Can't reach it right now — what's on this phone still works")
             }
             Spacer(Modifier.height(Space.l))
+            var adding by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+            OutlinedButton(onClick = { adding = true }, modifier = Modifier.fillMaxWidth()) { Text("Add a Device") }
+            if (adding) dev.arkui.AddDeviceDialog(addDevice, onDismiss = { adding = false })
+            Spacer(Modifier.height(Space.s))
             OutlinedButton(
                 onClick = onSignOut,
                 colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
@@ -208,7 +207,7 @@ fun listeningNumbers(h: Heard): List<Pair<String, String>> {
             when {
                 s == null -> "—"
                 a == null -> "idle"
-                else -> "${a.at.toInt() + 1} of ${a.queue.size}, ${if (a.clock.playing) "playing" else "paused"} at ${Media.clock(a.position(h.serverNow()))}"
+                else -> "${a.at.toInt() + 1} of ${a.queue.size}, ${if (a.clock.playing) "playing" else "paused"} at ${formatClock(a.position(h.serverNow()))}"
             }
     out +=
         "output" to
@@ -233,7 +232,7 @@ fun listeningNumbers(h: Heard): List<Pair<String, String>> {
                     "$l + ${s.followers(l).joinToString(", ") { it.id }} · volume $level${if (s.groupMuted(l)) " (muted)" else ""}"
                 } ?: "none")
     if (s != null && s.scrub.isEmpty()) out += "scrub" to "none"
-    for ((id, at) in s?.scrub.orEmpty()) out += "scrub ${if (id == h.me) "(this phone)" else id}" to Media.clock(at)
+    for ((id, at) in s?.scrub.orEmpty()) out += "scrub ${if (id == h.me) "(this phone)" else id}" to formatClock(at)
     return out
 }
 

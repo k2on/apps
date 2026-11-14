@@ -8,9 +8,10 @@ use arkui::fit::Cut;
 use arkui::line::Line;
 use arkui::menu::{self, Anchor, Entry, Menu};
 use arkui::picker::{self, Choice, Picker};
+use arkui::text::{self, text};
 use arkui::{art, format, glyphs, hero, icon, layer, panel, sidebar, style, table, theme, url, vim};
 use iced::keyboard::{key::Named, Key, Modifiers};
-use iced::widget::{button, column, container, row, slider, stack, text, Space};
+use iced::widget::{button, column, container, row, slider, stack, Space};
 use iced::{Alignment, Background, Border, Color, Element, Length, Point, Size, Theme};
 
 use crate::render::{Painter, Picture};
@@ -24,22 +25,12 @@ pub const GLYPHS: &[(&str, &[u8])] = &[
     ("ALBUM", glyphs::ALBUM),
     ("ARTIST", glyphs::ARTIST),
     ("BACK", glyphs::BACK),
-    ("BANK", glyphs::BANK),
-    ("CARD", glyphs::CARD),
-    ("CART", glyphs::CART),
     ("CHEVRON", glyphs::CHEVRON),
     ("CLOSE", glyphs::CLOSE),
     ("COMPOSER", glyphs::COMPOSER),
-    ("DEBT", glyphs::DEBT),
     ("DEBUG", glyphs::DEBUG),
     ("DEVICES", glyphs::DEVICES),
     ("DOWN", glyphs::DOWN),
-    ("DROPLET", glyphs::DROPLET),
-    ("FUEL", glyphs::FUEL),
-    ("GIFT", glyphs::GIFT),
-    ("GROWTH", glyphs::GROWTH),
-    ("HEART", glyphs::HEART),
-    ("HIDE", glyphs::HIDE),
     ("HOME", glyphs::HOME),
     ("LAPTOP", glyphs::LAPTOP),
     ("LIBRARY", glyphs::LIBRARY),
@@ -58,32 +49,78 @@ pub const GLYPHS: &[(&str, &[u8])] = &[
     ("PLAYLIST", glyphs::PLAYLIST),
     ("PLUS", glyphs::PLUS),
     ("PREVIOUS", glyphs::PREVIOUS),
-    ("PULPIT", glyphs::PULPIT),
-    ("RECEIPT", glyphs::RECEIPT),
-    ("RENAME", glyphs::RENAME),
-    ("REPEAT", glyphs::REPEAT),
     ("SEARCH", glyphs::SEARCH),
-    ("SEND", glyphs::SEND),
-    ("SHIELD", glyphs::SHIELD),
-    ("SHIRT", glyphs::SHIRT),
+    ("SKIP_BACK", glyphs::SKIP_BACK),
+    ("SKIP_FORWARD", glyphs::SKIP_FORWARD),
+    ("PULPIT", glyphs::PULPIT),
     ("SHOW", glyphs::SHOW),
     ("SHUFFLE", glyphs::SHUFFLE),
     ("SIGN_OUT", glyphs::SIGN_OUT),
-    ("SKIP_BACK", glyphs::SKIP_BACK),
-    ("SKIP_FORWARD", glyphs::SKIP_FORWARD),
     ("SPEAKER", glyphs::SPEAKER),
     ("STOP", glyphs::STOP),
-    ("TAG", glyphs::TAG),
-    ("TICKED", glyphs::TICKED),
     ("TICK", glyphs::TICK),
+    ("TICKED", glyphs::TICKED),
     ("TRANSCRIPT", glyphs::TRANSCRIPT),
-    ("UNHIDE", glyphs::UNHIDE),
     ("UNTICK", glyphs::UNTICK),
-    ("UTENSILS", glyphs::UTENSILS),
     ("VOLUME", glyphs::VOLUME),
+    ("BANK", glyphs::BANK),
+    ("CARD", glyphs::CARD),
+    ("DEBT", glyphs::DEBT),
+    ("GROWTH", glyphs::GROWTH),
     ("WALLET", glyphs::WALLET),
+    ("RENAME", glyphs::RENAME),
+    ("HIDE", glyphs::HIDE),
+    ("UNHIDE", glyphs::UNHIDE),
+    ("CART", glyphs::CART),
+    ("DROPLET", glyphs::DROPLET),
+    ("FUEL", glyphs::FUEL),
+    ("GIFT", glyphs::GIFT),
+    ("HEART", glyphs::HEART),
+    ("REPEAT", glyphs::REPEAT),
+    ("SEND", glyphs::SEND),
+    ("SHIELD", glyphs::SHIELD),
+    ("SHIRT", glyphs::SHIRT),
+    ("TAG", glyphs::TAG),
+    ("UTENSILS", glyphs::UTENSILS),
     ("WRENCH", glyphs::WRENCH),
     ("ZAP", glyphs::ZAP),
+    ("RECEIPT", glyphs::RECEIPT),
+    ("SCAN_LINE", glyphs::SCAN_LINE),
+    ("IMAGE", glyphs::IMAGE),
+    ("KEYBOARD", glyphs::KEYBOARD),
+    ("CIRCLE_MINUS", glyphs::CIRCLE_MINUS),
+    ("CHOOSE", glyphs::CHOOSE),
+    ("UNCHOSEN", glyphs::UNCHOSEN),
+    ("COPY", glyphs::COPY),
+    ("RECONCILE", glyphs::RECONCILE),
+    ("REOPEN", glyphs::REOPEN),
+    ("ADD", glyphs::ADD),
+    ("PANEL_RIGHT", glyphs::PANEL_RIGHT),
+    ("WAND", glyphs::WAND),
+    ("SYNC", glyphs::SYNC),
+    ("FILTER", glyphs::FILTER),
+    ("MAIL", glyphs::MAIL),
+    ("CHART", glyphs::CHART),
+    ("LIST", glyphs::LIST),
+    ("SETTINGS", glyphs::SETTINGS),
+    ("INBOX", glyphs::INBOX),
+    ("ALERT", glyphs::ALERT),
+    ("CLOCK", glyphs::CLOCK),
+    ("DOLLAR", glyphs::DOLLAR),
+    ("BANKNOTE", glyphs::BANKNOTE),
+    ("PIGGY", glyphs::PIGGY),
+    ("CLOUD", glyphs::CLOUD),
+    ("TARGET", glyphs::TARGET),
+    ("ARROWS", glyphs::ARROWS),
+    ("USERS", glyphs::USERS),
+    ("EYE", glyphs::EYE),
+    ("EYE_OFF", glyphs::EYE_OFF),
+    ("ARROW_UP", glyphs::ARROW_UP),
+    ("ARROW_DOWN", glyphs::ARROW_DOWN),
+    ("TRASH", glyphs::TRASH),
+    ("LOCK", glyphs::LOCK),
+    ("CROSSHAIR", glyphs::CROSSHAIR),
+    ("FOLDER", glyphs::FOLDER),
 ];
 
 /// Rows to draw with: places, long enough to be cut, and with the
@@ -251,9 +288,9 @@ pub fn answers(component: &str) -> Vec<Answers> {
         "text" => vec![Answers {
             caption: "arkui::format",
             rows: vec![
-                ("clock(261.0)".into(), format::clock(261.0)),
-                ("clock(3725.0)".into(), format::clock(3725.0)),
-                ("spell(3_725_000)".into(), format::spell(3_725_000)),
+                ("clock_secs(261.0)".into(), format::clock_secs(261.0)),
+                ("clock_secs(3725.0)".into(), format::clock_secs(3725.0)),
+                ("length(3_725_000)".into(), format::length(3_725_000)),
                 ("plural(1, \"place\")".into(), format::plural(1, "place")),
                 ("plural(12, \"place\")".into(), format::plural(12, "place")),
                 ("span(1685, 1750)".into(), format::span(1685, 1750)),
@@ -270,13 +307,17 @@ pub fn answers(component: &str) -> Vec<Answers> {
         "routes" => {
             let name = "North/South #1 · é";
             vec![Answers {
-                caption: "arkui::url and arkui::route",
+                caption: "arkui::url and arkui::router",
                 rows: vec![
                     (format!("url::encoded(\"{name}\")"), url::encoded(name)),
                     ("url::decode(url::encoded(…))".into(), url::decode(&url::encoded(name))),
                     (
-                        format!("route::join(\"place\", Some(\"{name}\"))"),
-                        arkui::route::join("place", Some(name)),
+                        format!("Address::at([\"album\", \"{name}\"]).url()"),
+                        arkui::router::Address::at(["album", name]).url(),
+                    ),
+                    (
+                        "Address::of_url(\"money://budget/?inspector=1\", \"/\")".into(),
+                        format!("{:?}", arkui::router::Address::of_url("money://budget/?inspector=1", "/")),
                     ),
                 ],
             }]
@@ -306,11 +347,11 @@ pub fn notes(component: &str) -> &'static [&'static str] {
         ],
         "command" => &["Ctrl+K opens it from anywhere; ↑ and ↓ walk what it found, ⏎ chooses, <Esc> or a click on the dimmed page closes it."],
         "reorder" => &["A press that moves less than reorder::THRESHOLD is a click; past it the row lifts, and the rows it passes slide a row's height out of its way on reorder::SLIDING, a spring."],
-        "pages" => &["On the desktop, two fingers sideways over the page go back and forward (arkui::swipe). In a browser the browser's own back does it."],
+        "pages" => &["On the desktop, two fingers sideways over the page go back and forward (arkui::swipe)."],
         "scroll" => &["scroll::reveal keeps the cursor on screen as j and k walk past the edge of a list."],
         "keys" => &["A count before a motion repeats it; a Move walks whatever grid the pane with the keys has (vim::Grid, vim::Page)."],
-        "routes" => &["A place is its address: walking a sidebar writes the bar, and back and forward come back through Router::poll."],
-        "waking" => &["A window that runs no loop sleeps until something rings its Bell: a page's hashchange and popstate ring it (wake::page_changes)."],
+        "routes" => &["A route is its URL (ark-router's #[derive(Routes)]), the browser's and the desktop's alike: walking a sidebar writes the bar, and back and forward come back through Router::poll."],
+        "waking" => &["A window that runs no loop sleeps until something rings its Bell: a socket's reader thread, a media key, a deadline (wake::at)."],
         _ => &[],
     }
 }
@@ -358,13 +399,14 @@ fn presses(run: &str) -> Vec<(Key, Modifiers)> {
     while let Some(c) = rest.chars().next() {
         if let Some(named) = rest.strip_prefix('<').and_then(|r| r.split_once('>')) {
             let key = match named.0 {
-                "Enter" => Named::Enter,
-                "Space" => Named::Space,
-                "Tab" => Named::Tab,
-                "Esc" => Named::Escape,
+                "Enter" => Key::Named(Named::Enter),
+                // The space bar is a character in winit 0.31 (the fork's).
+                "Space" => Key::Character(" ".into()),
+                "Tab" => Key::Named(Named::Tab),
+                "Esc" => Key::Named(Named::Escape),
                 other => panic!("no such key <{other}>"),
             };
-            out.push((Key::Named(key), Modifiers::empty()));
+            out.push((key, Modifiers::empty()));
             rest = named.1;
         } else if let Some(ctrl) = rest.strip_prefix('^').and_then(|r| r.chars().next()) {
             out.push((Key::Character(ctrl.to_string().into()), Modifiers::CTRL));
@@ -467,6 +509,7 @@ fn style_(c: Canvas) -> Picture {
                     .size(13)
                     .style(move |t| text::Style {
                         color: Some(style::on_row(t, on, false, false)),
+                        ..Default::default()
                     }),
                 on,
                 true,

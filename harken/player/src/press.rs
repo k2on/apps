@@ -49,12 +49,16 @@ pub enum Press {
     Jump {
         index: i64,
     },
-    /// A track pressed: this queue, from here.
+    /// A track pressed: this queue, from here. `shuffled` says it is a list
+    /// in an order of its own (Shuffle pressed): the session has no shuffle,
+    /// so it is the player's alone, which draws its Shuffle lit.
     Start {
         queue: Vec<Track>,
         at: i64,
         position_ms: i64,
         from: String,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        shuffled: bool,
     },
     /// Put these after what is playing.
     Next {
@@ -138,6 +142,7 @@ impl Press {
                 at,
                 position_ms,
                 from,
+                ..
             } => (
                 "start",
                 Start {

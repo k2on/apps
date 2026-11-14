@@ -1,6 +1,6 @@
 //! The stores, beside the banks: the importer's other half. Each run it
 //! gathers receipts from where the server was told they are, has the
-//! domain's adapters read them (`money_domain::stores`), and authors each
+//! domain's adapters read them (`money_core::stores`), and authors each
 //! store's as `receipts.add_receipts` — which changes nothing for a receipt
 //! it already has, so gathering the same ones again is harmless.
 //!
@@ -337,7 +337,7 @@ pub struct Waiting {
 /// Every export waiting in `dir`, store by store, by name.
 pub fn waiting(dir: &Path) -> Vec<Waiting> {
     let mut out = vec![];
-    for store in money_domain::stores::STORES {
+    for store in money_core::stores::STORES {
         let Ok(rd) = std::fs::read_dir(dir.join(store)) else { continue };
         let mut files: Vec<PathBuf> = rd.flatten().map(|e| e.path()).filter(|p| p.is_file()).collect();
         files.sort();

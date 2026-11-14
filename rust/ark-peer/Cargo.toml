@@ -10,6 +10,9 @@ ark = { path = "../ark" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 ark-auth = { path = "../ark-auth", default-features = false }
+# A server's push to its people's devices (`settings::Apns`, the `server`
+# feature's): the sender, configured.
+ark-push = { path = "../ark-push", features = ["send"], optional = true }
 # What a peer does, as events and spans (docs/plan-observe.md): emitted
 # here, collected wherever a subscriber is.
 tracing = { version = "0.1", default-features = false, features = ["std"] }
@@ -19,7 +22,7 @@ tracing-subscriber = { version = "0.3", default-features = false, features = ["r
 # never links.
 [features]
 default = ["server"]
-server = ["ark-auth/server", "dep:anyhow", "dep:axum", "dep:tokio", "dep:tower-http"]
+server = ["ark-auth/server", "dep:ark-push", "dep:anyhow", "dep:axum", "dep:tokio", "dep:tower-http"]
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 # `wss://` natively: rustls with ring and Mozilla's roots, the TLS the

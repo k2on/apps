@@ -1,5 +1,5 @@
 # The shared components' showcase for iOS: an app of its own over ArkUI for
-# SwiftUI (swift/ArkUI) and nothing else — no app's code, no kernel. The
+# SwiftUI (ui/swift) and nothing else — no app's code, no kernel. The
 # docs' captures are taken from it (.github/workflows/screens.yaml), launched
 # at one shot by name: `-showcase art`. `xcodegen generate` here (or
 # `nix run .#xcodegen -- generate`, the pinned one CI uses) writes
@@ -11,7 +11,7 @@ options:
     iOS: "17.0"
 packages:
   ArkUI:
-    path: ../../swift/ArkUI
+    path: ../../ui/swift
 targets:
   Showcase:
     type: application

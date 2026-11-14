@@ -8,22 +8,27 @@
 #
 #   app-mac.sh <out> <Foo.app> <app> [server URL]
 #
-# Writes <out>/device.json and <out>/<theme>/window.png. No steps yet: a
-# Mac window has no XCUITest driver here (drive-ios is the iPhone's), so
-# the one shot is the window as it opens.
+# Writes <out>/device.json and <out>/<theme>/window.png, and each of the
+# shots.json's `screens` that is `on` "mac", <out>/<theme>/<id>.png: the
+# app opened with that screen's launch arguments (`args`, after
+# shots.json's `launch.mac`, the Mac's own: a demo, a window size), so a
+# screen is opened with no steps. No steps beyond that: a Mac window has
+# no step driver here: the phones walk themselves (ui/docs/shots.md).
 set -euo pipefail
 out=$1
 bundle_app=$2
 app=$3
 server=${4:-}
 here=$(cd "$(dirname "$0")" && pwd)
-user=$(jq -r '.server.user // empty' "$app/screens/shots.json")
+user=$(jq -r '.server.user // empty' "$app/demo/shots.json")
 # A Mac app's Info.plist is under Contents/ (an iPhone app's at its root).
 exe="$bundle_app/Contents/MacOS/$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$bundle_app/Contents/Info.plist")"
 tmp=$(mktemp -d)
 mkdir -p "$out"
 # The window of a process, by its pid (window.swift).
+began=$(date +%s)
 xcrun swiftc -O "$here/window.swift" -o "$tmp/window"
+echo "  window.swift compiled in $(( $(date +%s) - began ))s"
 
 # The system's appearance, dark or not (System Events): given twenty
 # seconds, as a prompt for leave to drive System Events would never end.
@@ -41,33 +46,71 @@ dark_mode() {
 
 args=()
 if [ -n "$server" ]; then args=(--server "$server" --user "$user"); fi
-for theme in light dark; do
-  echo "$app mac $theme"
-  dark=false
-  [ "$theme" = light ] || dark=true
-  dark_mode "$dark"
-  "$exe" ${args[@]+"${args[@]}"} > "$tmp/$theme.log" 2>&1 &
-  pid=$!
-  wid=""
+# The Mac's own launch arguments, then each screen's id and arguments.
+base=()
+while IFS= read -r a; do base+=("$a"); done < <(jq -r '.launch.mac // [] | .[]' "$app/demo/shots.json")
+# Its demo (`-demo <day>`) on the run's day when one is given (DEMO_DAY,
+# what the phones' servers are seeded up to, app-screens.yaml): the same
+# household as theirs, on the same day.
+if [ -n "${DEMO_DAY:-}" ]; then
+  for i in "${!base[@]}"; do
+    if [ "${base[$i]}" = -demo ] && [ $((i + 1)) -lt ${#base[@]} ]; then base[$((i + 1))]=$DEMO_DAY; fi
+  done
+fi
+screens=$(jq -c '[.screens // [] | .[] | select((.on // []) | index("mac"))]' "$app/demo/shots.json")
+
+# The app opened with `$@`, its window taken as <out>/<theme>/<name>.png.
+shoot() {
+  local theme=$1 name=$2
+  shift 2
+  # In shots mode (ArkUI's `Shots`, ui/docs/shots.md): every move at its end at once.
+  local began
+  began=$(date +%s)
+  "$exe" -shots YES "$@" > "$tmp/$theme-$name.log" 2>&1 &
+  local pid=$! wid=""
   for _ in $(seq 1 60); do
     wid=$("$tmp/window" "$pid" 2> /dev/null) && break
     kill -0 "$pid" 2> /dev/null || break
     sleep 1
   done
   if [ -z "$wid" ]; then
-    echo "::error::$app's Mac window never opened"
-    tail -n 40 "$tmp/$theme.log" || true
+    echo "::error::$app's Mac window never opened ($name)"
+    tail -n 40 "$tmp/$theme-$name.log" || true
     kill "$pid" 2> /dev/null || true
-    exit 1
+    return 1
   fi
-  # Signed in and synced, then still.
+  local opened=$(( $(date +%s) - began ))
+  # Signed in and synced (or the demo opened), then still.
   sleep 8
+  # Its front window now, not the first it opened: Settings is a window
+  # of its own, opened after the main one (08-settings-banks was the
+  # Budget's window in 42977527249 and 43083062235).
+  wid=$("$tmp/window" "$pid" 2> /dev/null || echo "$wid")
   mkdir -p "$out/$theme"
-  screencapture -x -o -l "$wid" "$out/$theme/window.png"
+  screencapture -x -o -l "$wid" "$out/$theme/$name.png"
   kill "$pid" 2> /dev/null || true
   wait "$pid" 2> /dev/null || true
+  echo "  $theme $name: its window in ${opened}s, taken and closed in $(( $(date +%s) - began ))s"
+}
+
+failed=0
+for theme in light dark; do
+  echo "$app mac $theme"
+  dark=false
+  [ "$theme" = light ] || dark=true
+  dark_mode "$dark"
+  shoot "$theme" window ${args[@]+"${args[@]}"} || exit 1
+  n=$(jq length <<< "$screens")
+  for i in $(seq 0 $((n - 1))); do
+    id=$(jq -r ".[$i].id" <<< "$screens")
+    each=()
+    while IFS= read -r a; do each+=("$a"); done < <(jq -r ".[$i].args // [] | .[]" <<< "$screens")
+    echo "$app mac $theme $id"
+    shoot "$theme" "$id" ${base[@]+"${base[@]}"} ${each[@]+"${each[@]}"} || failed=1
+  done
 done
 dark_mode false || true
 
 read -r w h < <(sips -g pixelWidth -g pixelHeight "$out/light/window.png" | awk '/pixelWidth/ {w=$2} /pixelHeight/ {h=$2} END {print w, h}')
 printf '{"name":"Mac","width":%s,"height":%s,"corner":20,"cutout":"none"}\n' "$w" "$h" > "$out/device.json"
+exit $failed

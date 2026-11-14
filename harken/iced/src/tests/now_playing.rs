@@ -168,6 +168,7 @@ fn joined_while_another_device_plays_the_bar_the_row_and_the_title_are_one_track
         at: 0,
         position_ms: 0,
         from: String::new(),
+        shuffled: false,
     };
     assert_eq!(player.press(phone.as_mut().unwrap(), &press, None), None);
     carry(&hub, &mut app, &mut phone);

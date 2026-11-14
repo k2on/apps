@@ -1,0 +1,121 @@
+# arkui for Android
+
+What every Ark app on Android shares, with nothing of any app in it: the
+Kotlin twin of `ui/rust/arkui` and of ArkUI for SwiftUI (`ui/swift`).
+Package `dev.arkui`, on Compose and Material 3 alone — no ArkDB, no
+kernel. Its sources are `src/dev/arkui/` and `shots/` (the screenshot
+mode every app has, Android's framework alone), and its apps are:
+
+- `harken/android`, which this was drawn out of;
+- `money/android`;
+- `revelation` (`shots/` alone);
+- `showcase/android`, the docs' captures of the components.
+
+**The app library** is `app/` (package `dev.arkui.app`, the project's
+`:app`): what every Ark app is underneath its screens — `ArkApplication`,
+`ArkActivity`, `ArkApp`, `ArkScreen`, `BackgroundHooks` (ui/docs/app.md,
+"The App Library"). It is written over the kernel's Kotlin, which every
+app's library carries, so it compiles against one copy (`:bindings`,
+money's as the ffi check writes it) and carries none; nix builds it once
+(`packages.ark-app-android`) with the prebuild self-test's `[background]`
+fixture (`:fixture`), and every Ark app links its jar (`-ParkAppLib`).
+
+**Built once, linked by every app.** `android/` is a Gradle project of two
+Android libraries, `:shots` and `:arkui` (over `:shots`). nix builds each
+as a derivation of its own (flake.nix, `arkuiKotlin`:
+`packages.arkui-kotlin-shots`, `packages.arkui-kotlin`), its classes a jar,
+and passes the directory of jars to every app's Gradle as `-ParkuiLib`:
+the APK's, the tests' and the screenshots' builds of each app link them
+rather than compiling these sources again. Each library's source is only
+its own directory, so an edit to `shots/` rebuilds both and every app, an
+edit to `src/` rebuilds `arkui` and the apps that draw with it, not
+revelation. Its Maven graph is `android/deps.json` (`nix run
+.#arkui-kotlin-deps` records it again). A build that says no `arkuiLib` — a
+laptop's, the showcase's — still compiles the sources in as part of the
+app (`kotlin.srcDir` in its `app/build.gradle.kts`), so a change here is
+seen in Android Studio at once.
+
+## What is here
+
+**Harken's look, as it was** (`docs/plan-android.md`, "ark-ui"): the
+springs (`Springs`), the page motion and its back plumbing (`Motion`),
+the expanding card the player is (`ExpandingCard`), the derived squares
+and covers (`Art`), the reorderable list (`Reorder`), the tabs, the
+components (`Heading`, `PageBar`, `ListRow`, `SheetRow`, `CoverCard`,
+`Empty`, `Fetching`, `MoreButton`, …), the volume, the spacings (`Space`)
+and `ArkTheme`, the onboarding's pages without their state
+(`ServerScreen`, `SignInScreen`, `PermissionScreen`, `OpeningScreen` —
+each now taking an app's own sentence, placeholder and extra actions) and
+the splash's keeping (`holdSplashUntil`).
+
+**Finding a server** (`server/`): what an address could mean (`Address`),
+whether a `/healthz` is an Ark server running this app's domain
+(`Health`), and asking each URL in order (`Probe`). Plain Kotlin over
+`HttpURLConnection`.
+
+**Material You** (`MaterialYou.kt`, added for money): `MaterialYou`, the
+wallpaper's scheme on Android 12 and later or the app's own; the
+expressive shapes (`ExpressiveShapes`) and an emphasised type scale
+(`expressiveTypography`); `Pill` and `Tint`, a value in a tinted capsule
+(positive, neutral, caution, negative, accent, from the scheme's
+containers); `ProgressBar`, a bar that springs toward a goal; and `Stat`, a
+figure under its label.
+
+**The generic parts** (`Parts.kt`, `HeroParts.kt`; `ui/docs/parts.md`
+lists them with their SwiftUI and iced twins): `PageHeader`,
+`SectionHeader`, `GroupCard` and `RowDivider` (a `ListRow` in a card is a
+grouped row), `Banner`, `Chip`, `Badge`, `Tile`, `SearchField`,
+`NameField`, `Pager`, `Scrubber`, the glyphs by their shared names
+(`ArkGlyphs.named`), and a page about somebody (`HeroBanner`,
+`HeroHeading`, `HeroEntry`, `HeroMore`).
+
+**Money as a locale writes it** (`Amounts.kt`, `AmountField.kt`): minor
+units formatted and parsed in the phone's locale and currency — what
+java.text says of the locale read once (`LocaleNumbers`), the writing the
+app's library's (`ark_format`, every client's), handed in as `Amounts`
+and provided as `LocalAmounts` — drawn in tabular figures (`AmountText`), and
+typed on the number pad with the symbol before it (`AmountField`); one
+worked out elsewhere, shown with a small mark after it and not offered
+for editing (`MarkedAmount`).
+
+**Charts** (`Charts.kt`): `Donut`, a ring of parts with a figure in its
+middle, and `Bars`, the same parts against the largest — in the scheme's
+colours (`chartPalette`), drawn in on a spring, each read by TalkBack as
+the sentence the caller writes.
+
+**Swipe to act** (`Swipe.kt`): `SwipeToAct`, a row that does one thing
+when swiped toward the end, Gmail's way — the action's colour and glyph
+from under it, a tick where letting go acts, the row home after — with
+the same action on the row for TalkBack.
+
+**How things move and answer** (Apple's *Designing Fluid Interfaces*,
+carried over): critically damped springs for anything a tap or the app
+moved, a momentum spring only for a release at a flick's speed, and a
+release sent to the rest nearest where it was going (`Springs.settle`,
+`Springs.nearest`); reduced motion said once (`reducedMotion`,
+`LocalReducedMotion`, `ReducedMotion.ALWAYS_ANIMATE`, `keepMotion`), every
+travel becoming a cross-fade under it; the give a cover or card has under
+the finger and a row's highlight, from touch-down (`pressable`, `Press`);
+the iPhone's `.sensoryFeedback` on the same events (`SensoryFeedback`);
+and tracking and leading by size (`Typeset`, `tracked`).
+
+**A page's pinned bar** (`PinnedBar.kt`): `PinnedPage`, a page that is a
+list under its `PinnedBar`; `PinnedBar`, back and a page's
+actions over its list, with a soft edge rather than a hairline once the
+list is under it; when the page's header has scrolled up out of view, a
+small copy of it (its art and its title) rises into the bar on a
+critically damped spring, and goes back down when the header returns.
+Tapped, it takes the list to its top. Under reduced motion it only fades.
+SwiftUI's twin is ArkUI's `.inlineHeader` (`InlineHeader.swift`).
+
+## Verified
+
+The pieces the apps use are seen in their screenshots (app-screens);
+none has been seen on a phone.
+
+## Motion
+
+How anything here moves, presses or buzzes is `ui/docs/motion.md`: the
+principles, which of `Springs`, `Press`, `SensoryFeedback` and
+`reducedMotion` each kind of motion uses, and the checklist a change is
+reviewed against. Read it before adding or retuning one.

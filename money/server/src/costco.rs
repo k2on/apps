@@ -13,7 +13,7 @@
 //!   it has, the page asks Costco's GraphQL for the warehouse and gas
 //!   receipts of the last `MONEY_COSTCO_DAYS`, item by item, as its own
 //!   list does but with every line's amount, for
-//!   `money_domain::stores::costco`. A browser not signed in is said so.
+//!   `money_core::stores::costco`. A browser not signed in is said so.
 //!
 //! None of it is a published API: the page's address, the query and its
 //! headers are what costco.com's own pages were seen to use.
@@ -300,7 +300,7 @@ mod tests {
         assert!(ask.contains(r#""costco.service": "restOrders""#), "{ask}");
         assert_eq!(seen.closed, 1, "its tab closed");
 
-        let import = money_domain::stores::costco(&out).unwrap();
+        let import = money_core::stores::costco(&out).unwrap();
         let r = &import.receipts[0];
         assert_eq!((r.date.as_str(), r.place.as_str(), r.total), ("2026-10-25", "Costco SEATTLE", -1083));
         assert_eq!(r.items[0].name, "KS ORGANIC EGGS 24 CT");
@@ -360,7 +360,7 @@ mod tests {
         let out = at(browser).receipts(Some(&since)).unwrap().unwrap();
         let asks = seen.lock().unwrap().scripts.iter().filter(|s| s.contains("fetch(")).count();
         assert_eq!(asks, 3, "201 days: three windows");
-        let import = money_domain::stores::costco(&out).unwrap();
+        let import = money_core::stores::costco(&out).unwrap();
         assert_eq!(import.receipts.len(), 3, "a receipt from each window's answer");
 
         let dir = tempfile::tempdir().unwrap();

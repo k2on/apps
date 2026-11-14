@@ -102,7 +102,6 @@ import dev.arkui.GlassContainer
 import dev.arkui.GlassMorph
 import dev.arkui.Glyph
 import dev.arkui.glass
-import dev.arkui.Recompositions
 import dev.arkui.ReorderableItem
 import dev.arkui.Space
 import dev.arkui.Tokens
@@ -118,6 +117,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 import dev.arkui.pressable
 import dev.arkui.Press
+import uniffi.ark_format.formatClock
 
 /** How far an episode's skip goes back, and on, in seconds: what a podcast player's do. */
 const val JOG_BACK = 15
@@ -228,7 +228,6 @@ fun MiniPlayer(state: PlayerState, controls: Controls, position: StateFlow<Long>
 @Composable
 fun MiniFace(state: PlayerState, controls: Controls, position: StateFlow<Long> = Start, art: Boolean = true, modifier: Modifier = Modifier) {
     val now = state.now ?: return
-    Recompositions.hit("MiniPlayer")
     Column(modifier) {
         Row(Modifier.padding(start = Space.s, end = Space.xs).height(52.dp), verticalAlignment = Alignment.CenterVertically) {
             if (art) Cover(seedOf(now), now.art, 40.dp, Modifier.size(40.dp), corner = 4.dp) else Spacer(Modifier.size(40.dp))
@@ -269,9 +268,7 @@ private fun Hairline(durationMs: Long, position: StateFlow<Long>) {
     // Inside the bar, clear of its rounded corners, rounded at its ends: as the iPhone's, under
     // the words rather than along the bar's very edge, where its corners cut it.
     BoxWithConstraints(Modifier.padding(start = Space.l, end = Space.l, bottom = Space.xs).fillMaxWidth().height(2.dp).clip(CircleShape)) {
-        // Counted here, where the position is read: a tick recomposes this and not even the
-        // function around it.
-        Recompositions.hit("Progress")
+        // The position is read here: a tick recomposes this and not even the function around it.
         val done = if (durationMs > 0) (at.toFloat() / durationMs).coerceIn(0f, 1f) else 0f
         Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.outlineVariant))
         Box(Modifier.width(maxWidth * done).height(2.dp).background(MaterialTheme.colorScheme.primary))
@@ -441,7 +438,7 @@ val COVER_CORNER = 16.dp
 val COVER_SHADOW = 16.dp
 
 /**
- * How much of the cover shows through behind the full player: the theme's wash (arkui/theme.toml),
+ * How much of the cover shows through behind the full player: the theme's wash (ui/theme.toml),
  * faint enough that the title, the album and the gold read over a pale cover.
  */
 @Composable
@@ -541,28 +538,16 @@ private fun DeviceFace(on: Where, controls: Controls) {
 private fun Scrubber(state: PlayerState, position: StateFlow<Long>, scrubbing: StateFlow<Long?>, controls: Controls) {
     val ms by position.collectAsStateWithLifecycle()
     val theirs by scrubbing.collectAsStateWithLifecycle()
-    Recompositions.hit("Progress")
-    var dragging by remember { mutableStateOf<Float?>(null) }
     val total = state.durationMs.coerceAtLeast(1)
-    val at = dragging ?: ((theirs ?: ms).toFloat() / total).coerceIn(0f, 1f)
-    Bar(
-        value = at,
-        onValue = {
-            dragging = it
-            controls.scrub((it * total).toLong())
-        },
-        onDone = {
-            dragging?.let { controls.seek((it * total).toLong()) }
-            dragging = null
-        },
+    dev.arkui.Scrubber(
+        value = ((theirs ?: ms).toFloat() / total).coerceIn(0f, 1f),
+        onValue = { controls.scrub((it * total).toLong()) },
+        onDone = { controls.seek((it * total).toLong()) },
+        left = { formatClock((it * total).toLong()) },
+        right = { "-" + formatClock((state.durationMs - (it * total).toLong()).coerceAtLeast(0)) },
         enabled = state.durationMs > 0,
         label = "Position",
     )
-    val gone = (at * total).toLong()
-    Row(Modifier.fillMaxWidth()) {
-        Text(Media.clock(gone), style = quiet(MaterialTheme.typography.labelMedium), modifier = Modifier.weight(1f))
-        Text("-" + Media.clock((state.durationMs - gone).coerceAtLeast(0)), style = quiet(MaterialTheme.typography.labelMedium))
-    }
 }
 
 @Composable

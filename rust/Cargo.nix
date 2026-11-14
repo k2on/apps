@@ -47,10 +47,50 @@ rec {
       # File a bug if you depend on any for non-debug work!
       debug = internal.debugCrate { inherit packageId; };
     };
+    "ark-app" = rec {
+      packageId = "ark-app";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "ark-app";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
     "ark-auth" = rec {
       packageId = "ark-auth";
       build = internal.buildRustCrateWithFeatures {
         packageId = "ark-auth";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
+    "ark-background" = rec {
+      packageId = "ark-background";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "ark-background";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
+    "ark-camera" = rec {
+      packageId = "ark-camera";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "ark-camera";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
+    "ark-clipboard" = rec {
+      packageId = "ark-clipboard";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "ark-clipboard";
       };
 
       # Debug support which might change between releases.
@@ -67,6 +107,36 @@ rec {
       # File a bug if you depend on any for non-debug work!
       debug = internal.debugCrate { inherit packageId; };
     };
+    "ark-format" = rec {
+      packageId = "ark-format";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "ark-format";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
+    "ark-format-ffi" = rec {
+      packageId = "ark-format-ffi";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "ark-format-ffi";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
+    "ark-haptics" = rec {
+      packageId = "ark-haptics";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "ark-haptics";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
     "ark-macros" = rec {
       packageId = "ark-macros";
       build = internal.buildRustCrateWithFeatures {
@@ -77,10 +147,110 @@ rec {
       # File a bug if you depend on any for non-debug work!
       debug = internal.debugCrate { inherit packageId; };
     };
+    "ark-media-player" = rec {
+      packageId = "ark-media-player";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "ark-media-player";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
+    "ark-module" = rec {
+      packageId = "ark-module";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "ark-module";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
+    "ark-notifications" = rec {
+      packageId = "ark-notifications";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "ark-notifications";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
     "ark-peer" = rec {
       packageId = "ark-peer";
       build = internal.buildRustCrateWithFeatures {
         packageId = "ark-peer";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
+    "ark-push" = rec {
+      packageId = "ark-push";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "ark-push";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
+    "ark-router" = rec {
+      packageId = "ark-router";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "ark-router";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
+    "ark-router-macros" = rec {
+      packageId = "ark-router-macros";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "ark-router-macros";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
+    "ark-scanner" = rec {
+      packageId = "ark-scanner";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "ark-scanner";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
+    "ark-secure-store" = rec {
+      packageId = "ark-secure-store";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "ark-secure-store";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
+    "ark-share" = rec {
+      packageId = "ark-share";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "ark-share";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
+    "ark-ui-gen" = rec {
+      packageId = "ark-ui-gen";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "ark-ui-gen";
       };
 
       # Debug support which might change between releases.
@@ -107,10 +277,60 @@ rec {
       # File a bug if you depend on any for non-debug work!
       debug = internal.debugCrate { inherit packageId; };
     };
+    "arkui-glyphs" = rec {
+      packageId = "arkui-glyphs";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "arkui-glyphs";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
+    "arkui-macros" = rec {
+      packageId = "arkui-macros";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "arkui-macros";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
+    "arkui-serve" = rec {
+      packageId = "arkui-serve";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "arkui-serve";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
     "arkui-shots" = rec {
       packageId = "arkui-shots";
       build = internal.buildRustCrateWithFeatures {
         packageId = "arkui-shots";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
+    "arkui-web" = rec {
+      packageId = "arkui-web";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "arkui-web";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
+    "harken-app" = rec {
+      packageId = "harken-app";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "harken-app";
       };
 
       # Debug support which might change between releases.
@@ -177,20 +397,20 @@ rec {
       # File a bug if you depend on any for non-debug work!
       debug = internal.debugCrate { inherit packageId; };
     };
-    "money-domain" = rec {
-      packageId = "money-domain";
+    "money-app" = rec {
+      packageId = "money-app";
       build = internal.buildRustCrateWithFeatures {
-        packageId = "money-domain";
+        packageId = "money-app";
       };
 
       # Debug support which might change between releases.
       # File a bug if you depend on any for non-debug work!
       debug = internal.debugCrate { inherit packageId; };
     };
-    "money-ffi" = rec {
-      packageId = "money-ffi";
+    "money-core" = rec {
+      packageId = "money-core";
       build = internal.buildRustCrateWithFeatures {
-        packageId = "money-ffi";
+        packageId = "money-core";
       };
 
       # Debug support which might change between releases.
@@ -295,6 +515,209 @@ rec {
           "libm" = [ "dep:libm" ];
         };
         resolvedDefaultFeatures = [ "default" "std" ];
+      };
+      "accesskit" = rec {
+        crateName = "accesskit";
+        version = "0.22.0";
+        edition = "2021";
+        workspace_member = null;
+        src = pkgs.fetchgit {
+          url = "https://github.com/wash2/accesskit";
+          rev = "6c20249d3b9fd45e7002efad9f6b6171a9257912";
+          sha256 = "1riyv9hgng360knhxbbflqra32365iwzwxzx94bsxnfwfph8ldg9";
+        };
+        authors = [
+          "The AccessKit contributors"
+        ];
+        dependencies = [
+          {
+            name = "uuid";
+            packageId = "uuid";
+            usesDefaultFeatures = false;
+          }
+        ];
+        features = {
+          "enumn" = [ "dep:enumn" ];
+          "pyo3" = [ "dep:pyo3" ];
+          "schemars" = [ "dep:schemars" "dep:serde_json" "serde" "schemars/uuid1" ];
+          "serde" = [ "dep:serde" "enumn" "uuid/serde" ];
+        };
+      };
+      "accesskit_consumer" = rec {
+        crateName = "accesskit_consumer";
+        version = "0.32.0";
+        edition = "2021";
+        workspace_member = null;
+        src = pkgs.fetchgit {
+          url = "https://github.com/wash2/accesskit";
+          rev = "6c20249d3b9fd45e7002efad9f6b6171a9257912";
+          sha256 = "1riyv9hgng360knhxbbflqra32365iwzwxzx94bsxnfwfph8ldg9";
+        };
+        authors = [
+          "The AccessKit contributors"
+        ];
+        dependencies = [
+          {
+            name = "accesskit";
+            packageId = "accesskit";
+          }
+          {
+            name = "hashbrown";
+            packageId = "hashbrown 0.16.1";
+            usesDefaultFeatures = false;
+            features = [ "default-hasher" ];
+          }
+        ];
+
+      };
+      "accesskit_macos" = rec {
+        crateName = "accesskit_macos";
+        version = "0.23.0";
+        edition = "2021";
+        workspace_member = null;
+        src = pkgs.fetchgit {
+          url = "https://github.com/wash2/accesskit";
+          rev = "6c20249d3b9fd45e7002efad9f6b6171a9257912";
+          sha256 = "1riyv9hgng360knhxbbflqra32365iwzwxzx94bsxnfwfph8ldg9";
+        };
+        authors = [
+          "The AccessKit contributors"
+        ];
+        dependencies = [
+          {
+            name = "accesskit";
+            packageId = "accesskit";
+          }
+          {
+            name = "accesskit_consumer";
+            packageId = "accesskit_consumer";
+          }
+          {
+            name = "hashbrown";
+            packageId = "hashbrown 0.16.1";
+            usesDefaultFeatures = false;
+            features = [ "default-hasher" ];
+          }
+          {
+            name = "objc2";
+            packageId = "objc2 0.5.2";
+          }
+          {
+            name = "objc2-app-kit";
+            packageId = "objc2-app-kit 0.2.2";
+            features = [ "NSAccessibility" "NSAccessibilityConstants" "NSAccessibilityElement" "NSAccessibilityProtocols" "NSResponder" "NSView" "NSWindow" ];
+          }
+          {
+            name = "objc2-foundation";
+            packageId = "objc2-foundation 0.2.2";
+            features = [ "NSArray" "NSDictionary" "NSValue" "NSThread" ];
+          }
+        ];
+
+      };
+      "accesskit_windows" = rec {
+        crateName = "accesskit_windows";
+        version = "0.30.0";
+        edition = "2021";
+        workspace_member = null;
+        src = pkgs.fetchgit {
+          url = "https://github.com/wash2/accesskit";
+          rev = "6c20249d3b9fd45e7002efad9f6b6171a9257912";
+          sha256 = "1riyv9hgng360knhxbbflqra32365iwzwxzx94bsxnfwfph8ldg9";
+        };
+        authors = [
+          "The AccessKit contributors"
+        ];
+        dependencies = [
+          {
+            name = "accesskit";
+            packageId = "accesskit";
+          }
+          {
+            name = "accesskit_consumer";
+            packageId = "accesskit_consumer";
+          }
+          {
+            name = "hashbrown";
+            packageId = "hashbrown 0.16.1";
+            usesDefaultFeatures = false;
+            features = [ "default-hasher" ];
+          }
+          {
+            name = "static_assertions";
+            packageId = "static_assertions";
+          }
+          {
+            name = "windows";
+            packageId = "windows 0.61.3";
+            features = [ "Win32_Foundation" "Win32_Globalization" "Win32_Graphics_Gdi" "Win32_System_Com" "Win32_System_LibraryLoader" "Win32_System_Ole" "Win32_System_Variant" "Win32_UI_Accessibility" "Win32_UI_Input_KeyboardAndMouse" "Win32_UI_WindowsAndMessaging" ];
+          }
+          {
+            name = "windows-core";
+            packageId = "windows-core 0.61.2";
+          }
+        ];
+
+      };
+      "accesskit_winit" = rec {
+        crateName = "accesskit_winit";
+        version = "0.30.0";
+        edition = "2021";
+        workspace_member = null;
+        src = pkgs.fetchgit {
+          url = "https://github.com/wash2/accesskit";
+          rev = "6c20249d3b9fd45e7002efad9f6b6171a9257912";
+          sha256 = "1riyv9hgng360knhxbbflqra32365iwzwxzx94bsxnfwfph8ldg9";
+        };
+        authors = [
+          "The AccessKit contributors"
+        ];
+        dependencies = [
+          {
+            name = "accesskit";
+            packageId = "accesskit";
+          }
+          {
+            name = "accesskit_macos";
+            packageId = "accesskit_macos";
+            target = { target, features }: ("macos" == target."os" or null);
+          }
+          {
+            name = "accesskit_windows";
+            packageId = "accesskit_windows";
+            target = { target, features }: ("windows" == target."os" or null);
+          }
+          {
+            name = "raw-window-handle";
+            packageId = "raw-window-handle";
+            rename = "rwh_06";
+            optional = true;
+            features = [ "std" ];
+          }
+          {
+            name = "winit";
+            packageId = "winit";
+            usesDefaultFeatures = false;
+          }
+        ];
+        devDependencies = [
+          {
+            name = "winit";
+            packageId = "winit";
+            usesDefaultFeatures = false;
+            features = [ "x11" "wayland" "wayland-dlopen" "wayland-csd-adwaita" ];
+          }
+        ];
+        features = {
+          "accesskit_android" = [ "dep:accesskit_android" ];
+          "accesskit_unix" = [ "dep:accesskit_unix" ];
+          "async-io" = [ "accesskit_unix/async-io" ];
+          "default" = [ "accesskit_unix" "async-io" "rwh_06" "winit/x11" "winit/wayland" ];
+          "rwh_05" = [ "dep:rwh_05" ];
+          "rwh_06" = [ "dep:rwh_06" ];
+          "tokio" = [ "accesskit_unix/tokio" ];
+        };
+        resolvedDefaultFeatures = [ "rwh_06" ];
       };
       "adler2" = rec {
         crateName = "adler2";
@@ -419,6 +842,75 @@ rec {
         };
         resolvedDefaultFeatures = [ "default" "std" ];
       };
+      "allocator-api2" = rec {
+        crateName = "allocator-api2";
+        version = "0.2.21";
+        edition = "2018";
+        sha256 = "08zrzs022xwndihvzdn78yqarv2b9696y67i6h78nla3ww87jgb8";
+        libName = "allocator_api2";
+        authors = [
+          "Zakarum <zaq.dev@icloud.com>"
+        ];
+        features = {
+          "default" = [ "std" ];
+          "serde" = [ "dep:serde" ];
+          "std" = [ "alloc" ];
+        };
+        resolvedDefaultFeatures = [ "alloc" ];
+      };
+      "alsa" = rec {
+        crateName = "alsa";
+        version = "0.9.1";
+        edition = "2021";
+        sha256 = "0hvxc447bsynyhzhmznw6w2kwbid83p712dls4h1x8w3pavp4xgd";
+        authors = [
+          "David Henningsson <coding@diwic.se>"
+        ];
+        dependencies = [
+          {
+            name = "alsa-sys";
+            packageId = "alsa-sys";
+          }
+          {
+            name = "bitflags";
+            packageId = "bitflags 2.13.2";
+          }
+          {
+            name = "cfg-if";
+            packageId = "cfg-if";
+          }
+          {
+            name = "libc";
+            packageId = "libc";
+          }
+        ];
+
+      };
+      "alsa-sys" = rec {
+        crateName = "alsa-sys";
+        version = "0.3.1";
+        edition = "2018";
+        links = "alsa";
+        sha256 = "09qmmnpmlcj23zcgx2xsi4phcgm5i02g9xaf801y7i067mkfx3yv";
+        libName = "alsa_sys";
+        authors = [
+          "Pierre Krieger <pierre.krieger1708@gmail.com>"
+          "David Henningsson <coding@diwic.se>"
+        ];
+        dependencies = [
+          {
+            name = "libc";
+            packageId = "libc";
+          }
+        ];
+        buildDependencies = [
+          {
+            name = "pkg-config";
+            packageId = "pkg-config";
+          }
+        ];
+
+      };
       "android-activity" = rec {
         crateName = "android-activity";
         version = "0.6.1";
@@ -436,7 +928,7 @@ rec {
           }
           {
             name = "jni";
-            packageId = "jni";
+            packageId = "jni 0.22.4";
           }
           {
             name = "libc";
@@ -448,7 +940,7 @@ rec {
           }
           {
             name = "ndk";
-            packageId = "ndk";
+            packageId = "ndk 0.9.0";
             usesDefaultFeatures = false;
           }
           {
@@ -457,7 +949,7 @@ rec {
           }
           {
             name = "ndk-sys";
-            packageId = "ndk-sys";
+            packageId = "ndk-sys 0.6.0+11769913";
           }
           {
             name = "num_enum";
@@ -478,7 +970,7 @@ rec {
         devDependencies = [
           {
             name = "jni";
-            packageId = "jni";
+            packageId = "jni 0.22.4";
           }
         ];
         features = {
@@ -550,6 +1042,39 @@ rec {
         };
         resolvedDefaultFeatures = [ "default" "std" ];
       };
+      "any_spawner" = rec {
+        crateName = "any_spawner";
+        version = "0.3.0";
+        edition = "2021";
+        sha256 = "0z82fdy8lic92ib77cr7pxb1qn864fvynvngkwi69d7c3vzd710k";
+        authors = [
+          "Greg Johnston"
+        ];
+        dependencies = [
+          {
+            name = "futures";
+            packageId = "futures";
+          }
+          {
+            name = "thiserror";
+            packageId = "thiserror 2.0.21";
+          }
+          {
+            name = "wasm-bindgen-futures";
+            packageId = "wasm-bindgen-futures";
+            optional = true;
+          }
+        ];
+        features = {
+          "async-executor" = [ "dep:async-executor" ];
+          "futures-executor" = [ "futures/thread-pool" "futures/executor" ];
+          "glib" = [ "dep:glib" ];
+          "tokio" = [ "dep:tokio" ];
+          "tracing" = [ "dep:tracing" ];
+          "wasm-bindgen" = [ "dep:wasm-bindgen-futures" ];
+        };
+        resolvedDefaultFeatures = [ "futures-executor" "wasm-bindgen" ];
+      };
       "anyhow" = rec {
         crateName = "anyhow";
         version = "1.0.104";
@@ -589,6 +1114,27 @@ rec {
           "hashbrown" = [ "dep:hashbrown" ];
         };
         resolvedDefaultFeatures = [ "default" "std" ];
+      };
+      "approx" = rec {
+        crateName = "approx";
+        version = "0.5.1";
+        edition = "2015";
+        sha256 = "1ilpv3dgd58rasslss0labarq7jawxmivk17wsh8wmkdm3q15cfa";
+        authors = [
+          "Brendan Zabarauskas <bjzaba@yahoo.com.au>"
+        ];
+        dependencies = [
+          {
+            name = "num-traits";
+            packageId = "num-traits";
+            usesDefaultFeatures = false;
+          }
+        ];
+        features = {
+          "default" = [ "std" ];
+          "num-complex" = [ "dep:num-complex" ];
+        };
+        resolvedDefaultFeatures = [ "std" ];
       };
       "ar_archive_writer" = rec {
         crateName = "ar_archive_writer";
@@ -695,6 +1241,51 @@ rec {
         ];
 
       };
+      "ark-app" = rec {
+        crateName = "ark-app";
+        version = "0.1.0";
+        edition = "2021";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../ui/rust/app; };
+        libName = "ark_app";
+        dependencies = [
+          {
+            name = "ark";
+            packageId = "ark";
+          }
+          {
+            name = "ark-module";
+            packageId = "ark-module";
+          }
+          {
+            name = "arkui-macros";
+            packageId = "arkui-macros";
+          }
+        ];
+        devDependencies = [
+          {
+            name = "ark-background";
+            packageId = "ark-background";
+          }
+          {
+            name = "ark-camera";
+            packageId = "ark-camera";
+          }
+          {
+            name = "ark-haptics";
+            packageId = "ark-haptics";
+          }
+          {
+            name = "ark-notifications";
+            packageId = "ark-notifications";
+          }
+          {
+            name = "ark-peer";
+            packageId = "ark-peer";
+            usesDefaultFeatures = false;
+          }
+        ];
+
+      };
       "ark-auth" = rec {
         crateName = "ark-auth";
         version = "0.1.0";
@@ -707,9 +1298,22 @@ rec {
             packageId = "ark";
           }
           {
+            name = "ark-app";
+            packageId = "ark-app";
+          }
+          {
+            name = "ark-module";
+            packageId = "ark-module";
+          }
+          {
             name = "axum";
             packageId = "axum";
             optional = true;
+            target = { target, features }: (!("wasm32" == target."arch" or null));
+          }
+          {
+            name = "base64";
+            packageId = "base64 0.22.1";
             target = { target, features }: (!("wasm32" == target."arch" or null));
           }
           {
@@ -737,6 +1341,11 @@ rec {
           {
             name = "percent-encoding";
             packageId = "percent-encoding";
+          }
+          {
+            name = "qrcode";
+            packageId = "qrcode";
+            usesDefaultFeatures = false;
           }
           {
             name = "serde";
@@ -770,6 +1379,12 @@ rec {
             features = [ "cors" ];
           }
           {
+            name = "uniffi";
+            packageId = "uniffi";
+            optional = true;
+            usesDefaultFeatures = false;
+          }
+          {
             name = "ureq";
             packageId = "ureq";
             usesDefaultFeatures = false;
@@ -790,10 +1405,14 @@ rec {
             name = "web-sys";
             packageId = "web-sys";
             target = { target, features }: ("wasm32" == target."arch" or null);
-            features = [ "Headers" "History" "Location" "Request" "RequestInit" "Response" "Storage" "Window" ];
+            features = [ "Headers" "History" "Location" "Request" "RequestCredentials" "RequestInit" "Response" "Storage" "Window" ];
           }
         ];
         devDependencies = [
+          {
+            name = "ark-secure-store";
+            packageId = "ark-secure-store";
+          }
           {
             name = "base64";
             packageId = "base64 0.22.1";
@@ -825,9 +1444,87 @@ rec {
         ];
         features = {
           "default" = [ "server" ];
+          "ffi" = [ "dep:uniffi" ];
           "server" = [ "dep:axum" "dep:tokio" "dep:tower-http" ];
         };
-        resolvedDefaultFeatures = [ "default" "server" ];
+        resolvedDefaultFeatures = [ "default" "ffi" "server" ];
+      };
+      "ark-background" = rec {
+        crateName = "ark-background";
+        version = "0.1.0";
+        edition = "2021";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../modules/ark-background; };
+        libName = "ark_background";
+        dependencies = [
+          {
+            name = "ark-module";
+            packageId = "ark-module";
+          }
+          {
+            name = "uniffi";
+            packageId = "uniffi";
+            optional = true;
+            usesDefaultFeatures = false;
+          }
+        ];
+        features = {
+          "ffi" = [ "dep:uniffi" ];
+        };
+        resolvedDefaultFeatures = [ "ffi" ];
+      };
+      "ark-camera" = rec {
+        crateName = "ark-camera";
+        version = "0.1.0";
+        edition = "2021";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../modules/ark-camera; };
+        libName = "ark_camera";
+        dependencies = [
+          {
+            name = "ark-module";
+            packageId = "ark-module";
+          }
+          {
+            name = "uniffi";
+            packageId = "uniffi";
+            optional = true;
+            usesDefaultFeatures = false;
+          }
+        ];
+        features = {
+          "ffi" = [ "dep:uniffi" ];
+        };
+        resolvedDefaultFeatures = [ "ffi" ];
+      };
+      "ark-clipboard" = rec {
+        crateName = "ark-clipboard";
+        version = "0.1.0";
+        edition = "2021";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../modules/ark-clipboard; };
+        libName = "ark_clipboard";
+        dependencies = [
+          {
+            name = "ark-module";
+            packageId = "ark-module";
+          }
+          {
+            name = "uniffi";
+            packageId = "uniffi";
+            optional = true;
+            usesDefaultFeatures = false;
+          }
+          {
+            name = "web-sys";
+            packageId = "web-sys";
+            optional = true;
+            target = { target, features }: ("wasm32" == target."arch" or null);
+            features = [ "Window" "Navigator" "Clipboard" ];
+          }
+        ];
+        features = {
+          "ffi" = [ "dep:uniffi" ];
+          "web" = [ "dep:web-sys" ];
+        };
+        resolvedDefaultFeatures = [ "desktop" "ffi" "web" ];
       };
       "ark-ffi" = rec {
         crateName = "ark-ffi";
@@ -848,14 +1545,83 @@ rec {
             packageId = "ark";
           }
           {
+            name = "ark-app";
+            packageId = "ark-app";
+          }
+          {
             name = "ark-auth";
             packageId = "ark-auth";
             usesDefaultFeatures = false;
+            features = [ "ffi" ];
+          }
+          {
+            name = "ark-background";
+            packageId = "ark-background";
+            features = [ "ffi" ];
+          }
+          {
+            name = "ark-camera";
+            packageId = "ark-camera";
+            optional = true;
+            features = [ "ffi" ];
+          }
+          {
+            name = "ark-clipboard";
+            packageId = "ark-clipboard";
+            optional = true;
+            features = [ "ffi" ];
+          }
+          {
+            name = "ark-format";
+            packageId = "ark-format";
+          }
+          {
+            name = "ark-format-ffi";
+            packageId = "ark-format-ffi";
+          }
+          {
+            name = "ark-haptics";
+            packageId = "ark-haptics";
+            optional = true;
+            features = [ "ffi" ];
+          }
+          {
+            name = "ark-module";
+            packageId = "ark-module";
+          }
+          {
+            name = "ark-notifications";
+            packageId = "ark-notifications";
+            features = [ "ffi" ];
           }
           {
             name = "ark-peer";
             packageId = "ark-peer";
             usesDefaultFeatures = false;
+          }
+          {
+            name = "ark-push";
+            packageId = "ark-push";
+          }
+          {
+            name = "ark-router";
+            packageId = "ark-router";
+          }
+          {
+            name = "ark-scanner";
+            packageId = "ark-scanner";
+            optional = true;
+          }
+          {
+            name = "ark-secure-store";
+            packageId = "ark-secure-store";
+            features = [ "ffi" ];
+          }
+          {
+            name = "ark-share";
+            packageId = "ark-share";
+            optional = true;
+            features = [ "ffi" ];
           }
           {
             name = "serde_json";
@@ -891,8 +1657,64 @@ rec {
         ];
         features = {
           "bindgen" = [ "uniffi/cli" "uniffi/cargo-metadata" ];
+          "camera" = [ "dep:ark-camera" ];
+          "clipboard" = [ "dep:ark-clipboard" ];
+          "haptics" = [ "dep:ark-haptics" ];
+          "model" = [ "scanner" "ark-scanner/model" ];
+          "scanner" = [ "camera" "dep:ark-scanner" ];
+          "share" = [ "dep:ark-share" ];
         };
-        resolvedDefaultFeatures = [ "bindgen" ];
+        resolvedDefaultFeatures = [ "bindgen" "camera" "clipboard" "haptics" "model" "scanner" "share" ];
+      };
+      "ark-format" = rec {
+        crateName = "ark-format";
+        version = "0.1.0";
+        edition = "2021";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./ark-format; };
+        libName = "ark_format";
+
+      };
+      "ark-format-ffi" = rec {
+        crateName = "ark-format-ffi";
+        version = "0.1.0";
+        edition = "2021";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./ark-format-ffi; };
+        libName = "ark_format_ffi";
+        dependencies = [
+          {
+            name = "ark-format";
+            packageId = "ark-format";
+          }
+          {
+            name = "uniffi";
+            packageId = "uniffi";
+            usesDefaultFeatures = false;
+          }
+        ];
+
+      };
+      "ark-haptics" = rec {
+        crateName = "ark-haptics";
+        version = "0.1.0";
+        edition = "2021";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../modules/ark-haptics; };
+        libName = "ark_haptics";
+        dependencies = [
+          {
+            name = "ark-module";
+            packageId = "ark-module";
+          }
+          {
+            name = "uniffi";
+            packageId = "uniffi";
+            optional = true;
+            usesDefaultFeatures = false;
+          }
+        ];
+        features = {
+          "ffi" = [ "dep:uniffi" ];
+        };
+        resolvedDefaultFeatures = [ "ffi" ];
       };
       "ark-macros" = rec {
         crateName = "ark-macros";
@@ -919,6 +1741,111 @@ rec {
         ];
 
       };
+      "ark-media-player" = rec {
+        crateName = "ark-media-player";
+        version = "0.1.0";
+        edition = "2021";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../modules/ark-media-player; };
+        libName = "ark_media_player";
+        dependencies = [
+          {
+            name = "ark-module";
+            packageId = "ark-module";
+          }
+          {
+            name = "js-sys";
+            packageId = "js-sys";
+            optional = true;
+            target = { target, features }: ("wasm32" == target."arch" or null);
+          }
+          {
+            name = "rodio";
+            packageId = "rodio";
+            optional = true;
+            usesDefaultFeatures = false;
+            target = { target, features }: (!("wasm32" == target."arch" or null));
+            features = [ "symphonia-all" ];
+          }
+          {
+            name = "uniffi";
+            packageId = "uniffi";
+            optional = true;
+            usesDefaultFeatures = false;
+          }
+          {
+            name = "ureq";
+            packageId = "ureq";
+            optional = true;
+            usesDefaultFeatures = false;
+            target = { target, features }: (!("wasm32" == target."arch" or null));
+            features = [ "tls" ];
+          }
+          {
+            name = "wasm-bindgen";
+            packageId = "wasm-bindgen";
+            optional = true;
+            target = { target, features }: ("wasm32" == target."arch" or null);
+          }
+          {
+            name = "web-sys";
+            packageId = "web-sys";
+            optional = true;
+            target = { target, features }: ("wasm32" == target."arch" or null);
+            features = [ "Window" "Document" "Navigator" "HtmlAudioElement" "HtmlMediaElement" "Event" "EventTarget" "MediaError" ];
+          }
+          {
+            name = "zbus";
+            packageId = "zbus";
+            optional = true;
+            usesDefaultFeatures = false;
+            target = { target, features }: (!("wasm32" == target."arch" or null));
+            features = [ "blocking-api" "async-io" ];
+          }
+        ];
+        features = {
+          "desktop" = [ "dep:rodio" "dep:ureq" "dep:zbus" ];
+          "ffi" = [ "dep:uniffi" ];
+          "web" = [ "dep:wasm-bindgen" "dep:js-sys" "dep:web-sys" ];
+        };
+        resolvedDefaultFeatures = [ "desktop" "ffi" "web" ];
+      };
+      "ark-module" = rec {
+        crateName = "ark-module";
+        version = "0.1.0";
+        edition = "2021";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../ui/rust/module; };
+        libName = "ark_module";
+
+      };
+      "ark-notifications" = rec {
+        crateName = "ark-notifications";
+        version = "0.1.0";
+        edition = "2021";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../modules/ark-notifications; };
+        libName = "ark_notifications";
+        dependencies = [
+          {
+            name = "ark-module";
+            packageId = "ark-module";
+          }
+          {
+            name = "ark-push";
+            packageId = "ark-push";
+            optional = true;
+            usesDefaultFeatures = false;
+          }
+          {
+            name = "uniffi";
+            packageId = "uniffi";
+            optional = true;
+            usesDefaultFeatures = false;
+          }
+        ];
+        features = {
+          "ffi" = [ "dep:uniffi" "dep:ark-push" ];
+        };
+        resolvedDefaultFeatures = [ "ffi" ];
+      };
       "ark-peer" = rec {
         crateName = "ark-peer";
         version = "0.1.0";
@@ -940,6 +1867,12 @@ rec {
             name = "ark-auth";
             packageId = "ark-auth";
             usesDefaultFeatures = false;
+          }
+          {
+            name = "ark-push";
+            packageId = "ark-push";
+            optional = true;
+            features = [ "send" ];
           }
           {
             name = "axum";
@@ -1027,9 +1960,281 @@ rec {
         ];
         features = {
           "default" = [ "server" ];
-          "server" = [ "ark-auth/server" "dep:anyhow" "dep:axum" "dep:tokio" "dep:tower-http" ];
+          "server" = [ "ark-auth/server" "dep:ark-push" "dep:anyhow" "dep:axum" "dep:tokio" "dep:tower-http" ];
         };
         resolvedDefaultFeatures = [ "default" "server" ];
+      };
+      "ark-push" = rec {
+        crateName = "ark-push";
+        version = "0.1.0";
+        edition = "2021";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./ark-push; };
+        libName = "ark_push";
+        dependencies = [
+          {
+            name = "ark-module";
+            packageId = "ark-module";
+          }
+          {
+            name = "base64";
+            packageId = "base64 0.22.1";
+          }
+          {
+            name = "bytes";
+            packageId = "bytes";
+            optional = true;
+          }
+          {
+            name = "getrandom";
+            packageId = "getrandom 0.2.17";
+          }
+          {
+            name = "h2";
+            packageId = "h2";
+            optional = true;
+          }
+          {
+            name = "http";
+            packageId = "http";
+            optional = true;
+          }
+          {
+            name = "p256";
+            packageId = "p256";
+            features = [ "ecdh" ];
+          }
+          {
+            name = "ring";
+            packageId = "ring";
+          }
+          {
+            name = "rustls";
+            packageId = "rustls";
+            optional = true;
+            usesDefaultFeatures = false;
+            features = [ "ring" "std" "tls12" ];
+          }
+          {
+            name = "serde";
+            packageId = "serde";
+            features = [ "derive" ];
+          }
+          {
+            name = "serde_json";
+            packageId = "serde_json";
+            features = [ "raw_value" ];
+          }
+          {
+            name = "tokio";
+            packageId = "tokio";
+            optional = true;
+            features = [ "rt" "net" "time" ];
+          }
+          {
+            name = "tokio-rustls";
+            packageId = "tokio-rustls";
+            optional = true;
+            usesDefaultFeatures = false;
+            features = [ "ring" "tls12" "logging" ];
+          }
+          {
+            name = "ureq";
+            packageId = "ureq";
+            optional = true;
+            usesDefaultFeatures = false;
+            features = [ "tls" ];
+          }
+          {
+            name = "webpki-roots";
+            packageId = "webpki-roots 0.26.11";
+            optional = true;
+          }
+        ];
+        devDependencies = [
+          {
+            name = "tokio";
+            packageId = "tokio";
+            features = [ "rt" "net" "macros" ];
+          }
+        ];
+        features = {
+          "send" = [ "dep:h2" "dep:http" "dep:bytes" "dep:tokio" "dep:tokio-rustls" "dep:rustls" "dep:webpki-roots" "dep:ureq" ];
+        };
+        resolvedDefaultFeatures = [ "send" ];
+      };
+      "ark-router" = rec {
+        crateName = "ark-router";
+        version = "0.1.0";
+        edition = "2021";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../ui/rust/router; };
+        libName = "ark_router";
+        dependencies = [
+          {
+            name = "ark-router-macros";
+            packageId = "ark-router-macros";
+          }
+        ];
+
+      };
+      "ark-router-macros" = rec {
+        crateName = "ark-router-macros";
+        version = "0.1.0";
+        edition = "2021";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../ui/rust/router-macros; };
+        procMacro = true;
+        libName = "ark_router_macros";
+        dependencies = [
+          {
+            name = "proc-macro2";
+            packageId = "proc-macro2";
+          }
+          {
+            name = "quote";
+            packageId = "quote";
+          }
+          {
+            name = "syn";
+            packageId = "syn 2.0.119";
+            usesDefaultFeatures = false;
+            features = [ "clone-impls" "derive" "full" "parsing" "printing" "proc-macro" ];
+          }
+        ];
+
+      };
+      "ark-scanner" = rec {
+        crateName = "ark-scanner";
+        version = "0.1.0";
+        edition = "2021";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../modules/ark-scanner; };
+        libName = "ark_scanner";
+        dependencies = [
+          {
+            name = "ark-camera";
+            packageId = "ark-camera";
+          }
+          {
+            name = "ark-module";
+            packageId = "ark-module";
+          }
+          {
+            name = "image";
+            packageId = "image";
+            usesDefaultFeatures = false;
+            features = [ "jpeg" ];
+          }
+          {
+            name = "js-sys";
+            packageId = "js-sys";
+            optional = true;
+            target = { target, features }: ("wasm32" == target."arch" or null);
+          }
+          {
+            name = "tract-onnx";
+            packageId = "tract-onnx";
+            optional = true;
+          }
+          {
+            name = "wasm-bindgen";
+            packageId = "wasm-bindgen";
+            optional = true;
+            target = { target, features }: ("wasm32" == target."arch" or null);
+          }
+          {
+            name = "wasm-bindgen-futures";
+            packageId = "wasm-bindgen-futures";
+            optional = true;
+            target = { target, features }: ("wasm32" == target."arch" or null);
+          }
+          {
+            name = "web-sys";
+            packageId = "web-sys";
+            optional = true;
+            target = { target, features }: ("wasm32" == target."arch" or null);
+            features = [ "Window" "Document" "Element" "HtmlInputElement" "FileList" "File" "Blob" ];
+          }
+        ];
+        devDependencies = [
+          {
+            name = "image";
+            packageId = "image";
+            usesDefaultFeatures = false;
+            features = [ "png" "jpeg" ];
+          }
+        ];
+        features = {
+          "model" = [ "dep:tract-onnx" ];
+          "web" = [ "dep:web-sys" "dep:wasm-bindgen" "dep:wasm-bindgen-futures" "dep:js-sys" ];
+        };
+        resolvedDefaultFeatures = [ "desktop" "model" "web" ];
+      };
+      "ark-secure-store" = rec {
+        crateName = "ark-secure-store";
+        version = "0.1.0";
+        edition = "2021";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../modules/ark-secure-store; };
+        libName = "ark_secure_store";
+        dependencies = [
+          {
+            name = "ark-module";
+            packageId = "ark-module";
+          }
+          {
+            name = "uniffi";
+            packageId = "uniffi";
+            optional = true;
+            usesDefaultFeatures = false;
+          }
+          {
+            name = "zbus";
+            packageId = "zbus";
+            optional = true;
+            usesDefaultFeatures = false;
+            target = { target, features }: ("linux" == target."os" or null);
+            features = [ "blocking-api" "async-io" ];
+          }
+        ];
+        features = {
+          "desktop" = [ "dep:zbus" ];
+          "ffi" = [ "dep:uniffi" ];
+        };
+        resolvedDefaultFeatures = [ "desktop" "ffi" ];
+      };
+      "ark-share" = rec {
+        crateName = "ark-share";
+        version = "0.1.0";
+        edition = "2021";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../modules/ark-share; };
+        libName = "ark_share";
+        dependencies = [
+          {
+            name = "ark-module";
+            packageId = "ark-module";
+          }
+          {
+            name = "uniffi";
+            packageId = "uniffi";
+            optional = true;
+            usesDefaultFeatures = false;
+          }
+        ];
+        features = {
+          "ffi" = [ "dep:uniffi" ];
+        };
+        resolvedDefaultFeatures = [ "ffi" ];
+      };
+      "ark-ui-gen" = rec {
+        crateName = "ark-ui-gen";
+        version = "0.1.0";
+        edition = "2021";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../ui/rust/gen; };
+        libName = "ark_ui_gen";
+        dependencies = [
+          {
+            name = "ark-app";
+            packageId = "ark-app";
+          }
+        ];
+
       };
       "arkdb" = rec {
         crateName = "arkdb";
@@ -1069,31 +2274,46 @@ rec {
         crateName = "arkui";
         version = "0.1.0";
         edition = "2021";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./arkui; };
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../ui/rust/arkui; };
         dependencies = [
           {
-            name = "iced";
-            packageId = "iced";
-            target = { target, features }: (!("wasm32" == target."arch" or null));
-            features = [ "smol" "svg" "image" "advanced" "fira-sans" ];
+            name = "ark-app";
+            packageId = "ark-app";
+            optional = true;
+          }
+          {
+            name = "ark-format";
+            packageId = "ark-format";
+          }
+          {
+            name = "ark-router";
+            packageId = "ark-router";
+          }
+          {
+            name = "arkui-glyphs";
+            packageId = "arkui-glyphs";
+          }
+          {
+            name = "chrono";
+            packageId = "chrono";
+            usesDefaultFeatures = false;
+            features = [ "clock" ];
           }
           {
             name = "iced";
             packageId = "iced";
-            target = { target, features }: ("wasm32" == target."arch" or null);
-            features = [ "webgl" "svg" "image" "advanced" "fira-sans" ];
+            usesDefaultFeatures = false;
+            features = [ "winit" "wgpu" "tiny-skia" "crisp" "web-colors" "thread-pool" "linux-theme-detection" "x11" "wayland" "a11y" "smol" "svg" "image" "advanced" "fira-sans" ];
+          }
+          {
+            name = "iced_accessibility";
+            packageId = "iced_accessibility";
           }
           {
             name = "image";
             packageId = "image";
             usesDefaultFeatures = false;
-            target = { target, features }: (!("wasm32" == target."arch" or null));
             features = [ "jpeg" "png" ];
-          }
-          {
-            name = "js-sys";
-            packageId = "js-sys";
-            target = { target, features }: ("wasm32" == target."arch" or null);
           }
           {
             name = "raw-window-handle";
@@ -1104,18 +2324,7 @@ rec {
             name = "ureq";
             packageId = "ureq";
             usesDefaultFeatures = false;
-            target = { target, features }: (!("wasm32" == target."arch" or null));
             features = [ "tls" ];
-          }
-          {
-            name = "wasm-bindgen";
-            packageId = "wasm-bindgen";
-            target = { target, features }: ("wasm32" == target."arch" or null);
-          }
-          {
-            name = "wasm-bindgen-futures";
-            packageId = "wasm-bindgen-futures";
-            target = { target, features }: ("wasm32" == target."arch" or null);
           }
           {
             name = "wayland-client";
@@ -1130,12 +2339,6 @@ rec {
             features = [ "client" "unstable" ];
           }
           {
-            name = "web-sys";
-            packageId = "web-sys";
-            target = { target, features }: ("wasm32" == target."arch" or null);
-            features = [ "Window" "History" "Location" "EventTarget" "Navigator" "Clipboard" "Document" "Element" "HtmlElement" "HtmlInputElement" "Event" "DragEvent" "DataTransfer" "FileList" "File" "Blob" ];
-          }
-          {
             name = "zbus";
             packageId = "zbus";
             usesDefaultFeatures = false;
@@ -1147,7 +2350,106 @@ rec {
           {
             name = "iced_test";
             packageId = "iced_test";
-            target = {target, features}: (!("wasm32" == target."arch" or null));
+          }
+        ];
+        features = {
+          "app" = [ "dep:ark-app" ];
+        };
+        resolvedDefaultFeatures = [ "app" ];
+      };
+      "arkui-glyphs" = rec {
+        crateName = "arkui-glyphs";
+        version = "0.1.0";
+        edition = "2021";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../ui/rust/glyphs; };
+        libName = "arkui_glyphs";
+
+      };
+      "arkui-macros" = rec {
+        crateName = "arkui-macros";
+        version = "0.1.0";
+        edition = "2021";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../ui/rust/arkui-macros; };
+        procMacro = true;
+        libName = "arkui_macros";
+        dependencies = [
+          {
+            name = "proc-macro2";
+            packageId = "proc-macro2";
+          }
+          {
+            name = "quote";
+            packageId = "quote";
+          }
+          {
+            name = "syn";
+            packageId = "syn 2.0.119";
+            usesDefaultFeatures = false;
+            features = [ "clone-impls" "derive" "full" "parsing" "printing" "proc-macro" "visit-mut" ];
+          }
+        ];
+
+      };
+      "arkui-serve" = rec {
+        crateName = "arkui-serve";
+        version = "0.1.0";
+        edition = "2021";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../ui/rust/serve; };
+        libName = "arkui_serve";
+        dependencies = [
+          {
+            name = "ark";
+            packageId = "ark";
+          }
+          {
+            name = "ark-auth";
+            packageId = "ark-auth";
+          }
+          {
+            name = "ark-peer";
+            packageId = "ark-peer";
+            features = [ "server" ];
+          }
+          {
+            name = "arkui-web";
+            packageId = "arkui-web";
+            usesDefaultFeatures = false;
+            features = [ "ssr" ];
+          }
+          {
+            name = "axum";
+            packageId = "axum";
+          }
+          {
+            name = "tokio";
+            packageId = "tokio";
+            features = [ "rt-multi-thread" "macros" ];
+          }
+          {
+            name = "tower";
+            packageId = "tower";
+            features = [ "util" ];
+          }
+        ];
+        devDependencies = [
+          {
+            name = "leptos";
+            packageId = "leptos";
+            usesDefaultFeatures = false;
+            features = [ "ssr" ];
+          }
+          {
+            name = "money-core";
+            packageId = "money-core";
+          }
+          {
+            name = "tempfile";
+            packageId = "tempfile";
+          }
+          {
+            name = "ureq";
+            packageId = "ureq";
+            usesDefaultFeatures = false;
           }
         ];
 
@@ -1156,13 +2458,14 @@ rec {
         crateName = "arkui-shots";
         version = "0.1.0";
         edition = "2021";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./arkui-shots; };
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../ui/rust/shots; };
         libName = "arkui_shots";
         dependencies = [
           {
             name = "iced";
             packageId = "iced";
-            features = [ "smol" "svg" "image" "advanced" "fira-sans" ];
+            usesDefaultFeatures = false;
+            features = [ "winit" "wgpu" "tiny-skia" "crisp" "web-colors" "thread-pool" "linux-theme-detection" "x11" "wayland" "a11y" "smol" "svg" "image" "advanced" "fira-sans" ];
           }
           {
             name = "iced_test";
@@ -1181,6 +2484,76 @@ rec {
           }
         ];
 
+      };
+      "arkui-web" = rec {
+        crateName = "arkui-web";
+        version = "0.1.0";
+        edition = "2021";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../ui/rust/web; };
+        libName = "arkui_web";
+        dependencies = [
+          {
+            name = "ark";
+            packageId = "ark";
+            optional = true;
+          }
+          {
+            name = "ark-app";
+            packageId = "ark-app";
+          }
+          {
+            name = "ark-auth";
+            packageId = "ark-auth";
+            optional = true;
+            usesDefaultFeatures = false;
+          }
+          {
+            name = "ark-format";
+            packageId = "ark-format";
+          }
+          {
+            name = "ark-peer";
+            packageId = "ark-peer";
+            optional = true;
+            usesDefaultFeatures = false;
+          }
+          {
+            name = "ark-router";
+            packageId = "ark-router";
+          }
+          {
+            name = "arkui-glyphs";
+            packageId = "arkui-glyphs";
+          }
+          {
+            name = "leptos";
+            packageId = "leptos";
+            usesDefaultFeatures = false;
+          }
+          {
+            name = "wasm-bindgen";
+            packageId = "wasm-bindgen";
+          }
+          {
+            name = "wasm-bindgen-futures";
+            packageId = "wasm-bindgen-futures";
+            optional = true;
+            target = { target, features }: ("wasm32" == target."arch" or null);
+          }
+          {
+            name = "web-sys";
+            packageId = "web-sys";
+            features = [ "Window" "Document" "Element" "HtmlElement" "HtmlInputElement" "KeyboardEvent" "MouseEvent" "Event" "EventTarget" "DomRect" "Location" "UrlSearchParams" "MediaQueryList" "CssStyleDeclaration" "Node" "History" "FocusEvent" "PointerEvent" "ScrollIntoViewOptions" "ScrollLogicalPosition" "Navigator" "NodeList" "HtmlDocument" ];
+          }
+        ];
+        features = {
+          "csr" = [ "leptos/csr" ];
+          "default" = [ "csr" ];
+          "host" = [ "dep:ark" "dep:ark-peer" "dep:ark-auth" "dep:wasm-bindgen-futures" "web-sys/Storage" ];
+          "hydrate" = [ "leptos/hydrate" ];
+          "ssr" = [ "leptos/ssr" ];
+        };
+        resolvedDefaultFeatures = [ "csr" "default" "host" "hydrate" "ssr" ];
       };
       "arrayref" = rec {
         crateName = "arrayref";
@@ -1710,6 +3083,19 @@ rec {
         ];
 
       };
+      "async-once-cell" = rec {
+        crateName = "async-once-cell";
+        version = "0.5.4";
+        edition = "2018";
+        sha256 = "0np3zj2yvk20ha4rk7sf8s0rngywhcykl1zgyb36flkq4qvzi222";
+        libName = "async_once_cell";
+        authors = [
+          "Daniel De Graaf <code@danieldg.net>"
+        ];
+        features = {
+          "critical-section" = [ "dep:critical-section" ];
+        };
+      };
       "async-process" = rec {
         crateName = "async-process";
         version = "2.5.0";
@@ -1930,6 +3316,94 @@ rec {
         features = {
           "portable-atomic" = [ "dep:portable-atomic" ];
         };
+      };
+      "attribute-derive" = rec {
+        crateName = "attribute-derive";
+        version = "0.11.0";
+        edition = "2021";
+        sha256 = "0ryisgalxj44dlv1x9l56mxdyqrvqwscjhd3kp75fik8d1xfzyfj";
+        libName = "attribute_derive";
+        dependencies = [
+          {
+            name = "attribute-derive-macro";
+            packageId = "attribute-derive-macro";
+          }
+          {
+            name = "manyhow";
+            packageId = "manyhow";
+          }
+          {
+            name = "proc-macro2";
+            packageId = "proc-macro2";
+          }
+          {
+            name = "quote";
+            packageId = "quote";
+          }
+          {
+            name = "syn";
+            packageId = "syn 3.0.6";
+          }
+        ];
+        devDependencies = [
+          {
+            name = "quote";
+            packageId = "quote";
+          }
+          {
+            name = "syn";
+            packageId = "syn 3.0.6";
+            features = [ "extra-traits" ];
+          }
+        ];
+        features = {
+          "syn-full" = [ "syn/full" ];
+        };
+        resolvedDefaultFeatures = [ "syn-full" ];
+      };
+      "attribute-derive-macro" = rec {
+        crateName = "attribute-derive-macro";
+        version = "0.11.0";
+        edition = "2021";
+        sha256 = "164fzcfyfikja6q8z2fz9p4q53shsnyljilfpcjr2m3kbrp4439h";
+        procMacro = true;
+        libName = "attribute_derive_macro";
+        dependencies = [
+          {
+            name = "collection_literals";
+            packageId = "collection_literals";
+          }
+          {
+            name = "interpolator";
+            packageId = "interpolator";
+            features = [ "iter" ];
+          }
+          {
+            name = "manyhow";
+            packageId = "manyhow";
+          }
+          {
+            name = "proc-macro-utils";
+            packageId = "proc-macro-utils";
+          }
+          {
+            name = "proc-macro2";
+            packageId = "proc-macro2";
+          }
+          {
+            name = "quote";
+            packageId = "quote";
+          }
+          {
+            name = "quote-use";
+            packageId = "quote-use";
+          }
+          {
+            name = "syn";
+            packageId = "syn 3.0.6";
+          }
+        ];
+
       };
       "autocfg" = rec {
         crateName = "autocfg";
@@ -2155,7 +3629,7 @@ rec {
           }
           {
             name = "mime";
-            packageId = "mime";
+            packageId = "mime 0.3.17";
           }
           {
             name = "percent-encoding";
@@ -2315,7 +3789,7 @@ rec {
           }
           {
             name = "mime";
-            packageId = "mime";
+            packageId = "mime 0.3.17";
           }
           {
             name = "pin-project-lite";
@@ -2357,6 +3831,20 @@ rec {
           "tracing" = [ "dep:tracing" ];
         };
         resolvedDefaultFeatures = [ "tracing" ];
+      };
+      "base16" = rec {
+        crateName = "base16";
+        version = "0.2.1";
+        edition = "2018";
+        sha256 = "1a55jd3a4hsnsqg1fakpmll45plq8hifc465ib723vkaqc83cz6j";
+        authors = [
+          "Thom Chiovoloni <tchiovoloni@mozilla.com>"
+        ];
+        features = {
+          "default" = [ "std" ];
+          "std" = [ "alloc" ];
+        };
+        resolvedDefaultFeatures = [ "alloc" "default" "std" ];
       };
       "base16ct" = rec {
         crateName = "base16ct";
@@ -2451,6 +3939,77 @@ rec {
           }
         ];
 
+      };
+      "bindgen" = rec {
+        crateName = "bindgen";
+        version = "0.72.1";
+        edition = "2021";
+        sha256 = "15bq73y3wd3x3vxh3z3g72hy08zs8rxg1f0i1xsrrd6g16spcdwr";
+        libPath = "lib.rs";
+        authors = [
+          "Jyun-Yan You <jyyou.tw@gmail.com>"
+          "Emilio Cobos Álvarez <emilio@crisal.io>"
+          "Nick Fitzgerald <fitzgen@gmail.com>"
+          "The Servo project developers"
+        ];
+        dependencies = [
+          {
+            name = "bitflags";
+            packageId = "bitflags 2.13.2";
+          }
+          {
+            name = "cexpr";
+            packageId = "cexpr";
+          }
+          {
+            name = "clang-sys";
+            packageId = "clang-sys";
+            features = [ "clang_11_0" ];
+          }
+          {
+            name = "itertools";
+            packageId = "itertools 0.12.1";
+            usesDefaultFeatures = false;
+          }
+          {
+            name = "proc-macro2";
+            packageId = "proc-macro2";
+          }
+          {
+            name = "quote";
+            packageId = "quote";
+            usesDefaultFeatures = false;
+          }
+          {
+            name = "regex";
+            packageId = "regex";
+            usesDefaultFeatures = false;
+            features = [ "std" "unicode-perl" ];
+          }
+          {
+            name = "rustc-hash";
+            packageId = "rustc-hash 2.1.3";
+          }
+          {
+            name = "shlex";
+            packageId = "shlex 1.3.0";
+          }
+          {
+            name = "syn";
+            packageId = "syn 2.0.119";
+            features = [ "full" "extra-traits" "visit-mut" ];
+          }
+        ];
+        features = {
+          "__cli" = [ "dep:clap" "dep:clap_complete" ];
+          "default" = [ "logging" "prettyplease" "runtime" ];
+          "experimental" = [ "dep:annotate-snippets" ];
+          "logging" = [ "dep:log" ];
+          "prettyplease" = [ "dep:prettyplease" ];
+          "runtime" = [ "clang-sys/runtime" ];
+          "static" = [ "clang-sys/static" ];
+        };
+        resolvedDefaultFeatures = [ "runtime" ];
       };
       "bit-set 0.5.3" = rec {
         crateName = "bit-set";
@@ -2651,7 +4210,7 @@ rec {
           "std" = [ "alloc" "objc2/std" ];
           "unstable-winobjc" = [ "gnustep-1-8" ];
         };
-        resolvedDefaultFeatures = [ "alloc" "default" "std" ];
+        resolvedDefaultFeatures = [ "alloc" "std" ];
       };
       "block2 0.6.2" = rec {
         crateName = "block2";
@@ -2680,7 +4239,7 @@ rec {
           "std" = [ "alloc" ];
           "unstable-winobjc" = [ "gnustep-1-8" ];
         };
-        resolvedDefaultFeatures = [ "alloc" ];
+        resolvedDefaultFeatures = [ "alloc" "default" "std" ];
       };
       "blocking" = rec {
         crateName = "blocking";
@@ -2722,6 +4281,44 @@ rec {
           "tracing" = [ "dep:tracing" ];
         };
       };
+      "borsh" = rec {
+        crateName = "borsh";
+        version = "1.8.1";
+        edition = "2018";
+        crateBin = [];
+        sha256 = "02p2lhz49944wc6j5dzr42y1mkrv0znbicg3cl61b9bbda25sg2m";
+        authors = [
+          "Near Inc <hello@near.org>"
+        ];
+        dependencies = [
+          {
+            name = "bytes";
+            packageId = "bytes";
+            optional = true;
+            usesDefaultFeatures = false;
+          }
+        ];
+        buildDependencies = [
+          {
+            name = "cfg_aliases";
+            packageId = "cfg_aliases";
+          }
+        ];
+        features = {
+          "ascii" = [ "dep:ascii" ];
+          "borsh-derive" = [ "dep:borsh-derive" ];
+          "bson" = [ "dep:bson" ];
+          "bytes" = [ "dep:bytes" ];
+          "default" = [ "std" ];
+          "derive" = [ "borsh-derive" ];
+          "hashbrown" = [ "dep:hashbrown" ];
+          "indexmap" = [ "dep:indexmap" ];
+          "std" = [ "bytes?/std" ];
+          "unstable__schema" = [ "derive" "borsh-derive/schema" ];
+          "uuid" = [ "dep:uuid" ];
+        };
+        resolvedDefaultFeatures = [ "std" ];
+      };
       "bs58" = rec {
         crateName = "bs58";
         version = "0.5.1";
@@ -2755,6 +4352,27 @@ rec {
         };
         resolvedDefaultFeatures = [ "alloc" "std" ];
       };
+      "build_helpers" = rec {
+        crateName = "build_helpers";
+        version = "0.14.0";
+        edition = "2024";
+        workspace_member = null;
+        src = pkgs.fetchgit {
+          url = "https://github.com/pop-os/iced";
+          rev = "d5d638c3a3022396fcf5b9b588b3446820dc11ad";
+          sha256 = "0v5krpdscfwha8wdbwk8vv38x9jjxjlgc23yr3r6b31dcyqwsni1";
+        };
+        authors = [
+          "Héctor Ramón Jiménez <hector@hecrj.dev>"
+        ];
+        dependencies = [
+          {
+            name = "cfg_aliases";
+            packageId = "cfg_aliases";
+          }
+        ];
+
+      };
       "built" = rec {
         crateName = "built";
         version = "0.8.1";
@@ -2786,6 +4404,16 @@ rec {
           "serde" = [ "dep:serde" ];
         };
         resolvedDefaultFeatures = [ "default" ];
+      };
+      "by_address" = rec {
+        crateName = "by_address";
+        version = "1.2.1";
+        edition = "2021";
+        sha256 = "01idmag3lcwnnqrnnyik2gmbrr34drsi97q15ihvcbbidf2kryk4";
+        authors = [
+          "Matt Brubeck <mbrubeck@limpet.net>"
+        ];
+
       };
       "bytemuck" = rec {
         crateName = "bytemuck";
@@ -2878,61 +4506,7 @@ rec {
         };
         resolvedDefaultFeatures = [ "default" "std" ];
       };
-      "calloop 0.13.0" = rec {
-        crateName = "calloop";
-        version = "0.13.0";
-        edition = "2018";
-        sha256 = "1v5zgidnhsyml403rzr7vm99f8q6r5bxq5gxyiqkr8lcapwa57dr";
-        authors = [
-          "Elinor Berger <elinor@safaradeg.net>"
-        ];
-        dependencies = [
-          {
-            name = "bitflags";
-            packageId = "bitflags 2.13.2";
-          }
-          {
-            name = "log";
-            packageId = "log";
-          }
-          {
-            name = "polling";
-            packageId = "polling";
-          }
-          {
-            name = "rustix";
-            packageId = "rustix 0.38.44";
-            usesDefaultFeatures = false;
-            features = [ "event" "fs" "pipe" "std" ];
-          }
-          {
-            name = "slab";
-            packageId = "slab";
-          }
-          {
-            name = "thiserror";
-            packageId = "thiserror 1.0.69";
-          }
-        ];
-        devDependencies = [
-          {
-            name = "rustix";
-            packageId = "rustix 0.38.44";
-            usesDefaultFeatures = false;
-            features = [ "net" ];
-          }
-        ];
-        features = {
-          "async-task" = [ "dep:async-task" ];
-          "block_on" = [ "pin-utils" ];
-          "executor" = [ "async-task" ];
-          "futures-io" = [ "dep:futures-io" ];
-          "nix" = [ "dep:nix" ];
-          "pin-utils" = [ "dep:pin-utils" ];
-          "signals" = [ "nix" ];
-        };
-      };
-      "calloop 0.14.4" = rec {
+      "calloop" = rec {
         crateName = "calloop";
         version = "0.14.4";
         edition = "2018";
@@ -2986,40 +4560,7 @@ rec {
           "stream" = [ "futures-core" ];
         };
       };
-      "calloop-wayland-source 0.3.0" = rec {
-        crateName = "calloop-wayland-source";
-        version = "0.3.0";
-        edition = "2021";
-        sha256 = "086x5mq16prrcwd9k6bw9an0sp8bj9l5daz4ziz5z4snf2c6m9lm";
-        libName = "calloop_wayland_source";
-        authors = [
-          "Kirill Chibisov <contact@kchibisov.com>"
-        ];
-        dependencies = [
-          {
-            name = "calloop";
-            packageId = "calloop 0.13.0";
-          }
-          {
-            name = "rustix";
-            packageId = "rustix 0.38.44";
-            usesDefaultFeatures = false;
-            features = [ "std" ];
-          }
-          {
-            name = "wayland-backend";
-            packageId = "wayland-backend";
-          }
-          {
-            name = "wayland-client";
-            packageId = "wayland-client";
-          }
-        ];
-        features = {
-          "log" = [ "dep:log" ];
-        };
-      };
-      "calloop-wayland-source 0.4.1" = rec {
+      "calloop-wayland-source" = rec {
         crateName = "calloop-wayland-source";
         version = "0.4.1";
         edition = "2021";
@@ -3031,7 +4572,7 @@ rec {
         dependencies = [
           {
             name = "calloop";
-            packageId = "calloop 0.14.4";
+            packageId = "calloop";
           }
           {
             name = "rustix";
@@ -3164,13 +4705,42 @@ rec {
           }
           {
             name = "shlex";
-            packageId = "shlex";
+            packageId = "shlex 2.0.1";
           }
         ];
         features = {
           "parallel" = [ "dep:jobserver" "dep:libc" ];
         };
         resolvedDefaultFeatures = [ "parallel" ];
+      };
+      "cesu8" = rec {
+        crateName = "cesu8";
+        version = "1.1.0";
+        edition = "2015";
+        sha256 = "0g6q58wa7khxrxcxgnqyi9s1z2cjywwwd3hzr5c55wskhx6s0hvd";
+        authors = [
+          "Eric Kidd <git@randomhacks.net>"
+        ];
+        features = {
+        };
+      };
+      "cexpr" = rec {
+        crateName = "cexpr";
+        version = "0.6.0";
+        edition = "2018";
+        sha256 = "0rl77bwhs5p979ih4r0202cn5jrfsrbgrksp40lkfz5vk1x3ib3g";
+        authors = [
+          "Jethro Beekman <jethro@jbeekman.nl>"
+        ];
+        dependencies = [
+          {
+            name = "nom";
+            packageId = "nom 7.1.3";
+            usesDefaultFeatures = false;
+            features = [ "std" ];
+          }
+        ];
+
       };
       "cfg-if" = rec {
         crateName = "cfg-if";
@@ -3234,7 +4804,7 @@ rec {
           }
           {
             name = "windows-link";
-            packageId = "windows-link";
+            packageId = "windows-link 0.2.1";
             optional = true;
             target = { target, features }: (target."windows" or false);
           }
@@ -3262,6 +4832,71 @@ rec {
           "windows-link" = [ "dep:windows-link" ];
         };
         resolvedDefaultFeatures = [ "alloc" "clock" "iana-time-zone" "js-sys" "now" "serde" "std" "wasm-bindgen" "wasmbind" "winapi" "windows-link" ];
+      };
+      "clang-sys" = rec {
+        crateName = "clang-sys";
+        version = "1.9.1";
+        edition = "2021";
+        links = "clang";
+        sha256 = "12kqa3wywpxw3jk7n2dqz9fjm8p0qczx37y0yib3nwc0njkqnyhm";
+        libName = "clang_sys";
+        authors = [
+          "Kyle Mayes <kyle@mayeses.com>"
+        ];
+        dependencies = [
+          {
+            name = "glob";
+            packageId = "glob";
+          }
+          {
+            name = "libc";
+            packageId = "libc";
+            usesDefaultFeatures = false;
+          }
+          {
+            name = "libloading";
+            packageId = "libloading";
+            optional = true;
+          }
+        ];
+        buildDependencies = [
+          {
+            name = "glob";
+            packageId = "glob";
+          }
+        ];
+        devDependencies = [
+          {
+            name = "glob";
+            packageId = "glob";
+          }
+        ];
+        features = {
+          "clang_10_0" = [ "clang_9_0" ];
+          "clang_11_0" = [ "clang_10_0" ];
+          "clang_12_0" = [ "clang_11_0" ];
+          "clang_13_0" = [ "clang_12_0" ];
+          "clang_14_0" = [ "clang_13_0" ];
+          "clang_15_0" = [ "clang_14_0" ];
+          "clang_16_0" = [ "clang_15_0" ];
+          "clang_17_0" = [ "clang_16_0" ];
+          "clang_18_0" = [ "clang_17_0" ];
+          "clang_19_0" = [ "clang_18_0" ];
+          "clang_20_0" = [ "clang_19_0" ];
+          "clang_3_6" = [ "clang_3_5" ];
+          "clang_3_7" = [ "clang_3_6" ];
+          "clang_3_8" = [ "clang_3_7" ];
+          "clang_3_9" = [ "clang_3_8" ];
+          "clang_4_0" = [ "clang_3_9" ];
+          "clang_5_0" = [ "clang_4_0" ];
+          "clang_6_0" = [ "clang_5_0" ];
+          "clang_7_0" = [ "clang_6_0" ];
+          "clang_8_0" = [ "clang_7_0" ];
+          "clang_9_0" = [ "clang_8_0" ];
+          "libloading" = [ "dep:libloading" ];
+          "runtime" = [ "libloading" ];
+        };
+        resolvedDefaultFeatures = [ "clang_10_0" "clang_11_0" "clang_3_5" "clang_3_6" "clang_3_7" "clang_3_8" "clang_3_9" "clang_4_0" "clang_5_0" "clang_6_0" "clang_7_0" "clang_8_0" "clang_9_0" "libloading" "runtime" ];
       };
       "clap" = rec {
         crateName = "clap";
@@ -3403,26 +5038,29 @@ rec {
       };
       "clipboard_macos" = rec {
         crateName = "clipboard_macos";
-        version = "0.1.1";
+        version = "0.1.0";
         edition = "2018";
-        sha256 = "13zkbmnsl2c98452kvia7vr2ywwl123bj2q81diw78vv0jm4lzwv";
+        workspace_member = null;
+        src = pkgs.fetchgit {
+          url = "https://github.com/pop-os/window_clipboard.git";
+          rev = "f68595ee0e62fbd6589f4709b5aaa5c3c7ea5f6c";
+          sha256 = "1bd0y0hl61kpaj7f4b072nx8d73r0mqswcgr068l9s1yn4awkvaq";
+        };
         authors = [
           "Héctor Ramón Jiménez <hector0193@gmail.com>"
         ];
         dependencies = [
           {
-            name = "objc2";
-            packageId = "objc2 0.5.2";
+            name = "objc";
+            packageId = "objc";
           }
           {
-            name = "objc2-app-kit";
-            packageId = "objc2-app-kit 0.2.2";
-            features = [ "NSPasteboard" ];
+            name = "objc-foundation";
+            packageId = "objc-foundation";
           }
           {
-            name = "objc2-foundation";
-            packageId = "objc2-foundation 0.2.2";
-            features = [ "NSArray" "NSString" "NSURL" ];
+            name = "objc_id";
+            packageId = "objc_id";
           }
         ];
 
@@ -3431,30 +5069,49 @@ rec {
         crateName = "clipboard_wayland";
         version = "0.2.2";
         edition = "2018";
-        sha256 = "1f1prf3qhww5qqbbqbf27ygq103z9r1b678cs4lpg672qimqhgq0";
+        workspace_member = null;
+        src = pkgs.fetchgit {
+          url = "https://github.com/pop-os/window_clipboard.git";
+          rev = "f68595ee0e62fbd6589f4709b5aaa5c3c7ea5f6c";
+          sha256 = "1bd0y0hl61kpaj7f4b072nx8d73r0mqswcgr068l9s1yn4awkvaq";
+        };
         authors = [
           "Héctor Ramón Jiménez <hector0193@gmail.com>"
         ];
         dependencies = [
           {
+            name = "dnd";
+            packageId = "dnd";
+          }
+          {
+            name = "mime";
+            packageId = "mime 0.1.0";
+          }
+          {
             name = "smithay-clipboard";
             packageId = "smithay-clipboard";
+            features = [ "dnd" ];
           }
         ];
 
       };
       "clipboard_x11" = rec {
         crateName = "clipboard_x11";
-        version = "0.4.3";
+        version = "0.4.2";
         edition = "2018";
-        sha256 = "1m2szxgxk8s8j7anp73pdijdp50yvnjhakscj8wzvnpza8sf6qxx";
+        workspace_member = null;
+        src = pkgs.fetchgit {
+          url = "https://github.com/pop-os/window_clipboard.git";
+          rev = "f68595ee0e62fbd6589f4709b5aaa5c3c7ea5f6c";
+          sha256 = "1bd0y0hl61kpaj7f4b072nx8d73r0mqswcgr068l9s1yn4awkvaq";
+        };
         authors = [
           "Héctor Ramón Jiménez <hector0193@gmail.com>"
         ];
         dependencies = [
           {
             name = "thiserror";
-            packageId = "thiserror 2.0.21";
+            packageId = "thiserror 1.0.69";
           }
           {
             name = "x11rb";
@@ -3486,6 +5143,132 @@ rec {
           "std" = [ "alloc" "thiserror/std" ];
           "use_std" = [ "std" ];
         };
+      };
+      "cocoa" = rec {
+        crateName = "cocoa";
+        version = "0.25.0";
+        edition = "2015";
+        sha256 = "0g1pl5hq28arqmvsswf2ib7smj445miwa58qa7wrfvksz54h857n";
+        authors = [
+          "The Servo Project Developers"
+        ];
+        dependencies = [
+          {
+            name = "bitflags";
+            packageId = "bitflags 1.3.2";
+          }
+          {
+            name = "block";
+            packageId = "block";
+          }
+          {
+            name = "cocoa-foundation";
+            packageId = "cocoa-foundation";
+          }
+          {
+            name = "core-foundation";
+            packageId = "core-foundation 0.9.4";
+          }
+          {
+            name = "core-graphics";
+            packageId = "core-graphics";
+          }
+          {
+            name = "foreign-types";
+            packageId = "foreign-types";
+          }
+          {
+            name = "libc";
+            packageId = "libc";
+          }
+          {
+            name = "objc";
+            packageId = "objc";
+          }
+        ];
+
+      };
+      "cocoa-foundation" = rec {
+        crateName = "cocoa-foundation";
+        version = "0.1.2";
+        edition = "2015";
+        sha256 = "1xwk1khdyqw3dwsl15vr8p86shdcn544fr60ass8biz4nb5k8qlc";
+        libName = "cocoa_foundation";
+        authors = [
+          "The Servo Project Developers"
+        ];
+        dependencies = [
+          {
+            name = "bitflags";
+            packageId = "bitflags 1.3.2";
+          }
+          {
+            name = "block";
+            packageId = "block";
+          }
+          {
+            name = "core-foundation";
+            packageId = "core-foundation 0.9.4";
+          }
+          {
+            name = "core-graphics-types";
+            packageId = "core-graphics-types 0.1.3";
+          }
+          {
+            name = "libc";
+            packageId = "libc";
+          }
+          {
+            name = "objc";
+            packageId = "objc";
+          }
+        ];
+
+      };
+      "codee" = rec {
+        crateName = "codee";
+        version = "0.3.5";
+        edition = "2021";
+        sha256 = "1xci1dmhnq16drc5q1kap8wvslp9kl5f23b9qqmp6jfknk2bvnx9";
+        dependencies = [
+          {
+            name = "serde";
+            packageId = "serde";
+            optional = true;
+          }
+          {
+            name = "serde_json";
+            packageId = "serde_json";
+            optional = true;
+          }
+          {
+            name = "thiserror";
+            packageId = "thiserror 2.0.21";
+          }
+        ];
+        devDependencies = [
+          {
+            name = "serde";
+            packageId = "serde";
+            features = [ "derive" ];
+          }
+        ];
+        features = {
+          "base64" = [ "dep:base64" ];
+          "bincode" = [ "dep:bincode" ];
+          "bincode_serde" = [ "dep:bincode_v1" "dep:serde" ];
+          "bitcode" = [ "dep:bitcode" ];
+          "bitcode_serde" = [ "bitcode/serde" "dep:bitcode" "dep:serde" ];
+          "json_serde" = [ "dep:serde" "dep:serde_json" ];
+          "json_serde_wasm" = [ "dep:js-sys" "dep:serde" "dep:serde_json" "dep:serde-wasm-bindgen" "dep:wasm-bindgen" ];
+          "miniserde" = [ "dep:miniserde" ];
+          "msgpack_serde" = [ "dep:rmp-serde" "dep:serde" ];
+          "postcard" = [ "dep:postcard" "dep:serde" ];
+          "prost" = [ "dep:prost" ];
+          "rkyv" = [ "dep:rkyv" ];
+          "serde_lite" = [ "dep:serde-lite" ];
+        };
+        resolvedDefaultFeatures = [ "json_serde" ];
       };
       "codespan-reporting" = rec {
         crateName = "codespan-reporting";
@@ -3522,6 +5305,13 @@ rec {
           "termcolor" = [ "std" "dep:termcolor" ];
         };
         resolvedDefaultFeatures = [ "std" "termcolor" ];
+      };
+      "collection_literals" = rec {
+        crateName = "collection_literals";
+        version = "1.0.3";
+        edition = "2021";
+        sha256 = "113004p18ilisr3vcip2x27yxspqbm2qa63bby2i5hpsiidzfl15";
+
       };
       "color_quant" = rec {
         crateName = "color_quant";
@@ -3605,6 +5395,58 @@ rec {
         };
         resolvedDefaultFeatures = [ "default" "std" ];
       };
+      "config" = rec {
+        crateName = "config";
+        version = "0.15.27";
+        edition = "2024";
+        sha256 = "0154fnqvflb6jnncpqbh5srmaih5rnbcbw922i259v7w7b2zps9q";
+        dependencies = [
+          {
+            name = "convert_case";
+            packageId = "convert_case 0.6.0";
+            optional = true;
+          }
+          {
+            name = "pathdiff";
+            packageId = "pathdiff";
+          }
+          {
+            name = "serde_core";
+            packageId = "serde_core";
+          }
+          {
+            name = "toml";
+            packageId = "toml";
+            optional = true;
+            usesDefaultFeatures = false;
+            features = [ "parse" "std" ];
+          }
+          {
+            name = "winnow";
+            packageId = "winnow";
+          }
+        ];
+        features = {
+          "async" = [ "async-trait" ];
+          "async-trait" = [ "dep:async-trait" ];
+          "convert-case" = [ "convert_case" ];
+          "convert_case" = [ "dep:convert_case" ];
+          "corn" = [ "dep:corn" ];
+          "default" = [ "toml" "json" "yaml" "ini" "ron" "json5" "convert-case" "async" ];
+          "indexmap" = [ "dep:indexmap" ];
+          "ini" = [ "rust-ini" ];
+          "json" = [ "serde_json" ];
+          "json5" = [ "dep:json5" "dep:serde-untagged" ];
+          "preserve_order" = [ "indexmap" "toml?/preserve_order" "serde_json?/preserve_order" "ron?/indexmap" ];
+          "ron" = [ "dep:ron" ];
+          "rust-ini" = [ "dep:rust-ini" ];
+          "serde_json" = [ "dep:serde_json" ];
+          "toml" = [ "dep:toml" ];
+          "yaml" = [ "yaml-rust2" ];
+          "yaml-rust2" = [ "dep:yaml-rust2" ];
+        };
+        resolvedDefaultFeatures = [ "convert-case" "convert_case" "toml" ];
+      };
       "const-oid" = rec {
         crateName = "const-oid";
         version = "0.9.6";
@@ -3616,6 +5458,158 @@ rec {
         ];
         features = {
           "arbitrary" = [ "dep:arbitrary" ];
+        };
+      };
+      "const-str" = rec {
+        crateName = "const-str";
+        version = "1.1.0";
+        edition = "2021";
+        sha256 = "0br169v5x31pljc2wg5yrh0r83r7dv4cgpfd61161ncfjk4jrw8q";
+        libName = "const_str";
+        authors = [
+          "Nugine <nugine@foxmail.com>"
+        ];
+        features = {
+          "all" = [ "std" "proc" "regex" "http" "case" ];
+          "case" = [ "proc" "const-str-proc-macro?/heck" "dep:heck" ];
+          "http" = [ "proc" "const-str-proc-macro?/http" "dep:http" ];
+          "proc" = [ "dep:const-str-proc-macro" ];
+          "regex" = [ "proc" "const-str-proc-macro?/regex" "dep:regex" ];
+        };
+        resolvedDefaultFeatures = [ "default" ];
+      };
+      "const_format" = rec {
+        crateName = "const_format";
+        version = "0.2.37";
+        edition = "2021";
+        sha256 = "0m04hhk72casbbqixqg4xm6a86spl0saci1mj9cqci35d56wppm3";
+        authors = [
+          "rodrimati1992 <rodrimatt1985@gmail.com>"
+        ];
+        dependencies = [
+          {
+            name = "const_format_proc_macros";
+            packageId = "const_format_proc_macros";
+          }
+          {
+            name = "konst";
+            packageId = "konst";
+            usesDefaultFeatures = false;
+            features = [ "rust_1_64" ];
+          }
+        ];
+        features = {
+          "__debug" = [ "const_format_proc_macros/debug" ];
+          "__inline_const_pat_tests" = [ "__test" "fmt" ];
+          "__only_new_tests" = [ "__test" ];
+          "all" = [ "fmt" "derive" "rust_1_64" "assert" ];
+          "assert" = [ "assertc" ];
+          "assertc" = [ "fmt" "assertcp" ];
+          "assertcp" = [ "rust_1_51" ];
+          "const_generics" = [ "rust_1_51" ];
+          "constant_time_as_str" = [ "fmt" ];
+          "derive" = [ "fmt" "const_format_proc_macros/derive" ];
+          "fmt" = [ "rust_1_83" ];
+          "more_str_macros" = [ "rust_1_64" ];
+          "nightly_const_generics" = [ "const_generics" ];
+          "rust_1_64" = [ "rust_1_51" ];
+          "rust_1_83" = [ "rust_1_64" ];
+        };
+        resolvedDefaultFeatures = [ "default" ];
+      };
+      "const_format_proc_macros" = rec {
+        crateName = "const_format_proc_macros";
+        version = "0.2.37";
+        edition = "2021";
+        sha256 = "0ndn186d13yv97fbry163bacz9mz0j66hnyb11pm0hm6d415f6wl";
+        procMacro = true;
+        authors = [
+          "rodrimati1992 <rodrimatt1985@gmail.com>"
+        ];
+        dependencies = [
+          {
+            name = "proc-macro2";
+            packageId = "proc-macro2";
+          }
+          {
+            name = "quote";
+            packageId = "quote";
+          }
+          {
+            name = "unicode-xid";
+            packageId = "unicode-xid";
+          }
+        ];
+        features = {
+          "all" = [ "derive" ];
+          "debug" = [ "syn/extra-traits" ];
+          "derive" = [ "syn" "syn/derive" "syn/printing" ];
+          "syn" = [ "dep:syn" ];
+        };
+        resolvedDefaultFeatures = [ "default" ];
+      };
+      "const_str_slice_concat" = rec {
+        crateName = "const_str_slice_concat";
+        version = "0.1.0";
+        edition = "2021";
+        sha256 = "06ys7qs6d8ylxasckhclavz2icp2ji6737cgqpx21jwg6npmay7n";
+        authors = [
+          "Greg Johnston"
+        ];
+
+      };
+      "convert_case 0.11.0" = rec {
+        crateName = "convert_case";
+        version = "0.11.0";
+        edition = "2021";
+        sha256 = "0jfv1ajyr65bjlx533n5alfkfjdl8ks4zxfywdiz1jnj1qcz1yxg";
+        authors = [
+          "rutrum <dave@rutrum.net>"
+        ];
+        dependencies = [
+          {
+            name = "unicode-segmentation";
+            packageId = "unicode-segmentation";
+          }
+        ];
+
+      };
+      "convert_case 0.6.0" = rec {
+        crateName = "convert_case";
+        version = "0.6.0";
+        edition = "2018";
+        sha256 = "1jn1pq6fp3rri88zyw6jlhwwgf6qiyc08d6gjv0qypgkl862n67c";
+        authors = [
+          "Rutrum <dave@rutrum.net>"
+        ];
+        dependencies = [
+          {
+            name = "unicode-segmentation";
+            packageId = "unicode-segmentation";
+          }
+        ];
+        features = {
+          "rand" = [ "dep:rand" ];
+          "random" = [ "rand" ];
+        };
+      };
+      "convert_case_extras" = rec {
+        crateName = "convert_case_extras";
+        version = "0.2.0";
+        edition = "2021";
+        sha256 = "1fyfc5vdblw15k8w7xahmif7bmslx3mdamvmg0brvapqzbq7172q";
+        authors = [
+          "rutrum <dave@rutrum.net>"
+        ];
+        dependencies = [
+          {
+            name = "convert_case";
+            packageId = "convert_case 0.11.0";
+          }
+        ];
+        features = {
+          "rand" = [ "dep:rand" ];
+          "random" = [ "rand" ];
         };
       };
       "core-foundation 0.10.1" = rec {
@@ -3760,7 +5754,7 @@ rec {
           "default" = [ "link" ];
           "link" = [ "core-foundation/link" ];
         };
-        resolvedDefaultFeatures = [ "link" ];
+        resolvedDefaultFeatures = [ "default" "link" ];
       };
       "core-graphics-types 0.2.0" = rec {
         crateName = "core-graphics-types";
@@ -3792,6 +5786,18 @@ rec {
         };
         resolvedDefaultFeatures = [ "default" "link" ];
       };
+      "core_detect" = rec {
+        crateName = "core_detect";
+        version = "1.0.0";
+        edition = "2018";
+        sha256 = "0j0xp1j6f9lrp4ybylc3d0zdg8jq2hkmr1122qyil14qk84q13vz";
+        authors = [
+          "Thom Chiovoloni <chiovolonit@gmail.com>"
+        ];
+        features = {
+        };
+        resolvedDefaultFeatures = [ "default" ];
+      };
       "core_maths" = rec {
         crateName = "core_maths";
         version = "0.1.1";
@@ -3808,11 +5814,174 @@ rec {
         ];
 
       };
+      "coreaudio-rs" = rec {
+        crateName = "coreaudio-rs";
+        version = "0.11.3";
+        edition = "2018";
+        sha256 = "1kmssby4rqhv2iq1a8zmaav5p3bl40qs0wah9zv65ikr5lbpf41j";
+        libName = "coreaudio";
+        authors = [
+          "mitchmindtree <mitchell.nordine@gmail.com>"
+          "yupferris <jake@fusetools.com>"
+        ];
+        dependencies = [
+          {
+            name = "bitflags";
+            packageId = "bitflags 1.3.2";
+          }
+          {
+            name = "core-foundation-sys";
+            packageId = "core-foundation-sys";
+          }
+          {
+            name = "coreaudio-sys";
+            packageId = "coreaudio-sys";
+            usesDefaultFeatures = false;
+          }
+        ];
+        features = {
+          "audio_toolbox" = [ "coreaudio-sys/audio_toolbox" ];
+          "audio_unit" = [ "coreaudio-sys/audio_unit" ];
+          "core_audio" = [ "coreaudio-sys/core_audio" ];
+          "core_midi" = [ "coreaudio-sys/core_midi" ];
+          "default" = [ "audio_toolbox" "audio_unit" "core_audio" "open_al" "core_midi" ];
+          "open_al" = [ "coreaudio-sys/open_al" ];
+        };
+        resolvedDefaultFeatures = [ "audio_toolbox" "audio_unit" "core_audio" ];
+      };
+      "coreaudio-sys" = rec {
+        crateName = "coreaudio-sys";
+        version = "0.2.18";
+        edition = "2024";
+        sha256 = "0lyrpy2q2nkx52r3n9kbcr109v5bzailyrg5hdx7aqjsh2d77d5r";
+        libName = "coreaudio_sys";
+        authors = [
+          "Mitchell Nordine <mitchell.nordine@gmail.com>"
+        ];
+        buildDependencies = [
+          {
+            name = "bindgen";
+            packageId = "bindgen";
+            usesDefaultFeatures = false;
+            features = [ "runtime" ];
+          }
+        ];
+        features = {
+          "default" = [ "audio_toolbox" "audio_unit" "core_audio" "audio_server_plugin" "open_al" "core_midi" ];
+        };
+        resolvedDefaultFeatures = [ "audio_toolbox" "audio_unit" "core_audio" ];
+      };
+      "cosmic-client-toolkit" = rec {
+        crateName = "cosmic-client-toolkit";
+        version = "0.2.0";
+        edition = "2024";
+        workspace_member = null;
+        src = pkgs.fetchgit {
+          url = "https://github.com/pop-os/cosmic-protocols";
+          rev = "c0cff4db14c37ed954983158e4055aa94c7741d9";
+          sha256 = "02ga5wvwl0pqh3gn0ggzmahpbbi5r7l860v3a1ba49vb4n89ig8l";
+        };
+        libName = "cosmic_client_toolkit";
+        dependencies = [
+          {
+            name = "bitflags";
+            packageId = "bitflags 2.13.2";
+          }
+          {
+            name = "cosmic-protocols";
+            packageId = "cosmic-protocols";
+          }
+          {
+            name = "libc";
+            packageId = "libc";
+          }
+          {
+            name = "smithay-client-toolkit";
+            packageId = "smithay-client-toolkit";
+            rename = "sctk";
+          }
+          {
+            name = "wayland-client";
+            packageId = "wayland-client";
+          }
+          {
+            name = "wayland-protocols";
+            packageId = "wayland-protocols";
+            features = [ "client" "staging" ];
+          }
+        ];
+        features = {
+        };
+        resolvedDefaultFeatures = [ "default" ];
+      };
+      "cosmic-protocols" = rec {
+        crateName = "cosmic-protocols";
+        version = "0.2.0";
+        edition = "2024";
+        workspace_member = null;
+        src = pkgs.fetchgit {
+          url = "https://github.com/pop-os/cosmic-protocols";
+          rev = "c0cff4db14c37ed954983158e4055aa94c7741d9";
+          sha256 = "02ga5wvwl0pqh3gn0ggzmahpbbi5r7l860v3a1ba49vb4n89ig8l";
+        };
+        libName = "cosmic_protocols";
+        authors = [
+          "Victoria Brekenfeld <github@drakulix.de>"
+        ];
+        dependencies = [
+          {
+            name = "bitflags";
+            packageId = "bitflags 2.13.2";
+          }
+          {
+            name = "wayland-backend";
+            packageId = "wayland-backend";
+          }
+          {
+            name = "wayland-client";
+            packageId = "wayland-client";
+            optional = true;
+          }
+          {
+            name = "wayland-protocols";
+            packageId = "wayland-protocols";
+            features = [ "staging" ];
+          }
+          {
+            name = "wayland-protocols-wlr";
+            packageId = "wayland-protocols-wlr";
+          }
+          {
+            name = "wayland-scanner";
+            packageId = "wayland-scanner";
+          }
+          {
+            name = "wayland-server";
+            packageId = "wayland-server";
+            optional = true;
+          }
+        ];
+        devDependencies = [
+          {
+            name = "wayland-backend";
+            packageId = "wayland-backend";
+            features = [ "client_system" ];
+          }
+        ];
+        features = {
+          "client" = [ "wayland-client" "wayland-protocols/client" "wayland-protocols-wlr/client" ];
+          "default" = [ "client" "server" ];
+          "server" = [ "wayland-server" "wayland-protocols/server" "wayland-protocols-wlr/server" ];
+          "wayland-client" = [ "dep:wayland-client" ];
+          "wayland-server" = [ "dep:wayland-server" ];
+        };
+        resolvedDefaultFeatures = [ "client" "default" "server" "wayland-client" "wayland-server" ];
+      };
       "cosmic-text" = rec {
         crateName = "cosmic-text";
-        version = "0.15.0";
+        version = "0.19.0";
         edition = "2021";
-        sha256 = "0dvpwc4rb7gysrd7sir10k2hk2j2vis6xn35wg5s6mws78l54f0p";
+        sha256 = "0wys9shmdcibqacxl3qy50z5h48ff2xbx8j87zhlr4qda64bc5xy";
         libName = "cosmic_text";
         authors = [
           "Jeremy Soller <jeremy@system76.com>"
@@ -3847,7 +6016,7 @@ rec {
           }
           {
             name = "rustc-hash";
-            packageId = "rustc-hash 1.1.0";
+            packageId = "rustc-hash 2.1.3";
             usesDefaultFeatures = false;
           }
           {
@@ -3856,7 +6025,7 @@ rec {
           }
           {
             name = "skrifa";
-            packageId = "skrifa 0.37.0";
+            packageId = "skrifa 0.40.0";
             usesDefaultFeatures = false;
           }
           {
@@ -3902,7 +6071,7 @@ rec {
           "fontconfig" = [ "fontdb/fontconfig" "std" ];
           "hashbrown" = [ "dep:hashbrown" ];
           "modit" = [ "dep:modit" ];
-          "no_std" = [ "hashbrown" "dep:libm" "skrifa/libm" "core_maths" ];
+          "no_std" = [ "hashbrown" "dep:libm" "skrifa/libm" "core_maths" "swash?/libm" ];
           "std" = [ "fontdb/memmap" "fontdb/std" "harfrust/std" "linebender_resource_handle/std" "skrifa/std" "swash?/std" "sys-locale" "unicode-bidi/std" ];
           "swash" = [ "dep:swash" ];
           "syntect" = [ "dep:syntect" ];
@@ -3911,6 +6080,126 @@ rec {
           "wasm-web" = [ "sys-locale?/js" ];
         };
         resolvedDefaultFeatures = [ "default" "fontconfig" "std" "swash" "sys-locale" ];
+      };
+      "cpal" = rec {
+        crateName = "cpal";
+        version = "0.15.3";
+        edition = "2021";
+        sha256 = "0yd7d51kcf8ml0bfkjrac12zgfjzk21wa97maxg0fhzpr03sngc7";
+        dependencies = [
+          {
+            name = "alsa";
+            packageId = "alsa";
+            target = { target, features }: (("linux" == target."os" or null) || ("dragonfly" == target."os" or null) || ("freebsd" == target."os" or null) || ("netbsd" == target."os" or null));
+          }
+          {
+            name = "core-foundation-sys";
+            packageId = "core-foundation-sys";
+            target = { target, features }: (("macos" == target."os" or null) || ("ios" == target."os" or null));
+          }
+          {
+            name = "coreaudio-rs";
+            packageId = "coreaudio-rs";
+            usesDefaultFeatures = false;
+            target = { target, features }: ("ios" == target."os" or null);
+            features = [ "audio_unit" "core_audio" "audio_toolbox" ];
+          }
+          {
+            name = "coreaudio-rs";
+            packageId = "coreaudio-rs";
+            usesDefaultFeatures = false;
+            target = { target, features }: ("macos" == target."os" or null);
+            features = [ "audio_unit" "core_audio" ];
+          }
+          {
+            name = "dasp_sample";
+            packageId = "dasp_sample";
+          }
+          {
+            name = "jni";
+            packageId = "jni 0.21.1";
+            target = { target, features }: ("android" == target."os" or null);
+          }
+          {
+            name = "js-sys";
+            packageId = "js-sys";
+            target = { target, features }: (("wasm32" == target."arch" or null) && ("unknown" == target."os" or null));
+          }
+          {
+            name = "js-sys";
+            packageId = "js-sys";
+            target = { target, features }: ("emscripten" == target."os" or null);
+          }
+          {
+            name = "libc";
+            packageId = "libc";
+            target = { target, features }: (("linux" == target."os" or null) || ("dragonfly" == target."os" or null) || ("freebsd" == target."os" or null) || ("netbsd" == target."os" or null));
+          }
+          {
+            name = "mach2";
+            packageId = "mach2";
+            target = { target, features }: (("macos" == target."os" or null) || ("ios" == target."os" or null));
+          }
+          {
+            name = "ndk";
+            packageId = "ndk 0.8.0";
+            usesDefaultFeatures = false;
+            target = { target, features }: ("android" == target."os" or null);
+          }
+          {
+            name = "ndk-context";
+            packageId = "ndk-context";
+            target = { target, features }: ("android" == target."os" or null);
+          }
+          {
+            name = "oboe";
+            packageId = "oboe";
+            target = { target, features }: ("android" == target."os" or null);
+            features = [ "java-interface" ];
+          }
+          {
+            name = "wasm-bindgen";
+            packageId = "wasm-bindgen";
+            optional = true;
+            target = { target, features }: (("wasm32" == target."arch" or null) && ("unknown" == target."os" or null));
+          }
+          {
+            name = "wasm-bindgen";
+            packageId = "wasm-bindgen";
+            target = { target, features }: ("emscripten" == target."os" or null);
+          }
+          {
+            name = "wasm-bindgen-futures";
+            packageId = "wasm-bindgen-futures";
+            target = { target, features }: ("emscripten" == target."os" or null);
+          }
+          {
+            name = "web-sys";
+            packageId = "web-sys";
+            target = { target, features }: (("wasm32" == target."arch" or null) && ("unknown" == target."os" or null));
+            features = [ "AudioContext" "AudioContextOptions" "AudioBuffer" "AudioBufferSourceNode" "AudioNode" "AudioDestinationNode" "Window" "AudioContextState" ];
+          }
+          {
+            name = "web-sys";
+            packageId = "web-sys";
+            target = { target, features }: ("emscripten" == target."os" or null);
+            features = [ "AudioContext" "AudioContextOptions" "AudioBuffer" "AudioBufferSourceNode" "AudioNode" "AudioDestinationNode" "Window" "AudioContextState" ];
+          }
+          {
+            name = "windows";
+            packageId = "windows 0.54.0";
+            target = { target, features }: ("windows" == target."os" or null);
+            features = [ "Win32_Media_Audio" "Win32_Foundation" "Win32_Devices_Properties" "Win32_Media_KernelStreaming" "Win32_System_Com_StructuredStorage" "Win32_System_Threading" "Win32_Security" "Win32_System_SystemServices" "Win32_System_Variant" "Win32_Media_Multimedia" "Win32_UI_Shell_PropertiesSystem" ];
+          }
+        ];
+        features = {
+          "asio" = [ "asio-sys" "num-traits" ];
+          "asio-sys" = [ "dep:asio-sys" ];
+          "jack" = [ "dep:jack" ];
+          "num-traits" = [ "dep:num-traits" ];
+          "oboe-shared-stdcxx" = [ "oboe/shared-stdcxx" ];
+          "wasm-bindgen" = [ "dep:wasm-bindgen" ];
+        };
       };
       "cpufeatures" = rec {
         crateName = "cpufeatures";
@@ -4043,7 +6332,12 @@ rec {
         crateName = "cryoglyph";
         version = "0.1.0";
         edition = "2024";
-        sha256 = "06f5dvmsirrkrrpnyv92gdcsd7801a9n7cbgfdhx9nycvddpkg08";
+        workspace_member = null;
+        src = pkgs.fetchgit {
+          url = "https://github.com/iced-rs/cryoglyph.git";
+          rev = "e429a025df36ab8145708acb309080ae3deec17a";
+          sha256 = "0xbv41d08xw14srbr8pcmgc2pbixqx6qkbhpd65vmdb4blg58hnp";
+        };
         authors = [
           "Héctor Ramón Jiménez <hector@hecrj.dev>"
         ];
@@ -4377,6 +6671,19 @@ rec {
         ];
 
       };
+      "dasp_sample" = rec {
+        crateName = "dasp_sample";
+        version = "0.11.0";
+        edition = "2018";
+        sha256 = "0zzw35akm3qs2rixbmlijk6h0l4g9ry6g74qc59zv1q8vs1f31qc";
+        authors = [
+          "mitchmindtree <mitchell.nordine@gmail.com>"
+        ];
+        features = {
+          "default" = [ "std" ];
+        };
+        resolvedDefaultFeatures = [ "default" "std" ];
+      };
       "data-encoding" = rec {
         crateName = "data-encoding";
         version = "2.11.1";
@@ -4577,6 +6884,36 @@ rec {
         };
         resolvedDefaultFeatures = [ "default" "std" ];
       };
+      "derive-where" = rec {
+        crateName = "derive-where";
+        version = "1.7.0";
+        edition = "2021";
+        sha256 = "0rxmyjmci9lf871hxifjrf54x2zdcs5dxj57rn63fxl59s2r8arf";
+        procMacro = true;
+        libName = "derive_where";
+        dependencies = [
+          {
+            name = "proc-macro2";
+            packageId = "proc-macro2";
+            usesDefaultFeatures = false;
+            features = [ "proc-macro" ];
+          }
+          {
+            name = "quote";
+            packageId = "quote";
+            usesDefaultFeatures = false;
+          }
+          {
+            name = "syn";
+            packageId = "syn 3.0.6";
+            usesDefaultFeatures = false;
+            features = [ "clone-impls" "derive" "extra-traits" "full" "parsing" "printing" ];
+          }
+        ];
+        features = {
+          "zeroize-on-drop" = [ "zeroize" ];
+        };
+      };
       "digest" = rec {
         crateName = "digest";
         version = "0.10.7";
@@ -4663,7 +7000,7 @@ rec {
           "objc2" = [ "dep:objc2" ];
           "std" = [ "alloc" ];
         };
-        resolvedDefaultFeatures = [ "alloc" "objc2" ];
+        resolvedDefaultFeatures = [ "alloc" "objc2" "std" ];
       };
       "displaydoc" = rec {
         crateName = "displaydoc";
@@ -4708,6 +7045,46 @@ rec {
         ];
 
       };
+      "dnd" = rec {
+        crateName = "dnd";
+        version = "0.1.0";
+        edition = "2021";
+        workspace_member = null;
+        src = pkgs.fetchgit {
+          url = "https://github.com/pop-os/window_clipboard.git";
+          rev = "f68595ee0e62fbd6589f4709b5aaa5c3c7ea5f6c";
+          sha256 = "1bd0y0hl61kpaj7f4b072nx8d73r0mqswcgr068l9s1yn4awkvaq";
+        };
+        dependencies = [
+          {
+            name = "bitflags";
+            packageId = "bitflags 2.13.2";
+          }
+          {
+            name = "mime";
+            packageId = "mime 0.1.0";
+          }
+          {
+            name = "raw-window-handle";
+            packageId = "raw-window-handle";
+          }
+          {
+            name = "smithay-client-toolkit";
+            packageId = "smithay-client-toolkit";
+            rename = "sctk";
+            usesDefaultFeatures = false;
+            target = { target, features }: ((target."unix" or false) && (!(("macos" == target."os" or null) || ("android" == target."os" or null) || ("emscripten" == target."os" or null) || ("ios" == target."os" or null) || ("redox" == target."os" or null))));
+            features = [ "calloop" ];
+          }
+          {
+            name = "smithay-clipboard";
+            packageId = "smithay-clipboard";
+            target = { target, features }: ((target."unix" or false) && (!(("macos" == target."os" or null) || ("android" == target."os" or null) || ("emscripten" == target."os" or null) || ("ios" == target."os" or null) || ("redox" == target."os" or null))));
+            features = [ "dnd" ];
+          }
+        ];
+
+      };
       "document-features" = rec {
         crateName = "document-features";
         version = "0.2.12";
@@ -4747,14 +7124,142 @@ rec {
       "dpi" = rec {
         crateName = "dpi";
         version = "0.1.2";
-        edition = "2021";
-        sha256 = "0xhsvzgjvdch2fwmfc9vkb708b0q59b6imypyjlgbiigyb74rcfq";
+        edition = "2024";
+        workspace_member = null;
+        src = pkgs.fetchgit {
+          url = "https://github.com/pop-os/winit.git";
+          rev = "9567503d34130113e36b0167a2b8829c3756e429";
+          sha256 = "0g1xpd5aziblymj9yw37k3hd9jrrll3ij6x8ggnyfsny5kcq6zzw";
+        };
         features = {
           "default" = [ "std" ];
           "mint" = [ "dep:mint" ];
           "serde" = [ "dep:serde" ];
         };
         resolvedDefaultFeatures = [ "default" "std" ];
+      };
+      "drain_filter_polyfill" = rec {
+        crateName = "drain_filter_polyfill";
+        version = "0.1.3";
+        edition = "2021";
+        sha256 = "02040m2yrqzlsin6kndpkfy8870awxihpzh63fdwdi94wxg496k6";
+
+      };
+      "drm" = rec {
+        crateName = "drm";
+        version = "0.11.1";
+        edition = "2021";
+        sha256 = "1pnwicchrbkmfx9rn222q7a8jalzm6faa9pgnkdffnnpc2gady50";
+        authors = [
+          "Tyler Slabinski <tslabinski@slabity.net>"
+          "Victoria Brekenfeld <crates-io@drakulix.de>"
+        ];
+        dependencies = [
+          {
+            name = "bitflags";
+            packageId = "bitflags 2.13.2";
+          }
+          {
+            name = "bytemuck";
+            packageId = "bytemuck";
+            features = [ "extern_crate_alloc" "derive" ];
+          }
+          {
+            name = "drm-ffi";
+            packageId = "drm-ffi";
+          }
+          {
+            name = "drm-fourcc";
+            packageId = "drm-fourcc";
+          }
+          {
+            name = "rustix";
+            packageId = "rustix 0.38.44";
+            features = [ "mm" "fs" ];
+          }
+        ];
+        devDependencies = [
+          {
+            name = "rustix";
+            packageId = "rustix 0.38.44";
+            features = [ "event" "mm" ];
+          }
+        ];
+        features = {
+          "use_bindgen" = [ "drm-ffi/use_bindgen" ];
+        };
+      };
+      "drm-ffi" = rec {
+        crateName = "drm-ffi";
+        version = "0.7.1";
+        edition = "2021";
+        sha256 = "1iiardadqms7gaad50qq9624xzw0asfbnpyh5biq693r0n24ycs1";
+        libName = "drm_ffi";
+        authors = [
+          "Tyler Slabinski <tslabinski@slabity.net>"
+        ];
+        dependencies = [
+          {
+            name = "drm-sys";
+            packageId = "drm-sys";
+          }
+          {
+            name = "rustix";
+            packageId = "rustix 0.38.44";
+          }
+        ];
+        features = {
+          "use_bindgen" = [ "drm-sys/use_bindgen" ];
+        };
+      };
+      "drm-fourcc" = rec {
+        crateName = "drm-fourcc";
+        version = "2.2.0";
+        edition = "2018";
+        sha256 = "1x76v9a0pkgym4n6cah4barnai9gsssm7gjzxskw2agwibdvrbqa";
+        libName = "drm_fourcc";
+        authors = [
+          "Daniel Franklin <daniel@danielzfranklin.org>"
+        ];
+        features = {
+          "bindgen" = [ "dep:bindgen" ];
+          "build_bindings" = [ "regex" "bindgen" ];
+          "default" = [ "std" ];
+          "regex" = [ "dep:regex" ];
+          "serde" = [ "dep:serde" ];
+        };
+        resolvedDefaultFeatures = [ "default" "std" ];
+      };
+      "drm-sys" = rec {
+        crateName = "drm-sys";
+        version = "0.6.1";
+        edition = "2021";
+        sha256 = "0xiir3qkl6ccw898zbhdnckxyjlgzws5xfh526qiiwcj3y4gy29d";
+        libName = "drm_sys";
+        authors = [
+          "Tyler Slabinski <tslabinski@slabity.net>"
+        ];
+        dependencies = [
+          {
+            name = "libc";
+            packageId = "libc";
+            target = { target, features }: (!(("android" == target."os" or null) || ("linux" == target."os" or null)));
+          }
+          {
+            name = "linux-raw-sys";
+            packageId = "linux-raw-sys 0.6.5";
+            usesDefaultFeatures = false;
+            target = { target, features }: (("android" == target."os" or null) || ("linux" == target."os" or null));
+            features = [ "general" "no_std" ];
+          }
+        ];
+        features = {
+          "bindgen" = [ "dep:bindgen" ];
+          "pkg-config" = [ "dep:pkg-config" ];
+          "update_bindings" = [ "use_bindgen" ];
+          "use_bindgen" = [ "bindgen" "pkg-config" ];
+        };
+        resolvedDefaultFeatures = [ "default" ];
       };
       "dtor" = rec {
         crateName = "dtor";
@@ -4987,6 +7492,29 @@ rec {
         };
         resolvedDefaultFeatures = [ "std" "use_std" ];
       };
+      "either_of" = rec {
+        crateName = "either_of";
+        version = "0.1.9";
+        edition = "2021";
+        sha256 = "1kflq9xxlfrng8d664w6434sxf76i3g8ls4j0xaqfspjrfjf0q2h";
+        authors = [
+          "Greg Johnston"
+        ];
+        dependencies = [
+          {
+            name = "paste";
+            packageId = "paste";
+          }
+          {
+            name = "pin-project-lite";
+            packageId = "pin-project-lite";
+          }
+        ];
+        features = {
+          "default" = [ "no_std" ];
+        };
+        resolvedDefaultFeatures = [ "default" "no_std" ];
+      };
       "elliptic-curve" = rec {
         crateName = "elliptic-curve";
         version = "0.13.8";
@@ -5118,6 +7646,63 @@ rec {
         };
         resolvedDefaultFeatures = [ "alloc" ];
       };
+      "encoding_rs" = rec {
+        crateName = "encoding_rs";
+        version = "0.8.44";
+        edition = "2024";
+        sha256 = "1xb9w64hibnyh68sfh9qll8h43k3716j5nzr0jdqdaq4wxsk29c9";
+        authors = [
+          "Henri Sivonen <hsivonen@hsivonen.fi>"
+        ];
+        dependencies = [
+          {
+            name = "cfg-if";
+            packageId = "cfg-if";
+          }
+          {
+            name = "core_detect";
+            packageId = "core_detect";
+            target = { target, features }: (("x86_64" == target."arch" or null) || ("x86" == target."arch" or null));
+          }
+          {
+            name = "multiversion_no_op";
+            packageId = "multiversion_no_op";
+          }
+          {
+            name = "rustversion";
+            packageId = "rustversion";
+            optional = true;
+          }
+          {
+            name = "scopeguard";
+            packageId = "scopeguard";
+            usesDefaultFeatures = false;
+          }
+          {
+            name = "simdutf8";
+            packageId = "simdutf8";
+            usesDefaultFeatures = false;
+            target = { target, features }: (("x86_64" == target."arch" or null) || ("x86" == target."arch" or null) || ("aarch64" == target."arch" or null) || (("wasm32" == target."arch" or null) && (builtins.elem "simd128" targetFeatures)));
+            features = [ "aarch64_neon" "public_imp" ];
+          }
+        ];
+        buildDependencies = [
+          {
+            name = "rustversion";
+            packageId = "rustversion";
+          }
+        ];
+        features = {
+          "any_all_workaround" = [ "dep:any_all_workaround" ];
+          "default" = [ "alloc" ];
+          "fast-legacy-encode" = [ "fast-hangul-encode" "fast-hanja-encode" "fast-kanji-encode" "fast-gb-hanzi-encode" "fast-big5-hanzi-encode" ];
+          "rustversion" = [ "dep:rustversion" ];
+          "serde" = [ "dep:serde" ];
+          "simd-accel" = [ "any_all_workaround" "rustversion" ];
+          "std" = [ "dep:multiversion" ];
+        };
+        resolvedDefaultFeatures = [ "alloc" "default" ];
+      };
       "endi" = rec {
         crateName = "endi";
         version = "1.1.1";
@@ -5233,6 +7818,17 @@ rec {
         version = "1.0.2";
         edition = "2015";
         sha256 = "03swzqznragy8n0x31lqc78g2af054jwivp7lkrbrc0khz74lyl7";
+
+      };
+      "erased" = rec {
+        crateName = "erased";
+        version = "0.1.2";
+        edition = "2021";
+        sha256 = "0wi4yxhcyhiz7lajpx94abrsfqk3av11kfmc9rqjgplvj18i8wx1";
+        authors = [
+          "Jonathan Brouwer <jonathantbrouwer@gmail.com>"
+          "Jonathan Dönszelmann <jonabent@gmail.com>"
+        ];
 
       };
       "errno" = rec {
@@ -5456,6 +8052,16 @@ rec {
         };
         resolvedDefaultFeatures = [ "rayon" ];
       };
+      "extended" = rec {
+        crateName = "extended";
+        version = "0.1.0";
+        edition = "2021";
+        sha256 = "0r830ak1a9775i9yl5lljm29zbnlncw7xlfz35mhgjrz43c775mg";
+        authors = [
+          "Dietrich Epp <depp@zdome.net>"
+        ];
+
+      };
       "fastrand" = rec {
         crateName = "fastrand";
         version = "2.5.0";
@@ -5642,6 +8248,20 @@ rec {
         };
         resolvedDefaultFeatures = [ "std" ];
       };
+      "fnv" = rec {
+        crateName = "fnv";
+        version = "1.0.7";
+        edition = "2015";
+        sha256 = "1hc2mcqha06aibcaza94vbi81j6pr9a1bbxrxjfhc91zin8yr7iz";
+        libPath = "lib.rs";
+        authors = [
+          "Alex Crichton <alex@alexcrichton.com>"
+        ];
+        features = {
+          "default" = [ "std" ];
+        };
+        resolvedDefaultFeatures = [ "default" "std" ];
+      };
       "foldhash 0.1.5" = rec {
         crateName = "foldhash";
         version = "0.1.5";
@@ -5666,11 +8286,11 @@ rec {
           "default" = [ "std" ];
         };
       };
-      "font-types 0.10.1" = rec {
+      "font-types 0.11.3" = rec {
         crateName = "font-types";
-        version = "0.10.1";
+        version = "0.11.3";
         edition = "2021";
-        sha256 = "1idqs7pfv9134fzkfykjcg5x34gfjclpqqccln7d9jxv0ks599ir";
+        sha256 = "1mygnhm4xrnm803w2ax63ka3nm0s56l4h26mrs9xkbbdby8ssf2v";
         libName = "font_types";
         dependencies = [
           {
@@ -5746,7 +8366,7 @@ rec {
           }
           {
             name = "memmap2";
-            packageId = "memmap2";
+            packageId = "memmap2 0.9.11";
             optional = true;
           }
           {
@@ -6229,7 +8849,7 @@ rec {
           "unstable" = [ "futures-core/unstable" "futures-task/unstable" ];
           "write-all-vectored" = [ "io" ];
         };
-        resolvedDefaultFeatures = [ "alloc" "async-await" "async-await-macro" "channel" "futures-channel" "futures-io" "futures-macro" "futures-sink" "io" "memchr" "sink" "slab" "std" ];
+        resolvedDefaultFeatures = [ "alloc" "async-await" "async-await-macro" "channel" "default" "futures-channel" "futures-io" "futures-macro" "futures-sink" "io" "memchr" "sink" "slab" "std" ];
       };
       "generic-array" = rec {
         crateName = "generic-array";
@@ -6283,7 +8903,7 @@ rec {
           }
           {
             name = "windows-link";
-            packageId = "windows-link";
+            packageId = "windows-link 0.2.1";
             target = { target, features }: (target."windows" or false);
           }
         ];
@@ -6431,6 +9051,13 @@ rec {
             packageId = "cfg-if";
           }
           {
+            name = "js-sys";
+            packageId = "js-sys";
+            optional = true;
+            usesDefaultFeatures = false;
+            target = { target, features }: ((builtins.elem "wasm" target."family") && (("unknown" == target."os" or null) || ("none" == target."os" or null)) && (builtins.elem "atomics" targetFeatures));
+          }
+          {
             name = "libc";
             packageId = "libc";
             usesDefaultFeatures = false;
@@ -6484,12 +9111,19 @@ rec {
             usesDefaultFeatures = false;
             target = { target, features }: (("uefi" == target."os" or null) && ("efi_rng" == target."getrandom_backend" or null));
           }
+          {
+            name = "wasm-bindgen";
+            packageId = "wasm-bindgen";
+            optional = true;
+            usesDefaultFeatures = false;
+            target = { target, features }: ((builtins.elem "wasm" target."family") && (("unknown" == target."os" or null) || ("none" == target."os" or null)));
+          }
         ];
         features = {
           "sys_rng" = [ "dep:rand_core" ];
           "wasm_js" = [ "dep:wasm-bindgen" "dep:js-sys" ];
         };
-        resolvedDefaultFeatures = [ "std" ];
+        resolvedDefaultFeatures = [ "std" "wasm_js" ];
       };
       "gif 0.13.3" = rec {
         crateName = "gif";
@@ -6600,6 +9234,141 @@ rec {
         ];
 
       };
+      "gloo-net" = rec {
+        crateName = "gloo-net";
+        version = "0.6.0";
+        edition = "2021";
+        sha256 = "1005q761m8kbifc01pvjyjfpj0qs3szh8qaxni13vjjq39xn4vy0";
+        libName = "gloo_net";
+        authors = [
+          "Rust and WebAssembly Working Group"
+          "Elina <imelina@elina.website>"
+        ];
+        dependencies = [
+          {
+            name = "futures-channel";
+            packageId = "futures-channel";
+            optional = true;
+          }
+          {
+            name = "futures-core";
+            packageId = "futures-core";
+            optional = true;
+          }
+          {
+            name = "futures-sink";
+            packageId = "futures-sink";
+            optional = true;
+          }
+          {
+            name = "gloo-utils";
+            packageId = "gloo-utils";
+            usesDefaultFeatures = false;
+          }
+          {
+            name = "http";
+            packageId = "http";
+          }
+          {
+            name = "js-sys";
+            packageId = "js-sys";
+          }
+          {
+            name = "pin-project";
+            packageId = "pin-project";
+            optional = true;
+          }
+          {
+            name = "serde";
+            packageId = "serde";
+            optional = true;
+          }
+          {
+            name = "serde_json";
+            packageId = "serde_json";
+            optional = true;
+          }
+          {
+            name = "thiserror";
+            packageId = "thiserror 1.0.69";
+          }
+          {
+            name = "wasm-bindgen";
+            packageId = "wasm-bindgen";
+          }
+          {
+            name = "wasm-bindgen-futures";
+            packageId = "wasm-bindgen-futures";
+          }
+          {
+            name = "web-sys";
+            packageId = "web-sys";
+          }
+        ];
+        devDependencies = [
+          {
+            name = "serde";
+            packageId = "serde";
+            features = [ "derive" ];
+          }
+        ];
+        features = {
+          "default" = [ "json" "websocket" "http" "eventsource" ];
+          "eventsource" = [ "futures-channel" "futures-core" "pin-project" "web-sys/Event" "web-sys/EventTarget" "web-sys/EventSource" "web-sys/MessageEvent" ];
+          "futures-channel" = [ "dep:futures-channel" ];
+          "futures-core" = [ "dep:futures-core" ];
+          "futures-io" = [ "dep:futures-io" ];
+          "futures-sink" = [ "dep:futures-sink" ];
+          "http" = [ "web-sys/Headers" "web-sys/UrlSearchParams" "web-sys/Url" "web-sys/Request" "web-sys/RequestInit" "web-sys/RequestMode" "web-sys/Response" "web-sys/ResponseInit" "web-sys/ResponseType" "web-sys/RequestCache" "web-sys/RequestCredentials" "web-sys/ObserverCallback" "web-sys/RequestRedirect" "web-sys/ReferrerPolicy" "web-sys/AbortSignal" "web-sys/ReadableStream" "web-sys/Blob" "web-sys/FormData" ];
+          "io-util" = [ "futures-io" ];
+          "json" = [ "serde" "serde_json" "gloo-utils/serde" ];
+          "pin-project" = [ "dep:pin-project" ];
+          "serde" = [ "dep:serde" ];
+          "serde_json" = [ "dep:serde_json" ];
+          "websocket" = [ "web-sys/WebSocket" "web-sys/AddEventListenerOptions" "web-sys/ErrorEvent" "web-sys/FileReader" "web-sys/MessageEvent" "web-sys/ProgressEvent" "web-sys/CloseEvent" "web-sys/CloseEventInit" "web-sys/BinaryType" "web-sys/Blob" "futures-channel" "futures-core" "futures-sink" "pin-project" ];
+        };
+        resolvedDefaultFeatures = [ "default" "eventsource" "futures-channel" "futures-core" "futures-sink" "http" "json" "pin-project" "serde" "serde_json" "websocket" ];
+      };
+      "gloo-utils" = rec {
+        crateName = "gloo-utils";
+        version = "0.2.0";
+        edition = "2021";
+        sha256 = "1am31cd6889shb7158bg9zzsjcpvyzxrhfhxgia8rc8k84smam8b";
+        libName = "gloo_utils";
+        authors = [
+          "Rust and WebAssembly Working Group"
+        ];
+        dependencies = [
+          {
+            name = "js-sys";
+            packageId = "js-sys";
+          }
+          {
+            name = "serde";
+            packageId = "serde";
+            optional = true;
+          }
+          {
+            name = "serde_json";
+            packageId = "serde_json";
+            optional = true;
+          }
+          {
+            name = "wasm-bindgen";
+            packageId = "wasm-bindgen";
+          }
+          {
+            name = "web-sys";
+            packageId = "web-sys";
+            features = [ "Document" "History" "HtmlElement" "Location" "Window" "HtmlHeadElement" "Element" ];
+          }
+        ];
+        features = {
+          "default" = [ "serde" ];
+          "serde" = [ "dep:serde" "dep:serde_json" ];
+        };
+        resolvedDefaultFeatures = [ "serde" ];
+      };
       "glow" = rec {
         crateName = "glow";
         version = "0.16.0";
@@ -6696,78 +9465,46 @@ rec {
         };
         resolvedDefaultFeatures = [ "alloc" "archive" "default" "elf32" "elf64" "endian_fd" "log" "mach32" "mach64" "pe32" "pe64" "std" ];
       };
-      "gpu-alloc" = rec {
-        crateName = "gpu-alloc";
-        version = "0.6.2";
-        edition = "2018";
-        sha256 = "1ybbd5p0m8cbzl7rl6kpmjbxy369rmm75pn611axy0kgfar09ks5";
-        libName = "gpu_alloc";
-        authors = [
-          "Zakarum <roman@barykin.me>"
-        ];
-        dependencies = [
-          {
-            name = "bitflags";
-            packageId = "bitflags 2.13.2";
-            usesDefaultFeatures = false;
-          }
-          {
-            name = "gpu-alloc-types";
-            packageId = "gpu-alloc-types";
-          }
-        ];
-        features = {
-          "default" = [ "std" ];
-          "serde" = [ "dep:serde" "bitflags/serde" "gpu-alloc-types/serde" ];
-          "tracing" = [ "dep:tracing" ];
-        };
-        resolvedDefaultFeatures = [ "default" "std" ];
-      };
-      "gpu-alloc-types" = rec {
-        crateName = "gpu-alloc-types";
-        version = "0.3.1";
-        edition = "2018";
-        sha256 = "0n3h4arigd24d2naynhffdhir9x43ir3xzp4q8kda3ni9lbfvfxj";
-        libName = "gpu_alloc_types";
-        authors = [
-          "Zakarum <roman@barykin.me>"
-        ];
-        dependencies = [
-          {
-            name = "bitflags";
-            packageId = "bitflags 2.13.2";
-            usesDefaultFeatures = false;
-          }
-        ];
-        features = {
-          "serde" = [ "dep:serde" ];
-        };
-      };
       "gpu-allocator" = rec {
         crateName = "gpu-allocator";
-        version = "0.27.0";
+        version = "0.28.0";
         edition = "2021";
-        sha256 = "1kfa6kvvslmrr63p4n5fsm8myp03xi5lzylywys9f0l0xyjs4lf1";
+        sha256 = "15c7izilxm5j52d9hr9kqjb2pjram293xm182mgnrnxarykmw9ai";
         libName = "gpu_allocator";
         authors = [
           "Traverse Research <opensource@traverseresearch.nl>"
         ];
         dependencies = [
           {
+            name = "ash";
+            packageId = "ash";
+            optional = true;
+            usesDefaultFeatures = false;
+            features = [ "debug" ];
+          }
+          {
+            name = "hashbrown";
+            packageId = "hashbrown 0.16.1";
+            optional = true;
+          }
+          {
             name = "log";
             packageId = "log";
+            usesDefaultFeatures = false;
           }
           {
             name = "presser";
             packageId = "presser";
+            usesDefaultFeatures = false;
           }
           {
             name = "thiserror";
-            packageId = "thiserror 1.0.69";
+            packageId = "thiserror 2.0.21";
+            usesDefaultFeatures = false;
           }
           {
             name = "windows";
-            packageId = "windows 0.58.0";
+            packageId = "windows 0.62.2";
             optional = true;
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_Graphics_Direct3D12" "Win32_Graphics_Dxgi_Common" ];
@@ -6775,21 +9512,28 @@ rec {
         ];
         devDependencies = [
           {
+            name = "ash";
+            packageId = "ash";
+            usesDefaultFeatures = false;
+            features = [ "debug" "loaded" ];
+          }
+          {
             name = "windows";
-            packageId = "windows 0.58.0";
+            packageId = "windows 0.62.2";
             target = {target, features}: (target."windows" or false);
             features = [ "Win32_Graphics_Direct3D" "Win32_Graphics_Direct3D12" "Win32_Graphics_Dxgi_Common" ];
           }
         ];
         features = {
           "d3d12" = [ "dep:windows" ];
-          "default" = [ "d3d12" "vulkan" ];
-          "metal" = [ "dep:metal" ];
-          "public-winapi" = [ "dep:winapi" ];
+          "default" = [ "std" "d3d12" "vulkan" "metal" ];
+          "hashbrown" = [ "dep:hashbrown" ];
+          "metal" = [ "dep:objc2" "dep:objc2-metal" "dep:objc2-foundation" ];
+          "std" = [ "presser/std" ];
           "visualizer" = [ "dep:egui" "dep:egui_extras" ];
           "vulkan" = [ "dep:ash" ];
         };
-        resolvedDefaultFeatures = [ "d3d12" ];
+        resolvedDefaultFeatures = [ "d3d12" "hashbrown" "vulkan" ];
       };
       "gpu-descriptor" = rec {
         crateName = "gpu-descriptor";
@@ -6878,6 +9622,16 @@ rec {
         };
         resolvedDefaultFeatures = [ "alloc" ];
       };
+      "guardian" = rec {
+        crateName = "guardian";
+        version = "1.3.0";
+        edition = "2021";
+        sha256 = "0vwgbkx0m41bhh15p5hyjy3hfl2vyfs7p3s43rxa06kv70lsrqhp";
+        authors = [
+          "Jon Gjengset <jon@thesquareplanet.com>"
+        ];
+
+      };
       "guillotiere" = rec {
         crateName = "guillotiere";
         version = "0.6.2";
@@ -6899,6 +9653,78 @@ rec {
         features = {
           "serde" = [ "dep:serde" ];
           "serialization" = [ "serde" "euclid/serde" ];
+        };
+      };
+      "h2" = rec {
+        crateName = "h2";
+        version = "0.4.20";
+        edition = "2021";
+        sha256 = "0661bxispf05ik0idbjlyabwyqpngh9c2r6avaqkzann68104abx";
+        authors = [
+          "Carl Lerche <me@carllerche.com>"
+          "Sean McArthur <sean@seanmonstar.com>"
+        ];
+        dependencies = [
+          {
+            name = "atomic-waker";
+            packageId = "atomic-waker";
+          }
+          {
+            name = "bytes";
+            packageId = "bytes";
+          }
+          {
+            name = "fnv";
+            packageId = "fnv";
+          }
+          {
+            name = "futures-core";
+            packageId = "futures-core";
+            usesDefaultFeatures = false;
+          }
+          {
+            name = "futures-sink";
+            packageId = "futures-sink";
+            usesDefaultFeatures = false;
+          }
+          {
+            name = "http";
+            packageId = "http";
+          }
+          {
+            name = "indexmap";
+            packageId = "indexmap 2.14.2";
+            features = [ "std" ];
+          }
+          {
+            name = "slab";
+            packageId = "slab";
+          }
+          {
+            name = "tokio";
+            packageId = "tokio";
+            features = [ "io-util" ];
+          }
+          {
+            name = "tokio-util";
+            packageId = "tokio-util";
+            features = [ "codec" "io" ];
+          }
+          {
+            name = "tracing";
+            packageId = "tracing";
+            usesDefaultFeatures = false;
+            features = [ "std" ];
+          }
+        ];
+        devDependencies = [
+          {
+            name = "tokio";
+            packageId = "tokio";
+            features = [ "rt-multi-thread" "macros" "sync" "net" ];
+          }
+        ];
+        features = {
         };
       };
       "half" = rec {
@@ -6953,9 +9779,9 @@ rec {
       };
       "harfrust" = rec {
         crateName = "harfrust";
-        version = "0.3.2";
+        version = "0.5.2";
         edition = "2021";
-        sha256 = "1n5r45i2f8w71ia9vql7c8da1qxd7j3hfxpylc98l7f72bdj1h4j";
+        sha256 = "1ya5d0j39lf15vk27vncz616cbbadm6rggvp95k9cvhzhapfb8lx";
         dependencies = [
           {
             name = "bitflags";
@@ -6972,7 +9798,7 @@ rec {
           }
           {
             name = "read-fonts";
-            packageId = "read-fonts 0.35.0";
+            packageId = "read-fonts 0.37.0";
             usesDefaultFeatures = false;
             features = [ "libm" ];
           }
@@ -6987,6 +9813,28 @@ rec {
         };
         resolvedDefaultFeatures = [ "std" ];
       };
+      "harken-app" = rec {
+        crateName = "harken-app";
+        version = "0.1.0";
+        edition = "2021";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../harken/app; };
+        libName = "harken_app";
+        dependencies = [
+          {
+            name = "ark";
+            packageId = "ark";
+          }
+          {
+            name = "ark-app";
+            packageId = "ark-app";
+          }
+          {
+            name = "ark-router";
+            packageId = "ark-router";
+          }
+        ];
+
+      };
       "harken-domain" = rec {
         crateName = "harken-domain";
         version = "0.1.0";
@@ -6999,16 +9847,6 @@ rec {
             packageId = "ark";
           }
           {
-            name = "ark-auth";
-            packageId = "ark-auth";
-            usesDefaultFeatures = false;
-          }
-          {
-            name = "ark-ffi";
-            packageId = "ark-ffi";
-            optional = true;
-          }
-          {
             name = "serde";
             packageId = "serde";
             features = [ "derive" ];
@@ -7017,12 +9855,6 @@ rec {
             name = "serde_json";
             packageId = "serde_json";
             features = [ "raw_value" ];
-          }
-          {
-            name = "uniffi";
-            packageId = "uniffi";
-            optional = true;
-            usesDefaultFeatures = false;
           }
         ];
         devDependencies = [
@@ -7036,10 +9868,7 @@ rec {
             packageId = "arkdb";
           }
         ];
-        features = {
-          "ffi" = [ "dep:uniffi" "dep:ark-ffi" ];
-        };
-        resolvedDefaultFeatures = [ "ffi" ];
+
       };
       "harken-ffi" = rec {
         crateName = "harken-ffi";
@@ -7053,8 +9882,25 @@ rec {
             packageId = "ark";
           }
           {
+            name = "ark-app";
+            packageId = "ark-app";
+          }
+          {
             name = "ark-ffi";
             packageId = "ark-ffi";
+          }
+          {
+            name = "ark-format";
+            packageId = "ark-format";
+          }
+          {
+            name = "ark-format-ffi";
+            packageId = "ark-format-ffi";
+          }
+          {
+            name = "ark-media-player";
+            packageId = "ark-media-player";
+            features = [ "ffi" ];
           }
           {
             name = "ark-peer";
@@ -7062,9 +9908,12 @@ rec {
             usesDefaultFeatures = false;
           }
           {
+            name = "harken-app";
+            packageId = "harken-app";
+          }
+          {
             name = "harken-domain";
             packageId = "harken-domain";
-            features = [ "ffi" ];
           }
           {
             name = "harken-player";
@@ -7121,9 +9970,19 @@ rec {
             usesDefaultFeatures = false;
           }
           {
+            name = "ark-media-player";
+            packageId = "ark-media-player";
+            features = [ "desktop" ];
+          }
+          {
             name = "ark-peer";
             packageId = "ark-peer";
             usesDefaultFeatures = false;
+          }
+          {
+            name = "ark-secure-store";
+            packageId = "ark-secure-store";
+            features = [ "desktop" ];
           }
           {
             name = "arkui";
@@ -7132,7 +9991,10 @@ rec {
           {
             name = "arkui-shots";
             packageId = "arkui-shots";
-            target = { target, features }: (!("wasm32" == target."arch" or null));
+          }
+          {
+            name = "harken-app";
+            packageId = "harken-app";
           }
           {
             name = "harken-domain";
@@ -7151,19 +10013,8 @@ rec {
           {
             name = "iced";
             packageId = "iced";
-            target = { target, features }: (!("wasm32" == target."arch" or null));
-            features = [ "smol" "svg" "image" "advanced" "fira-sans" ];
-          }
-          {
-            name = "iced";
-            packageId = "iced";
-            target = { target, features }: ("wasm32" == target."arch" or null);
-            features = [ "webgl" "svg" "image" "advanced" "fira-sans" ];
-          }
-          {
-            name = "js-sys";
-            packageId = "js-sys";
-            target = { target, features }: ("wasm32" == target."arch" or null);
+            usesDefaultFeatures = false;
+            features = [ "winit" "wgpu" "tiny-skia" "crisp" "web-colors" "thread-pool" "linux-theme-detection" "x11" "wayland" "a11y" "smol" "svg" "image" "advanced" "fira-sans" ];
           }
           {
             name = "serde";
@@ -7179,33 +10030,19 @@ rec {
             name = "tungstenite";
             packageId = "tungstenite";
             usesDefaultFeatures = false;
-            target = { target, features }: (!("wasm32" == target."arch" or null));
             features = [ "handshake" ];
           }
           {
             name = "ureq";
             packageId = "ureq";
             usesDefaultFeatures = false;
-            target = { target, features }: (!("wasm32" == target."arch" or null));
             features = [ "tls" ];
-          }
-          {
-            name = "wasm-bindgen";
-            packageId = "wasm-bindgen";
-            target = { target, features }: ("wasm32" == target."arch" or null);
-          }
-          {
-            name = "web-sys";
-            packageId = "web-sys";
-            target = { target, features }: ("wasm32" == target."arch" or null);
-            features = [ "Window" "Location" "Storage" "Document" "Element" "HtmlAudioElement" "HtmlMediaElement" "WebSocket" "MessageEvent" "CloseEvent" "BinaryType" "Event" "DomTokenList" ];
           }
         ];
         devDependencies = [
           {
             name = "iced_tiny_skia";
             packageId = "iced_tiny_skia";
-            target = {target, features}: (!("wasm32" == target."arch" or null));
           }
         ];
         features = {
@@ -7225,6 +10062,10 @@ rec {
             packageId = "ark";
           }
           {
+            name = "ark-module";
+            packageId = "ark-module";
+          }
+          {
             name = "ark-peer";
             packageId = "ark-peer";
             usesDefaultFeatures = false;
@@ -7244,6 +10085,12 @@ rec {
             features = [ "raw_value" ];
           }
         ];
+        devDependencies = [
+          {
+            name = "ark-media-player";
+            packageId = "ark-media-player";
+          }
+        ];
 
       };
       "harken-seed" = rec {
@@ -7257,7 +10104,7 @@ rec {
             requiredFeatures = [ "cli" ];
           }
         ];
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../harken/seed; };
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../harken/demo; };
         libName = "harken_seed";
         dependencies = [
           {
@@ -7524,6 +10371,19 @@ rec {
         ];
         dependencies = [
           {
+            name = "allocator-api2";
+            packageId = "allocator-api2";
+            optional = true;
+            usesDefaultFeatures = false;
+            features = [ "alloc" ];
+          }
+          {
+            name = "equivalent";
+            packageId = "equivalent";
+            optional = true;
+            usesDefaultFeatures = false;
+          }
+          {
             name = "foldhash";
             packageId = "foldhash 0.2.0";
             optional = true;
@@ -7542,7 +10402,7 @@ rec {
           "rustc-dep-of-std" = [ "nightly" "core" "alloc" "rustc-internal-api" ];
           "serde" = [ "dep:serde_core" "dep:serde" ];
         };
-        resolvedDefaultFeatures = [ "default-hasher" "inline-more" ];
+        resolvedDefaultFeatures = [ "allocator-api2" "default" "default-hasher" "equivalent" "inline-more" "raw-entry" ];
       };
       "hashbrown 0.17.1" = rec {
         crateName = "hashbrown";
@@ -7652,6 +10512,20 @@ rec {
           "std" = [ "digest/std" ];
         };
         resolvedDefaultFeatures = [ "reset" ];
+      };
+      "html-escape" = rec {
+        crateName = "html-escape";
+        version = "0.2.15";
+        edition = "2021";
+        sha256 = "1i8k6hkpvrz2d0px2rcgc7d2qyc22l760wr1lfxrf4dlnjan0df9";
+        libName = "html_escape";
+        authors = [
+          "Magic Len <len@magiclen.org>"
+        ];
+        features = {
+          "default" = [ "std" ];
+        };
+        resolvedDefaultFeatures = [ "default" "std" ];
       };
       "http" = rec {
         crateName = "http";
@@ -7771,6 +10645,52 @@ rec {
           "Pyfisch <pyfisch@posteo.org>"
         ];
 
+      };
+      "hydration_context" = rec {
+        crateName = "hydration_context";
+        version = "0.3.2";
+        edition = "2021";
+        sha256 = "0h7nfk8l00zw6pmmjv4rdncqdz98q937p7q5zxg8rmg7iy2hanr8";
+        authors = [
+          "Greg Johnston"
+        ];
+        dependencies = [
+          {
+            name = "futures";
+            packageId = "futures";
+          }
+          {
+            name = "js-sys";
+            packageId = "js-sys";
+            optional = true;
+          }
+          {
+            name = "or_poisoned";
+            packageId = "or_poisoned";
+          }
+          {
+            name = "pin-project-lite";
+            packageId = "pin-project-lite";
+          }
+          {
+            name = "serde";
+            packageId = "serde";
+            features = [ "derive" ];
+          }
+          {
+            name = "throw_error";
+            packageId = "throw_error";
+          }
+          {
+            name = "wasm-bindgen";
+            packageId = "wasm-bindgen";
+            optional = true;
+          }
+        ];
+        features = {
+          "browser" = [ "dep:wasm-bindgen" "dep:js-sys" ];
+        };
+        resolvedDefaultFeatures = [ "browser" ];
       };
       "hyper" = rec {
         crateName = "hyper";
@@ -8017,11 +10937,25 @@ rec {
         crateName = "iced";
         version = "0.14.0";
         edition = "2024";
-        sha256 = "1cqzf3fzcwn4j696yzrpb8k5ar8fv8xdp8sphczn9flkdh1023h0";
+        workspace_member = null;
+        src = pkgs.fetchgit {
+          url = "https://github.com/pop-os/iced";
+          rev = "d5d638c3a3022396fcf5b9b588b3446820dc11ad";
+          sha256 = "0v5krpdscfwha8wdbwk8vv38x9jjxjlgc23yr3r6b31dcyqwsni1";
+        };
         authors = [
           "Héctor Ramón Jiménez <hector@hecrj.dev>"
         ];
         dependencies = [
+          {
+            name = "dnd";
+            packageId = "dnd";
+          }
+          {
+            name = "iced_accessibility";
+            packageId = "iced_accessibility";
+            optional = true;
+          }
           {
             name = "iced_core";
             packageId = "iced_core";
@@ -8033,6 +10967,10 @@ rec {
           {
             name = "iced_futures";
             packageId = "iced_futures";
+          }
+          {
+            name = "iced_program";
+            packageId = "iced_program";
           }
           {
             name = "iced_renderer";
@@ -8049,6 +10987,7 @@ rec {
           {
             name = "iced_winit";
             packageId = "iced_winit";
+            optional = true;
             usesDefaultFeatures = false;
           }
           {
@@ -8058,22 +10997,40 @@ rec {
             usesDefaultFeatures = false;
           }
           {
+            name = "mime";
+            packageId = "mime 0.1.0";
+          }
+          {
             name = "thiserror";
             packageId = "thiserror 2.0.21";
           }
+          {
+            name = "window_clipboard";
+            packageId = "window_clipboard";
+          }
+        ];
+        buildDependencies = [
+          {
+            name = "build_helpers";
+            packageId = "build_helpers";
+          }
         ];
         features = {
+          "a11y" = [ "iced_accessibility" "iced_core/a11y" "iced_widget/a11y" "iced_winit?/a11y" ];
           "advanced" = [ "iced_core/advanced" "iced_widget/advanced" ];
           "advanced-shaping" = [ "iced_core/advanced-shaping" ];
+          "async-std" = [ "iced_accessibility?/async-io" ];
           "basic-shaping" = [ "iced_core/basic-shaping" ];
           "canvas" = [ "iced_widget/canvas" ];
           "crisp" = [ "iced_core/crisp" "iced_widget/crisp" ];
           "debug" = [ "iced_winit/debug" "dep:iced_devtools" ];
-          "default" = [ "wgpu" "tiny-skia" "crisp" "web-colors" "thread-pool" "linux-theme-detection" "x11" "wayland" ];
+          "default" = [ "a11y" "tiny-skia" "tokio" "wayland" "x11" ];
           "fira-sans" = [ "iced_renderer/fira-sans" ];
           "highlighter" = [ "iced_highlighter" "iced_widget/highlighter" ];
           "hot" = [ "debug" "iced_debug/hot" ];
+          "iced_accessibility" = [ "dep:iced_accessibility" ];
           "iced_highlighter" = [ "dep:iced_highlighter" ];
+          "iced_winit" = [ "dep:iced_winit" ];
           "image" = [ "image-without-codecs" "image/default" ];
           "image-without-codecs" = [ "iced_widget/image" "dep:image" ];
           "lazy" = [ "iced_widget/lazy" ];
@@ -8090,22 +11047,60 @@ rec {
           "thread-pool" = [ "iced_futures/thread-pool" ];
           "time-travel" = [ "debug" "iced_devtools/time-travel" ];
           "tiny-skia" = [ "iced_renderer/tiny-skia" ];
-          "tokio" = [ "iced_futures/tokio" ];
+          "tokio" = [ "iced_futures/tokio" "iced_accessibility?/tokio" ];
           "unconditional-rendering" = [ "iced_winit/unconditional-rendering" ];
-          "wayland" = [ "iced_renderer/wayland" "iced_winit/wayland" ];
+          "wayland" = [ "iced_renderer/wayland" "iced_winit/wayland" "iced_runtime/wayland" "iced_widget/wayland" "iced_core/wayland" ];
           "web-colors" = [ "iced_renderer/web-colors" ];
           "webgl" = [ "iced_renderer/webgl" ];
           "wgpu" = [ "wgpu-bare" "iced_renderer/wgpu" ];
           "wgpu-bare" = [ "iced_renderer/wgpu-bare" "iced_widget/wgpu" ];
+          "winit" = [ "iced_winit" "iced_accessibility?/accesskit_winit" "iced_program/winit" ];
           "x11" = [ "iced_renderer/x11" "iced_winit/x11" ];
         };
-        resolvedDefaultFeatures = [ "advanced" "crisp" "default" "fira-sans" "image" "image-without-codecs" "linux-theme-detection" "smol" "svg" "thread-pool" "tiny-skia" "wayland" "web-colors" "webgl" "wgpu" "wgpu-bare" "x11" ];
+        resolvedDefaultFeatures = [ "a11y" "advanced" "crisp" "fira-sans" "iced_accessibility" "iced_winit" "image" "image-without-codecs" "linux-theme-detection" "smol" "svg" "thread-pool" "tiny-skia" "wayland" "web-colors" "wgpu" "wgpu-bare" "winit" "x11" ];
+      };
+      "iced_accessibility" = rec {
+        crateName = "iced_accessibility";
+        version = "0.1.0";
+        edition = "2021";
+        workspace_member = null;
+        src = pkgs.fetchgit {
+          url = "https://github.com/pop-os/iced";
+          rev = "d5d638c3a3022396fcf5b9b588b3446820dc11ad";
+          sha256 = "0v5krpdscfwha8wdbwk8vv38x9jjxjlgc23yr3r6b31dcyqwsni1";
+        };
+        dependencies = [
+          {
+            name = "accesskit";
+            packageId = "accesskit";
+          }
+          {
+            name = "accesskit_winit";
+            packageId = "accesskit_winit";
+            optional = true;
+            usesDefaultFeatures = false;
+            features = [ "rwh_06" ];
+          }
+        ];
+        features = {
+          "accesskit_macos" = [ "dep:accesskit_macos" ];
+          "accesskit_windows" = [ "dep:accesskit_windows" ];
+          "accesskit_winit" = [ "dep:accesskit_winit" ];
+          "async-io" = [ "accesskit_winit?/async-io" ];
+          "tokio" = [ "accesskit_winit?/tokio" ];
+        };
+        resolvedDefaultFeatures = [ "accesskit_winit" ];
       };
       "iced_core" = rec {
         crateName = "iced_core";
         version = "0.14.0";
         edition = "2024";
-        sha256 = "11cxf8scyvx4r722q1dj9agyxg02m51yfai5d5z3wh4rsqvikawi";
+        workspace_member = null;
+        src = pkgs.fetchgit {
+          url = "https://github.com/pop-os/iced";
+          rev = "d5d638c3a3022396fcf5b9b588b3446820dc11ad";
+          sha256 = "0v5krpdscfwha8wdbwk8vv38x9jjxjlgc23yr3r6b31dcyqwsni1";
+        };
         authors = [
           "Héctor Ramón Jiménez <hector@hecrj.dev>"
         ];
@@ -8119,8 +11114,24 @@ rec {
             packageId = "bytes";
           }
           {
+            name = "cosmic-client-toolkit";
+            packageId = "cosmic-client-toolkit";
+            rename = "cctk";
+            optional = true;
+            target = { target, features }: ((target."unix" or false) && (!(("redox" == target."os" or null) || (builtins.elem "wasm" target."family") || ("android" == target."os" or null) || ("apple" == target."vendor" or null))));
+          }
+          {
+            name = "dnd";
+            packageId = "dnd";
+          }
+          {
             name = "glam";
             packageId = "glam";
+          }
+          {
+            name = "iced_accessibility";
+            packageId = "iced_accessibility";
+            optional = true;
           }
           {
             name = "lilt";
@@ -8131,8 +11142,21 @@ rec {
             packageId = "log";
           }
           {
+            name = "mime";
+            packageId = "mime 0.1.0";
+          }
+          {
             name = "num-traits";
             packageId = "num-traits";
+          }
+          {
+            name = "palette";
+            packageId = "palette";
+          }
+          {
+            name = "raw-window-handle";
+            packageId = "raw-window-handle";
+            target = { target, features }: (target."windows" or false);
           }
           {
             name = "rustc-hash";
@@ -8147,20 +11171,43 @@ rec {
             packageId = "thiserror 2.0.21";
           }
           {
+            name = "unicode-segmentation";
+            packageId = "unicode-segmentation";
+          }
+          {
             name = "web-time";
             packageId = "web-time";
           }
+          {
+            name = "window_clipboard";
+            packageId = "window_clipboard";
+          }
+        ];
+        buildDependencies = [
+          {
+            name = "build_helpers";
+            packageId = "build_helpers";
+          }
         ];
         features = {
+          "a11y" = [ "iced_accessibility" ];
+          "cctk" = [ "dep:cctk" ];
+          "iced_accessibility" = [ "dep:iced_accessibility" ];
           "serde" = [ "dep:serde" ];
+          "wayland" = [ "cctk" ];
         };
-        resolvedDefaultFeatures = [ "advanced" "crisp" ];
+        resolvedDefaultFeatures = [ "a11y" "advanced" "cctk" "crisp" "iced_accessibility" "wayland" ];
       };
       "iced_debug" = rec {
         crateName = "iced_debug";
         version = "0.14.0";
         edition = "2024";
-        sha256 = "1gm05qhb89xd625c7gz42wlgp8ar9vy3cghhyi9hwqjs46q5l0r5";
+        workspace_member = null;
+        src = pkgs.fetchgit {
+          url = "https://github.com/pop-os/iced";
+          rev = "d5d638c3a3022396fcf5b9b588b3446820dc11ad";
+          sha256 = "0v5krpdscfwha8wdbwk8vv38x9jjxjlgc23yr3r6b31dcyqwsni1";
+        };
         authors = [
           "Héctor Ramón Jiménez <hector@hecrj.dev>"
         ];
@@ -8187,7 +11234,12 @@ rec {
         crateName = "iced_futures";
         version = "0.14.0";
         edition = "2024";
-        sha256 = "02nz7wm85xmhl2ls8dyiab6dp80fmwcc0diw573vxps2mp68a34c";
+        workspace_member = null;
+        src = pkgs.fetchgit {
+          url = "https://github.com/pop-os/iced";
+          rev = "d5d638c3a3022396fcf5b9b588b3446820dc11ad";
+          sha256 = "0v5krpdscfwha8wdbwk8vv38x9jjxjlgc23yr3r6b31dcyqwsni1";
+        };
         authors = [
           "Héctor Ramón Jiménez <hector@hecrj.dev>"
         ];
@@ -8228,6 +11280,7 @@ rec {
           }
         ];
         features = {
+          "a11y" = [ "iced_core/a11y" ];
           "smol" = [ "dep:smol" ];
           "thread-pool" = [ "futures/thread-pool" ];
           "tokio" = [ "dep:tokio" ];
@@ -8238,7 +11291,12 @@ rec {
         crateName = "iced_graphics";
         version = "0.14.0";
         edition = "2024";
-        sha256 = "00m18kxq58xwb6i81393r1m4jb14np8zm9cgyram05f4rv1a2k13";
+        workspace_member = null;
+        src = pkgs.fetchgit {
+          url = "https://github.com/pop-os/iced";
+          rev = "d5d638c3a3022396fcf5b9b588b3446820dc11ad";
+          sha256 = "0v5krpdscfwha8wdbwk8vv38x9jjxjlgc23yr3r6b31dcyqwsni1";
+        };
         authors = [
           "Héctor Ramón Jiménez <hector@hecrj.dev>"
         ];
@@ -8312,7 +11370,12 @@ rec {
         crateName = "iced_program";
         version = "0.14.0";
         edition = "2024";
-        sha256 = "0wx6whk9s61y6knmlcznkq7sc6m1gcrsq3dhis6ninkwjk1gxykd";
+        workspace_member = null;
+        src = pkgs.fetchgit {
+          url = "https://github.com/pop-os/iced";
+          rev = "d5d638c3a3022396fcf5b9b588b3446820dc11ad";
+          sha256 = "0v5krpdscfwha8wdbwk8vv38x9jjxjlgc23yr3r6b31dcyqwsni1";
+        };
         authors = [
           "Héctor Ramón Jiménez <hector@hecrj.dev>"
         ];
@@ -8328,12 +11391,18 @@ rec {
         ];
         features = {
         };
+        resolvedDefaultFeatures = [ "winit" ];
       };
       "iced_renderer" = rec {
         crateName = "iced_renderer";
         version = "0.14.0";
         edition = "2024";
-        sha256 = "01dcbnp2l7ssg7yvk92qwqz44py60xynribfk1vw1s084j0c0315";
+        workspace_member = null;
+        src = pkgs.fetchgit {
+          url = "https://github.com/pop-os/iced";
+          rev = "d5d638c3a3022396fcf5b9b588b3446820dc11ad";
+          sha256 = "0v5krpdscfwha8wdbwk8vv38x9jjxjlgc23yr3r6b31dcyqwsni1";
+        };
         authors = [
           "Héctor Ramón Jiménez <hector@hecrj.dev>"
         ];
@@ -8379,13 +11448,18 @@ rec {
           "wgpu-bare" = [ "iced_wgpu" ];
           "x11" = [ "iced_tiny_skia?/x11" ];
         };
-        resolvedDefaultFeatures = [ "fira-sans" "iced_tiny_skia" "iced_wgpu" "image" "svg" "tiny-skia" "wayland" "web-colors" "webgl" "wgpu" "wgpu-bare" "x11" ];
+        resolvedDefaultFeatures = [ "fira-sans" "iced_tiny_skia" "iced_wgpu" "image" "svg" "tiny-skia" "wayland" "web-colors" "wgpu" "wgpu-bare" "x11" ];
       };
       "iced_runtime" = rec {
         crateName = "iced_runtime";
         version = "0.14.0";
         edition = "2024";
-        sha256 = "1m589zs8dk07vha6jfa1aik6b56lr0vf6hij31s6dh74kj0rp26i";
+        workspace_member = null;
+        src = pkgs.fetchgit {
+          url = "https://github.com/pop-os/iced";
+          rev = "d5d638c3a3022396fcf5b9b588b3446820dc11ad";
+          sha256 = "0v5krpdscfwha8wdbwk8vv38x9jjxjlgc23yr3r6b31dcyqwsni1";
+        };
         authors = [
           "Héctor Ramón Jiménez <hector@hecrj.dev>"
         ];
@@ -8395,12 +11469,29 @@ rec {
             packageId = "bytes";
           }
           {
+            name = "cosmic-client-toolkit";
+            packageId = "cosmic-client-toolkit";
+            rename = "cctk";
+            optional = true;
+            target = { target, features }: ((target."unix" or false) && (!(("redox" == target."os" or null) || (builtins.elem "wasm" target."family") || ("android" == target."os" or null) || ("apple" == target."vendor" or null))));
+          }
+          {
+            name = "dnd";
+            packageId = "dnd";
+          }
+          {
+            name = "iced_accessibility";
+            packageId = "iced_accessibility";
+            optional = true;
+          }
+          {
             name = "iced_core";
             packageId = "iced_core";
           }
           {
             name = "iced_futures";
             packageId = "iced_futures";
+            features = [ "thread-pool" ];
           }
           {
             name = "raw-window-handle";
@@ -8410,17 +11501,36 @@ rec {
             name = "thiserror";
             packageId = "thiserror 2.0.21";
           }
+          {
+            name = "window_clipboard";
+            packageId = "window_clipboard";
+          }
+        ];
+        buildDependencies = [
+          {
+            name = "build_helpers";
+            packageId = "build_helpers";
+          }
         ];
         features = {
+          "a11y" = [ "iced_accessibility" "iced_core/a11y" ];
+          "iced_accessibility" = [ "dep:iced_accessibility" ];
           "selector" = [ "dep:iced_selector" ];
           "sipper" = [ "dep:sipper" ];
+          "wayland" = [ "iced_core/wayland" "dep:cctk" ];
         };
+        resolvedDefaultFeatures = [ "a11y" "iced_accessibility" "wayland" ];
       };
       "iced_selector" = rec {
         crateName = "iced_selector";
         version = "0.14.0";
         edition = "2024";
-        sha256 = "1zn4vpxpb9y30vinz2sj0qzbrwzp3r936hk27a5w974m6362qi5i";
+        workspace_member = null;
+        src = pkgs.fetchgit {
+          url = "https://github.com/pop-os/iced";
+          rev = "d5d638c3a3022396fcf5b9b588b3446820dc11ad";
+          sha256 = "0v5krpdscfwha8wdbwk8vv38x9jjxjlgc23yr3r6b31dcyqwsni1";
+        };
         authors = [
           "Héctor Ramón Jiménez <hector@hecrj.dev>"
         ];
@@ -8436,7 +11546,12 @@ rec {
         crateName = "iced_test";
         version = "0.14.0";
         edition = "2024";
-        sha256 = "0rh1vl8z787imc9fw0k3v93gdmbg2fiqz9h6pvk8r5b3dv62cv5m";
+        workspace_member = null;
+        src = pkgs.fetchgit {
+          url = "https://github.com/pop-os/iced";
+          rev = "d5d638c3a3022396fcf5b9b588b3446820dc11ad";
+          sha256 = "0v5krpdscfwha8wdbwk8vv38x9jjxjlgc23yr3r6b31dcyqwsni1";
+        };
         authors = [
           "Héctor Ramón Jiménez <hector@hecrj.dev>"
         ];
@@ -8484,9 +11599,14 @@ rec {
       };
       "iced_tiny_skia" = rec {
         crateName = "iced_tiny_skia";
-        version = "0.14.1";
+        version = "0.14.0";
         edition = "2024";
-        sha256 = "1y6nhxkyfv7pg4xvsdj8zhb2hxk7lf1kj3617j2v2517finmjry2";
+        workspace_member = null;
+        src = pkgs.fetchgit {
+          url = "https://github.com/pop-os/iced";
+          rev = "d5d638c3a3022396fcf5b9b588b3446820dc11ad";
+          sha256 = "0v5krpdscfwha8wdbwk8vv38x9jjxjlgc23yr3r6b31dcyqwsni1";
+        };
         authors = [
           "Héctor Ramón Jiménez <hector@hecrj.dev>"
         ];
@@ -8528,11 +11648,10 @@ rec {
           {
             name = "softbuffer";
             packageId = "softbuffer";
-            usesDefaultFeatures = false;
           }
           {
             name = "tiny-skia";
-            packageId = "tiny-skia";
+            packageId = "tiny-skia 0.11.4";
             usesDefaultFeatures = false;
             features = [ "std" "simd" ];
           }
@@ -8552,11 +11671,21 @@ rec {
         crateName = "iced_wgpu";
         version = "0.14.0";
         edition = "2024";
-        sha256 = "04qwaqqaxj79pq7fql7989f84h020q04b4sp0ahzi80ckfcll57z";
+        workspace_member = null;
+        src = pkgs.fetchgit {
+          url = "https://github.com/pop-os/iced";
+          rev = "d5d638c3a3022396fcf5b9b588b3446820dc11ad";
+          sha256 = "0v5krpdscfwha8wdbwk8vv38x9jjxjlgc23yr3r6b31dcyqwsni1";
+        };
         authors = [
           "Héctor Ramón Jiménez <hector@hecrj.dev>"
         ];
         dependencies = [
+          {
+            name = "as-raw-xcb-connection";
+            packageId = "as-raw-xcb-connection";
+            target = { target, features }: ((target."unix" or false) && (!("macos" == target."os" or null)) && (!("redox" == target."os" or null)));
+          }
           {
             name = "bitflags";
             packageId = "bitflags 2.13.2";
@@ -8597,6 +11726,11 @@ rec {
             packageId = "log";
           }
           {
+            name = "raw-window-handle";
+            packageId = "raw-window-handle";
+            target = { target, features }: ((target."unix" or false) && (!("macos" == target."os" or null)) && (!("redox" == target."os" or null)));
+          }
+          {
             name = "resvg";
             packageId = "resvg";
             optional = true;
@@ -8606,8 +11740,42 @@ rec {
             packageId = "rustc-hash 2.1.3";
           }
           {
+            name = "rustix";
+            packageId = "rustix 0.38.44";
+            target = { target, features }: ((target."unix" or false) && (!("macos" == target."os" or null)) && (!("redox" == target."os" or null)));
+            features = [ "fs" ];
+          }
+          {
             name = "thiserror";
             packageId = "thiserror 2.0.21";
+          }
+          {
+            name = "tiny-xlib";
+            packageId = "tiny-xlib";
+            target = { target, features }: ((target."unix" or false) && (!("macos" == target."os" or null)) && (!("redox" == target."os" or null)));
+          }
+          {
+            name = "wayland-backend";
+            packageId = "wayland-backend";
+            target = { target, features }: ((target."unix" or false) && (!("macos" == target."os" or null)) && (!("redox" == target."os" or null)));
+            features = [ "client_system" ];
+          }
+          {
+            name = "wayland-client";
+            packageId = "wayland-client";
+            target = { target, features }: ((target."unix" or false) && (!("macos" == target."os" or null)) && (!("redox" == target."os" or null)));
+          }
+          {
+            name = "wayland-protocols";
+            packageId = "wayland-protocols";
+            target = { target, features }: ((target."unix" or false) && (!("macos" == target."os" or null)) && (!("redox" == target."os" or null)));
+            features = [ "staging" ];
+          }
+          {
+            name = "wayland-sys";
+            packageId = "wayland-sys";
+            target = { target, features }: ((target."unix" or false) && (!("macos" == target."os" or null)) && (!("redox" == target."os" or null)));
+            features = [ "dlopen" ];
           }
           {
             name = "wgpu";
@@ -8615,31 +11783,70 @@ rec {
             usesDefaultFeatures = false;
             features = [ "std" "wgsl" ];
           }
+          {
+            name = "x11rb";
+            packageId = "x11rb";
+            target = { target, features }: ((target."unix" or false) && (!("macos" == target."os" or null)) && (!("redox" == target."os" or null)));
+            features = [ "allow-unsafe-code" "dl-libxcb" "dri3" "randr" ];
+          }
+        ];
+        buildDependencies = [
+          {
+            name = "build_helpers";
+            packageId = "build_helpers";
+          }
         ];
         features = {
+          "cctk" = [ "dep:cctk" ];
           "default" = [ "wgpu/default" ];
           "geometry" = [ "iced_graphics/geometry" "lyon" ];
           "image" = [ "iced_graphics/image" ];
           "lyon" = [ "dep:lyon" ];
           "resvg" = [ "dep:resvg" ];
           "svg" = [ "iced_graphics/svg" "resvg/text" ];
+          "wayland" = [ "cctk" ];
           "web-colors" = [ "iced_graphics/web-colors" ];
           "webgl" = [ "wgpu/webgl" ];
         };
-        resolvedDefaultFeatures = [ "default" "image" "resvg" "svg" "web-colors" "webgl" ];
+        resolvedDefaultFeatures = [ "default" "image" "resvg" "svg" "web-colors" ];
       };
       "iced_widget" = rec {
         crateName = "iced_widget";
         version = "0.14.2";
         edition = "2024";
-        sha256 = "1aspx7drf0sprvgl4p7rz16hdlqidjp2phcbirhw429i1px6lndi";
+        workspace_member = null;
+        src = pkgs.fetchgit {
+          url = "https://github.com/pop-os/iced";
+          rev = "d5d638c3a3022396fcf5b9b588b3446820dc11ad";
+          sha256 = "0v5krpdscfwha8wdbwk8vv38x9jjxjlgc23yr3r6b31dcyqwsni1";
+        };
         authors = [
           "Héctor Ramón Jiménez <hector@hecrj.dev>"
         ];
         dependencies = [
           {
+            name = "cosmic-client-toolkit";
+            packageId = "cosmic-client-toolkit";
+            rename = "cctk";
+            optional = true;
+            target = { target, features }: ((target."unix" or false) && (!(("redox" == target."os" or null) || (builtins.elem "wasm" target."family") || ("android" == target."os" or null) || ("apple" == target."vendor" or null))));
+          }
+          {
+            name = "dnd";
+            packageId = "dnd";
+          }
+          {
+            name = "iced_accessibility";
+            packageId = "iced_accessibility";
+            optional = true;
+          }
+          {
             name = "iced_renderer";
             packageId = "iced_renderer";
+          }
+          {
+            name = "iced_runtime";
+            packageId = "iced_runtime";
           }
           {
             name = "log";
@@ -8661,36 +11868,87 @@ rec {
             name = "unicode-segmentation";
             packageId = "unicode-segmentation";
           }
+          {
+            name = "window_clipboard";
+            packageId = "window_clipboard";
+          }
+        ];
+        buildDependencies = [
+          {
+            name = "build_helpers";
+            packageId = "build_helpers";
+          }
         ];
         features = {
+          "a11y" = [ "iced_accessibility" ];
           "canvas" = [ "iced_renderer/geometry" ];
           "highlighter" = [ "dep:iced_highlighter" ];
+          "iced_accessibility" = [ "dep:iced_accessibility" ];
           "image" = [ "iced_renderer/image" ];
           "lazy" = [ "ouroboros" ];
           "markdown" = [ "dep:pulldown-cmark" ];
           "ouroboros" = [ "dep:ouroboros" ];
           "qr_code" = [ "canvas" "dep:qrcode" ];
           "svg" = [ "iced_renderer/svg" ];
+          "wayland" = [ "iced_runtime/wayland" "dep:cctk" ];
           "wgpu" = [ "iced_renderer/wgpu-bare" ];
         };
-        resolvedDefaultFeatures = [ "advanced" "crisp" "image" "svg" "wgpu" ];
+        resolvedDefaultFeatures = [ "a11y" "advanced" "crisp" "iced_accessibility" "image" "svg" "wayland" "wgpu" ];
       };
       "iced_winit" = rec {
         crateName = "iced_winit";
-        version = "0.14.1";
+        version = "0.14.0";
         edition = "2024";
-        sha256 = "0wkznfn5vk9zmhif3cmly08haymv6fcsciw2d369j64mis68i2bm";
+        workspace_member = null;
+        src = pkgs.fetchgit {
+          url = "https://github.com/pop-os/iced";
+          rev = "d5d638c3a3022396fcf5b9b588b3446820dc11ad";
+          sha256 = "0v5krpdscfwha8wdbwk8vv38x9jjxjlgc23yr3r6b31dcyqwsni1";
+        };
         authors = [
           "Héctor Ramón Jiménez <hector@hecrj.dev>"
         ];
         dependencies = [
           {
+            name = "cosmic-client-toolkit";
+            packageId = "cosmic-client-toolkit";
+            rename = "cctk";
+            optional = true;
+            target = { target, features }: ((target."unix" or false) && (!(("redox" == target."os" or null) || (builtins.elem "wasm" target."family") || ("android" == target."os" or null) || ("apple" == target."vendor" or null))));
+          }
+          {
+            name = "cursor-icon";
+            packageId = "cursor-icon";
+          }
+          {
+            name = "dnd";
+            packageId = "dnd";
+          }
+          {
+            name = "iced_accessibility";
+            packageId = "iced_accessibility";
+            optional = true;
+            features = [ "accesskit_winit" ];
+          }
+          {
             name = "iced_debug";
             packageId = "iced_debug";
           }
           {
+            name = "iced_futures";
+            packageId = "iced_futures";
+          }
+          {
+            name = "iced_graphics";
+            packageId = "iced_graphics";
+          }
+          {
             name = "iced_program";
             packageId = "iced_program";
+          }
+          {
+            name = "iced_runtime";
+            packageId = "iced_runtime";
           }
           {
             name = "log";
@@ -8701,24 +11959,50 @@ rec {
             packageId = "mundy";
             optional = true;
             usesDefaultFeatures = false;
-            target = { target, features }: ("linux" == target."os" or null);
+            target = { target, features }: ((target."unix" or false) && (!(("redox" == target."os" or null) || (builtins.elem "wasm" target."family") || ("android" == target."os" or null) || ("apple" == target."vendor" or null))));
+          }
+          {
+            name = "raw-window-handle";
+            packageId = "raw-window-handle";
+            optional = true;
+            target = { target, features }: ((target."unix" or false) && (!(("redox" == target."os" or null) || (builtins.elem "wasm" target."family") || ("android" == target."os" or null) || ("apple" == target."vendor" or null))));
           }
           {
             name = "rustc-hash";
             packageId = "rustc-hash 2.1.3";
           }
           {
-            name = "thiserror";
-            packageId = "thiserror 2.0.21";
+            name = "rustix";
+            packageId = "rustix 0.38.44";
+            target = { target, features }: ((target."unix" or false) && (!(("redox" == target."os" or null) || (builtins.elem "wasm" target."family") || ("android" == target."os" or null) || ("apple" == target."vendor" or null))));
           }
           {
-            name = "tracing";
-            packageId = "tracing";
+            name = "thiserror";
+            packageId = "thiserror 2.0.21";
           }
           {
             name = "wasm-bindgen-futures";
             packageId = "wasm-bindgen-futures";
             target = { target, features }: ("wasm32" == target."arch" or null);
+          }
+          {
+            name = "wayland-backend";
+            packageId = "wayland-backend";
+            optional = true;
+            target = { target, features }: ((target."unix" or false) && (!(("redox" == target."os" or null) || (builtins.elem "wasm" target."family") || ("android" == target."os" or null) || ("apple" == target."vendor" or null))));
+            features = [ "client_system" ];
+          }
+          {
+            name = "wayland-client";
+            packageId = "wayland-client";
+            target = { target, features }: ((target."unix" or false) && (!(("redox" == target."os" or null) || (builtins.elem "wasm" target."family") || ("android" == target."os" or null) || ("apple" == target."vendor" or null))));
+          }
+          {
+            name = "wayland-protocols";
+            packageId = "wayland-protocols";
+            optional = true;
+            target = { target, features }: ((target."unix" or false) && (!(("redox" == target."os" or null) || (builtins.elem "wasm" target."family") || ("android" == target."os" or null) || ("apple" == target."vendor" or null))));
+            features = [ "staging" ];
           }
           {
             name = "web-sys";
@@ -8727,26 +12011,68 @@ rec {
             features = [ "Document" "Window" "HtmlCanvasElement" ];
           }
           {
+            name = "winapi";
+            packageId = "winapi";
+            target = { target, features }: ("windows" == target."os" or null);
+          }
+          {
             name = "window_clipboard";
             packageId = "window_clipboard";
-            usesDefaultFeatures = false;
           }
           {
             name = "winit";
             packageId = "winit";
-            usesDefaultFeatures = false;
-            features = [ "rwh_06" ];
+          }
+          {
+            name = "winit-core";
+            packageId = "winit-core";
+          }
+          {
+            name = "xkbcommon";
+            packageId = "xkbcommon 0.7.0";
+            optional = true;
+            target = { target, features }: ((target."unix" or false) && (!(("redox" == target."os" or null) || (builtins.elem "wasm" target."family") || ("android" == target."os" or null) || ("apple" == target."vendor" or null))));
+            features = [ "wayland" ];
+          }
+          {
+            name = "xkbcommon-dl";
+            packageId = "xkbcommon-dl";
+            optional = true;
+            target = { target, features }: ((target."unix" or false) && (!(("redox" == target."os" or null) || (builtins.elem "wasm" target."family") || ("android" == target."os" or null) || ("apple" == target."vendor" or null))));
+          }
+          {
+            name = "xkeysym";
+            packageId = "xkeysym";
+            optional = true;
+            target = { target, features }: ((target."unix" or false) && (!(("redox" == target."os" or null) || (builtins.elem "wasm" target."family") || ("android" == target."os" or null) || ("apple" == target."vendor" or null))));
+          }
+        ];
+        buildDependencies = [
+          {
+            name = "build_helpers";
+            packageId = "build_helpers";
           }
         ];
         features = {
+          "a11y" = [ "iced_accessibility" "iced_runtime/a11y" ];
           "debug" = [ "iced_debug/enable" ];
-          "default" = [ "x11" "wayland" ];
+          "default" = [ "x11" "wayland-dlopen" ];
+          "iced_accessibility" = [ "dep:iced_accessibility" ];
           "linux-theme-detection" = [ "dep:mundy" "mundy/async-io" "mundy/color-scheme" ];
+          "raw-window-handle" = [ "dep:raw-window-handle" ];
           "sysinfo" = [ "dep:sysinfo" ];
-          "wayland" = [ "winit/wayland" "winit/wayland-dlopen" "winit/wayland-csd-adwaita" "window_clipboard/wayland" ];
-          "x11" = [ "winit/x11" "window_clipboard/x11" ];
+          "system" = [ "sysinfo" ];
+          "wayland" = [ "winit/wayland" "wayland-csd-adwaita" "wayland-protocols" "raw-window-handle" "iced_runtime/wayland" "wayland-backend" "xkbcommon" "xkbcommon-dl" "xkeysym" "dep:cctk" ];
+          "wayland-backend" = [ "dep:wayland-backend" ];
+          "wayland-csd-adwaita" = [ "winit/wayland-csd-adwaita" ];
+          "wayland-dlopen" = [ "winit/wayland-dlopen" ];
+          "wayland-protocols" = [ "dep:wayland-protocols" ];
+          "x11" = [ "winit/x11" ];
+          "xkbcommon" = [ "dep:xkbcommon" ];
+          "xkbcommon-dl" = [ "dep:xkbcommon-dl" ];
+          "xkeysym" = [ "dep:xkeysym" ];
         };
-        resolvedDefaultFeatures = [ "linux-theme-detection" "wayland" "x11" ];
+        resolvedDefaultFeatures = [ "a11y" "iced_accessibility" "linux-theme-detection" "raw-window-handle" "wayland" "wayland-backend" "wayland-csd-adwaita" "wayland-protocols" "x11" "xkbcommon" "xkbcommon-dl" "xkeysym" ];
       };
       "icu_collections" = rec {
         crateName = "icu_collections";
@@ -9420,6 +12746,38 @@ rec {
         ];
 
       };
+      "interpolator" = rec {
+        crateName = "interpolator";
+        version = "0.5.0";
+        edition = "2021";
+        sha256 = "1n6rnk7s61zf20fxjv8yxqfxvl2d68zdrs7i2631w4mf38cm5pbi";
+        features = {
+        };
+        resolvedDefaultFeatures = [ "iter" ];
+      };
+      "inventory" = rec {
+        crateName = "inventory";
+        version = "0.3.25";
+        edition = "2021";
+        sha256 = "0z6d57l6pkan8sdr4j87fwk1rfih1awir6hwpy8ss8n84ql2ha39";
+        authors = [
+          "David Tolnay <dtolnay@gmail.com>"
+        ];
+        dependencies = [
+          {
+            name = "rustversion";
+            packageId = "rustversion";
+            target = { target, features }: (builtins.elem "wasm" target."family");
+          }
+        ];
+        devDependencies = [
+          {
+            name = "rustversion";
+            packageId = "rustversion";
+          }
+        ];
+
+      };
       "itertools 0.10.5" = rec {
         crateName = "itertools";
         version = "0.10.5";
@@ -9557,7 +12915,7 @@ rec {
           }
           {
             name = "windows-link";
-            packageId = "windows-link";
+            packageId = "windows-link 0.2.1";
             optional = true;
             target = { target, features }: (target."windows" or false);
           }
@@ -9684,7 +13042,60 @@ rec {
         ];
 
       };
-      "jni" = rec {
+      "jni 0.21.1" = rec {
+        crateName = "jni";
+        version = "0.21.1";
+        edition = "2018";
+        sha256 = "15wczfkr2r45slsljby12ymf2hij8wi5b104ghck9byjnwmsm1qs";
+        authors = [
+          "Josh Chase <josh@prevoty.com>"
+        ];
+        dependencies = [
+          {
+            name = "cesu8";
+            packageId = "cesu8";
+          }
+          {
+            name = "cfg-if";
+            packageId = "cfg-if";
+          }
+          {
+            name = "combine";
+            packageId = "combine";
+          }
+          {
+            name = "jni-sys";
+            packageId = "jni-sys 0.3.1";
+          }
+          {
+            name = "log";
+            packageId = "log";
+          }
+          {
+            name = "thiserror";
+            packageId = "thiserror 1.0.69";
+          }
+          {
+            name = "windows-sys";
+            packageId = "windows-sys 0.45.0";
+            target = { target, features }: (target."windows" or false);
+            features = [ "Win32_Globalization" ];
+          }
+        ];
+        buildDependencies = [
+          {
+            name = "walkdir";
+            packageId = "walkdir";
+          }
+        ];
+        features = {
+          "invocation" = [ "java-locator" "libloading" ];
+          "java-locator" = [ "dep:java-locator" ];
+          "libloading" = [ "dep:libloading" ];
+        };
+        resolvedDefaultFeatures = [ "default" ];
+      };
+      "jni 0.22.4" = rec {
         crateName = "jni";
         version = "0.22.4";
         edition = "2024";
@@ -9723,7 +13134,7 @@ rec {
           }
           {
             name = "windows-link";
-            packageId = "windows-link";
+            packageId = "windows-link 0.2.1";
             target = { target, features }: (target."windows" or false);
           }
         ];
@@ -9906,6 +13317,36 @@ rec {
         ];
 
       };
+      "keyboard-types" = rec {
+        crateName = "keyboard-types";
+        version = "0.8.3";
+        edition = "2021";
+        sha256 = "13dj6jsk4rr4kqghlxyr3ql7ajfrg65awc1h4c21mris80xqbghg";
+        libName = "keyboard_types";
+        authors = [
+          "Pyfisch <pyfisch@posteo.org>"
+        ];
+        dependencies = [
+          {
+            name = "bitflags";
+            packageId = "bitflags 2.13.2";
+          }
+          {
+            name = "serde";
+            packageId = "serde";
+            optional = true;
+            usesDefaultFeatures = false;
+            features = [ "derive" ];
+          }
+        ];
+        features = {
+          "default" = [ "std" ];
+          "serde" = [ "dep:serde" "bitflags/serde" ];
+          "std" = [ "serde?/std" ];
+          "webdriver" = [ "dep:unicode-segmentation" "std" ];
+        };
+        resolvedDefaultFeatures = [ "default" "std" ];
+      };
       "khronos-egl" = rec {
         crateName = "khronos-egl";
         version = "6.0.0";
@@ -9960,6 +13401,53 @@ rec {
           "Pierre Krieger <pierre.krieger1708@gmail.com>"
         ];
 
+      };
+      "konst" = rec {
+        crateName = "konst";
+        version = "0.2.20";
+        edition = "2018";
+        sha256 = "1yyf1fhk28wbf1lqrga9as4cpfmpbry9a5vvdqyxgz14g3nk708j";
+        authors = [
+          "rodrimati1992 <rodrimatt1985@gmail.com>"
+        ];
+        dependencies = [
+          {
+            name = "konst_macro_rules";
+            packageId = "konst_macro_rules";
+          }
+        ];
+        features = {
+          "__ui" = [ "__test" "trybuild" "rust_latest_stable" ];
+          "const_generics" = [ "rust_1_51" ];
+          "constant_time_slice" = [ "rust_latest_stable" ];
+          "default" = [ "cmp" "parsing" ];
+          "deref_raw_in_fn" = [ "rust_1_56" ];
+          "konst_proc_macros" = [ "dep:konst_proc_macros" ];
+          "mut_refs" = [ "rust_latest_stable" "konst_macro_rules/mut_refs" ];
+          "nightly_mut_refs" = [ "mut_refs" "konst_macro_rules/nightly_mut_refs" ];
+          "parsing" = [ "parsing_no_proc" "konst_proc_macros" ];
+          "rust_1_51" = [ "konst_macro_rules/rust_1_51" ];
+          "rust_1_55" = [ "rust_1_51" "konst_macro_rules/rust_1_55" ];
+          "rust_1_56" = [ "rust_1_55" "konst_macro_rules/rust_1_56" ];
+          "rust_1_57" = [ "rust_1_56" "konst_macro_rules/rust_1_57" ];
+          "rust_1_61" = [ "rust_1_57" "konst_macro_rules/rust_1_61" ];
+          "rust_1_64" = [ "rust_1_61" ];
+          "rust_latest_stable" = [ "rust_1_64" ];
+          "trybuild" = [ "dep:trybuild" ];
+        };
+        resolvedDefaultFeatures = [ "rust_1_51" "rust_1_55" "rust_1_56" "rust_1_57" "rust_1_61" "rust_1_64" ];
+      };
+      "konst_macro_rules" = rec {
+        crateName = "konst_macro_rules";
+        version = "0.2.19";
+        edition = "2018";
+        sha256 = "0dswja0dqcww4x3fwjnirc0azv2n6cazn8yv0kddksd8awzkz4x4";
+        authors = [
+          "rodrimati1992 <rodrimatt1985@gmail.com>"
+        ];
+        features = {
+        };
+        resolvedDefaultFeatures = [ "rust_1_51" "rust_1_55" "rust_1_56" "rust_1_57" "rust_1_61" ];
       };
       "kqueue" = rec {
         crateName = "kqueue";
@@ -10124,6 +13612,492 @@ rec {
         ];
 
       };
+      "leptos" = rec {
+        crateName = "leptos";
+        version = "0.8.23";
+        edition = "2021";
+        sha256 = "14fqa3d7fkscjacgqwzlhmkir23cinjr72z1fw50b1gm3w39y3sb";
+        authors = [
+          "Greg Johnston"
+        ];
+        dependencies = [
+          {
+            name = "any_spawner";
+            packageId = "any_spawner";
+            features = [ "wasm-bindgen" "futures-executor" ];
+          }
+          {
+            name = "cfg-if";
+            packageId = "cfg-if";
+          }
+          {
+            name = "either_of";
+            packageId = "either_of";
+          }
+          {
+            name = "futures";
+            packageId = "futures";
+          }
+          {
+            name = "getrandom";
+            packageId = "getrandom 0.4.3";
+            optional = true;
+          }
+          {
+            name = "hydration_context";
+            packageId = "hydration_context";
+          }
+          {
+            name = "leptos_config";
+            packageId = "leptos_config";
+          }
+          {
+            name = "leptos_dom";
+            packageId = "leptos_dom";
+          }
+          {
+            name = "leptos_hot_reload";
+            packageId = "leptos_hot_reload";
+          }
+          {
+            name = "leptos_macro";
+            packageId = "leptos_macro";
+          }
+          {
+            name = "leptos_macro";
+            packageId = "leptos_macro";
+            target = { target, features }: (target."erase_components" or false);
+            features = [ "__internal_erase_components" ];
+          }
+          {
+            name = "leptos_server";
+            packageId = "leptos_server";
+            features = [ "tachys" ];
+          }
+          {
+            name = "oco_ref";
+            packageId = "oco_ref";
+          }
+          {
+            name = "or_poisoned";
+            packageId = "or_poisoned";
+          }
+          {
+            name = "paste";
+            packageId = "paste";
+          }
+          {
+            name = "reactive_graph";
+            packageId = "reactive_graph";
+            features = [ "serde" ];
+          }
+          {
+            name = "rustc-hash";
+            packageId = "rustc-hash 2.1.3";
+          }
+          {
+            name = "send_wrapper";
+            packageId = "send_wrapper";
+          }
+          {
+            name = "serde";
+            packageId = "serde";
+          }
+          {
+            name = "serde_json";
+            packageId = "serde_json";
+          }
+          {
+            name = "serde_qs";
+            packageId = "serde_qs";
+          }
+          {
+            name = "server_fn";
+            packageId = "server_fn";
+            features = [ "form-redirects" "browser" ];
+          }
+          {
+            name = "slotmap";
+            packageId = "slotmap";
+          }
+          {
+            name = "tachys";
+            packageId = "tachys";
+            features = [ "reactive_graph" "reactive_stores" "oco" ];
+          }
+          {
+            name = "thiserror";
+            packageId = "thiserror 2.0.21";
+          }
+          {
+            name = "throw_error";
+            packageId = "throw_error";
+          }
+          {
+            name = "typed-builder";
+            packageId = "typed-builder";
+          }
+          {
+            name = "typed-builder-macro";
+            packageId = "typed-builder-macro";
+          }
+          {
+            name = "wasm-bindgen";
+            packageId = "wasm-bindgen";
+          }
+          {
+            name = "wasm-bindgen-futures";
+            packageId = "wasm-bindgen-futures";
+          }
+          {
+            name = "wasm_split_helpers";
+            packageId = "wasm_split_helpers";
+          }
+          {
+            name = "web-sys";
+            packageId = "web-sys";
+            features = [ "ShadowRoot" "ShadowRootInit" "ShadowRootMode" ];
+          }
+        ];
+        buildDependencies = [
+          {
+            name = "rustc_version";
+            packageId = "rustc_version";
+          }
+        ];
+        devDependencies = [
+          {
+            name = "any_spawner";
+            packageId = "any_spawner";
+            features = [ "futures-executor" "tokio" ];
+          }
+        ];
+        features = {
+          "base64" = [ "dep:base64" ];
+          "bitcode" = [ "server_fn/bitcode" ];
+          "bitcode-serde" = [ "server_fn/bitcode-serde" ];
+          "cbor" = [ "server_fn/cbor" ];
+          "csr" = [ "leptos_macro/csr" "reactive_graph/effects" "getrandom?/wasm_js" ];
+          "default-tls" = [ "server_fn/default-tls" ];
+          "delegation" = [ "tachys/delegation" ];
+          "hydrate" = [ "leptos_macro/hydrate" "hydration" "tachys/hydrate" "reactive_graph/effects" "getrandom?/wasm_js" ];
+          "hydration" = [ "reactive_graph/hydration" "leptos_server/hydration" "hydration_context/browser" "leptos_dom/hydration" ];
+          "islands" = [ "leptos_macro/islands" ];
+          "islands-router" = [ "tachys/mark_branches" ];
+          "leptos-spin-macro" = [ "dep:leptos-spin-macro" ];
+          "msgpack" = [ "server_fn/msgpack" ];
+          "multipart" = [ "server_fn/multipart" ];
+          "nightly" = [ "leptos_macro/nightly" "reactive_graph/nightly" "tachys/nightly" ];
+          "nonce" = [ "base64" "rand" "dep:getrandom" ];
+          "postcard" = [ "server_fn/postcard" ];
+          "rand" = [ "dep:rand" ];
+          "rkyv" = [ "server_fn/rkyv" "leptos_server/rkyv" ];
+          "rustls" = [ "server_fn/rustls" ];
+          "serde-lite" = [ "server_fn/serde-lite" "leptos_server/serde-lite" ];
+          "spin" = [ "leptos-spin-macro" ];
+          "ssr" = [ "leptos_macro/ssr" "leptos_server/ssr" "server_fn/ssr" "hydration" "tachys/ssr" ];
+          "subsecond" = [ "reactive_graph/subsecond" "dep:subsecond" "dep:dioxus-cli-config" "dep:dioxus-devtools" "web-sys/Location" "web-sys/MessageEvent" "web-sys/WebSocket" "web-sys/Window" ];
+          "trace-component-props" = [ "leptos_macro/trace-component-props" "leptos_dom/trace-component-props" ];
+          "tracing" = [ "dep:tracing" "reactive_graph/tracing" "tachys/tracing" "leptos_macro/tracing" "leptos_dom/tracing" "leptos_server/tracing" ];
+        };
+        resolvedDefaultFeatures = [ "csr" "hydrate" "hydration" "ssr" ];
+      };
+      "leptos_config" = rec {
+        crateName = "leptos_config";
+        version = "0.8.10";
+        edition = "2021";
+        sha256 = "1hrzvi834zhf8iv4cka7jz6wynyj06n05czsjg8w1k2v658zf1hc";
+        authors = [
+          "Greg Johnston"
+        ];
+        dependencies = [
+          {
+            name = "config";
+            packageId = "config";
+            usesDefaultFeatures = false;
+            features = [ "toml" "convert-case" ];
+          }
+          {
+            name = "regex";
+            packageId = "regex";
+          }
+          {
+            name = "serde";
+            packageId = "serde";
+            features = [ "derive" "rc" ];
+          }
+          {
+            name = "thiserror";
+            packageId = "thiserror 2.0.21";
+          }
+          {
+            name = "typed-builder";
+            packageId = "typed-builder";
+          }
+        ];
+
+      };
+      "leptos_dom" = rec {
+        crateName = "leptos_dom";
+        version = "0.8.8";
+        edition = "2021";
+        sha256 = "113qn0mgf4di75b3cmk8w0v2b6f0ga5ccm5l97jzkapqv2g2wx1m";
+        authors = [
+          "Greg Johnston"
+        ];
+        dependencies = [
+          {
+            name = "js-sys";
+            packageId = "js-sys";
+          }
+          {
+            name = "or_poisoned";
+            packageId = "or_poisoned";
+          }
+          {
+            name = "reactive_graph";
+            packageId = "reactive_graph";
+          }
+          {
+            name = "send_wrapper";
+            packageId = "send_wrapper";
+          }
+          {
+            name = "tachys";
+            packageId = "tachys";
+          }
+          {
+            name = "wasm-bindgen";
+            packageId = "wasm-bindgen";
+          }
+          {
+            name = "web-sys";
+            packageId = "web-sys";
+            features = [ "Location" ];
+          }
+        ];
+        features = {
+          "hydration" = [ "reactive_graph/hydration" ];
+          "trace-component-props" = [ "dep:serde" "dep:serde_json" ];
+          "tracing" = [ "dep:tracing" ];
+        };
+        resolvedDefaultFeatures = [ "default" "hydration" ];
+      };
+      "leptos_hot_reload" = rec {
+        crateName = "leptos_hot_reload";
+        version = "0.8.7";
+        edition = "2021";
+        sha256 = "047gyqrbpb2gg0zn9kczdk5vsizaqaz34fp1pynnckk07nyqjjfq";
+        authors = [
+          "Greg Johnston"
+        ];
+        dependencies = [
+          {
+            name = "anyhow";
+            packageId = "anyhow";
+          }
+          {
+            name = "camino";
+            packageId = "camino";
+          }
+          {
+            name = "indexmap";
+            packageId = "indexmap 2.14.2";
+          }
+          {
+            name = "or_poisoned";
+            packageId = "or_poisoned";
+          }
+          {
+            name = "proc-macro2";
+            packageId = "proc-macro2";
+            features = [ "span-locations" "nightly" ];
+          }
+          {
+            name = "quote";
+            packageId = "quote";
+          }
+          {
+            name = "rstml";
+            packageId = "rstml";
+          }
+          {
+            name = "serde";
+            packageId = "serde";
+            features = [ "derive" ];
+          }
+          {
+            name = "syn";
+            packageId = "syn 3.0.6";
+            features = [ "full" "parsing" "extra-traits" "visit" "printing" ];
+          }
+          {
+            name = "walkdir";
+            packageId = "walkdir";
+          }
+        ];
+
+      };
+      "leptos_macro" = rec {
+        crateName = "leptos_macro";
+        version = "0.8.20";
+        edition = "2021";
+        sha256 = "09r10d53k6jbvmk8hw9h2da1marl2z8plb8aj2hdxgix03wfcrh0";
+        procMacro = true;
+        authors = [
+          "Greg Johnston"
+        ];
+        dependencies = [
+          {
+            name = "attribute-derive";
+            packageId = "attribute-derive";
+            features = [ "syn-full" ];
+          }
+          {
+            name = "cfg-if";
+            packageId = "cfg-if";
+          }
+          {
+            name = "convert_case";
+            packageId = "convert_case 0.11.0";
+          }
+          {
+            name = "convert_case_extras";
+            packageId = "convert_case_extras";
+          }
+          {
+            name = "html-escape";
+            packageId = "html-escape";
+          }
+          {
+            name = "itertools";
+            packageId = "itertools 0.14.0";
+          }
+          {
+            name = "leptos_hot_reload";
+            packageId = "leptos_hot_reload";
+          }
+          {
+            name = "prettyplease";
+            packageId = "prettyplease";
+          }
+          {
+            name = "proc-macro2";
+            packageId = "proc-macro2";
+          }
+          {
+            name = "quote";
+            packageId = "quote";
+          }
+          {
+            name = "rstml";
+            packageId = "rstml";
+          }
+          {
+            name = "server_fn_macro";
+            packageId = "server_fn_macro";
+          }
+          {
+            name = "syn";
+            packageId = "syn 3.0.6";
+            features = [ "full" ];
+          }
+          {
+            name = "uuid";
+            packageId = "uuid";
+            features = [ "v4" ];
+          }
+        ];
+        buildDependencies = [
+          {
+            name = "rustc_version";
+            packageId = "rustc_version";
+          }
+        ];
+        features = {
+          "actix" = [ "server_fn_macro/actix" ];
+          "axum" = [ "server_fn_macro/axum" ];
+          "generic" = [ "server_fn_macro/generic" ];
+          "nightly" = [ "server_fn_macro/nightly" ];
+          "ssr" = [ "server_fn_macro/ssr" ];
+          "tracing" = [ "dep:tracing" ];
+        };
+        resolvedDefaultFeatures = [ "__internal_erase_components" "csr" "hydrate" "ssr" ];
+      };
+      "leptos_server" = rec {
+        crateName = "leptos_server";
+        version = "0.8.8";
+        edition = "2021";
+        sha256 = "0j9hccixrvqdy7v296zkd17l8rmmdc57cd3r61pqhbf2c492sar0";
+        authors = [
+          "Greg Johnston"
+        ];
+        dependencies = [
+          {
+            name = "any_spawner";
+            packageId = "any_spawner";
+          }
+          {
+            name = "base64";
+            packageId = "base64 0.22.1";
+          }
+          {
+            name = "codee";
+            packageId = "codee";
+            features = [ "json_serde" ];
+          }
+          {
+            name = "futures";
+            packageId = "futures";
+          }
+          {
+            name = "hydration_context";
+            packageId = "hydration_context";
+          }
+          {
+            name = "or_poisoned";
+            packageId = "or_poisoned";
+          }
+          {
+            name = "reactive_graph";
+            packageId = "reactive_graph";
+            features = [ "hydration" ];
+          }
+          {
+            name = "send_wrapper";
+            packageId = "send_wrapper";
+          }
+          {
+            name = "serde";
+            packageId = "serde";
+          }
+          {
+            name = "serde_json";
+            packageId = "serde_json";
+          }
+          {
+            name = "server_fn";
+            packageId = "server_fn";
+          }
+          {
+            name = "tachys";
+            packageId = "tachys";
+            optional = true;
+            features = [ "reactive_graph" ];
+          }
+        ];
+        features = {
+          "js-sys" = [ "dep:js-sys" ];
+          "miniserde" = [ "codee/miniserde" ];
+          "rkyv" = [ "codee/rkyv" ];
+          "serde-lite" = [ "codee/serde_lite" ];
+          "serde-wasm-bindgen" = [ "codee/json_serde_wasm" ];
+          "tachys" = [ "dep:tachys" ];
+          "tracing" = [ "dep:tracing" ];
+          "wasm-bindgen" = [ "dep:wasm-bindgen" ];
+        };
+        resolvedDefaultFeatures = [ "hydration" "ssr" "tachys" ];
+      };
       "libc" = rec {
         crateName = "libc";
         version = "0.2.189";
@@ -10181,7 +14155,7 @@ rec {
           }
           {
             name = "windows-link";
-            packageId = "windows-link";
+            packageId = "windows-link 0.2.1";
             target = { target, features }: (target."windows" or false);
           }
         ];
@@ -10309,7 +14283,24 @@ rec {
           "default" = [ "std" "general" "errno" ];
           "rustc-dep-of-std" = [ "core" "compiler_builtins" "no_std" ];
         };
-        resolvedDefaultFeatures = [ "elf" "errno" "general" "ioctl" "no_std" "prctl" "system" ];
+        resolvedDefaultFeatures = [ "elf" "errno" "general" "ioctl" "no_std" ];
+      };
+      "linux-raw-sys 0.6.5" = rec {
+        crateName = "linux-raw-sys";
+        version = "0.6.5";
+        edition = "2021";
+        sha256 = "1mv3c1zz51ydcj768zavm8g06gz5jb1p7yigmmif7hz5whdmnf1a";
+        libName = "linux_raw_sys";
+        authors = [
+          "Dan Gohman <dev@sunfishcode.online>"
+        ];
+        features = {
+          "compiler_builtins" = [ "dep:compiler_builtins" ];
+          "core" = [ "dep:core" ];
+          "default" = [ "std" "general" "errno" ];
+          "rustc-dep-of-std" = [ "core" "compiler_builtins" "no_std" ];
+        };
+        resolvedDefaultFeatures = [ "general" "no_std" ];
       };
       "liquid" = rec {
         crateName = "liquid";
@@ -10642,6 +14633,23 @@ rec {
           "nightly" = [ "hashbrown" "hashbrown/nightly" ];
         };
       };
+      "mach2" = rec {
+        crateName = "mach2";
+        version = "0.4.3";
+        edition = "2015";
+        sha256 = "0i6vcnbq5v51whgyidzhf7cbxqrmj2nkw8z0m2ib02rc60mjhh6n";
+        dependencies = [
+          {
+            name = "libc";
+            packageId = "libc";
+            usesDefaultFeatures = false;
+            target = { target, features }: (("macos" == target."os" or null) || ("ios" == target."os" or null));
+          }
+        ];
+        features = {
+        };
+        resolvedDefaultFeatures = [ "default" ];
+      };
       "malloc_buf" = rec {
         crateName = "malloc_buf";
         version = "0.0.6";
@@ -10654,6 +14662,78 @@ rec {
           {
             name = "libc";
             packageId = "libc";
+          }
+        ];
+
+      };
+      "manyhow" = rec {
+        crateName = "manyhow";
+        version = "0.14.1";
+        edition = "2021";
+        sha256 = "1iyqkq8bkrhyb5jv1472q8i91d3k3zwrj1dphmkjl9qn6c3lnw7i";
+        dependencies = [
+          {
+            name = "manyhow-macros";
+            packageId = "manyhow-macros";
+            rename = "macros";
+            optional = true;
+          }
+          {
+            name = "proc-macro2";
+            packageId = "proc-macro2";
+          }
+          {
+            name = "quote";
+            packageId = "quote";
+          }
+          {
+            name = "syn";
+            packageId = "syn 3.0.6";
+            optional = true;
+            usesDefaultFeatures = false;
+            features = [ "printing" "parsing" ];
+          }
+        ];
+        devDependencies = [
+          {
+            name = "proc-macro2";
+            packageId = "proc-macro2";
+            features = [ "span-locations" ];
+          }
+          {
+            name = "syn";
+            packageId = "syn 3.0.6";
+            features = [ "full" ];
+          }
+        ];
+        features = {
+          "darling" = [ "darling_core" ];
+          "darling_core" = [ "dep:darling_core" ];
+          "default" = [ "syn" "macros" ];
+          "macros" = [ "dep:macros" ];
+          "syn" = [ "dep:syn" ];
+        };
+        resolvedDefaultFeatures = [ "default" "macros" "syn" ];
+      };
+      "manyhow-macros" = rec {
+        crateName = "manyhow-macros";
+        version = "0.14.1";
+        edition = "2021";
+        sha256 = "099pjn6japlsiizblb2gxql2b9hk5l2s72m167wbcpqz3yvisq1i";
+        procMacro = true;
+        libName = "manyhow_macros";
+        dependencies = [
+          {
+            name = "proc-macro-utils";
+            packageId = "proc-macro-utils";
+          }
+          {
+            name = "proc-macro2";
+            packageId = "proc-macro2";
+          }
+          {
+            name = "quote";
+            packageId = "quote";
           }
         ];
 
@@ -10784,7 +14864,27 @@ rec {
           "rust_decimal" = [ "dep:rust_decimal" ];
         };
       };
-      "memmap2" = rec {
+      "memmap2 0.8.0" = rec {
+        crateName = "memmap2";
+        version = "0.8.0";
+        edition = "2018";
+        sha256 = "1vf3djv9s917fbvw5vclllpl22g12iph6cz11gn57ndhxwya19a3";
+        authors = [
+          "Dan Burkert <dan@danburkert.com>"
+          "Yevhenii Reizner <razrfalcon@gmail.com>"
+        ];
+        dependencies = [
+          {
+            name = "libc";
+            packageId = "libc";
+            target = { target, features }: (target."unix" or false);
+          }
+        ];
+        features = {
+          "stable_deref_trait" = [ "dep:stable_deref_trait" ];
+        };
+      };
+      "memmap2 0.9.11" = rec {
         crateName = "memmap2";
         version = "0.9.11";
         edition = "2021";
@@ -10825,9 +14925,9 @@ rec {
       };
       "metal" = rec {
         crateName = "metal";
-        version = "0.32.0";
+        version = "0.33.0";
         edition = "2021";
-        sha256 = "01g6a10l2p576ibybz0v9hignw7qj0r6d513qbf2vxrzcxpmmh80";
+        sha256 = "05dwbjpdrhbnfq2jgdx0m5j9ip3ibwsln0b3v663p45wnn8pf167";
         authors = [
           "gfx-rs developers"
         ];
@@ -10869,7 +14969,26 @@ rec {
         };
         resolvedDefaultFeatures = [ "default" "link" ];
       };
-      "mime" = rec {
+      "mime 0.1.0" = rec {
+        crateName = "mime";
+        version = "0.1.0";
+        edition = "2021";
+        workspace_member = null;
+        src = pkgs.fetchgit {
+          url = "https://github.com/pop-os/window_clipboard.git";
+          rev = "f68595ee0e62fbd6589f4709b5aaa5c3c7ea5f6c";
+          sha256 = "1bd0y0hl61kpaj7f4b072nx8d73r0mqswcgr068l9s1yn4awkvaq";
+        };
+        dependencies = [
+          {
+            name = "smithay-clipboard";
+            packageId = "smithay-clipboard";
+            target = { target, features }: ((target."unix" or false) && (!(("macos" == target."os" or null) || ("android" == target."os" or null) || ("emscripten" == target."os" or null) || ("ios" == target."os" or null) || ("redox" == target."os" or null))));
+          }
+        ];
+
+      };
+      "mime 0.3.17" = rec {
         crateName = "mime";
         version = "0.3.17";
         edition = "2015";
@@ -10890,7 +15009,7 @@ rec {
         dependencies = [
           {
             name = "mime";
-            packageId = "mime";
+            packageId = "mime 0.3.17";
           }
           {
             name = "unicase";
@@ -11030,68 +15149,61 @@ rec {
         };
         resolvedDefaultFeatures = [ "default" "log" "net" "os-ext" "os-poll" ];
       };
-      "money-domain" = rec {
-        crateName = "money-domain";
+      "money-app" = rec {
+        crateName = "money-app";
         version = "0.1.0";
         edition = "2021";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../money/domain; };
-        libName = "money_domain";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../money/app; };
+        libName = "money_app";
         dependencies = [
           {
             name = "ark";
             packageId = "ark";
           }
           {
-            name = "ark-auth";
-            packageId = "ark-auth";
-            usesDefaultFeatures = false;
+            name = "ark-app";
+            packageId = "ark-app";
           }
           {
-            name = "ark-ffi";
-            packageId = "ark-ffi";
-            optional = true;
+            name = "ark-camera";
+            packageId = "ark-camera";
           }
           {
-            name = "serde";
-            packageId = "serde";
-            features = [ "derive" ];
+            name = "ark-clipboard";
+            packageId = "ark-clipboard";
           }
           {
-            name = "serde_json";
-            packageId = "serde_json";
-            features = [ "raw_value" ];
+            name = "ark-format";
+            packageId = "ark-format";
           }
           {
-            name = "uniffi";
-            packageId = "uniffi";
-            optional = true;
-            usesDefaultFeatures = false;
+            name = "ark-haptics";
+            packageId = "ark-haptics";
+          }
+          {
+            name = "ark-router";
+            packageId = "ark-router";
+          }
+          {
+            name = "ark-scanner";
+            packageId = "ark-scanner";
+          }
+          {
+            name = "ark-secure-store";
+            packageId = "ark-secure-store";
+          }
+          {
+            name = "ark-share";
+            packageId = "ark-share";
+          }
+          {
+            name = "money-core";
+            packageId = "money-core";
+            features = [ "demo" ];
           }
         ];
         devDependencies = [
           {
-            name = "ark-peer";
-            packageId = "ark-peer";
-            usesDefaultFeatures = false;
-          }
-        ];
-        features = {
-          "ffi" = [ "dep:uniffi" "dep:ark-ffi" ];
-        };
-        resolvedDefaultFeatures = [ "ffi" ];
-      };
-      "money-ffi" = rec {
-        crateName = "money-ffi";
-        version = "0.1.0";
-        edition = "2021";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../money/ffi; };
-        libName = "money_ffi";type = [ "lib" "cdylib" "staticlib" ];
-        dependencies = [
-          {
-            name = "ark";
-            packageId = "ark";
-          }
-          {
             name = "ark-ffi";
             packageId = "ark-ffi";
           }
@@ -11101,41 +15213,13 @@ rec {
             usesDefaultFeatures = false;
           }
           {
-            name = "money-domain";
-            packageId = "money-domain";
-            features = [ "ffi" ];
+            name = "money-core";
+            packageId = "money-core";
+            features = [ "demo" ];
           }
           {
             name = "money-seed";
             packageId = "money-seed";
-            usesDefaultFeatures = false;
-          }
-          {
-            name = "serde_json";
-            packageId = "serde_json";
-            features = [ "raw_value" ];
-          }
-          {
-            name = "tract-onnx";
-            packageId = "tract-onnx";
-            optional = true;
-          }
-          {
-            name = "uniffi";
-            packageId = "uniffi";
-            usesDefaultFeatures = false;
-          }
-        ];
-        devDependencies = [
-          {
-            name = "arkdb";
-            packageId = "arkdb";
-          }
-          {
-            name = "image";
-            packageId = "image";
-            usesDefaultFeatures = false;
-            features = [ "png" ];
           }
           {
             name = "serde_json";
@@ -11147,11 +15231,33 @@ rec {
             packageId = "tempfile";
           }
         ];
+
+      };
+      "money-core" = rec {
+        crateName = "money-core";
+        version = "0.1.0";
+        edition = "2021";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../money/core; };
+        libName = "money_core";
+        dependencies = [
+          {
+            name = "ark";
+            packageId = "ark";
+          }
+          {
+            name = "serde";
+            packageId = "serde";
+            features = [ "derive" ];
+          }
+          {
+            name = "serde_json";
+            packageId = "serde_json";
+            features = [ "raw_value" ];
+          }
+        ];
         features = {
-          "default" = [ "page" ];
-          "page" = [ "dep:tract-onnx" ];
         };
-        resolvedDefaultFeatures = [ "default" "page" ];
+        resolvedDefaultFeatures = [ "demo" ];
       };
       "money-iced" = rec {
         crateName = "money-iced";
@@ -11171,9 +15277,18 @@ rec {
             packageId = "ark";
           }
           {
+            name = "ark-app";
+            packageId = "ark-app";
+          }
+          {
             name = "ark-auth";
             packageId = "ark-auth";
             usesDefaultFeatures = false;
+          }
+          {
+            name = "ark-clipboard";
+            packageId = "ark-clipboard";
+            features = [ "desktop" ];
           }
           {
             name = "ark-peer";
@@ -11181,62 +15296,55 @@ rec {
             usesDefaultFeatures = false;
           }
           {
+            name = "ark-secure-store";
+            packageId = "ark-secure-store";
+            features = [ "desktop" ];
+          }
+          {
             name = "arkui";
             packageId = "arkui";
+            features = [ "app" ];
           }
           {
             name = "arkui-shots";
             packageId = "arkui-shots";
-            target = { target, features }: (!("wasm32" == target."arch" or null));
           }
           {
             name = "iced";
             packageId = "iced";
-            target = { target, features }: (!("wasm32" == target."arch" or null));
-            features = [ "smol" "svg" "image" "advanced" "fira-sans" ];
+            usesDefaultFeatures = false;
+            features = [ "winit" "wgpu" "tiny-skia" "crisp" "web-colors" "thread-pool" "linux-theme-detection" "x11" "wayland" "a11y" "smol" "svg" "image" "advanced" "fira-sans" ];
           }
           {
-            name = "iced";
-            packageId = "iced";
-            target = { target, features }: ("wasm32" == target."arch" or null);
-            features = [ "webgl" "svg" "image" "advanced" "fira-sans" ];
+            name = "money-app";
+            packageId = "money-app";
           }
           {
-            name = "money-domain";
-            packageId = "money-domain";
+            name = "money-core";
+            packageId = "money-core";
+            features = [ "demo" ];
           }
           {
             name = "money-seed";
             packageId = "money-seed";
-            usesDefaultFeatures = false;
-          }
-          {
-            name = "web-sys";
-            packageId = "web-sys";
-            target = { target, features }: ("wasm32" == target."arch" or null);
-            features = [ "console" "Window" "Location" ];
           }
         ];
         devDependencies = [
           {
             name = "iced_test";
             packageId = "iced_test";
-            target = {target, features}: (!("wasm32" == target."arch" or null));
           }
           {
             name = "money-server";
             packageId = "money-server";
-            target = {target, features}: (!("wasm32" == target."arch" or null));
           }
           {
             name = "tempfile";
             packageId = "tempfile";
-            target = {target, features}: (!("wasm32" == target."arch" or null));
           }
           {
             name = "tokio";
             packageId = "tokio";
-            target = {target, features}: (!("wasm32" == target."arch" or null));
             features = [ "rt-multi-thread" ];
           }
         ];
@@ -11255,39 +15363,34 @@ rec {
             requiredFeatures = [ "cli" ];
           }
         ];
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../money/seed; };
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../money/demo; };
         libName = "money_seed";
         dependencies = [
-          {
-            name = "anyhow";
-            packageId = "anyhow";
-            optional = true;
-          }
-          {
-            name = "ark";
-            packageId = "ark";
-          }
           {
             name = "ark-peer";
             packageId = "ark-peer";
             usesDefaultFeatures = false;
           }
           {
-            name = "money-domain";
-            packageId = "money-domain";
+            name = "money-core";
+            packageId = "money-core";
+            features = [ "demo" ];
           }
         ];
         features = {
-          "cli" = [ "dep:anyhow" ];
-          "default" = [ "cli" ];
         };
-        resolvedDefaultFeatures = [ "cli" "default" ];
+        resolvedDefaultFeatures = [ "cli" ];
       };
       "money-server" = rec {
         crateName = "money-server";
         version = "0.1.0";
         edition = "2021";
         crateBin = [
+          {
+            name = "money-peer";
+            path = "src/peer.rs";
+            requiredFeatures = [ ];
+          }
           {
             name = "money-server";
             path = "src/main.rs";
@@ -11310,6 +15413,10 @@ rec {
             packageId = "ark-auth";
           }
           {
+            name = "ark-format";
+            packageId = "ark-format";
+          }
+          {
             name = "ark-peer";
             packageId = "ark-peer";
             features = [ "server" ];
@@ -11329,8 +15436,8 @@ rec {
             features = [ "clock" ];
           }
           {
-            name = "money-domain";
-            packageId = "money-domain";
+            name = "money-core";
+            packageId = "money-core";
           }
           {
             name = "serde";
@@ -11362,9 +15469,13 @@ rec {
         ];
         devDependencies = [
           {
+            name = "money-core";
+            packageId = "money-core";
+            features = [ "demo" ];
+          }
+          {
             name = "money-seed";
             packageId = "money-seed";
-            usesDefaultFeatures = false;
           }
           {
             name = "tempfile";
@@ -11411,6 +15522,17 @@ rec {
           "sse_shaper_paths" = [ "sse" ];
         };
         resolvedDefaultFeatures = [ "avx" "avx_luts" "avx_shaper_fixed_point_paths" "avx_shaper_paths" "default" "lut" "neon" "neon_luts" "neon_shaper_fixed_point_paths" "neon_shaper_paths" "sse" "sse_luts" "sse_shaper_fixed_point_paths" "sse_shaper_paths" ];
+      };
+      "multiversion_no_op" = rec {
+        crateName = "multiversion_no_op";
+        version = "1.0.0";
+        edition = "2021";
+        sha256 = "03d2k7xk7vky38q48h08miw4jca34ymckggnrqggn60vlddvagvl";
+        procMacro = true;
+        authors = [
+          "Henri Sivonen <hsivonen@hsivonen.fi>"
+        ];
+
       };
       "mundy" = rec {
         crateName = "mundy";
@@ -11466,7 +15588,7 @@ rec {
           }
           {
             name = "jni";
-            packageId = "jni";
+            packageId = "jni 0.22.4";
             target = { target, features }: ("android" == target."os" or null);
           }
           {
@@ -11563,9 +15685,9 @@ rec {
       };
       "naga" = rec {
         crateName = "naga";
-        version = "27.0.3";
+        version = "28.0.0";
         edition = "2021";
-        sha256 = "1n57m5hwi42mk57ljz7manc45b8ky8890891y86yw4cb1rgz4v06";
+        sha256 = "0d8idx407r0lnqbcjl097wyfr6lavf3i09b1zkfijch64mr6d3v1";
         authors = [
           "gfx-rs developers"
         ];
@@ -11748,7 +15870,64 @@ rec {
         };
         resolvedDefaultFeatures = [ "default" "std" ];
       };
-      "ndk" = rec {
+      "ndk 0.8.0" = rec {
+        crateName = "ndk";
+        version = "0.8.0";
+        edition = "2021";
+        sha256 = "1dx5yyqh32bi161mipg4br4i33syjidw81qrq0w7mc8hf0ds6xi0";
+        authors = [
+          "The Rust Mobile contributors"
+        ];
+        dependencies = [
+          {
+            name = "bitflags";
+            packageId = "bitflags 2.13.2";
+          }
+          {
+            name = "jni-sys";
+            packageId = "jni-sys 0.3.1";
+          }
+          {
+            name = "log";
+            packageId = "log";
+          }
+          {
+            name = "ndk-sys";
+            packageId = "ndk-sys 0.5.0+25.2.9519653";
+            rename = "ffi";
+          }
+          {
+            name = "num_enum";
+            packageId = "num_enum";
+          }
+          {
+            name = "thiserror";
+            packageId = "thiserror 1.0.69";
+          }
+        ];
+        features = {
+          "all" = [ "audio" "bitmap" "media" "api-level-31" "rwh_04" "rwh_05" "rwh_06" ];
+          "api-level-24" = [ "api-level-23" ];
+          "api-level-25" = [ "api-level-24" ];
+          "api-level-26" = [ "api-level-25" ];
+          "api-level-27" = [ "api-level-26" ];
+          "api-level-28" = [ "api-level-27" ];
+          "api-level-29" = [ "api-level-28" ];
+          "api-level-30" = [ "api-level-29" ];
+          "api-level-31" = [ "api-level-30" ];
+          "audio" = [ "ffi/audio" "api-level-26" ];
+          "bitmap" = [ "ffi/bitmap" ];
+          "default" = [ "rwh_06" ];
+          "jni" = [ "dep:jni" ];
+          "media" = [ "ffi/media" ];
+          "rwh_04" = [ "dep:rwh_04" ];
+          "rwh_05" = [ "dep:rwh_05" ];
+          "rwh_06" = [ "dep:rwh_06" ];
+          "sync" = [ "ffi/sync" "api-level-26" ];
+          "test" = [ "ffi/test" "jni" "all" ];
+        };
+      };
+      "ndk 0.9.0" = rec {
         crateName = "ndk";
         version = "0.9.0";
         edition = "2021";
@@ -11771,7 +15950,7 @@ rec {
           }
           {
             name = "ndk-sys";
-            packageId = "ndk-sys";
+            packageId = "ndk-sys 0.6.0+11769913";
             rename = "ffi";
           }
           {
@@ -11813,7 +15992,7 @@ rec {
           "sync" = [ "ffi/sync" "api-level-26" ];
           "test" = [ "ffi/test" "jni" "all" ];
         };
-        resolvedDefaultFeatures = [ "default" "rwh_06" ];
+        resolvedDefaultFeatures = [ "rwh_06" ];
       };
       "ndk-context" = rec {
         crateName = "ndk-context";
@@ -11826,7 +16005,25 @@ rec {
         ];
 
       };
-      "ndk-sys" = rec {
+      "ndk-sys 0.5.0+25.2.9519653" = rec {
+        crateName = "ndk-sys";
+        version = "0.5.0+25.2.9519653";
+        edition = "2021";
+        sha256 = "14bnxww0f17xl8pyn6j5kpkl98snjl9lin8i7qv4zzb0vmlnf6cc";
+        libName = "ndk_sys";
+        authors = [
+          "The Rust Windowing contributors"
+        ];
+        dependencies = [
+          {
+            name = "jni-sys";
+            packageId = "jni-sys 0.3.1";
+          }
+        ];
+        features = {
+        };
+      };
+      "ndk-sys 0.6.0+11769913" = rec {
         crateName = "ndk-sys";
         version = "0.6.0+11769913";
         edition = "2021";
@@ -11853,6 +16050,16 @@ rec {
         authors = [
           "Matt Brubeck <mbrubeck@limpet.net>"
           "Jonathan Reem <jonathan.reem@gmail.com>"
+        ];
+
+      };
+      "next_tuple" = rec {
+        crateName = "next_tuple";
+        version = "0.1.0";
+        edition = "2021";
+        sha256 = "0a4sl0vg71sq0drcskc5hby7zqm480kv7qhldyvckc3iw0h3k6b0";
+        authors = [
+          "Greg Johnston"
         ];
 
       };
@@ -12530,6 +16737,31 @@ rec {
           "objc_exception" = [ "dep:objc_exception" ];
         };
       };
+      "objc-foundation" = rec {
+        crateName = "objc-foundation";
+        version = "0.1.1";
+        edition = "2015";
+        sha256 = "1y9bwb3m5fdq7w7i4bnds067dhm4qxv4m1mbg9y61j9nkrjipp8s";
+        libName = "objc_foundation";
+        authors = [
+          "Steven Sheldon"
+        ];
+        dependencies = [
+          {
+            name = "block";
+            packageId = "block";
+          }
+          {
+            name = "objc";
+            packageId = "objc";
+          }
+          {
+            name = "objc_id";
+            packageId = "objc_id";
+          }
+        ];
+
+      };
       "objc-sys" = rec {
         crateName = "objc-sys";
         version = "0.3.5";
@@ -12594,7 +16826,7 @@ rec {
           "unstable-static-sel" = [ "objc2-proc-macros" ];
           "unstable-static-sel-inlined" = [ "unstable-static-sel" ];
         };
-        resolvedDefaultFeatures = [ "alloc" "default" "relax-sign-encoding" "std" ];
+        resolvedDefaultFeatures = [ "alloc" "default" "std" ];
       };
       "objc2 0.6.4" = rec {
         crateName = "objc2";
@@ -12630,7 +16862,7 @@ rec {
           "unstable-static-sel-inlined" = [ "unstable-static-sel" ];
           "unstable-winobjc" = [ "gnustep-1-8" ];
         };
-        resolvedDefaultFeatures = [ "alloc" "default" "std" ];
+        resolvedDefaultFeatures = [ "alloc" "default" "relax-sign-encoding" "std" ];
       };
       "objc2-app-kit 0.2.2" = rec {
         crateName = "objc2-app-kit";
@@ -12970,7 +17202,7 @@ rec {
           "objc2-quartz-core" = [ "dep:objc2-quartz-core" ];
           "std" = [ "alloc" "bitflags?/std" "block2?/std" "libc?/std" "objc2/std" "objc2-core-data?/std" "objc2-core-image?/std" "objc2-foundation/std" "objc2-quartz-core?/std" ];
         };
-        resolvedDefaultFeatures = [ "NSAppearance" "NSApplication" "NSBitmapImageRep" "NSButton" "NSColor" "NSControl" "NSCursor" "NSDragging" "NSEvent" "NSGraphics" "NSGraphicsContext" "NSImage" "NSImageRep" "NSMenu" "NSMenuItem" "NSOpenGLView" "NSPasteboard" "NSResponder" "NSRunningApplication" "NSScreen" "NSTextInputClient" "NSTextInputContext" "NSView" "NSWindow" "NSWindowScripting" "NSWindowTabGroup" "alloc" "bitflags" "default" "std" ];
+        resolvedDefaultFeatures = [ "NSAccessibility" "NSAccessibilityConstants" "NSAccessibilityElement" "NSAccessibilityProtocols" "NSResponder" "NSView" "NSWindow" "alloc" "bitflags" "default" "std" ];
       };
       "objc2-app-kit 0.3.2" = rec {
         crateName = "objc2-app-kit";
@@ -13007,7 +17239,7 @@ rec {
           }
           {
             name = "objc2-cloud-kit";
-            packageId = "objc2-cloud-kit 0.3.2";
+            packageId = "objc2-cloud-kit";
             optional = true;
             usesDefaultFeatures = false;
             target = { target, features }: ("apple" == target."vendor" or null);
@@ -13377,103 +17609,7 @@ rec {
         };
         resolvedDefaultFeatures = [ "AppKitDefines" "AppKitErrors" "NSATSTypesetter" "NSAccessibility" "NSAccessibilityColor" "NSAccessibilityConstants" "NSAccessibilityCustomAction" "NSAccessibilityCustomRotor" "NSAccessibilityElement" "NSAccessibilityProtocols" "NSActionCell" "NSAdaptiveImageGlyph" "NSAffineTransform" "NSAlert" "NSAlignmentFeedbackFilter" "NSAnimation" "NSAnimationContext" "NSAppearance" "NSAppleScriptExtensions" "NSApplication" "NSApplicationScripting" "NSArrayController" "NSAttributedString" "NSBackgroundExtensionView" "NSBezierPath" "NSBitmapImageRep" "NSBox" "NSBrowser" "NSBrowserCell" "NSButton" "NSButtonCell" "NSButtonTouchBarItem" "NSCIImageRep" "NSCachedImageRep" "NSCandidateListTouchBarItem" "NSCell" "NSClickGestureRecognizer" "NSClipView" "NSCollectionView" "NSCollectionViewCompositionalLayout" "NSCollectionViewFlowLayout" "NSCollectionViewGridLayout" "NSCollectionViewLayout" "NSCollectionViewTransitionLayout" "NSColor" "NSColorList" "NSColorPanel" "NSColorPicker" "NSColorPickerTouchBarItem" "NSColorPicking" "NSColorSampler" "NSColorSpace" "NSColorWell" "NSComboBox" "NSComboBoxCell" "NSComboButton" "NSControl" "NSController" "NSCursor" "NSCustomImageRep" "NSCustomTouchBarItem" "NSDataAsset" "NSDatePicker" "NSDatePickerCell" "NSDictionaryController" "NSDiffableDataSource" "NSDirection" "NSDockTile" "NSDocument" "NSDocumentController" "NSDocumentScripting" "NSDragging" "NSDraggingItem" "NSDraggingSession" "NSDrawer" "NSEPSImageRep" "NSErrors" "NSEvent" "NSFilePromiseProvider" "NSFilePromiseReceiver" "NSFileWrapperExtensions" "NSFont" "NSFontAssetRequest" "NSFontCollection" "NSFontDescriptor" "NSFontManager" "NSFontPanel" "NSForm" "NSFormCell" "NSGestureRecognizer" "NSGlassEffectView" "NSGlyphGenerator" "NSGlyphInfo" "NSGradient" "NSGraphics" "NSGraphicsContext" "NSGridView" "NSGroupTouchBarItem" "NSHapticFeedback" "NSHelpManager" "NSImage" "NSImageCell" "NSImageRep" "NSImageView" "NSInputManager" "NSInputServer" "NSInterfaceStyle" "NSItemBadge" "NSItemProvider" "NSKeyValueBinding" "NSLayoutAnchor" "NSLayoutConstraint" "NSLayoutGuide" "NSLayoutManager" "NSLevelIndicator" "NSLevelIndicatorCell" "NSMagnificationGestureRecognizer" "NSMatrix" "NSMediaLibraryBrowserController" "NSMenu" "NSMenuItem" "NSMenuItemBadge" "NSMenuItemCell" "NSMenuToolbarItem" "NSMovie" "NSNib" "NSNibConnector" "NSNibControlConnector" "NSNibDeclarations" "NSNibLoading" "NSNibOutletConnector" "NSObjectController" "NSOpenGL" "NSOpenGLLayer" "NSOpenGLView" "NSOpenPanel" "NSOutlineView" "NSPDFImageRep" "NSPDFInfo" "NSPDFPanel" "NSPICTImageRep" "NSPageController" "NSPageLayout" "NSPanGestureRecognizer" "NSPanel" "NSParagraphStyle" "NSPasteboard" "NSPasteboardItem" "NSPathCell" "NSPathComponentCell" "NSPathControl" "NSPathControlItem" "NSPersistentDocument" "NSPickerTouchBarItem" "NSPopUpButton" "NSPopUpButtonCell" "NSPopover" "NSPopoverTouchBarItem" "NSPredicateEditor" "NSPredicateEditorRowTemplate" "NSPressGestureRecognizer" "NSPressureConfiguration" "NSPreviewRepresentingActivityItem" "NSPrintInfo" "NSPrintOperation" "NSPrintPanel" "NSPrinter" "NSProgressIndicator" "NSResponder" "NSRotationGestureRecognizer" "NSRuleEditor" "NSRulerMarker" "NSRulerView" "NSRunningApplication" "NSSavePanel" "NSScreen" "NSScrollView" "NSScroller" "NSScrubber" "NSScrubberItemView" "NSScrubberLayout" "NSSearchField" "NSSearchFieldCell" "NSSearchToolbarItem" "NSSecureTextField" "NSSegmentedCell" "NSSegmentedControl" "NSShadow" "NSSharingCollaborationModeRestriction" "NSSharingService" "NSSharingServicePickerToolbarItem" "NSSharingServicePickerTouchBarItem" "NSSlider" "NSSliderAccessory" "NSSliderCell" "NSSliderTouchBarItem" "NSSound" "NSSpeechRecognizer" "NSSpeechSynthesizer" "NSSpellChecker" "NSSpellProtocol" "NSSplitView" "NSSplitViewController" "NSSplitViewItem" "NSSplitViewItemAccessoryViewController" "NSStackView" "NSStatusBar" "NSStatusBarButton" "NSStatusItem" "NSStepper" "NSStepperCell" "NSStepperTouchBarItem" "NSStoryboard" "NSStoryboardSegue" "NSStringDrawing" "NSSwitch" "NSTabView" "NSTabViewController" "NSTabViewItem" "NSTableCellView" "NSTableColumn" "NSTableHeaderCell" "NSTableHeaderView" "NSTableRowView" "NSTableView" "NSTableViewDiffableDataSource" "NSTableViewRowAction" "NSText" "NSTextAlternatives" "NSTextAttachment" "NSTextAttachmentCell" "NSTextCheckingClient" "NSTextCheckingController" "NSTextContainer" "NSTextContent" "NSTextContentManager" "NSTextElement" "NSTextField" "NSTextFieldCell" "NSTextFinder" "NSTextInputClient" "NSTextInputContext" "NSTextInsertionIndicator" "NSTextLayoutFragment" "NSTextLayoutManager" "NSTextLineFragment" "NSTextList" "NSTextListElement" "NSTextRange" "NSTextSelection" "NSTextSelectionNavigation" "NSTextStorage" "NSTextStorageScripting" "NSTextTable" "NSTextView" "NSTextViewportLayoutController" "NSTintConfiguration" "NSTintProminence" "NSTitlebarAccessoryViewController" "NSTokenField" "NSTokenFieldCell" "NSToolbar" "NSToolbarItem" "NSToolbarItemGroup" "NSTouch" "NSTouchBar" "NSTouchBarItem" "NSTrackingArea" "NSTrackingSeparatorToolbarItem" "NSTreeController" "NSTreeNode" "NSTypesetter" "NSUserActivity" "NSUserDefaultsController" "NSUserInterfaceCompression" "NSUserInterfaceItemIdentification" "NSUserInterfaceItemSearching" "NSUserInterfaceLayout" "NSUserInterfaceValidation" "NSView" "NSViewController" "NSViewLayoutRegion" "NSVisualEffectView" "NSWindow" "NSWindowController" "NSWindowRestoration" "NSWindowScripting" "NSWindowTab" "NSWindowTabGroup" "NSWorkspace" "NSWritingToolsCoordinator" "NSWritingToolsCoordinatorAnimationParameters" "NSWritingToolsCoordinatorContext" "alloc" "bitflags" "block2" "default" "libc" "objc2-cloud-kit" "objc2-core-data" "objc2-core-foundation" "objc2-core-graphics" "objc2-core-image" "objc2-core-text" "objc2-core-video" "objc2-quartz-core" "std" ];
       };
-      "objc2-cloud-kit 0.2.2" = rec {
-        crateName = "objc2-cloud-kit";
-        version = "0.2.2";
-        edition = "2021";
-        sha256 = "02dhjvmcq8c2bwj31jx423jygif1scs9f0lmlab0ayhw75b3ppbl";
-        libName = "objc2_cloud_kit";
-        dependencies = [
-          {
-            name = "bitflags";
-            packageId = "bitflags 2.13.2";
-            optional = true;
-            usesDefaultFeatures = false;
-          }
-          {
-            name = "block2";
-            packageId = "block2 0.5.1";
-            optional = true;
-            usesDefaultFeatures = false;
-          }
-          {
-            name = "objc2";
-            packageId = "objc2 0.5.2";
-            usesDefaultFeatures = false;
-          }
-          {
-            name = "objc2-core-location";
-            packageId = "objc2-core-location";
-            optional = true;
-            usesDefaultFeatures = false;
-          }
-          {
-            name = "objc2-foundation";
-            packageId = "objc2-foundation 0.2.2";
-            usesDefaultFeatures = false;
-          }
-        ];
-        features = {
-          "CKAcceptSharesOperation" = [ "objc2-foundation/NSArray" "objc2-foundation/NSError" "objc2-foundation/NSOperation" ];
-          "CKAllowedSharingOptions" = [ "bitflags" "objc2-foundation/NSObject" ];
-          "CKAsset" = [ "objc2-foundation/NSURL" ];
-          "CKContainer" = [ "bitflags" "objc2-foundation/NSArray" "objc2-foundation/NSError" "objc2-foundation/NSOperation" "objc2-foundation/NSString" "objc2-foundation/NSURL" ];
-          "CKDatabase" = [ "objc2-foundation/NSArray" "objc2-foundation/NSError" "objc2-foundation/NSOperation" "objc2-foundation/NSString" ];
-          "CKDatabaseOperation" = [ "objc2-foundation/NSOperation" ];
-          "CKDiscoverAllUserIdentitiesOperation" = [ "objc2-foundation/NSError" "objc2-foundation/NSOperation" ];
-          "CKDiscoverUserIdentitiesOperation" = [ "objc2-foundation/NSArray" "objc2-foundation/NSError" "objc2-foundation/NSOperation" ];
-          "CKError" = [ "objc2-foundation/NSString" ];
-          "CKFetchDatabaseChangesOperation" = [ "objc2-foundation/NSError" "objc2-foundation/NSOperation" ];
-          "CKFetchNotificationChangesOperation" = [ "objc2-foundation/NSError" "objc2-foundation/NSOperation" ];
-          "CKFetchRecordChangesOperation" = [ "objc2-foundation/NSArray" "objc2-foundation/NSData" "objc2-foundation/NSError" "objc2-foundation/NSOperation" "objc2-foundation/NSString" ];
-          "CKFetchRecordZoneChangesOperation" = [ "objc2-foundation/NSArray" "objc2-foundation/NSData" "objc2-foundation/NSDictionary" "objc2-foundation/NSError" "objc2-foundation/NSObject" "objc2-foundation/NSOperation" "objc2-foundation/NSString" ];
-          "CKFetchRecordZonesOperation" = [ "objc2-foundation/NSArray" "objc2-foundation/NSDictionary" "objc2-foundation/NSError" "objc2-foundation/NSOperation" ];
-          "CKFetchRecordsOperation" = [ "objc2-foundation/NSArray" "objc2-foundation/NSDictionary" "objc2-foundation/NSError" "objc2-foundation/NSOperation" "objc2-foundation/NSString" ];
-          "CKFetchShareMetadataOperation" = [ "objc2-foundation/NSArray" "objc2-foundation/NSError" "objc2-foundation/NSOperation" "objc2-foundation/NSString" "objc2-foundation/NSURL" ];
-          "CKFetchShareParticipantsOperation" = [ "objc2-foundation/NSArray" "objc2-foundation/NSError" "objc2-foundation/NSOperation" ];
-          "CKFetchSubscriptionsOperation" = [ "objc2-foundation/NSArray" "objc2-foundation/NSDictionary" "objc2-foundation/NSError" "objc2-foundation/NSOperation" "objc2-foundation/NSString" ];
-          "CKFetchWebAuthTokenOperation" = [ "objc2-foundation/NSError" "objc2-foundation/NSOperation" "objc2-foundation/NSString" ];
-          "CKLocationSortDescriptor" = [ "objc2-core-location?/CLLocation" "objc2-foundation/NSCoder" "objc2-foundation/NSObjCRuntime" "objc2-foundation/NSObject" "objc2-foundation/NSSortDescriptor" "objc2-foundation/NSString" ];
-          "CKMarkNotificationsReadOperation" = [ "objc2-foundation/NSArray" "objc2-foundation/NSError" "objc2-foundation/NSOperation" ];
-          "CKModifyBadgeOperation" = [ "objc2-foundation/NSError" "objc2-foundation/NSOperation" ];
-          "CKModifyRecordZonesOperation" = [ "objc2-foundation/NSArray" "objc2-foundation/NSError" "objc2-foundation/NSOperation" ];
-          "CKModifyRecordsOperation" = [ "objc2-foundation/NSArray" "objc2-foundation/NSData" "objc2-foundation/NSError" "objc2-foundation/NSOperation" ];
-          "CKModifySubscriptionsOperation" = [ "objc2-foundation/NSArray" "objc2-foundation/NSError" "objc2-foundation/NSOperation" "objc2-foundation/NSString" ];
-          "CKNotification" = [ "objc2-foundation/NSArray" "objc2-foundation/NSDictionary" "objc2-foundation/NSObject" "objc2-foundation/NSString" "objc2-foundation/NSValue" ];
-          "CKOperation" = [ "objc2-foundation/NSDate" "objc2-foundation/NSObjCRuntime" "objc2-foundation/NSOperation" "objc2-foundation/NSString" ];
-          "CKOperationGroup" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
-          "CKQuery" = [ "objc2-foundation/NSArray" "objc2-foundation/NSCoder" "objc2-foundation/NSObject" "objc2-foundation/NSPredicate" "objc2-foundation/NSSortDescriptor" "objc2-foundation/NSString" ];
-          "CKQueryOperation" = [ "objc2-foundation/NSArray" "objc2-foundation/NSError" "objc2-foundation/NSObject" "objc2-foundation/NSOperation" "objc2-foundation/NSString" ];
-          "CKRecord" = [ "objc2-core-location?/CLLocation" "objc2-foundation/NSArray" "objc2-foundation/NSCoder" "objc2-foundation/NSData" "objc2-foundation/NSDate" "objc2-foundation/NSObject" "objc2-foundation/NSString" "objc2-foundation/NSValue" ];
-          "CKRecordID" = [ "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
-          "CKRecordZone" = [ "bitflags" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
-          "CKRecordZoneID" = [ "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
-          "CKReference" = [ "objc2-foundation/NSObject" ];
-          "CKServerChangeToken" = [ "objc2-foundation/NSObject" ];
-          "CKShare" = [ "objc2-foundation/NSArray" "objc2-foundation/NSCoder" "objc2-foundation/NSObject" "objc2-foundation/NSString" "objc2-foundation/NSURL" ];
-          "CKShareMetadata" = [ "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
-          "CKShareParticipant" = [ "objc2-foundation/NSObject" ];
-          "CKSubscription" = [ "bitflags" "objc2-foundation/NSArray" "objc2-foundation/NSCoder" "objc2-foundation/NSObject" "objc2-foundation/NSPredicate" "objc2-foundation/NSString" ];
-          "CKSyncEngine" = [ "objc2-foundation/NSArray" "objc2-foundation/NSError" "objc2-foundation/NSObject" "objc2-foundation/NSSet" ];
-          "CKSyncEngineConfiguration" = [ "objc2-foundation/NSString" ];
-          "CKSyncEngineEvent" = [ "objc2-foundation/NSArray" "objc2-foundation/NSDictionary" "objc2-foundation/NSError" "objc2-foundation/NSString" ];
-          "CKSyncEngineRecordZoneChangeBatch" = [ "objc2-foundation/NSArray" ];
-          "CKSyncEngineState" = [ "objc2-foundation/NSArray" "objc2-foundation/NSObject" ];
-          "CKSystemSharingUIObserver" = [ "objc2-foundation/NSError" ];
-          "CKUserIdentity" = [ "objc2-foundation/NSArray" "objc2-foundation/NSObject" "objc2-foundation/NSPersonNameComponents" "objc2-foundation/NSString" ];
-          "CKUserIdentityLookupInfo" = [ "objc2-foundation/NSArray" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
-          "NSItemProvider_CKSharingSupport" = [ "objc2-foundation/NSError" "objc2-foundation/NSItemProvider" ];
-          "all" = [ "CKAcceptSharesOperation" "CKAllowedSharingOptions" "CKAsset" "CKContainer" "CKDatabase" "CKDatabaseOperation" "CKDefines" "CKDiscoverAllUserIdentitiesOperation" "CKDiscoverUserIdentitiesOperation" "CKError" "CKFetchDatabaseChangesOperation" "CKFetchNotificationChangesOperation" "CKFetchRecordChangesOperation" "CKFetchRecordZoneChangesOperation" "CKFetchRecordZonesOperation" "CKFetchRecordsOperation" "CKFetchShareMetadataOperation" "CKFetchShareParticipantsOperation" "CKFetchSubscriptionsOperation" "CKFetchWebAuthTokenOperation" "CKLocationSortDescriptor" "CKMarkNotificationsReadOperation" "CKModifyBadgeOperation" "CKModifyRecordZonesOperation" "CKModifyRecordsOperation" "CKModifySubscriptionsOperation" "CKNotification" "CKOperation" "CKOperationGroup" "CKQuery" "CKQueryOperation" "CKRecord" "CKRecordID" "CKRecordZone" "CKRecordZoneID" "CKReference" "CKServerChangeToken" "CKShare" "CKShareMetadata" "CKShareParticipant" "CKSubscription" "CKSyncEngine" "CKSyncEngineConfiguration" "CKSyncEngineEvent" "CKSyncEngineRecordZoneChangeBatch" "CKSyncEngineState" "CKSystemSharingUIObserver" "CKUserIdentity" "CKUserIdentityLookupInfo" "NSItemProvider_CKSharingSupport" "bitflags" "block2" "objc2-core-location" ];
-          "alloc" = [ "block2?/alloc" "objc2/alloc" "objc2-core-location?/alloc" "objc2-foundation/alloc" ];
-          "bitflags" = [ "dep:bitflags" "objc2-foundation/bitflags" ];
-          "block2" = [ "dep:block2" "objc2-core-location?/block2" "objc2-foundation/block2" ];
-          "default" = [ "std" ];
-          "objc2-core-location" = [ "dep:objc2-core-location" ];
-          "std" = [ "alloc" "bitflags?/std" "block2?/std" "objc2/std" "objc2-core-location?/std" "objc2-foundation/std" ];
-        };
-        resolvedDefaultFeatures = [ "CKShareMetadata" "alloc" "bitflags" "std" ];
-      };
-      "objc2-cloud-kit 0.3.2" = rec {
+      "objc2-cloud-kit" = rec {
         crateName = "objc2-cloud-kit";
         version = "0.3.2";
         edition = "2021";
@@ -13561,67 +17697,6 @@ rec {
           "std" = [ "alloc" ];
         };
         resolvedDefaultFeatures = [ "CKContainer" "CKRecord" "CKShare" "CKShareMetadata" "bitflags" ];
-      };
-      "objc2-contacts" = rec {
-        crateName = "objc2-contacts";
-        version = "0.2.2";
-        edition = "2021";
-        sha256 = "12a8m927xrrxa54xhqhqnkkl1a6l07pyrpnqfk9jz09kkh755zx5";
-        libName = "objc2_contacts";
-        dependencies = [
-          {
-            name = "block2";
-            packageId = "block2 0.5.1";
-            optional = true;
-            usesDefaultFeatures = false;
-          }
-          {
-            name = "objc2";
-            packageId = "objc2 0.5.2";
-            usesDefaultFeatures = false;
-          }
-          {
-            name = "objc2-foundation";
-            packageId = "objc2-foundation 0.2.2";
-            usesDefaultFeatures = false;
-          }
-        ];
-        features = {
-          "CNChangeHistoryEvent" = [ "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
-          "CNChangeHistoryFetchRequest" = [ "objc2-foundation/NSArray" "objc2-foundation/NSData" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
-          "CNContact" = [ "objc2-foundation/NSArray" "objc2-foundation/NSCalendar" "objc2-foundation/NSData" "objc2-foundation/NSObjCRuntime" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
-          "CNContactFetchRequest" = [ "objc2-foundation/NSArray" "objc2-foundation/NSObject" "objc2-foundation/NSPredicate" ];
-          "CNContactFormatter" = [ "objc2-foundation/NSAttributedString" "objc2-foundation/NSDictionary" "objc2-foundation/NSFormatter" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
-          "CNContactProperty" = [ "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
-          "CNContactRelation" = [ "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
-          "CNContactStore" = [ "objc2-foundation/NSArray" "objc2-foundation/NSData" "objc2-foundation/NSEnumerator" "objc2-foundation/NSError" "objc2-foundation/NSObject" "objc2-foundation/NSPredicate" "objc2-foundation/NSString" ];
-          "CNContactVCardSerialization" = [ "objc2-foundation/NSArray" "objc2-foundation/NSData" "objc2-foundation/NSError" "objc2-foundation/NSObject" ];
-          "CNContact_NSItemProvider" = [ "objc2-foundation/NSItemProvider" ];
-          "CNContact_Predicates" = [ "objc2-foundation/NSArray" "objc2-foundation/NSPredicate" "objc2-foundation/NSString" ];
-          "CNContactsUserDefaults" = [ "objc2-foundation/NSString" ];
-          "CNContainer" = [ "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
-          "CNContainer_Predicates" = [ "objc2-foundation/NSArray" "objc2-foundation/NSPredicate" "objc2-foundation/NSString" ];
-          "CNError" = [ "objc2-foundation/NSString" ];
-          "CNFetchResult" = [ "objc2-foundation/NSData" ];
-          "CNGroup" = [ "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
-          "CNGroup_Predicates" = [ "objc2-foundation/NSArray" "objc2-foundation/NSPredicate" "objc2-foundation/NSString" ];
-          "CNInstantMessageAddress" = [ "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
-          "CNLabeledValue" = [ "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
-          "CNMutableContact" = [ "objc2-foundation/NSArray" "objc2-foundation/NSCalendar" "objc2-foundation/NSData" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
-          "CNMutableGroup" = [ "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
-          "CNMutablePostalAddress" = [ "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
-          "CNPhoneNumber" = [ "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
-          "CNPostalAddress" = [ "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
-          "CNPostalAddressFormatter" = [ "objc2-foundation/NSAttributedString" "objc2-foundation/NSDictionary" "objc2-foundation/NSFormatter" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
-          "CNSaveRequest" = [ "objc2-foundation/NSString" ];
-          "CNSocialProfile" = [ "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
-          "all" = [ "CNChangeHistoryEvent" "CNChangeHistoryFetchRequest" "CNContact" "CNContactFetchRequest" "CNContactFormatter" "CNContactProperty" "CNContactRelation" "CNContactStore" "CNContactVCardSerialization" "CNContact_NSItemProvider" "CNContact_Predicates" "CNContactsUserDefaults" "CNContainer" "CNContainer_Predicates" "CNError" "CNFetchRequest" "CNFetchResult" "CNGroup" "CNGroup_Predicates" "CNInstantMessageAddress" "CNLabeledValue" "CNMutableContact" "CNMutableGroup" "CNMutablePostalAddress" "CNPhoneNumber" "CNPostalAddress" "CNPostalAddressFormatter" "CNSaveRequest" "CNSocialProfile" "ContactsDefines" "block2" ];
-          "alloc" = [ "block2?/alloc" "objc2/alloc" "objc2-foundation/alloc" ];
-          "block2" = [ "dep:block2" "objc2-foundation/block2" ];
-          "default" = [ "std" ];
-          "std" = [ "alloc" "block2?/std" "objc2/std" "objc2-foundation/std" ];
-        };
-        resolvedDefaultFeatures = [ "alloc" "std" ];
       };
       "objc2-core-data 0.2.2" = rec {
         crateName = "objc2-core-data";
@@ -13822,6 +17897,13 @@ rec {
             features = [ "std" ];
           }
           {
+            name = "block2";
+            packageId = "block2 0.6.2";
+            optional = true;
+            usesDefaultFeatures = false;
+            features = [ "alloc" ];
+          }
+          {
             name = "dispatch2";
             packageId = "dispatch2";
             optional = true;
@@ -13860,7 +17942,7 @@ rec {
           "objc2" = [ "dep:objc2" "dispatch2?/objc2" ];
           "std" = [ "alloc" ];
         };
-        resolvedDefaultFeatures = [ "CFArray" "CFAttributedString" "CFCGTypes" "CFCalendar" "CFCharacterSet" "CFData" "CFDate" "CFDictionary" "CFError" "CFFileSecurity" "CFLocale" "CFMachPort" "CFMessagePort" "CFNumber" "CFRunLoop" "CFSet" "CFStream" "CFString" "CFURL" "alloc" "bitflags" "objc2" "std" ];
+        resolvedDefaultFeatures = [ "CFArray" "CFAttributedString" "CFBase" "CFCGTypes" "CFCalendar" "CFCharacterSet" "CFData" "CFDate" "CFDictionary" "CFError" "CFFileSecurity" "CFLocale" "CFMachPort" "CFMessagePort" "CFNumber" "CFRunLoop" "CFSet" "CFStream" "CFString" "CFURL" "CFUUID" "alloc" "bitflags" "block2" "objc2" "std" ];
       };
       "objc2-core-graphics" = rec {
         crateName = "objc2-core-graphics";
@@ -13882,6 +17964,12 @@ rec {
             optional = true;
             usesDefaultFeatures = false;
             features = [ "alloc" ];
+          }
+          {
+            name = "libc";
+            packageId = "libc";
+            optional = true;
+            usesDefaultFeatures = false;
           }
           {
             name = "objc2";
@@ -13956,7 +18044,7 @@ rec {
           "objc2-metal" = [ "dep:objc2-metal" ];
           "std" = [ "alloc" ];
         };
-        resolvedDefaultFeatures = [ "CGColor" "CGColorSpace" "CGContext" "CGDataProvider" "CGDirectDisplay" "CGEventTypes" "CGFont" "CGImage" "CGPath" "alloc" "bitflags" "objc2" "std" ];
+        resolvedDefaultFeatures = [ "CGColor" "CGColorSpace" "CGContext" "CGDirectDisplay" "CGDisplayConfiguration" "CGDisplayFade" "CGError" "CGEventTypes" "CGFont" "CGImage" "CGPath" "CGRemoteOperation" "CGWindowLevel" "alloc" "bitflags" "libc" "objc2" "std" ];
       };
       "objc2-core-image 0.2.2" = rec {
         crateName = "objc2-core-image";
@@ -14021,7 +18109,7 @@ rec {
           "objc2-metal" = [ "dep:objc2-metal" ];
           "std" = [ "alloc" "block2?/std" "objc2/std" "objc2-foundation/std" "objc2-metal?/std" ];
         };
-        resolvedDefaultFeatures = [ "CIColor" "CIContext" "CIImage" "alloc" "std" ];
+        resolvedDefaultFeatures = [ "alloc" "std" ];
       };
       "objc2-core-image 0.3.2" = rec {
         crateName = "objc2-core-image";
@@ -14082,69 +18170,6 @@ rec {
           "std" = [ "alloc" ];
         };
         resolvedDefaultFeatures = [ "CIColor" "CIContext" "CIFilter" "CIImage" ];
-      };
-      "objc2-core-location" = rec {
-        crateName = "objc2-core-location";
-        version = "0.2.2";
-        edition = "2021";
-        sha256 = "10apgsrigqryvi4rcc0f6yfjflvrl83f4bi5hkr48ck89vizw300";
-        libName = "objc2_core_location";
-        dependencies = [
-          {
-            name = "block2";
-            packageId = "block2 0.5.1";
-            optional = true;
-            usesDefaultFeatures = false;
-          }
-          {
-            name = "objc2";
-            packageId = "objc2 0.5.2";
-            usesDefaultFeatures = false;
-          }
-          {
-            name = "objc2-contacts";
-            packageId = "objc2-contacts";
-            optional = true;
-            usesDefaultFeatures = false;
-            target = { target, features }: (!("tvos" == target."os" or null));
-          }
-          {
-            name = "objc2-foundation";
-            packageId = "objc2-foundation 0.2.2";
-            usesDefaultFeatures = false;
-          }
-        ];
-        features = {
-          "CLBeaconIdentityCondition" = [ "objc2-foundation/NSObject" "objc2-foundation/NSUUID" "objc2-foundation/NSValue" ];
-          "CLBeaconIdentityConstraint" = [ "objc2-foundation/NSObject" "objc2-foundation/NSUUID" ];
-          "CLBeaconRegion" = [ "objc2-foundation/NSDate" "objc2-foundation/NSDictionary" "objc2-foundation/NSObject" "objc2-foundation/NSString" "objc2-foundation/NSUUID" "objc2-foundation/NSValue" ];
-          "CLCircularGeographicCondition" = [ "objc2-foundation/NSObject" ];
-          "CLCircularRegion" = [ "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
-          "CLCondition" = [ "objc2-foundation/NSObject" ];
-          "CLError" = [ "objc2-foundation/NSString" ];
-          "CLErrorDomain" = [ "objc2-foundation/NSString" ];
-          "CLGeocoder" = [ "objc2-contacts?/CNPostalAddress" "objc2-foundation/NSArray" "objc2-foundation/NSDictionary" "objc2-foundation/NSError" "objc2-foundation/NSLocale" "objc2-foundation/NSString" ];
-          "CLHeading" = [ "objc2-foundation/NSDate" "objc2-foundation/NSObject" ];
-          "CLLocation" = [ "objc2-foundation/NSDate" "objc2-foundation/NSObject" ];
-          "CLLocationManager" = [ "objc2-foundation/NSArray" "objc2-foundation/NSData" "objc2-foundation/NSDate" "objc2-foundation/NSError" "objc2-foundation/NSSet" "objc2-foundation/NSString" ];
-          "CLLocationManagerDelegate" = [ "objc2-foundation/NSArray" "objc2-foundation/NSError" ];
-          "CLLocationPushServiceError" = [ "objc2-foundation/NSError" "objc2-foundation/NSString" ];
-          "CLLocationPushServiceExtension" = [ "objc2-foundation/NSDictionary" "objc2-foundation/NSString" ];
-          "CLMonitor" = [ "objc2-foundation/NSArray" "objc2-foundation/NSString" ];
-          "CLMonitorConfiguration" = [ "objc2-foundation/NSString" ];
-          "CLMonitoringEvent" = [ "objc2-foundation/NSDate" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
-          "CLMonitoringRecord" = [ "objc2-foundation/NSObject" ];
-          "CLPlacemark" = [ "objc2-contacts?/CNPostalAddress" "objc2-foundation/NSArray" "objc2-foundation/NSDictionary" "objc2-foundation/NSObject" "objc2-foundation/NSString" "objc2-foundation/NSTimeZone" ];
-          "CLRegion" = [ "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
-          "CLVisit" = [ "objc2-foundation/NSDate" "objc2-foundation/NSObject" ];
-          "all" = [ "CLAvailability" "CLBackgroundActivitySession" "CLBeaconIdentityCondition" "CLBeaconIdentityConstraint" "CLBeaconRegion" "CLCircularGeographicCondition" "CLCircularRegion" "CLCondition" "CLError" "CLErrorDomain" "CLGeocoder" "CLHeading" "CLLocation" "CLLocationManager" "CLLocationManagerDelegate" "CLLocationManager_CLVisitExtensions" "CLLocationPushServiceError" "CLLocationPushServiceExtension" "CLLocationUpdater" "CLMonitor" "CLMonitorConfiguration" "CLMonitoringEvent" "CLMonitoringRecord" "CLPlacemark" "CLRegion" "CLVisit" "block2" "objc2-contacts" ];
-          "alloc" = [ "block2?/alloc" "objc2/alloc" "objc2-contacts?/alloc" "objc2-foundation/alloc" ];
-          "block2" = [ "dep:block2" "objc2-contacts?/block2" "objc2-foundation/block2" ];
-          "default" = [ "std" ];
-          "objc2-contacts" = [ "dep:objc2-contacts" ];
-          "std" = [ "alloc" "block2?/std" "objc2/std" "objc2-contacts?/std" "objc2-foundation/std" ];
-        };
-        resolvedDefaultFeatures = [ "alloc" "std" ];
       };
       "objc2-core-text" = rec {
         crateName = "objc2-core-text";
@@ -14270,7 +18295,7 @@ rec {
           "objc2-open-gl" = [ "dep:objc2-open-gl" ];
           "std" = [ "alloc" ];
         };
-        resolvedDefaultFeatures = [ "CVBase" "bitflags" "objc2" ];
+        resolvedDefaultFeatures = [ "CVBase" "CVDisplayLink" "CVReturn" "alloc" "bitflags" "objc2" "objc2-core-graphics" "std" ];
       };
       "objc2-encode" = rec {
         crateName = "objc2-encode";
@@ -14305,11 +18330,6 @@ rec {
             packageId = "block2 0.5.1";
             optional = true;
             usesDefaultFeatures = false;
-          }
-          {
-            name = "dispatch";
-            packageId = "dispatch";
-            optional = true;
           }
           {
             name = "libc";
@@ -14375,7 +18395,7 @@ rec {
           "libc" = [ "dep:libc" ];
           "std" = [ "alloc" "bitflags?/std" "block2?/std" "libc?/std" "objc2/std" ];
         };
-        resolvedDefaultFeatures = [ "NSArray" "NSAttributedString" "NSBundle" "NSCoder" "NSData" "NSDate" "NSDictionary" "NSDistributedNotificationCenter" "NSEnumerator" "NSError" "NSException" "NSExtensionContext" "NSExtensionRequestHandling" "NSFileWrapper" "NSFormatter" "NSGeometry" "NSItemProvider" "NSKeyValueObserving" "NSLocale" "NSNotification" "NSNull" "NSObjCRuntime" "NSObject" "NSOperation" "NSPathUtilities" "NSProcessInfo" "NSRange" "NSRunLoop" "NSScriptCommand" "NSScriptStandardSuiteCommands" "NSSet" "NSString" "NSThread" "NSURL" "NSUUID" "NSUndoManager" "NSUserActivity" "NSValue" "NSZone" "alloc" "bitflags" "block2" "default" "dispatch" "std" ];
+        resolvedDefaultFeatures = [ "NSArray" "NSAttributedString" "NSCoder" "NSData" "NSDate" "NSDictionary" "NSError" "NSGeometry" "NSNotification" "NSNull" "NSObjCRuntime" "NSObject" "NSRange" "NSString" "NSThread" "NSURL" "NSUndoManager" "NSValue" "alloc" "bitflags" "default" "std" ];
       };
       "objc2-foundation 0.3.2" = rec {
         crateName = "objc2-foundation";
@@ -14524,51 +18544,6 @@ rec {
         };
         resolvedDefaultFeatures = [ "IOSurfaceRef" "bitflags" "objc2" ];
       };
-      "objc2-link-presentation" = rec {
-        crateName = "objc2-link-presentation";
-        version = "0.2.2";
-        edition = "2021";
-        sha256 = "160k4qh00yrx57dabn3hzas4r98kmk9bc0qsy1jvwday3irax8d1";
-        libName = "objc2_link_presentation";
-        dependencies = [
-          {
-            name = "block2";
-            packageId = "block2 0.5.1";
-            optional = true;
-            usesDefaultFeatures = false;
-          }
-          {
-            name = "objc2";
-            packageId = "objc2 0.5.2";
-            usesDefaultFeatures = false;
-          }
-          {
-            name = "objc2-app-kit";
-            packageId = "objc2-app-kit 0.2.2";
-            optional = true;
-            usesDefaultFeatures = false;
-            target = { target, features }: ("macos" == target."os" or null);
-          }
-          {
-            name = "objc2-foundation";
-            packageId = "objc2-foundation 0.2.2";
-            usesDefaultFeatures = false;
-          }
-        ];
-        features = {
-          "LPError" = [ "objc2-foundation/NSError" "objc2-foundation/NSString" ];
-          "LPLinkMetadata" = [ "objc2-foundation/NSItemProvider" "objc2-foundation/NSObject" "objc2-foundation/NSString" "objc2-foundation/NSURL" ];
-          "LPLinkView" = [ "objc2-app-kit?/NSAccessibilityProtocols" "objc2-app-kit?/NSAnimation" "objc2-app-kit?/NSAppearance" "objc2-app-kit?/NSDragging" "objc2-app-kit?/NSResponder" "objc2-app-kit?/NSUserInterfaceItemIdentification" "objc2-app-kit?/NSView" "objc2-foundation/NSCoder" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-foundation/NSURL" ];
-          "LPMetadataProvider" = [ "objc2-foundation/NSDate" "objc2-foundation/NSError" "objc2-foundation/NSURL" "objc2-foundation/NSURLRequest" ];
-          "all" = [ "LPError" "LPFoundation" "LPLinkMetadata" "LPLinkView" "LPMetadataProvider" "block2" "objc2-app-kit" ];
-          "alloc" = [ "block2?/alloc" "objc2/alloc" "objc2-app-kit?/alloc" "objc2-foundation/alloc" ];
-          "block2" = [ "dep:block2" "objc2-app-kit?/block2" "objc2-foundation/block2" ];
-          "default" = [ "std" ];
-          "objc2-app-kit" = [ "dep:objc2-app-kit" ];
-          "std" = [ "alloc" "block2?/std" "objc2/std" "objc2-app-kit?/std" "objc2-foundation/std" ];
-        };
-        resolvedDefaultFeatures = [ "alloc" "std" ];
-      };
       "objc2-metal" = rec {
         crateName = "objc2-metal";
         version = "0.2.2";
@@ -14654,7 +18629,7 @@ rec {
           "std" = [ "alloc" "bitflags?/std" "block2?/std" "objc2/std" "objc2-foundation/std" ];
           "unstable-private" = [ "objc2-foundation/NSString" "objc2-foundation/NSError" ];
         };
-        resolvedDefaultFeatures = [ "MTLCommandQueue" "MTLDevice" "MTLResource" "MTLTexture" "alloc" "bitflags" "std" ];
+        resolvedDefaultFeatures = [ "alloc" "bitflags" "std" ];
       };
       "objc2-quartz-core 0.2.2" = rec {
         crateName = "objc2-quartz-core";
@@ -14723,7 +18698,7 @@ rec {
           "objc2-metal" = [ "dep:objc2-metal" ];
           "std" = [ "alloc" "bitflags?/std" "block2?/std" "objc2/std" "objc2-foundation/std" "objc2-metal?/std" ];
         };
-        resolvedDefaultFeatures = [ "CADisplayLink" "CALayer" "CATransform3D" "alloc" "bitflags" "std" ];
+        resolvedDefaultFeatures = [ "CALayer" "alloc" "bitflags" "std" ];
       };
       "objc2-quartz-core 0.3.2" = rec {
         crateName = "objc2-quartz-core";
@@ -14744,13 +18719,6 @@ rec {
             packageId = "objc2 0.6.4";
             usesDefaultFeatures = false;
             features = [ "std" ];
-          }
-          {
-            name = "objc2-core-foundation";
-            packageId = "objc2-core-foundation";
-            optional = true;
-            usesDefaultFeatures = false;
-            features = [ "CFCGTypes" "CFDate" "objc2" ];
           }
           {
             name = "objc2-foundation";
@@ -14794,40 +18762,13 @@ rec {
           "objc2-open-gl" = [ "dep:objc2-open-gl" ];
           "std" = [ "alloc" ];
         };
-        resolvedDefaultFeatures = [ "CADisplayLink" "CALayer" "CAMediaTiming" "CAMediaTimingFunction" "CAOpenGLLayer" "CATransaction" "alloc" "bitflags" "objc2-core-foundation" "std" ];
-      };
-      "objc2-symbols" = rec {
-        crateName = "objc2-symbols";
-        version = "0.2.2";
-        edition = "2021";
-        sha256 = "1p04hjkxan18g2b7h9n2n8xxsvazapv2h6mfmmdk06zc7pz4ws0a";
-        libName = "objc2_symbols";
-        dependencies = [
-          {
-            name = "objc2";
-            packageId = "objc2 0.5.2";
-            usesDefaultFeatures = false;
-          }
-          {
-            name = "objc2-foundation";
-            packageId = "objc2-foundation 0.2.2";
-            usesDefaultFeatures = false;
-          }
-        ];
-        features = {
-          "NSSymbolEffect" = [ "objc2-foundation/NSObject" ];
-          "all" = [ "NSSymbolEffect" ];
-          "alloc" = [ "objc2/alloc" "objc2-foundation/alloc" ];
-          "default" = [ "std" ];
-          "std" = [ "alloc" "objc2/std" "objc2-foundation/std" ];
-        };
-        resolvedDefaultFeatures = [ "alloc" "std" ];
+        resolvedDefaultFeatures = [ "CADisplayLink" "CALayer" "CAMediaTiming" "CAMediaTimingFunction" "CAOpenGLLayer" "bitflags" ];
       };
       "objc2-ui-kit" = rec {
         crateName = "objc2-ui-kit";
-        version = "0.2.2";
+        version = "0.3.2";
         edition = "2021";
-        sha256 = "0vrb5r8z658l8c19bx78qks8c5hg956544yirf8npk90idwldfxq";
+        sha256 = "08mbgqg8pffclyxpz2lr8r1fv8wn2i4m1k6bk1s5fvy06f766zfq";
         libName = "objc2_ui_kit";
         dependencies = [
           {
@@ -14835,540 +18776,421 @@ rec {
             packageId = "bitflags 2.13.2";
             optional = true;
             usesDefaultFeatures = false;
-          }
-          {
-            name = "block2";
-            packageId = "block2 0.5.1";
-            optional = true;
-            usesDefaultFeatures = false;
+            features = [ "std" ];
           }
           {
             name = "objc2";
-            packageId = "objc2 0.5.2";
+            packageId = "objc2 0.6.4";
             usesDefaultFeatures = false;
+            features = [ "std" ];
           }
           {
-            name = "objc2-cloud-kit";
-            packageId = "objc2-cloud-kit 0.2.2";
+            name = "objc2-core-foundation";
+            packageId = "objc2-core-foundation";
             optional = true;
             usesDefaultFeatures = false;
-          }
-          {
-            name = "objc2-core-data";
-            packageId = "objc2-core-data 0.2.2";
-            optional = true;
-            usesDefaultFeatures = false;
-          }
-          {
-            name = "objc2-core-image";
-            packageId = "objc2-core-image 0.2.2";
-            optional = true;
-            usesDefaultFeatures = false;
-            target = { target, features }: (!("watchos" == target."os" or null));
-          }
-          {
-            name = "objc2-core-location";
-            packageId = "objc2-core-location";
-            optional = true;
-            usesDefaultFeatures = false;
+            features = [ "CFCGTypes" "CFDate" "objc2" ];
           }
           {
             name = "objc2-foundation";
-            packageId = "objc2-foundation 0.2.2";
+            packageId = "objc2-foundation 0.3.2";
             usesDefaultFeatures = false;
-          }
-          {
-            name = "objc2-link-presentation";
-            packageId = "objc2-link-presentation";
-            optional = true;
-            usesDefaultFeatures = false;
-            target = { target, features }: (!("watchos" == target."os" or null));
-          }
-          {
-            name = "objc2-quartz-core";
-            packageId = "objc2-quartz-core 0.2.2";
-            optional = true;
-            usesDefaultFeatures = false;
-            target = { target, features }: (!("watchos" == target."os" or null));
-          }
-          {
-            name = "objc2-symbols";
-            packageId = "objc2-symbols";
-            optional = true;
-            usesDefaultFeatures = false;
-          }
-          {
-            name = "objc2-uniform-type-identifiers";
-            packageId = "objc2-uniform-type-identifiers";
-            optional = true;
-            usesDefaultFeatures = false;
-          }
-          {
-            name = "objc2-user-notifications";
-            packageId = "objc2-user-notifications";
-            optional = true;
-            usesDefaultFeatures = false;
+            features = [ "alloc" ];
           }
         ];
         features = {
+          "NSAdaptiveImageGlyph" = [ "objc2-foundation/NSAttributedString" "objc2-foundation/NSCoder" "objc2-foundation/NSData" "objc2-foundation/NSDictionary" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
           "NSAttributedString" = [ "bitflags" "objc2-foundation/NSAttributedString" "objc2-foundation/NSData" "objc2-foundation/NSDictionary" "objc2-foundation/NSError" "objc2-foundation/NSFileWrapper" "objc2-foundation/NSRange" "objc2-foundation/NSString" "objc2-foundation/NSURL" ];
           "NSDataAsset" = [ "objc2-foundation/NSBundle" "objc2-foundation/NSData" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
           "NSDiffableDataSourceSectionSnapshot" = [ "objc2-foundation/NSArray" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
           "NSIndexPath_UIKitAdditions" = [ "objc2-foundation/NSIndexPath" ];
-          "NSItemProvider_UIKitAdditions" = [ "objc2-foundation/NSArray" "objc2-foundation/NSData" "objc2-foundation/NSError" "objc2-foundation/NSGeometry" "objc2-foundation/NSItemProvider" "objc2-foundation/NSString" ];
-          "NSLayoutAnchor" = [ "objc2-foundation/NSArray" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
-          "NSLayoutConstraint" = [ "bitflags" "objc2-foundation/NSArray" "objc2-foundation/NSDictionary" "objc2-foundation/NSGeometry" "objc2-foundation/NSString" ];
-          "NSLayoutManager" = [ "bitflags" "objc2-foundation/NSArray" "objc2-foundation/NSAttributedString" "objc2-foundation/NSCoder" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-foundation/NSRange" ];
-          "NSParagraphStyle" = [ "bitflags" "objc2-foundation/NSArray" "objc2-foundation/NSCharacterSet" "objc2-foundation/NSDictionary" "objc2-foundation/NSGeometry" "objc2-foundation/NSLocale" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
-          "NSShadow" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" ];
-          "NSStringDrawing" = [ "bitflags" "objc2-foundation/NSAttributedString" "objc2-foundation/NSDictionary" "objc2-foundation/NSGeometry" "objc2-foundation/NSString" ];
-          "NSTextAttachment" = [ "objc2-foundation/NSAttributedString" "objc2-foundation/NSData" "objc2-foundation/NSDictionary" "objc2-foundation/NSFileWrapper" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
-          "NSTextContainer" = [ "objc2-foundation/NSArray" "objc2-foundation/NSCoder" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" ];
+          "NSItemProvider_UIKitAdditions" = [ "objc2-foundation/NSArray" "objc2-foundation/NSData" "objc2-foundation/NSError" "objc2-foundation/NSItemProvider" "objc2-foundation/NSString" ];
+          "NSLayoutAnchor" = [ "objc2-foundation/NSArray" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "NSLayoutConstraint" = [ "bitflags" "objc2-foundation/NSArray" "objc2-foundation/NSDictionary" "objc2-foundation/NSString" ];
+          "NSLayoutManager" = [ "bitflags" "objc2-foundation/NSArray" "objc2-foundation/NSAttributedString" "objc2-foundation/NSCoder" "objc2-foundation/NSDictionary" "objc2-foundation/NSObject" "objc2-foundation/NSRange" "objc2-foundation/NSString" ];
+          "NSParagraphStyle" = [ "bitflags" "objc2-foundation/NSArray" "objc2-foundation/NSCharacterSet" "objc2-foundation/NSDictionary" "objc2-foundation/NSLocale" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "NSShadow" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSObject" ];
+          "NSStringDrawing" = [ "bitflags" "objc2-foundation/NSAttributedString" "objc2-foundation/NSDictionary" "objc2-foundation/NSString" ];
+          "NSTextAttachment" = [ "objc2-foundation/NSAttributedString" "objc2-foundation/NSData" "objc2-foundation/NSDictionary" "objc2-foundation/NSFileWrapper" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "NSTextContainer" = [ "objc2-foundation/NSArray" "objc2-foundation/NSCoder" "objc2-foundation/NSObject" ];
           "NSTextContentManager" = [ "bitflags" "objc2-foundation/NSArray" "objc2-foundation/NSAttributedString" "objc2-foundation/NSCoder" "objc2-foundation/NSError" "objc2-foundation/NSNotification" "objc2-foundation/NSObject" "objc2-foundation/NSRange" "objc2-foundation/NSString" ];
           "NSTextElement" = [ "objc2-foundation/NSArray" "objc2-foundation/NSAttributedString" ];
-          "NSTextLayoutFragment" = [ "bitflags" "objc2-foundation/NSArray" "objc2-foundation/NSCoder" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-foundation/NSOperation" ];
-          "NSTextLayoutManager" = [ "bitflags" "objc2-foundation/NSArray" "objc2-foundation/NSAttributedString" "objc2-foundation/NSCoder" "objc2-foundation/NSDictionary" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-foundation/NSOperation" "objc2-foundation/NSString" ];
-          "NSTextLineFragment" = [ "objc2-foundation/NSAttributedString" "objc2-foundation/NSCoder" "objc2-foundation/NSDictionary" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-foundation/NSRange" "objc2-foundation/NSString" ];
+          "NSTextLayoutFragment" = [ "bitflags" "objc2-foundation/NSArray" "objc2-foundation/NSCoder" "objc2-foundation/NSObject" "objc2-foundation/NSOperation" ];
+          "NSTextLayoutManager" = [ "bitflags" "objc2-foundation/NSArray" "objc2-foundation/NSAttributedString" "objc2-foundation/NSCoder" "objc2-foundation/NSDictionary" "objc2-foundation/NSObject" "objc2-foundation/NSOperation" "objc2-foundation/NSString" ];
+          "NSTextLineFragment" = [ "objc2-foundation/NSAttributedString" "objc2-foundation/NSCoder" "objc2-foundation/NSDictionary" "objc2-foundation/NSObject" "objc2-foundation/NSRange" "objc2-foundation/NSString" ];
           "NSTextList" = [ "bitflags" "objc2-foundation/NSCoder" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
           "NSTextListElement" = [ "objc2-foundation/NSArray" "objc2-foundation/NSAttributedString" "objc2-foundation/NSDictionary" "objc2-foundation/NSString" ];
           "NSTextRange" = [ "objc2-foundation/NSObjCRuntime" ];
-          "NSTextSelection" = [ "objc2-foundation/NSArray" "objc2-foundation/NSAttributedString" "objc2-foundation/NSCoder" "objc2-foundation/NSDictionary" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
-          "NSTextSelectionNavigation" = [ "bitflags" "objc2-foundation/NSArray" "objc2-foundation/NSGeometry" "objc2-foundation/NSString" ];
+          "NSTextSelection" = [ "objc2-foundation/NSArray" "objc2-foundation/NSAttributedString" "objc2-foundation/NSCoder" "objc2-foundation/NSDictionary" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "NSTextSelectionNavigation" = [ "bitflags" "objc2-foundation/NSArray" "objc2-foundation/NSString" ];
           "NSTextStorage" = [ "bitflags" "objc2-foundation/NSArray" "objc2-foundation/NSAttributedString" "objc2-foundation/NSNotification" "objc2-foundation/NSObject" "objc2-foundation/NSRange" "objc2-foundation/NSString" ];
-          "NSTextViewportLayoutController" = [ "objc2-foundation/NSGeometry" ];
           "UIAccelerometer" = [ "objc2-foundation/NSDate" ];
-          "UIAccessibility" = [ "bitflags" "objc2-foundation/NSArray" "objc2-foundation/NSAttributedString" "objc2-foundation/NSGeometry" "objc2-foundation/NSNotification" "objc2-foundation/NSSet" "objc2-foundation/NSString" ];
+          "UIAccessibility" = [ "bitflags" "objc2-foundation/NSArray" "objc2-foundation/NSAttributedString" "objc2-foundation/NSNotification" "objc2-foundation/NSSet" "objc2-foundation/NSString" ];
           "UIAccessibilityAdditions" = [ "objc2-foundation/NSArray" "objc2-foundation/NSAttributedString" "objc2-foundation/NSString" ];
           "UIAccessibilityConstants" = [ "bitflags" "objc2-foundation/NSAttributedString" "objc2-foundation/NSNotification" "objc2-foundation/NSString" ];
           "UIAccessibilityContainer" = [ "objc2-foundation/NSArray" "objc2-foundation/NSRange" ];
           "UIAccessibilityCustomAction" = [ "objc2-foundation/NSAttributedString" "objc2-foundation/NSString" ];
           "UIAccessibilityCustomRotor" = [ "objc2-foundation/NSArray" "objc2-foundation/NSAttributedString" "objc2-foundation/NSString" ];
-          "UIAccessibilityElement" = [ "objc2-foundation/NSGeometry" "objc2-foundation/NSString" ];
+          "UIAccessibilityElement" = [ "objc2-foundation/NSString" ];
           "UIAccessibilityIdentification" = [ "objc2-foundation/NSString" ];
-          "UIAccessibilityLocationDescriptor" = [ "objc2-foundation/NSAttributedString" "objc2-foundation/NSGeometry" "objc2-foundation/NSString" ];
-          "UIAccessibilityZoom" = [ "objc2-foundation/NSGeometry" ];
+          "UIAccessibilityLocationDescriptor" = [ "objc2-foundation/NSAttributedString" "objc2-foundation/NSString" ];
           "UIAction" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
-          "UIActionSheet" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-foundation/NSString" "objc2-quartz-core?/CALayer" ];
+          "UIActionSheet" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
           "UIActivity" = [ "objc2-foundation/NSArray" "objc2-foundation/NSString" ];
-          "UIActivityIndicatorView" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-quartz-core?/CALayer" ];
-          "UIActivityItemProvider" = [ "objc2-foundation/NSGeometry" "objc2-foundation/NSOperation" "objc2-foundation/NSString" "objc2-link-presentation?/LPLinkMetadata" ];
-          "UIActivityItemsConfiguration" = [ "objc2-foundation/NSArray" "objc2-foundation/NSGeometry" "objc2-foundation/NSItemProvider" "objc2-foundation/NSString" ];
-          "UIActivityItemsConfigurationReading" = [ "objc2-foundation/NSArray" "objc2-foundation/NSGeometry" "objc2-foundation/NSItemProvider" "objc2-foundation/NSString" ];
-          "UIActivityViewController" = [ "objc2-foundation/NSArray" "objc2-foundation/NSBundle" "objc2-foundation/NSCoder" "objc2-foundation/NSError" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "UIActivityCollaborationModeRestriction" = [ "objc2-foundation/NSObject" "objc2-foundation/NSString" "objc2-foundation/NSURL" ];
+          "UIActivityIndicatorView" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSObject" ];
+          "UIActivityItemProvider" = [ "objc2-foundation/NSOperation" "objc2-foundation/NSString" ];
+          "UIActivityItemsConfiguration" = [ "objc2-foundation/NSArray" "objc2-foundation/NSItemProvider" "objc2-foundation/NSString" ];
+          "UIActivityItemsConfigurationReading" = [ "objc2-foundation/NSArray" "objc2-foundation/NSItemProvider" "objc2-foundation/NSString" ];
+          "UIActivityItemsConfigurationReading_ShareSheet" = [ "objc2-foundation/NSString" ];
+          "UIActivityViewController" = [ "bitflags" "objc2-foundation/NSArray" "objc2-foundation/NSBundle" "objc2-foundation/NSCoder" "objc2-foundation/NSError" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
           "UIAlertController" = [ "objc2-foundation/NSArray" "objc2-foundation/NSBundle" "objc2-foundation/NSCoder" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
-          "UIAlertView" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-foundation/NSString" "objc2-quartz-core?/CALayer" ];
+          "UIAlertView" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
           "UIAppearance" = [ "objc2-foundation/NSArray" ];
-          "UIApplication" = [ "bitflags" "objc2-cloud-kit?/CKShareMetadata" "objc2-foundation/NSArray" "objc2-foundation/NSCoder" "objc2-foundation/NSData" "objc2-foundation/NSDate" "objc2-foundation/NSDictionary" "objc2-foundation/NSError" "objc2-foundation/NSGeometry" "objc2-foundation/NSNotification" "objc2-foundation/NSObjCRuntime" "objc2-foundation/NSSet" "objc2-foundation/NSString" "objc2-foundation/NSURL" "objc2-foundation/NSUserActivity" ];
+          "UIApplication" = [ "bitflags" "objc2-foundation/NSArray" "objc2-foundation/NSCoder" "objc2-foundation/NSData" "objc2-foundation/NSDate" "objc2-foundation/NSDictionary" "objc2-foundation/NSError" "objc2-foundation/NSNotification" "objc2-foundation/NSObjCRuntime" "objc2-foundation/NSSet" "objc2-foundation/NSString" "objc2-foundation/NSURL" "objc2-foundation/NSUserActivity" ];
           "UIApplicationShortcutItem" = [ "objc2-foundation/NSDictionary" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
-          "UIAttachmentBehavior" = [ "objc2-foundation/NSArray" "objc2-foundation/NSGeometry" ];
-          "UIBackgroundConfiguration" = [ "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" ];
-          "UIBandSelectionInteraction" = [ "objc2-foundation/NSGeometry" ];
+          "UIAttachmentBehavior" = [ "objc2-foundation/NSArray" ];
+          "UIBackgroundConfiguration" = [ "objc2-foundation/NSObject" ];
+          "UIBackgroundExtensionView" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSObject" ];
           "UIBarAppearance" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSObject" ];
-          "UIBarButtonItem" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-foundation/NSSet" "objc2-foundation/NSString" "objc2-symbols?/NSSymbolEffect" ];
-          "UIBarButtonItemAppearance" = [ "objc2-foundation/NSAttributedString" "objc2-foundation/NSCoder" "objc2-foundation/NSDictionary" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "UIBarButtonItem" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSObject" "objc2-foundation/NSSet" "objc2-foundation/NSString" ];
+          "UIBarButtonItemAppearance" = [ "objc2-foundation/NSAttributedString" "objc2-foundation/NSCoder" "objc2-foundation/NSDictionary" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "UIBarButtonItemBadge" = [ "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
           "UIBarButtonItemGroup" = [ "objc2-foundation/NSArray" "objc2-foundation/NSCoder" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
-          "UIBarItem" = [ "objc2-foundation/NSAttributedString" "objc2-foundation/NSCoder" "objc2-foundation/NSDictionary" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
-          "UIBezierPath" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" ];
+          "UIBarItem" = [ "objc2-foundation/NSAttributedString" "objc2-foundation/NSCoder" "objc2-foundation/NSDictionary" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "UIBezierPath" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSObject" ];
           "UIBlurEffect" = [ "objc2-foundation/NSObject" ];
-          "UIButton" = [ "objc2-foundation/NSAttributedString" "objc2-foundation/NSCoder" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-foundation/NSString" "objc2-quartz-core?/CALayer" ];
-          "UIButtonConfiguration" = [ "objc2-foundation/NSAttributedString" "objc2-foundation/NSDictionary" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "UIButton" = [ "objc2-foundation/NSAttributedString" "objc2-foundation/NSCoder" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "UIButtonConfiguration" = [ "objc2-foundation/NSAttributedString" "objc2-foundation/NSDictionary" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
           "UICalendarSelectionMultiDate" = [ "objc2-foundation/NSArray" "objc2-foundation/NSCalendar" ];
           "UICalendarSelectionSingleDate" = [ "objc2-foundation/NSCalendar" ];
-          "UICalendarView" = [ "objc2-foundation/NSArray" "objc2-foundation/NSCalendar" "objc2-foundation/NSCoder" "objc2-foundation/NSDateInterval" "objc2-foundation/NSGeometry" "objc2-foundation/NSLocale" "objc2-foundation/NSObject" "objc2-foundation/NSString" "objc2-foundation/NSTimeZone" "objc2-quartz-core?/CALayer" ];
-          "UICanvasFeedbackGenerator" = [ "objc2-foundation/NSGeometry" ];
-          "UICellAccessory" = [ "objc2-foundation/NSArray" "objc2-foundation/NSCoder" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "UICalendarSelectionWeekOfYear" = [ "objc2-foundation/NSCalendar" ];
+          "UICalendarView" = [ "objc2-foundation/NSArray" "objc2-foundation/NSCalendar" "objc2-foundation/NSCoder" "objc2-foundation/NSDateInterval" "objc2-foundation/NSLocale" "objc2-foundation/NSObject" "objc2-foundation/NSString" "objc2-foundation/NSTimeZone" ];
+          "UICellAccessory" = [ "objc2-foundation/NSArray" "objc2-foundation/NSCoder" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
           "UICellConfigurationState" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSObject" ];
-          "UICloudSharingController" = [ "bitflags" "objc2-cloud-kit?/CKContainer" "objc2-cloud-kit?/CKRecord" "objc2-cloud-kit?/CKShare" "objc2-foundation/NSBundle" "objc2-foundation/NSCoder" "objc2-foundation/NSData" "objc2-foundation/NSError" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
-          "UICollectionLayoutList" = [ "objc2-foundation/NSGeometry" "objc2-foundation/NSIndexPath" "objc2-foundation/NSObject" ];
-          "UICollectionView" = [ "bitflags" "objc2-foundation/NSArray" "objc2-foundation/NSCoder" "objc2-foundation/NSGeometry" "objc2-foundation/NSIndexPath" "objc2-foundation/NSIndexSet" "objc2-foundation/NSObject" "objc2-foundation/NSProgress" "objc2-foundation/NSString" "objc2-quartz-core?/CALayer" ];
-          "UICollectionViewCell" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-foundation/NSString" "objc2-quartz-core?/CALayer" ];
-          "UICollectionViewCompositionalLayout" = [ "objc2-foundation/NSArray" "objc2-foundation/NSCoder" "objc2-foundation/NSGeometry" "objc2-foundation/NSIndexPath" "objc2-foundation/NSObject" "objc2-foundation/NSString" "objc2-quartz-core?/CATransform3D" ];
+          "UICloudSharingController" = [ "bitflags" "objc2-foundation/NSBundle" "objc2-foundation/NSCoder" "objc2-foundation/NSData" "objc2-foundation/NSError" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "UICollectionLayoutList" = [ "bitflags" "objc2-foundation/NSIndexPath" "objc2-foundation/NSObject" ];
+          "UICollectionView" = [ "bitflags" "objc2-foundation/NSArray" "objc2-foundation/NSCoder" "objc2-foundation/NSIndexPath" "objc2-foundation/NSIndexSet" "objc2-foundation/NSObject" "objc2-foundation/NSProgress" "objc2-foundation/NSString" ];
+          "UICollectionViewCell" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "UICollectionViewCompositionalLayout" = [ "objc2-foundation/NSArray" "objc2-foundation/NSCoder" "objc2-foundation/NSIndexPath" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
           "UICollectionViewController" = [ "objc2-foundation/NSBundle" "objc2-foundation/NSCoder" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
-          "UICollectionViewFlowLayout" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSGeometry" "objc2-foundation/NSIndexPath" "objc2-foundation/NSObject" ];
+          "UICollectionViewFlowLayout" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSIndexPath" "objc2-foundation/NSObject" ];
           "UICollectionViewItemRegistration" = [ "objc2-foundation/NSIndexPath" "objc2-foundation/NSString" ];
-          "UICollectionViewLayout" = [ "objc2-foundation/NSArray" "objc2-foundation/NSCoder" "objc2-foundation/NSDictionary" "objc2-foundation/NSGeometry" "objc2-foundation/NSIndexPath" "objc2-foundation/NSObject" "objc2-foundation/NSString" "objc2-quartz-core?/CATransform3D" ];
-          "UICollectionViewListCell" = [ "objc2-foundation/NSArray" "objc2-foundation/NSCoder" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-quartz-core?/CALayer" ];
-          "UICollectionViewTransitionLayout" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "UICollectionViewLayout" = [ "objc2-foundation/NSArray" "objc2-foundation/NSCoder" "objc2-foundation/NSDictionary" "objc2-foundation/NSIndexPath" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "UICollectionViewListCell" = [ "objc2-foundation/NSArray" "objc2-foundation/NSCoder" "objc2-foundation/NSObject" ];
+          "UICollectionViewTransitionLayout" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
           "UICollectionViewUpdateItem" = [ "objc2-foundation/NSIndexPath" ];
-          "UICollisionBehavior" = [ "bitflags" "objc2-foundation/NSArray" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" ];
-          "UIColor" = [ "objc2-core-image?/CIColor" "objc2-foundation/NSBundle" "objc2-foundation/NSGeometry" "objc2-foundation/NSItemProvider" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "UICollisionBehavior" = [ "bitflags" "objc2-foundation/NSArray" "objc2-foundation/NSObject" ];
+          "UIColor" = [ "objc2-foundation/NSBundle" "objc2-foundation/NSItemProvider" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
           "UIColorPickerViewController" = [ "objc2-foundation/NSBundle" "objc2-foundation/NSCoder" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
-          "UIColorWell" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-foundation/NSString" "objc2-quartz-core?/CALayer" ];
+          "UIColorWell" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
           "UICommand" = [ "bitflags" "objc2-foundation/NSArray" "objc2-foundation/NSCoder" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
           "UIConfigurationState" = [ "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
           "UIContentConfiguration" = [ "objc2-foundation/NSObject" ];
           "UIContentSizeCategory" = [ "objc2-foundation/NSNotification" "objc2-foundation/NSObjCRuntime" "objc2-foundation/NSString" ];
           "UIContentUnavailableButtonProperties" = [ "objc2-foundation/NSObject" ];
-          "UIContentUnavailableConfiguration" = [ "objc2-foundation/NSAttributedString" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "UIContentUnavailableConfiguration" = [ "objc2-foundation/NSAttributedString" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
           "UIContentUnavailableConfigurationState" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
-          "UIContentUnavailableImageProperties" = [ "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" ];
-          "UIContentUnavailableTextProperties" = [ "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" ];
-          "UIContentUnavailableView" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-quartz-core?/CALayer" ];
+          "UIContentUnavailableImageProperties" = [ "objc2-foundation/NSObject" ];
+          "UIContentUnavailableTextProperties" = [ "objc2-foundation/NSObject" ];
+          "UIContentUnavailableView" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSObject" ];
           "UIContextMenuConfiguration" = [ "objc2-foundation/NSArray" "objc2-foundation/NSObject" "objc2-foundation/NSSet" ];
-          "UIContextMenuInteraction" = [ "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" ];
+          "UIContextMenuInteraction" = [ "objc2-foundation/NSObject" ];
           "UIContextualAction" = [ "objc2-foundation/NSString" ];
-          "UIControl" = [ "bitflags" "objc2-foundation/NSArray" "objc2-foundation/NSCoder" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-foundation/NSSet" "objc2-foundation/NSString" "objc2-quartz-core?/CALayer" ];
+          "UIControl" = [ "bitflags" "objc2-foundation/NSArray" "objc2-foundation/NSCoder" "objc2-foundation/NSObject" "objc2-foundation/NSSet" "objc2-foundation/NSString" ];
+          "UIConversationContext" = [ "objc2-foundation/NSArray" "objc2-foundation/NSDictionary" "objc2-foundation/NSPersonNameComponents" "objc2-foundation/NSSet" "objc2-foundation/NSString" ];
+          "UIConversationEntry" = [ "objc2-foundation/NSDate" "objc2-foundation/NSSet" "objc2-foundation/NSString" ];
+          "UICornerConfiguration" = [ "objc2-foundation/NSObject" ];
+          "UICornerRadius" = [ "objc2-foundation/NSObject" ];
           "UIDataDetectors" = [ "bitflags" ];
           "UIDataSourceTranslating" = [ "objc2-foundation/NSIndexPath" ];
-          "UIDatePicker" = [ "objc2-foundation/NSCalendar" "objc2-foundation/NSCoder" "objc2-foundation/NSDate" "objc2-foundation/NSGeometry" "objc2-foundation/NSLocale" "objc2-foundation/NSObject" "objc2-foundation/NSTimeZone" "objc2-quartz-core?/CALayer" ];
-          "UIDeferredMenuElement" = [ "objc2-foundation/NSArray" "objc2-foundation/NSCoder" "objc2-foundation/NSObject" ];
+          "UIDatePicker" = [ "objc2-foundation/NSCalendar" "objc2-foundation/NSCoder" "objc2-foundation/NSDate" "objc2-foundation/NSLocale" "objc2-foundation/NSObject" "objc2-foundation/NSTimeZone" ];
+          "UIDeferredMenuElement" = [ "objc2-foundation/NSArray" "objc2-foundation/NSCoder" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
           "UIDevice" = [ "objc2-foundation/NSNotification" "objc2-foundation/NSString" "objc2-foundation/NSUUID" ];
           "UIDiffableDataSource" = [ "objc2-foundation/NSArray" "objc2-foundation/NSIndexPath" "objc2-foundation/NSObject" "objc2-foundation/NSOrderedCollectionDifference" "objc2-foundation/NSString" ];
           "UIDocument" = [ "bitflags" "objc2-foundation/NSDate" "objc2-foundation/NSDictionary" "objc2-foundation/NSError" "objc2-foundation/NSFilePresenter" "objc2-foundation/NSNotification" "objc2-foundation/NSProgress" "objc2-foundation/NSString" "objc2-foundation/NSURL" "objc2-foundation/NSUndoManager" "objc2-foundation/NSUserActivity" ];
           "UIDocumentBrowserAction" = [ "bitflags" "objc2-foundation/NSArray" "objc2-foundation/NSString" "objc2-foundation/NSURL" ];
-          "UIDocumentBrowserViewController" = [ "objc2-foundation/NSArray" "objc2-foundation/NSBundle" "objc2-foundation/NSCoder" "objc2-foundation/NSError" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-foundation/NSProgress" "objc2-foundation/NSString" "objc2-foundation/NSURL" "objc2-uniform-type-identifiers?/UTType" ];
-          "UIDocumentInteractionController" = [ "objc2-foundation/NSArray" "objc2-foundation/NSGeometry" "objc2-foundation/NSString" "objc2-foundation/NSURL" ];
+          "UIDocumentBrowserViewController" = [ "objc2-foundation/NSArray" "objc2-foundation/NSBundle" "objc2-foundation/NSCoder" "objc2-foundation/NSError" "objc2-foundation/NSObject" "objc2-foundation/NSProgress" "objc2-foundation/NSString" "objc2-foundation/NSURL" ];
+          "UIDocumentInteractionController" = [ "objc2-foundation/NSArray" "objc2-foundation/NSString" "objc2-foundation/NSURL" ];
           "UIDocumentMenuViewController" = [ "objc2-foundation/NSArray" "objc2-foundation/NSBundle" "objc2-foundation/NSCoder" "objc2-foundation/NSObject" "objc2-foundation/NSString" "objc2-foundation/NSURL" ];
           "UIDocumentPickerExtensionViewController" = [ "objc2-foundation/NSArray" "objc2-foundation/NSBundle" "objc2-foundation/NSCoder" "objc2-foundation/NSObject" "objc2-foundation/NSString" "objc2-foundation/NSURL" ];
-          "UIDocumentPickerViewController" = [ "objc2-foundation/NSArray" "objc2-foundation/NSBundle" "objc2-foundation/NSCoder" "objc2-foundation/NSObject" "objc2-foundation/NSString" "objc2-foundation/NSURL" "objc2-uniform-type-identifiers?/UTType" ];
-          "UIDocumentProperties" = [ "objc2-foundation/NSArray" "objc2-foundation/NSURL" "objc2-link-presentation?/LPLinkMetadata" ];
+          "UIDocumentPickerViewController" = [ "objc2-foundation/NSArray" "objc2-foundation/NSBundle" "objc2-foundation/NSCoder" "objc2-foundation/NSObject" "objc2-foundation/NSString" "objc2-foundation/NSURL" ];
+          "UIDocumentProperties" = [ "objc2-foundation/NSArray" "objc2-foundation/NSURL" ];
           "UIDocumentViewController" = [ "objc2-foundation/NSBundle" "objc2-foundation/NSCoder" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
-          "UIDragInteraction" = [ "objc2-foundation/NSArray" "objc2-foundation/NSGeometry" ];
+          "UIDocumentViewControllerLaunchOptions" = [ "objc2-foundation/NSString" ];
+          "UIDragInteraction" = [ "objc2-foundation/NSArray" ];
           "UIDragItem" = [ "objc2-foundation/NSItemProvider" ];
           "UIDragPreview" = [ "objc2-foundation/NSObject" ];
           "UIDragPreviewParameters" = [ "objc2-foundation/NSArray" "objc2-foundation/NSObject" "objc2-foundation/NSValue" ];
-          "UIDragSession" = [ "objc2-foundation/NSArray" "objc2-foundation/NSGeometry" "objc2-foundation/NSItemProvider" "objc2-foundation/NSProgress" "objc2-foundation/NSString" ];
+          "UIDragSession" = [ "objc2-foundation/NSArray" "objc2-foundation/NSItemProvider" "objc2-foundation/NSProgress" "objc2-foundation/NSString" ];
           "UIDropInteraction" = [ "objc2-foundation/NSObject" "objc2-foundation/NSProgress" ];
-          "UIDynamicAnimator" = [ "objc2-foundation/NSArray" "objc2-foundation/NSDate" "objc2-foundation/NSGeometry" "objc2-foundation/NSIndexPath" "objc2-foundation/NSString" ];
-          "UIDynamicBehavior" = [ "objc2-foundation/NSArray" "objc2-foundation/NSGeometry" ];
-          "UIDynamicItemBehavior" = [ "objc2-foundation/NSArray" "objc2-foundation/NSGeometry" ];
-          "UIEditMenuInteraction" = [ "objc2-foundation/NSArray" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" ];
+          "UIDynamicAnimator" = [ "objc2-foundation/NSArray" "objc2-foundation/NSDate" "objc2-foundation/NSIndexPath" "objc2-foundation/NSString" ];
+          "UIDynamicBehavior" = [ "objc2-foundation/NSArray" ];
+          "UIDynamicItemBehavior" = [ "objc2-foundation/NSArray" ];
+          "UIEditMenuInteraction" = [ "objc2-foundation/NSArray" "objc2-foundation/NSObject" ];
           "UIEvent" = [ "bitflags" "objc2-foundation/NSArray" "objc2-foundation/NSDate" "objc2-foundation/NSSet" ];
           "UIEventAttribution" = [ "objc2-foundation/NSObject" "objc2-foundation/NSString" "objc2-foundation/NSURL" ];
-          "UIEventAttributionView" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-quartz-core?/CALayer" ];
-          "UIFieldBehavior" = [ "objc2-foundation/NSArray" "objc2-foundation/NSDate" "objc2-foundation/NSGeometry" ];
+          "UIEventAttributionView" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSObject" ];
+          "UIFieldBehavior" = [ "objc2-foundation/NSArray" "objc2-foundation/NSDate" ];
           "UIFindInteraction" = [ "objc2-foundation/NSArray" "objc2-foundation/NSString" ];
           "UIFindSession" = [ "objc2-foundation/NSString" ];
-          "UIFocus" = [ "bitflags" "objc2-foundation/NSArray" "objc2-foundation/NSGeometry" "objc2-foundation/NSNotification" "objc2-foundation/NSString" ];
+          "UIFocus" = [ "bitflags" "objc2-foundation/NSArray" "objc2-foundation/NSNotification" "objc2-foundation/NSString" ];
           "UIFocusAnimationCoordinator" = [ "objc2-foundation/NSDate" ];
-          "UIFocusEffect" = [ "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-foundation/NSString" "objc2-quartz-core?/CALayer" ];
+          "UIFocusEffect" = [ "objc2-foundation/NSObject" ];
           "UIFocusGuide" = [ "objc2-foundation/NSArray" "objc2-foundation/NSObject" ];
-          "UIFocusMovementHint" = [ "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-quartz-core?/CATransform3D" ];
-          "UIFocusSystem" = [ "objc2-foundation/NSString" "objc2-foundation/NSURL" ];
-          "UIFont" = [ "objc2-foundation/NSArray" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
-          "UIFontDescriptor" = [ "bitflags" "objc2-foundation/NSArray" "objc2-foundation/NSCoder" "objc2-foundation/NSDictionary" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-foundation/NSSet" "objc2-foundation/NSString" ];
-          "UIFontMetrics" = [ "objc2-foundation/NSGeometry" "objc2-foundation/NSString" ];
+          "UIFocusMovementHint" = [ "objc2-foundation/NSObject" ];
+          "UIFocusSystem_UIKitAdditions" = [ "objc2-foundation/NSString" "objc2-foundation/NSURL" ];
+          "UIFont" = [ "objc2-foundation/NSArray" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "UIFontDescriptor" = [ "bitflags" "objc2-foundation/NSArray" "objc2-foundation/NSCoder" "objc2-foundation/NSDictionary" "objc2-foundation/NSObject" "objc2-foundation/NSSet" "objc2-foundation/NSString" ];
+          "UIFontMetrics" = [ "objc2-foundation/NSString" ];
           "UIFontPickerViewController" = [ "objc2-foundation/NSBundle" "objc2-foundation/NSCoder" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
           "UIFontPickerViewControllerConfiguration" = [ "objc2-foundation/NSArray" "objc2-foundation/NSObject" "objc2-foundation/NSPredicate" "objc2-foundation/NSString" ];
-          "UIGeometry" = [ "bitflags" "objc2-foundation/NSCoder" "objc2-foundation/NSGeometry" "objc2-foundation/NSString" "objc2-foundation/NSValue" ];
-          "UIGestureRecognizer" = [ "objc2-foundation/NSArray" "objc2-foundation/NSCoder" "objc2-foundation/NSGeometry" "objc2-foundation/NSString" "objc2-foundation/NSValue" ];
+          "UIGeometry" = [ "bitflags" "objc2-foundation/NSCoder" "objc2-foundation/NSString" "objc2-foundation/NSValue" ];
+          "UIGestureRecognizer" = [ "objc2-foundation/NSArray" "objc2-foundation/NSCoder" "objc2-foundation/NSString" "objc2-foundation/NSValue" ];
           "UIGestureRecognizerSubclass" = [ "objc2-foundation/NSSet" ];
-          "UIGraphics" = [ "objc2-foundation/NSData" "objc2-foundation/NSDictionary" "objc2-foundation/NSGeometry" "objc2-foundation/NSString" "objc2-foundation/NSURL" ];
-          "UIGraphicsImageRenderer" = [ "objc2-foundation/NSData" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" ];
-          "UIGraphicsPDFRenderer" = [ "objc2-foundation/NSData" "objc2-foundation/NSDictionary" "objc2-foundation/NSError" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-foundation/NSString" "objc2-foundation/NSURL" ];
-          "UIGraphicsRenderer" = [ "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" ];
+          "UIGlassEffect" = [ "objc2-foundation/NSObject" ];
+          "UIGraphics" = [ "objc2-foundation/NSData" "objc2-foundation/NSDictionary" "objc2-foundation/NSString" "objc2-foundation/NSURL" ];
+          "UIGraphicsImageRenderer" = [ "objc2-foundation/NSData" "objc2-foundation/NSObject" ];
+          "UIGraphicsPDFRenderer" = [ "objc2-foundation/NSData" "objc2-foundation/NSDictionary" "objc2-foundation/NSError" "objc2-foundation/NSObject" "objc2-foundation/NSString" "objc2-foundation/NSURL" ];
+          "UIGraphicsRenderer" = [ "objc2-foundation/NSObject" ];
           "UIGraphicsRendererSubclass" = [ "objc2-foundation/NSError" ];
-          "UIGravityBehavior" = [ "objc2-foundation/NSArray" "objc2-foundation/NSGeometry" ];
+          "UIGravityBehavior" = [ "objc2-foundation/NSArray" ];
           "UIGuidedAccess" = [ "bitflags" "objc2-foundation/NSArray" "objc2-foundation/NSError" "objc2-foundation/NSString" ];
           "UIHoverEffect" = [ "objc2-foundation/NSObject" ];
-          "UIHoverEffectLayer" = [ "objc2-foundation/NSObject" "objc2-quartz-core?/CALayer" "objc2-quartz-core?/CAMediaTiming" ];
-          "UIHoverGestureRecognizer" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSGeometry" ];
+          "UIHoverEffectLayer" = [ "objc2-foundation/NSObject" ];
+          "UIHoverGestureRecognizer" = [ "objc2-foundation/NSCoder" ];
           "UIHoverStyle" = [ "objc2-foundation/NSObject" ];
-          "UIImage" = [ "objc2-core-image?/CIImage" "objc2-foundation/NSArray" "objc2-foundation/NSBundle" "objc2-foundation/NSData" "objc2-foundation/NSDate" "objc2-foundation/NSDictionary" "objc2-foundation/NSGeometry" "objc2-foundation/NSItemProvider" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "UIImage" = [ "objc2-foundation/NSArray" "objc2-foundation/NSBundle" "objc2-foundation/NSData" "objc2-foundation/NSDate" "objc2-foundation/NSDictionary" "objc2-foundation/NSItemProvider" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
           "UIImageAsset" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSObject" ];
           "UIImageConfiguration" = [ "objc2-foundation/NSLocale" "objc2-foundation/NSObject" ];
-          "UIImagePickerController" = [ "objc2-foundation/NSArray" "objc2-foundation/NSBundle" "objc2-foundation/NSCoder" "objc2-foundation/NSDate" "objc2-foundation/NSDictionary" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-foundation/NSString" "objc2-foundation/NSValue" ];
-          "UIImageReader" = [ "objc2-foundation/NSData" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-foundation/NSURL" ];
-          "UIImageSymbolConfiguration" = [ "objc2-foundation/NSArray" "objc2-foundation/NSGeometry" "objc2-foundation/NSLocale" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
-          "UIImageView" = [ "objc2-foundation/NSArray" "objc2-foundation/NSCoder" "objc2-foundation/NSDate" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-quartz-core?/CALayer" "objc2-symbols?/NSSymbolEffect" ];
-          "UIImpactFeedbackGenerator" = [ "objc2-foundation/NSGeometry" ];
-          "UIIndirectScribbleInteraction" = [ "objc2-foundation/NSArray" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" ];
-          "UIInputView" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-quartz-core?/CALayer" ];
+          "UIImagePickerController" = [ "objc2-foundation/NSArray" "objc2-foundation/NSBundle" "objc2-foundation/NSCoder" "objc2-foundation/NSDate" "objc2-foundation/NSDictionary" "objc2-foundation/NSObject" "objc2-foundation/NSString" "objc2-foundation/NSValue" ];
+          "UIImageReader" = [ "objc2-foundation/NSData" "objc2-foundation/NSObject" "objc2-foundation/NSURL" ];
+          "UIImageSymbolConfiguration" = [ "objc2-foundation/NSArray" "objc2-foundation/NSLocale" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "UIImageView" = [ "objc2-foundation/NSArray" "objc2-foundation/NSCoder" "objc2-foundation/NSDate" "objc2-foundation/NSObject" ];
+          "UIIndirectScribbleInteraction" = [ "objc2-foundation/NSArray" "objc2-foundation/NSObject" ];
+          "UIInputView" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSObject" ];
           "UIInputViewController" = [ "objc2-foundation/NSBundle" "objc2-foundation/NSCoder" "objc2-foundation/NSObject" "objc2-foundation/NSRange" "objc2-foundation/NSString" "objc2-foundation/NSUUID" ];
           "UIInteraction" = [ "objc2-foundation/NSArray" ];
-          "UIInterface" = [ "objc2-foundation/NSGeometry" ];
           "UIKey" = [ "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
           "UIKeyCommand" = [ "objc2-foundation/NSArray" "objc2-foundation/NSCoder" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
-          "UIKeyboardLayoutGuide" = [ "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" ];
-          "UILabel" = [ "objc2-foundation/NSAttributedString" "objc2-foundation/NSCoder" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-foundation/NSString" "objc2-quartz-core?/CALayer" ];
-          "UILargeContentViewer" = [ "objc2-foundation/NSGeometry" "objc2-foundation/NSNotification" "objc2-foundation/NSString" ];
-          "UILayoutGuide" = [ "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "UIKeyboardLayoutGuide" = [ "objc2-foundation/NSObject" ];
+          "UILabel" = [ "objc2-foundation/NSAttributedString" "objc2-foundation/NSCoder" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "UILargeContentViewer" = [ "objc2-foundation/NSNotification" "objc2-foundation/NSString" ];
+          "UILayoutGuide" = [ "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
           "UILexicon" = [ "objc2-foundation/NSArray" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
-          "UIListContentConfiguration" = [ "objc2-foundation/NSAttributedString" "objc2-foundation/NSCoder" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-foundation/NSString" "objc2-quartz-core?/CALayer" ];
-          "UIListContentImageProperties" = [ "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" ];
-          "UIListContentTextProperties" = [ "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" ];
-          "UIListSeparatorConfiguration" = [ "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" ];
-          "UILocalNotification" = [ "objc2-core-location?/CLRegion" "objc2-foundation/NSCalendar" "objc2-foundation/NSCoder" "objc2-foundation/NSDate" "objc2-foundation/NSDictionary" "objc2-foundation/NSObject" "objc2-foundation/NSString" "objc2-foundation/NSTimeZone" ];
+          "UIListContentConfiguration" = [ "objc2-foundation/NSAttributedString" "objc2-foundation/NSCoder" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "UIListContentImageProperties" = [ "objc2-foundation/NSObject" ];
+          "UIListContentTextProperties" = [ "objc2-foundation/NSObject" ];
+          "UIListSeparatorConfiguration" = [ "objc2-foundation/NSObject" ];
+          "UILocalNotification" = [ "objc2-foundation/NSCalendar" "objc2-foundation/NSCoder" "objc2-foundation/NSDate" "objc2-foundation/NSDictionary" "objc2-foundation/NSObject" "objc2-foundation/NSString" "objc2-foundation/NSTimeZone" ];
           "UILocalizedIndexedCollation" = [ "objc2-foundation/NSArray" "objc2-foundation/NSString" ];
-          "UILongPressGestureRecognizer" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSDate" "objc2-foundation/NSGeometry" ];
-          "UIManagedDocument" = [ "objc2-core-data?/NSManagedObjectContext" "objc2-core-data?/NSManagedObjectModel" "objc2-foundation/NSDictionary" "objc2-foundation/NSError" "objc2-foundation/NSFilePresenter" "objc2-foundation/NSProgress" "objc2-foundation/NSString" "objc2-foundation/NSURL" ];
+          "UILongPressGestureRecognizer" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSDate" ];
+          "UIMailConversationContext" = [ "objc2-foundation/NSSet" "objc2-foundation/NSString" ];
+          "UIMailConversationEntry" = [ "objc2-foundation/NSSet" "objc2-foundation/NSString" ];
+          "UIMainMenuSystem" = [ "objc2-foundation/NSObject" ];
+          "UIManagedDocument" = [ "objc2-foundation/NSDictionary" "objc2-foundation/NSError" "objc2-foundation/NSFilePresenter" "objc2-foundation/NSProgress" "objc2-foundation/NSString" "objc2-foundation/NSURL" ];
           "UIMenu" = [ "bitflags" "objc2-foundation/NSArray" "objc2-foundation/NSCoder" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
           "UIMenuBuilder" = [ "objc2-foundation/NSArray" "objc2-foundation/NSString" ];
-          "UIMenuController" = [ "objc2-foundation/NSArray" "objc2-foundation/NSGeometry" "objc2-foundation/NSNotification" "objc2-foundation/NSString" ];
+          "UIMenuController" = [ "objc2-foundation/NSArray" "objc2-foundation/NSNotification" "objc2-foundation/NSString" ];
           "UIMenuDisplayPreferences" = [ "objc2-foundation/NSObject" ];
           "UIMenuElement" = [ "bitflags" "objc2-foundation/NSCoder" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
           "UIMenuLeaf" = [ "objc2-foundation/NSString" ];
-          "UIMotionEffect" = [ "objc2-foundation/NSArray" "objc2-foundation/NSCoder" "objc2-foundation/NSDictionary" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
-          "UINavigationBar" = [ "objc2-foundation/NSArray" "objc2-foundation/NSAttributedString" "objc2-foundation/NSCoder" "objc2-foundation/NSDictionary" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-foundation/NSString" "objc2-quartz-core?/CALayer" ];
-          "UINavigationBarAppearance" = [ "objc2-foundation/NSAttributedString" "objc2-foundation/NSCoder" "objc2-foundation/NSDictionary" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
-          "UINavigationController" = [ "objc2-foundation/NSArray" "objc2-foundation/NSBundle" "objc2-foundation/NSCoder" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
-          "UINavigationItem" = [ "objc2-foundation/NSArray" "objc2-foundation/NSCoder" "objc2-foundation/NSObject" "objc2-foundation/NSRange" "objc2-foundation/NSString" ];
+          "UIMotionEffect" = [ "objc2-foundation/NSArray" "objc2-foundation/NSCoder" "objc2-foundation/NSDictionary" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "UINavigationBar" = [ "objc2-foundation/NSArray" "objc2-foundation/NSAttributedString" "objc2-foundation/NSCoder" "objc2-foundation/NSDictionary" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "UINavigationBarAppearance" = [ "objc2-foundation/NSAttributedString" "objc2-foundation/NSCoder" "objc2-foundation/NSDictionary" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "UINavigationController" = [ "objc2-foundation/NSArray" "objc2-foundation/NSBundle" "objc2-foundation/NSCoder" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "UINavigationItem" = [ "objc2-foundation/NSArray" "objc2-foundation/NSAttributedString" "objc2-foundation/NSCoder" "objc2-foundation/NSObject" "objc2-foundation/NSRange" "objc2-foundation/NSString" ];
           "UINib" = [ "objc2-foundation/NSArray" "objc2-foundation/NSBundle" "objc2-foundation/NSData" "objc2-foundation/NSDictionary" "objc2-foundation/NSString" ];
           "UINibLoading" = [ "objc2-foundation/NSString" ];
-          "UINotificationFeedbackGenerator" = [ "objc2-foundation/NSGeometry" ];
           "UIOpenURLContext" = [ "objc2-foundation/NSURL" ];
           "UIOrientation" = [ "bitflags" ];
-          "UIPageControl" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-quartz-core?/CALayer" ];
+          "UIPageControl" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSObject" ];
           "UIPageControlProgress" = [ "objc2-foundation/NSDate" ];
           "UIPageViewController" = [ "objc2-foundation/NSArray" "objc2-foundation/NSBundle" "objc2-foundation/NSCoder" "objc2-foundation/NSDictionary" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
-          "UIPanGestureRecognizer" = [ "bitflags" "objc2-foundation/NSCoder" "objc2-foundation/NSGeometry" ];
+          "UIPanGestureRecognizer" = [ "bitflags" "objc2-foundation/NSCoder" ];
           "UIPasteConfiguration" = [ "objc2-foundation/NSArray" "objc2-foundation/NSItemProvider" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
           "UIPasteConfigurationSupporting" = [ "objc2-foundation/NSArray" "objc2-foundation/NSItemProvider" ];
-          "UIPasteControl" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-quartz-core?/CALayer" ];
+          "UIPasteControl" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSObject" ];
           "UIPasteboard" = [ "objc2-foundation/NSArray" "objc2-foundation/NSData" "objc2-foundation/NSDate" "objc2-foundation/NSDictionary" "objc2-foundation/NSError" "objc2-foundation/NSIndexSet" "objc2-foundation/NSItemProvider" "objc2-foundation/NSNotification" "objc2-foundation/NSSet" "objc2-foundation/NSString" "objc2-foundation/NSURL" ];
-          "UIPencilInteraction" = [ "objc2-foundation/NSDate" "objc2-foundation/NSGeometry" ];
-          "UIPickerView" = [ "objc2-foundation/NSAttributedString" "objc2-foundation/NSCoder" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-foundation/NSString" "objc2-quartz-core?/CALayer" ];
-          "UIPinchGestureRecognizer" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSGeometry" ];
-          "UIPointerAccessory" = [ "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" ];
-          "UIPointerInteraction" = [ "objc2-foundation/NSGeometry" ];
+          "UIPencilInteraction" = [ "objc2-foundation/NSDate" ];
+          "UIPickerView" = [ "objc2-foundation/NSAttributedString" "objc2-foundation/NSCoder" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "UIPinchGestureRecognizer" = [ "objc2-foundation/NSCoder" ];
+          "UIPointerAccessory" = [ "objc2-foundation/NSObject" ];
           "UIPointerLockState" = [ "objc2-foundation/NSNotification" "objc2-foundation/NSString" ];
-          "UIPointerRegion" = [ "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" ];
-          "UIPointerStyle" = [ "objc2-foundation/NSArray" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" ];
-          "UIPopoverBackgroundView" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-quartz-core?/CALayer" ];
-          "UIPopoverController" = [ "objc2-foundation/NSArray" "objc2-foundation/NSGeometry" ];
-          "UIPopoverPresentationController" = [ "objc2-foundation/NSArray" "objc2-foundation/NSGeometry" ];
-          "UIPopoverPresentationControllerSourceItem" = [ "objc2-foundation/NSGeometry" ];
-          "UIPopoverSupport" = [ "bitflags" "objc2-foundation/NSGeometry" ];
-          "UIPresentationController" = [ "objc2-foundation/NSGeometry" ];
-          "UIPress" = [ "objc2-foundation/NSArray" "objc2-foundation/NSDate" "objc2-foundation/NSGeometry" ];
+          "UIPointerRegion" = [ "objc2-foundation/NSObject" ];
+          "UIPointerStyle" = [ "objc2-foundation/NSArray" "objc2-foundation/NSObject" ];
+          "UIPopoverBackgroundView" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSObject" ];
+          "UIPopoverController" = [ "objc2-foundation/NSArray" ];
+          "UIPopoverPresentationController" = [ "objc2-foundation/NSArray" ];
+          "UIPopoverSupport" = [ "bitflags" ];
+          "UIPress" = [ "objc2-foundation/NSArray" "objc2-foundation/NSDate" ];
           "UIPressesEvent" = [ "objc2-foundation/NSSet" ];
-          "UIPreviewInteraction" = [ "objc2-foundation/NSGeometry" ];
           "UIPreviewParameters" = [ "objc2-foundation/NSArray" "objc2-foundation/NSObject" "objc2-foundation/NSValue" ];
           "UIPrintError" = [ "objc2-foundation/NSError" "objc2-foundation/NSString" ];
-          "UIPrintFormatter" = [ "objc2-foundation/NSAttributedString" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "UIPrintFormatter" = [ "objc2-foundation/NSAttributedString" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
           "UIPrintInfo" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSDictionary" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
-          "UIPrintInteractionController" = [ "objc2-foundation/NSArray" "objc2-foundation/NSData" "objc2-foundation/NSError" "objc2-foundation/NSGeometry" "objc2-foundation/NSSet" "objc2-foundation/NSString" "objc2-foundation/NSURL" ];
-          "UIPrintPageRenderer" = [ "objc2-foundation/NSArray" "objc2-foundation/NSGeometry" "objc2-foundation/NSRange" ];
-          "UIPrintPaper" = [ "objc2-foundation/NSArray" "objc2-foundation/NSGeometry" ];
+          "UIPrintInteractionController" = [ "objc2-foundation/NSArray" "objc2-foundation/NSData" "objc2-foundation/NSError" "objc2-foundation/NSSet" "objc2-foundation/NSString" "objc2-foundation/NSURL" ];
+          "UIPrintPageRenderer" = [ "objc2-foundation/NSArray" "objc2-foundation/NSRange" ];
+          "UIPrintPaper" = [ "objc2-foundation/NSArray" ];
           "UIPrintServiceExtension" = [ "objc2-foundation/NSArray" "objc2-foundation/NSData" "objc2-foundation/NSObject" "objc2-foundation/NSString" "objc2-foundation/NSURL" ];
           "UIPrinter" = [ "bitflags" "objc2-foundation/NSString" "objc2-foundation/NSURL" ];
-          "UIPrinterPickerController" = [ "objc2-foundation/NSError" "objc2-foundation/NSGeometry" ];
-          "UIProgressView" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-foundation/NSProgress" "objc2-quartz-core?/CALayer" ];
-          "UIPushBehavior" = [ "objc2-foundation/NSArray" "objc2-foundation/NSGeometry" ];
+          "UIPrinterPickerController" = [ "objc2-foundation/NSError" ];
+          "UIProgressView" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSObject" "objc2-foundation/NSProgress" ];
+          "UIPushBehavior" = [ "objc2-foundation/NSArray" ];
           "UIReferenceLibraryViewController" = [ "objc2-foundation/NSBundle" "objc2-foundation/NSCoder" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
-          "UIRefreshControl" = [ "objc2-foundation/NSAttributedString" "objc2-foundation/NSCoder" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-quartz-core?/CALayer" ];
-          "UIRegion" = [ "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" ];
+          "UIRefreshControl" = [ "objc2-foundation/NSAttributedString" "objc2-foundation/NSCoder" "objc2-foundation/NSObject" ];
+          "UIRegion" = [ "objc2-foundation/NSObject" ];
           "UIResponder" = [ "objc2-foundation/NSArray" "objc2-foundation/NSAttributedString" "objc2-foundation/NSDictionary" "objc2-foundation/NSSet" "objc2-foundation/NSString" "objc2-foundation/NSUndoManager" "objc2-foundation/NSUserActivity" ];
-          "UIRotationGestureRecognizer" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSGeometry" ];
+          "UIRotationGestureRecognizer" = [ "objc2-foundation/NSCoder" ];
           "UIScene" = [ "objc2-foundation/NSError" "objc2-foundation/NSNotification" "objc2-foundation/NSSet" "objc2-foundation/NSString" "objc2-foundation/NSURL" "objc2-foundation/NSUserActivity" ];
           "UISceneActivationConditions" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSObject" "objc2-foundation/NSPredicate" "objc2-foundation/NSString" "objc2-foundation/NSUserActivity" ];
+          "UISceneConfiguration" = [ "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
           "UISceneDefinitions" = [ "objc2-foundation/NSError" "objc2-foundation/NSString" ];
-          "UISceneOptions" = [ "objc2-cloud-kit?/CKShareMetadata" "objc2-foundation/NSSet" "objc2-foundation/NSString" "objc2-foundation/NSUserActivity" "objc2-user-notifications?/UNNotificationResponse" ];
-          "UISceneSession" = [ "objc2-foundation/NSDictionary" "objc2-foundation/NSObject" "objc2-foundation/NSString" "objc2-foundation/NSUserActivity" ];
+          "UISceneDestructionCondition" = [ "objc2-foundation/NSObject" ];
+          "UISceneOptions" = [ "objc2-foundation/NSSet" "objc2-foundation/NSString" "objc2-foundation/NSUserActivity" ];
+          "UISceneSession" = [ "objc2-foundation/NSDictionary" "objc2-foundation/NSObject" "objc2-foundation/NSString" "objc2-foundation/NSUserActivity" "UISceneConfiguration" ];
           "UISceneSessionActivationRequest" = [ "objc2-foundation/NSObject" "objc2-foundation/NSString" "objc2-foundation/NSUserActivity" ];
-          "UIScreen" = [ "objc2-foundation/NSArray" "objc2-foundation/NSGeometry" "objc2-foundation/NSNotification" "objc2-foundation/NSString" "objc2-quartz-core?/CADisplayLink" ];
+          "UISceneSystemProtectionManager" = [ "objc2-foundation/NSNotification" "objc2-foundation/NSString" ];
+          "UIScreen" = [ "objc2-foundation/NSArray" "objc2-foundation/NSNotification" "objc2-foundation/NSString" ];
           "UIScreenEdgePanGestureRecognizer" = [ "objc2-foundation/NSCoder" ];
-          "UIScreenMode" = [ "objc2-foundation/NSGeometry" ];
-          "UIScreenshotService" = [ "objc2-foundation/NSData" "objc2-foundation/NSGeometry" ];
-          "UIScribbleInteraction" = [ "objc2-foundation/NSGeometry" ];
-          "UIScrollView" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-foundation/NSSet" "objc2-quartz-core?/CALayer" ];
-          "UISearchBar" = [ "objc2-foundation/NSArray" "objc2-foundation/NSAttributedString" "objc2-foundation/NSCoder" "objc2-foundation/NSDictionary" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-foundation/NSRange" "objc2-foundation/NSString" "objc2-quartz-core?/CALayer" ];
+          "UIScreenshotService" = [ "objc2-foundation/NSData" ];
+          "UIScrollView" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSObject" "objc2-foundation/NSSet" ];
+          "UISearchBar" = [ "objc2-foundation/NSArray" "objc2-foundation/NSAttributedString" "objc2-foundation/NSCoder" "objc2-foundation/NSDictionary" "objc2-foundation/NSObject" "objc2-foundation/NSRange" "objc2-foundation/NSString" "objc2-foundation/NSValue" ];
           "UISearchContainerViewController" = [ "objc2-foundation/NSBundle" "objc2-foundation/NSCoder" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
           "UISearchController" = [ "objc2-foundation/NSArray" "objc2-foundation/NSBundle" "objc2-foundation/NSCoder" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
           "UISearchDisplayController" = [ "objc2-foundation/NSString" ];
           "UISearchSuggestion" = [ "objc2-foundation/NSAttributedString" "objc2-foundation/NSString" ];
-          "UISearchTextField" = [ "objc2-foundation/NSArray" "objc2-foundation/NSCoder" "objc2-foundation/NSGeometry" "objc2-foundation/NSItemProvider" "objc2-foundation/NSObject" "objc2-foundation/NSString" "objc2-quartz-core?/CALayer" ];
-          "UISegmentedControl" = [ "objc2-foundation/NSArray" "objc2-foundation/NSAttributedString" "objc2-foundation/NSCoder" "objc2-foundation/NSDictionary" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-foundation/NSString" "objc2-quartz-core?/CALayer" ];
-          "UISelectionFeedbackGenerator" = [ "objc2-foundation/NSGeometry" ];
-          "UIShape" = [ "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" ];
-          "UISheetPresentationController" = [ "objc2-foundation/NSArray" "objc2-foundation/NSGeometry" "objc2-foundation/NSString" ];
-          "UISlider" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-quartz-core?/CALayer" ];
-          "UISnapBehavior" = [ "objc2-foundation/NSGeometry" ];
-          "UISplitViewController" = [ "objc2-foundation/NSArray" "objc2-foundation/NSBundle" "objc2-foundation/NSCoder" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
-          "UISpringLoadedInteraction" = [ "objc2-foundation/NSGeometry" ];
-          "UIStackView" = [ "objc2-foundation/NSArray" "objc2-foundation/NSCoder" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-quartz-core?/CALayer" ];
-          "UIStandardTextCursorView" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-quartz-core?/CALayer" ];
+          "UISearchTab" = [ "objc2-foundation/NSString" ];
+          "UISearchTextField" = [ "objc2-foundation/NSArray" "objc2-foundation/NSCoder" "objc2-foundation/NSItemProvider" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "UISegmentedControl" = [ "objc2-foundation/NSArray" "objc2-foundation/NSAttributedString" "objc2-foundation/NSCoder" "objc2-foundation/NSDictionary" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "UIShadowProperties" = [ "objc2-foundation/NSObject" ];
+          "UIShape" = [ "objc2-foundation/NSObject" ];
+          "UISheetPresentationController" = [ "objc2-foundation/NSArray" "objc2-foundation/NSString" ];
+          "UISlider" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSObject" ];
+          "UISliderTrackConfiguration" = [ "objc2-foundation/NSArray" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "UISmartReplySuggestion" = [ "objc2-foundation/NSString" ];
+          "UISplitViewController" = [ "objc2-foundation/NSArray" "objc2-foundation/NSBundle" "objc2-foundation/NSCoder" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "UIStackView" = [ "objc2-foundation/NSArray" "objc2-foundation/NSCoder" "objc2-foundation/NSObject" ];
+          "UIStandardTextCursorView" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSObject" ];
           "UIStateRestoration" = [ "objc2-foundation/NSArray" "objc2-foundation/NSCoder" "objc2-foundation/NSIndexPath" "objc2-foundation/NSString" ];
-          "UIStatusBarManager" = [ "objc2-foundation/NSGeometry" ];
-          "UIStepper" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-quartz-core?/CALayer" ];
+          "UIStepper" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSObject" ];
           "UIStoryboard" = [ "objc2-foundation/NSBundle" "objc2-foundation/NSCoder" "objc2-foundation/NSString" ];
           "UIStoryboardPopoverSegue" = [ "objc2-foundation/NSString" ];
           "UIStoryboardSegue" = [ "objc2-foundation/NSString" ];
           "UIStringDrawing" = [ "objc2-foundation/NSString" ];
           "UISwipeActionsConfiguration" = [ "objc2-foundation/NSArray" ];
           "UISwipeGestureRecognizer" = [ "bitflags" "objc2-foundation/NSCoder" ];
-          "UISwitch" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-foundation/NSString" "objc2-quartz-core?/CALayer" ];
-          "UISymbolEffectCompletion" = [ "objc2-symbols?/NSSymbolEffect" ];
-          "UITabBar" = [ "objc2-foundation/NSArray" "objc2-foundation/NSCoder" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-quartz-core?/CALayer" ];
-          "UITabBarAppearance" = [ "objc2-foundation/NSAttributedString" "objc2-foundation/NSCoder" "objc2-foundation/NSDictionary" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
-          "UITabBarController" = [ "objc2-foundation/NSArray" "objc2-foundation/NSBundle" "objc2-foundation/NSCoder" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
-          "UITabBarItem" = [ "objc2-foundation/NSAttributedString" "objc2-foundation/NSCoder" "objc2-foundation/NSDictionary" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
-          "UITableView" = [ "objc2-foundation/NSArray" "objc2-foundation/NSCoder" "objc2-foundation/NSGeometry" "objc2-foundation/NSIndexPath" "objc2-foundation/NSIndexSet" "objc2-foundation/NSNotification" "objc2-foundation/NSObject" "objc2-foundation/NSProgress" "objc2-foundation/NSString" "objc2-quartz-core?/CALayer" ];
-          "UITableViewCell" = [ "bitflags" "objc2-foundation/NSCoder" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-foundation/NSString" "objc2-quartz-core?/CALayer" ];
+          "UISwitch" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "UISymbolContentTransition" = [ "objc2-foundation/NSObject" ];
+          "UITab" = [ "objc2-foundation/NSString" ];
+          "UITabBar" = [ "objc2-foundation/NSArray" "objc2-foundation/NSCoder" "objc2-foundation/NSObject" ];
+          "UITabBarAppearance" = [ "objc2-foundation/NSAttributedString" "objc2-foundation/NSCoder" "objc2-foundation/NSDictionary" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "UITabBarController" = [ "objc2-foundation/NSArray" "objc2-foundation/NSBundle" "objc2-foundation/NSCoder" "objc2-foundation/NSObject" "objc2-foundation/NSProgress" "objc2-foundation/NSString" ];
+          "UITabBarControllerSidebar" = [ "objc2-foundation/NSArray" "objc2-foundation/NSObject" "objc2-foundation/NSProgress" ];
+          "UITabBarItem" = [ "objc2-foundation/NSAttributedString" "objc2-foundation/NSCoder" "objc2-foundation/NSDictionary" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "UITabGroup" = [ "objc2-foundation/NSArray" "objc2-foundation/NSString" ];
+          "UITabSidebarItem" = [ "objc2-foundation/NSArray" "objc2-foundation/NSObject" ];
+          "UITableView" = [ "bitflags" "objc2-foundation/NSArray" "objc2-foundation/NSCoder" "objc2-foundation/NSIndexPath" "objc2-foundation/NSIndexSet" "objc2-foundation/NSNotification" "objc2-foundation/NSObject" "objc2-foundation/NSProgress" "objc2-foundation/NSString" ];
+          "UITableViewCell" = [ "bitflags" "objc2-foundation/NSCoder" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
           "UITableViewController" = [ "objc2-foundation/NSBundle" "objc2-foundation/NSCoder" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
-          "UITableViewHeaderFooterView" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-foundation/NSString" "objc2-quartz-core?/CALayer" ];
+          "UITableViewHeaderFooterView" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
           "UITapGestureRecognizer" = [ "objc2-foundation/NSCoder" ];
-          "UITargetedDragPreview" = [ "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" ];
-          "UITargetedPreview" = [ "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" ];
+          "UITargetedDragPreview" = [ "objc2-foundation/NSObject" ];
+          "UITargetedPreview" = [ "objc2-foundation/NSObject" ];
           "UITextChecker" = [ "objc2-foundation/NSArray" "objc2-foundation/NSRange" "objc2-foundation/NSString" ];
-          "UITextDragPreviewRenderer" = [ "objc2-foundation/NSGeometry" "objc2-foundation/NSRange" ];
+          "UITextDragPreviewRenderer" = [ "objc2-foundation/NSRange" ];
           "UITextDragURLPreviews" = [ "objc2-foundation/NSString" "objc2-foundation/NSURL" ];
           "UITextDragging" = [ "bitflags" "objc2-foundation/NSArray" ];
           "UITextDropProposal" = [ "objc2-foundation/NSObject" ];
           "UITextDropping" = [ "objc2-foundation/NSProgress" ];
-          "UITextField" = [ "objc2-foundation/NSArray" "objc2-foundation/NSAttributedString" "objc2-foundation/NSCoder" "objc2-foundation/NSDictionary" "objc2-foundation/NSGeometry" "objc2-foundation/NSNotification" "objc2-foundation/NSObject" "objc2-foundation/NSRange" "objc2-foundation/NSString" "objc2-quartz-core?/CALayer" ];
+          "UITextField" = [ "objc2-foundation/NSArray" "objc2-foundation/NSAttributedString" "objc2-foundation/NSCoder" "objc2-foundation/NSDictionary" "objc2-foundation/NSNotification" "objc2-foundation/NSObject" "objc2-foundation/NSRange" "objc2-foundation/NSString" "objc2-foundation/NSValue" ];
           "UITextFormattingCoordinator" = [ "objc2-foundation/NSAttributedString" "objc2-foundation/NSDictionary" "objc2-foundation/NSString" ];
-          "UITextInput" = [ "objc2-foundation/NSArray" "objc2-foundation/NSAttributedString" "objc2-foundation/NSDictionary" "objc2-foundation/NSGeometry" "objc2-foundation/NSNotification" "objc2-foundation/NSObjCRuntime" "objc2-foundation/NSObject" "objc2-foundation/NSRange" "objc2-foundation/NSString" ];
-          "UITextInputTraits" = [ "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
-          "UITextInteraction" = [ "objc2-foundation/NSArray" "objc2-foundation/NSGeometry" ];
+          "UITextFormattingViewController" = [ "objc2-foundation/NSBundle" "objc2-foundation/NSCoder" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "UITextFormattingViewControllerChangeValue" = [ "objc2-foundation/NSObject" "objc2-foundation/NSString" "objc2-foundation/NSValue" ];
+          "UITextFormattingViewControllerComponent" = [ "objc2-foundation/NSArray" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "UITextFormattingViewControllerConfiguration" = [ "objc2-foundation/NSArray" "objc2-foundation/NSObject" ];
+          "UITextFormattingViewControllerFormattingDescriptor" = [ "objc2-foundation/NSArray" "objc2-foundation/NSAttributedString" "objc2-foundation/NSDictionary" "objc2-foundation/NSObject" "objc2-foundation/NSRange" "objc2-foundation/NSSet" "objc2-foundation/NSString" ];
+          "UITextFormattingViewControllerFormattingStyle" = [ "objc2-foundation/NSAttributedString" "objc2-foundation/NSDictionary" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "UITextInput" = [ "objc2-foundation/NSArray" "objc2-foundation/NSAttributedString" "objc2-foundation/NSDictionary" "objc2-foundation/NSNotification" "objc2-foundation/NSObjCRuntime" "objc2-foundation/NSObject" "objc2-foundation/NSRange" "objc2-foundation/NSString" ];
+          "UITextInputTraits" = [ "bitflags" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "UITextInteraction" = [ "objc2-foundation/NSArray" ];
           "UITextItem" = [ "objc2-foundation/NSAttributedString" "objc2-foundation/NSRange" "objc2-foundation/NSString" "objc2-foundation/NSURL" ];
-          "UITextLoupeSession" = [ "objc2-foundation/NSGeometry" ];
           "UITextPasteDelegate" = [ "objc2-foundation/NSArray" "objc2-foundation/NSAttributedString" "objc2-foundation/NSDictionary" "objc2-foundation/NSItemProvider" "objc2-foundation/NSString" ];
           "UITextSearching" = [ "objc2-foundation/NSObjCRuntime" "objc2-foundation/NSObject" "objc2-foundation/NSOrderedSet" "objc2-foundation/NSString" ];
           "UITextSelectionDisplayInteraction" = [ "objc2-foundation/NSArray" ];
-          "UITextSelectionHandleView" = [ "objc2-foundation/NSGeometry" ];
           "UITextSelectionHighlightView" = [ "objc2-foundation/NSArray" ];
-          "UITextView" = [ "objc2-foundation/NSArray" "objc2-foundation/NSAttributedString" "objc2-foundation/NSCoder" "objc2-foundation/NSDictionary" "objc2-foundation/NSGeometry" "objc2-foundation/NSNotification" "objc2-foundation/NSObject" "objc2-foundation/NSRange" "objc2-foundation/NSString" "objc2-foundation/NSURL" "objc2-quartz-core?/CALayer" ];
+          "UITextView" = [ "objc2-foundation/NSArray" "objc2-foundation/NSAttributedString" "objc2-foundation/NSCoder" "objc2-foundation/NSDictionary" "objc2-foundation/NSNotification" "objc2-foundation/NSObject" "objc2-foundation/NSRange" "objc2-foundation/NSString" "objc2-foundation/NSURL" "objc2-foundation/NSValue" ];
           "UITimingCurveProvider" = [ "objc2-foundation/NSObject" ];
-          "UITimingParameters" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSDate" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" ];
-          "UIToolTipInteraction" = [ "objc2-foundation/NSGeometry" "objc2-foundation/NSString" ];
-          "UIToolbar" = [ "objc2-foundation/NSArray" "objc2-foundation/NSCoder" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-quartz-core?/CALayer" ];
+          "UITimingParameters" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSDate" "objc2-foundation/NSObject" ];
+          "UIToolTipInteraction" = [ "objc2-foundation/NSString" ];
+          "UIToolbar" = [ "objc2-foundation/NSArray" "objc2-foundation/NSCoder" "objc2-foundation/NSObject" ];
           "UIToolbarAppearance" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSObject" ];
-          "UITouch" = [ "bitflags" "objc2-foundation/NSArray" "objc2-foundation/NSDate" "objc2-foundation/NSGeometry" "objc2-foundation/NSValue" ];
+          "UITouch" = [ "bitflags" "objc2-foundation/NSArray" "objc2-foundation/NSDate" "objc2-foundation/NSValue" ];
           "UITrackingLayoutGuide" = [ "objc2-foundation/NSArray" "objc2-foundation/NSObject" ];
-          "UITrait" = [ "objc2-foundation/NSGeometry" "objc2-foundation/NSString" ];
-          "UITraitCollection" = [ "objc2-foundation/NSArray" "objc2-foundation/NSCoder" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "UITrait" = [ "objc2-foundation/NSString" ];
+          "UITraitCollection" = [ "objc2-foundation/NSArray" "objc2-foundation/NSCoder" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "UIUpdateInfo" = [ "objc2-foundation/NSDate" ];
           "UIUserActivity" = [ "objc2-foundation/NSUserActivity" ];
           "UIUserNotificationSettings" = [ "bitflags" "objc2-foundation/NSArray" "objc2-foundation/NSCoder" "objc2-foundation/NSDictionary" "objc2-foundation/NSObject" "objc2-foundation/NSSet" "objc2-foundation/NSString" ];
           "UIVibrancyEffect" = [ "objc2-foundation/NSObject" ];
           "UIVideoEditorController" = [ "objc2-foundation/NSBundle" "objc2-foundation/NSCoder" "objc2-foundation/NSDate" "objc2-foundation/NSError" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
-          "UIView" = [ "bitflags" "objc2-foundation/NSArray" "objc2-foundation/NSCoder" "objc2-foundation/NSDate" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-foundation/NSString" "objc2-quartz-core?/CALayer" "objc2-quartz-core?/CATransform3D" ];
-          "UIViewAnimating" = [ "objc2-foundation/NSDate" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" ];
+          "UIView" = [ "bitflags" "objc2-foundation/NSArray" "objc2-foundation/NSCoder" "objc2-foundation/NSDate" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "UIViewAnimating" = [ "objc2-foundation/NSDate" "objc2-foundation/NSObject" ];
           "UIViewConfigurationState" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSObject" ];
-          "UIViewController" = [ "objc2-foundation/NSArray" "objc2-foundation/NSBundle" "objc2-foundation/NSCoder" "objc2-foundation/NSDate" "objc2-foundation/NSExtensionContext" "objc2-foundation/NSExtensionRequestHandling" "objc2-foundation/NSGeometry" "objc2-foundation/NSNotification" "objc2-foundation/NSObjCRuntime" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
-          "UIViewControllerTransitionCoordinator" = [ "objc2-foundation/NSDate" "objc2-foundation/NSGeometry" "objc2-foundation/NSString" ];
-          "UIViewControllerTransitioning" = [ "objc2-foundation/NSDate" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
-          "UIViewPropertyAnimator" = [ "objc2-foundation/NSDate" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" ];
+          "UIViewController" = [ "objc2-foundation/NSArray" "objc2-foundation/NSBundle" "objc2-foundation/NSCoder" "objc2-foundation/NSDate" "objc2-foundation/NSExtensionContext" "objc2-foundation/NSExtensionRequestHandling" "objc2-foundation/NSNotification" "objc2-foundation/NSObjCRuntime" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "UIViewControllerTransitionCoordinator" = [ "objc2-foundation/NSDate" "objc2-foundation/NSString" ];
+          "UIViewControllerTransitioning" = [ "objc2-foundation/NSDate" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "UIViewPropertyAnimator" = [ "objc2-foundation/NSDate" "objc2-foundation/NSObject" ];
           "UIVisualEffect" = [ "objc2-foundation/NSObject" ];
-          "UIVisualEffectView" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-quartz-core?/CALayer" ];
-          "UIWebView" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSData" "objc2-foundation/NSError" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-foundation/NSString" "objc2-foundation/NSURL" "objc2-foundation/NSURLRequest" "objc2-quartz-core?/CALayer" ];
-          "UIWindow" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSGeometry" "objc2-foundation/NSNotification" "objc2-foundation/NSObject" "objc2-foundation/NSString" "objc2-quartz-core?/CALayer" ];
-          "UIWindowScene" = [ "objc2-cloud-kit?/CKShareMetadata" "objc2-foundation/NSArray" "objc2-foundation/NSError" "objc2-foundation/NSGeometry" "objc2-foundation/NSString" ];
+          "UIVisualEffectView" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSObject" ];
+          "UIWebView" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSData" "objc2-foundation/NSError" "objc2-foundation/NSObject" "objc2-foundation/NSString" "objc2-foundation/NSURL" "objc2-foundation/NSURLRequest" ];
+          "UIWindow" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSNotification" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "UIWindowScene" = [ "objc2-foundation/NSArray" "objc2-foundation/NSError" "objc2-foundation/NSString" "UISceneSizeRestrictions" ];
           "UIWindowSceneActivationAction" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
           "UIWindowSceneActivationConfiguration" = [ "objc2-foundation/NSUserActivity" ];
-          "UIWindowSceneActivationInteraction" = [ "objc2-foundation/NSError" "objc2-foundation/NSGeometry" ];
-          "UIWindowSceneGeometry" = [ "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" ];
-          "UIWindowSceneGeometryPreferencesMac" = [ "objc2-foundation/NSGeometry" ];
-          "UIWindowSceneGeometryPreferencesVision" = [ "objc2-foundation/NSGeometry" ];
+          "UIWindowSceneActivationInteraction" = [ "objc2-foundation/NSError" ];
+          "UIWindowSceneGeometry" = [ "objc2-foundation/NSObject" ];
           "UIWindowScenePlacement" = [ "objc2-foundation/NSObject" ];
           "UIWindowSceneProminentPlacement" = [ "objc2-foundation/NSObject" ];
+          "UIWindowScenePushPlacement" = [ "objc2-foundation/NSObject" ];
+          "UIWindowSceneReplacePlacement" = [ "objc2-foundation/NSObject" ];
           "UIWindowSceneStandardPlacement" = [ "objc2-foundation/NSObject" ];
-          "UNNotificationResponse_UIKitAdditions" = [ "objc2-user-notifications?/UNNotificationResponse" ];
-          "all" = [ "DocumentManager" "NSAttributedString" "NSDataAsset" "NSDiffableDataSourceSectionSnapshot" "NSFileProviderExtension" "NSIndexPath_UIKitAdditions" "NSItemProvider_UIKitAdditions" "NSLayoutAnchor" "NSLayoutConstraint" "NSLayoutManager" "NSParagraphStyle" "NSShadow" "NSStringDrawing" "NSText" "NSTextAttachment" "NSTextContainer" "NSTextContentManager" "NSTextElement" "NSTextLayoutFragment" "NSTextLayoutManager" "NSTextLineFragment" "NSTextList" "NSTextListElement" "NSTextRange" "NSTextSelection" "NSTextSelectionNavigation" "NSTextStorage" "NSTextViewportLayoutController" "NSToolbar_UIKitAdditions" "NSTouchBar_UIKitAdditions" "NSUserActivity_NSItemProvider" "PrintKitUI" "ShareSheet" "UIAccelerometer" "UIAccessibility" "UIAccessibilityAdditions" "UIAccessibilityConstants" "UIAccessibilityContainer" "UIAccessibilityContentSizeCategoryImageAdjusting" "UIAccessibilityCustomAction" "UIAccessibilityCustomRotor" "UIAccessibilityElement" "UIAccessibilityIdentification" "UIAccessibilityLocationDescriptor" "UIAccessibilityZoom" "UIAction" "UIActionSheet" "UIActivity" "UIActivityIndicatorView" "UIActivityItemProvider" "UIActivityItemsConfiguration" "UIActivityItemsConfigurationReading" "UIActivityViewController" "UIAlert" "UIAlertController" "UIAlertView" "UIAppearance" "UIApplication" "UIApplicationShortcutItem" "UIAttachmentBehavior" "UIBackgroundConfiguration" "UIBandSelectionInteraction" "UIBarAppearance" "UIBarButtonItem" "UIBarButtonItemAppearance" "UIBarButtonItemGroup" "UIBarCommon" "UIBarItem" "UIBehavioralStyle" "UIBezierPath" "UIBlurEffect" "UIButton" "UIButtonConfiguration" "UICalendarSelection" "UICalendarSelectionMultiDate" "UICalendarSelectionSingleDate" "UICalendarView" "UICalendarViewDecoration" "UICanvasFeedbackGenerator" "UICellAccessory" "UICellConfigurationState" "UICloudSharingController" "UICollectionLayoutList" "UICollectionView" "UICollectionViewCell" "UICollectionViewCompositionalLayout" "UICollectionViewController" "UICollectionViewFlowLayout" "UICollectionViewItemRegistration" "UICollectionViewLayout" "UICollectionViewListCell" "UICollectionViewTransitionLayout" "UICollectionViewUpdateItem" "UICollisionBehavior" "UIColor" "UIColorPickerViewController" "UIColorWell" "UICommand" "UIConfigurationColorTransformer" "UIConfigurationState" "UIContentConfiguration" "UIContentSizeCategory" "UIContentSizeCategoryAdjusting" "UIContentUnavailableButtonProperties" "UIContentUnavailableConfiguration" "UIContentUnavailableConfigurationState" "UIContentUnavailableImageProperties" "UIContentUnavailableTextProperties" "UIContentUnavailableView" "UIContextMenuConfiguration" "UIContextMenuInteraction" "UIContextualAction" "UIControl" "UIDataDetectors" "UIDataSourceTranslating" "UIDatePicker" "UIDeferredMenuElement" "UIDevice" "UIDiffableDataSource" "UIDocument" "UIDocumentBrowserAction" "UIDocumentBrowserViewController" "UIDocumentInteractionController" "UIDocumentMenuViewController" "UIDocumentPickerExtensionViewController" "UIDocumentPickerViewController" "UIDocumentProperties" "UIDocumentViewController" "UIDragInteraction" "UIDragItem" "UIDragPreview" "UIDragPreviewParameters" "UIDragSession" "UIDropInteraction" "UIDynamicAnimator" "UIDynamicBehavior" "UIDynamicItemBehavior" "UIEditMenuInteraction" "UIEvent" "UIEventAttribution" "UIEventAttributionView" "UIFeedbackGenerator" "UIFieldBehavior" "UIFindInteraction" "UIFindSession" "UIFocus" "UIFocusAnimationCoordinator" "UIFocusDebugger" "UIFocusEffect" "UIFocusGuide" "UIFocusMovementHint" "UIFocusSystem" "UIFont" "UIFontDescriptor" "UIFontMetrics" "UIFontPickerViewController" "UIFontPickerViewControllerConfiguration" "UIFoundation" "UIGeometry" "UIGestureRecognizer" "UIGestureRecognizerSubclass" "UIGraphics" "UIGraphicsImageRenderer" "UIGraphicsPDFRenderer" "UIGraphicsRenderer" "UIGraphicsRendererSubclass" "UIGravityBehavior" "UIGuidedAccess" "UIGuidedAccessRestrictions" "UIHoverEffect" "UIHoverEffectLayer" "UIHoverGestureRecognizer" "UIHoverStyle" "UIImage" "UIImageAsset" "UIImageConfiguration" "UIImagePickerController" "UIImageReader" "UIImageSymbolConfiguration" "UIImageView" "UIImpactFeedbackGenerator" "UIIndirectScribbleInteraction" "UIInputView" "UIInputViewController" "UIInteraction" "UIInterface" "UIKey" "UIKeyCommand" "UIKeyConstants" "UIKeyboardLayoutGuide" "UIKitCore" "UIKitDefines" "UILabel" "UILargeContentViewer" "UILayoutGuide" "UILetterformAwareAdjusting" "UILexicon" "UIListContentConfiguration" "UIListContentImageProperties" "UIListContentTextProperties" "UIListSeparatorConfiguration" "UILocalNotification" "UILocalizedIndexedCollation" "UILongPressGestureRecognizer" "UIManagedDocument" "UIMenu" "UIMenuBuilder" "UIMenuController" "UIMenuDisplayPreferences" "UIMenuElement" "UIMenuLeaf" "UIMenuSystem" "UIMotionEffect" "UINavigationBar" "UINavigationBarAppearance" "UINavigationController" "UINavigationItem" "UINib" "UINibDeclarations" "UINibLoading" "UINotificationFeedbackGenerator" "UIOpenURLContext" "UIOrientation" "UIPageControl" "UIPageControlProgress" "UIPageViewController" "UIPanGestureRecognizer" "UIPasteConfiguration" "UIPasteConfigurationSupporting" "UIPasteControl" "UIPasteboard" "UIPencilInteraction" "UIPickerView" "UIPinchGestureRecognizer" "UIPointerAccessory" "UIPointerInteraction" "UIPointerLockState" "UIPointerRegion" "UIPointerStyle" "UIPopoverBackgroundView" "UIPopoverController" "UIPopoverPresentationController" "UIPopoverPresentationControllerSourceItem" "UIPopoverSupport" "UIPresentationController" "UIPress" "UIPressesEvent" "UIPreviewInteraction" "UIPreviewParameters" "UIPrintError" "UIPrintFormatter" "UIPrintInfo" "UIPrintInteractionController" "UIPrintPageRenderer" "UIPrintPaper" "UIPrintServiceExtension" "UIPrinter" "UIPrinterPickerController" "UIProgressView" "UIPushBehavior" "UIReferenceLibraryViewController" "UIRefreshControl" "UIRegion" "UIResponder" "UIResponder_UIActivityItemsConfiguration" "UIRotationGestureRecognizer" "UIScene" "UISceneActivationConditions" "UISceneDefinitions" "UISceneEnhancedStateRestoration" "UISceneOptions" "UISceneSession" "UISceneSessionActivationRequest" "UISceneWindowingBehaviors" "UIScene_AVAudioSession" "UIScreen" "UIScreenEdgePanGestureRecognizer" "UIScreenMode" "UIScreenshotService" "UIScribbleInteraction" "UIScrollView" "UISearchBar" "UISearchContainerViewController" "UISearchController" "UISearchDisplayController" "UISearchSuggestion" "UISearchTextField" "UISegmentedControl" "UISelectionFeedbackGenerator" "UIShape" "UISheetPresentationController" "UISlider" "UISnapBehavior" "UISplitViewController" "UISpringLoadedInteraction" "UISpringLoadedInteractionSupporting" "UIStackView" "UIStandardTextCursorView" "UIStateRestoration" "UIStatusBarManager" "UIStepper" "UIStoryboard" "UIStoryboardPopoverSegue" "UIStoryboardSegue" "UIStringDrawing" "UISwipeActionsConfiguration" "UISwipeGestureRecognizer" "UISwitch" "UISymbolEffectCompletion" "UITabBar" "UITabBarAppearance" "UITabBarController" "UITabBarItem" "UITableView" "UITableViewCell" "UITableViewController" "UITableViewHeaderFooterView" "UITapGestureRecognizer" "UITargetedDragPreview" "UITargetedPreview" "UITextChecker" "UITextCursorDropPositionAnimator" "UITextCursorView" "UITextDragPreviewRenderer" "UITextDragURLPreviews" "UITextDragging" "UITextDropProposal" "UITextDropping" "UITextField" "UITextFormattingCoordinator" "UITextInput" "UITextInputContext" "UITextInputTraits" "UITextInteraction" "UITextItem" "UITextItemInteraction" "UITextLoupeSession" "UITextPasteConfigurationSupporting" "UITextPasteDelegate" "UITextSearching" "UITextSelectionDisplayInteraction" "UITextSelectionHandleView" "UITextSelectionHighlightView" "UITextView" "UITimingCurveProvider" "UITimingParameters" "UIToolTipInteraction" "UIToolbar" "UIToolbarAppearance" "UITouch" "UITrackingLayoutGuide" "UITrait" "UITraitCollection" "UIUserActivity" "UIUserNotificationSettings" "UIVibrancyEffect" "UIVideoEditorController" "UIView" "UIViewAnimating" "UIViewConfigurationState" "UIViewController" "UIViewControllerTransitionCoordinator" "UIViewControllerTransitioning" "UIViewPropertyAnimator" "UIVisualEffect" "UIVisualEffectView" "UIWebView" "UIWindow" "UIWindowScene" "UIWindowSceneActivationAction" "UIWindowSceneActivationConfiguration" "UIWindowSceneActivationInteraction" "UIWindowSceneActivationRequestOptions" "UIWindowSceneDragInteraction" "UIWindowSceneGeometry" "UIWindowSceneGeometryPreferences" "UIWindowSceneGeometryPreferencesIOS" "UIWindowSceneGeometryPreferencesMac" "UIWindowSceneGeometryPreferencesVision" "UIWindowScenePlacement" "UIWindowSceneProminentPlacement" "UIWindowSceneStandardPlacement" "UNNotificationResponse_UIKitAdditions" "bitflags" "block2" "objc2-cloud-kit" "objc2-core-data" "objc2-core-image" "objc2-core-location" "objc2-link-presentation" "objc2-quartz-core" "objc2-symbols" "objc2-uniform-type-identifiers" "objc2-user-notifications" ];
-          "alloc" = [ "block2?/alloc" "objc2/alloc" "objc2-cloud-kit?/alloc" "objc2-core-data?/alloc" "objc2-core-image?/alloc" "objc2-core-location?/alloc" "objc2-foundation/alloc" "objc2-link-presentation?/alloc" "objc2-quartz-core?/alloc" "objc2-symbols?/alloc" "objc2-uniform-type-identifiers?/alloc" "objc2-user-notifications?/alloc" ];
-          "bitflags" = [ "dep:bitflags" "objc2-cloud-kit?/bitflags" "objc2-core-data?/bitflags" "objc2-foundation/bitflags" "objc2-quartz-core?/bitflags" "objc2-user-notifications?/bitflags" ];
-          "block2" = [ "dep:block2" "objc2-cloud-kit?/block2" "objc2-core-data?/block2" "objc2-core-image?/block2" "objc2-core-location?/block2" "objc2-foundation/block2" "objc2-link-presentation?/block2" "objc2-quartz-core?/block2" "objc2-uniform-type-identifiers?/block2" "objc2-user-notifications?/block2" ];
-          "default" = [ "std" ];
+          "UIWritingToolsCoordinator" = [ "objc2-foundation/NSArray" "objc2-foundation/NSAttributedString" "objc2-foundation/NSRange" "objc2-foundation/NSString" "objc2-foundation/NSUUID" "objc2-foundation/NSValue" ];
+          "UIWritingToolsCoordinatorContext" = [ "objc2-foundation/NSAttributedString" "objc2-foundation/NSRange" "objc2-foundation/NSUUID" ];
+          "UIZoomTransitionOptions" = [ "objc2-foundation/NSObject" ];
+          "bitflags" = [ "dep:bitflags" ];
+          "block2" = [ "dep:block2" ];
+          "default" = [ "std" "DocumentManager" "NSAdaptiveImageGlyph" "NSAttributedString" "NSDataAsset" "NSDiffableDataSourceSectionSnapshot" "NSFileProviderExtension" "NSIndexPath_UIKitAdditions" "NSItemProvider_UIKitAdditions" "NSLayoutAnchor" "NSLayoutConstraint" "NSLayoutManager" "NSParagraphStyle" "NSShadow" "NSStringDrawing" "NSText" "NSTextAttachment" "NSTextContainer" "NSTextContentManager" "NSTextElement" "NSTextLayoutFragment" "NSTextLayoutManager" "NSTextLineFragment" "NSTextList" "NSTextListElement" "NSTextRange" "NSTextSelection" "NSTextSelectionNavigation" "NSTextStorage" "NSTextViewportLayoutController" "NSToolbar_UIKitAdditions" "NSTouchBar_UIKitAdditions" "NSUserActivity_NSItemProvider" "PrintKitUI" "ShareSheet" "UIAccelerometer" "UIAccessibility" "UIAccessibilityAdditions" "UIAccessibilityConstants" "UIAccessibilityContainer" "UIAccessibilityContentSizeCategoryImageAdjusting" "UIAccessibilityCustomAction" "UIAccessibilityCustomRotor" "UIAccessibilityElement" "UIAccessibilityIdentification" "UIAccessibilityLocationDescriptor" "UIAccessibilityZoom" "UIAction" "UIActionSheet" "UIActivity" "UIActivityCollaborationModeRestriction" "UIActivityIndicatorView" "UIActivityItemProvider" "UIActivityItemsConfiguration" "UIActivityItemsConfigurationReading" "UIActivityItemsConfigurationReading_ShareSheet" "UIActivityViewController" "UIAlert" "UIAlertController" "UIAlertView" "UIAppearance" "UIApplication" "UIApplicationShortcutItem" "UIAttachmentBehavior" "UIBackgroundConfiguration" "UIBackgroundExtensionView" "UIBandSelectionInteraction" "UIBarAppearance" "UIBarButtonItem" "UIBarButtonItemAppearance" "UIBarButtonItemBadge" "UIBarButtonItemGroup" "UIBarCommon" "UIBarItem" "UIBehavioralStyle" "UIBezierPath" "UIBlurEffect" "UIButton" "UIButtonConfiguration" "UICalendarSelection" "UICalendarSelectionMultiDate" "UICalendarSelectionSingleDate" "UICalendarSelectionWeekOfYear" "UICalendarView" "UICalendarViewDecoration" "UICanvasFeedbackGenerator" "UICellAccessory" "UICellConfigurationState" "UICloudSharingController" "UICollectionLayoutList" "UICollectionView" "UICollectionViewCell" "UICollectionViewCompositionalLayout" "UICollectionViewController" "UICollectionViewFlowLayout" "UICollectionViewItemRegistration" "UICollectionViewLayout" "UICollectionViewListCell" "UICollectionViewTransitionLayout" "UICollectionViewUpdateItem" "UICollisionBehavior" "UIColor" "UIColorPickerViewController" "UIColorWell" "UICommand" "UIConfigurationColorTransformer" "UIConfigurationState" "UIContentConfiguration" "UIContentSizeCategory" "UIContentSizeCategoryAdjusting" "UIContentUnavailableButtonProperties" "UIContentUnavailableConfiguration" "UIContentUnavailableConfigurationState" "UIContentUnavailableImageProperties" "UIContentUnavailableTextProperties" "UIContentUnavailableView" "UIContextMenuConfiguration" "UIContextMenuInteraction" "UIContextMenuSystem" "UIContextualAction" "UIControl" "UIConversationContext" "UIConversationEntry" "UICornerConfiguration" "UICornerRadius" "UIDataDetectors" "UIDataSourceTranslating" "UIDatePicker" "UIDeferredMenuElement" "UIDevice" "UIDiffableDataSource" "UIDocument" "UIDocumentBrowserAction" "UIDocumentBrowserViewController" "UIDocumentInteractionController" "UIDocumentMenuViewController" "UIDocumentPickerExtensionViewController" "UIDocumentPickerViewController" "UIDocumentProperties" "UIDocumentViewController" "UIDocumentViewControllerLaunchOptions" "UIDragInteraction" "UIDragItem" "UIDragPreview" "UIDragPreviewParameters" "UIDragSession" "UIDropInteraction" "UIDynamicAnimator" "UIDynamicBehavior" "UIDynamicItemBehavior" "UIEditMenuInteraction" "UIEvent" "UIEventAttribution" "UIEventAttributionView" "UIFeedbackGenerator" "UIFieldBehavior" "UIFindInteraction" "UIFindSession" "UIFocus" "UIFocusAnimationCoordinator" "UIFocusDebugger" "UIFocusDefines" "UIFocusEffect" "UIFocusGuide" "UIFocusMovementHint" "UIFocusSystem" "UIFocusSystem_UIKitAdditions" "UIFocusUpdateContext_UIKitAdditions" "UIFont" "UIFontDescriptor" "UIFontMetrics" "UIFontPickerViewController" "UIFontPickerViewControllerConfiguration" "UIFoundation" "UIGeometry" "UIGestureRecognizer" "UIGestureRecognizerSubclass" "UIGlassEffect" "UIGraphics" "UIGraphicsImageRenderer" "UIGraphicsPDFRenderer" "UIGraphicsRenderer" "UIGraphicsRendererSubclass" "UIGravityBehavior" "UIGuidedAccess" "UIGuidedAccessRestrictions" "UIHoverEffect" "UIHoverEffectLayer" "UIHoverGestureRecognizer" "UIHoverStyle" "UIImage" "UIImageAsset" "UIImageConfiguration" "UIImagePickerController" "UIImageReader" "UIImageSymbolConfiguration" "UIImageView" "UIImpactFeedbackGenerator" "UIIndirectScribbleInteraction" "UIInputSuggestion" "UIInputView" "UIInputViewController" "UIInteraction" "UIInterface" "UIKey" "UIKeyCommand" "UIKeyConstants" "UIKeyboardLayoutGuide" "UIKitCore" "UIKitDefines" "UILabel" "UILargeContentViewer" "UILayoutGuide" "UILetterformAwareAdjusting" "UILexicon" "UIListContentConfiguration" "UIListContentImageProperties" "UIListContentTextProperties" "UIListSeparatorConfiguration" "UILocalNotification" "UILocalizedIndexedCollation" "UILongPressGestureRecognizer" "UIMailConversationContext" "UIMailConversationEntry" "UIMainMenuSystem" "UIManagedDocument" "UIMenu" "UIMenuBuilder" "UIMenuController" "UIMenuDisplayPreferences" "UIMenuElement" "UIMenuLeaf" "UIMenuSystem" "UIMessageConversationContext" "UIMessageConversationEntry" "UIMotionEffect" "UINavigationBar" "UINavigationBarAppearance" "UINavigationController" "UINavigationItem" "UINib" "UINibDeclarations" "UINibLoading" "UINotificationFeedbackGenerator" "UIOpenURLContext" "UIOrientation" "UIPageControl" "UIPageControlProgress" "UIPageViewController" "UIPanGestureRecognizer" "UIPasteConfiguration" "UIPasteConfigurationSupporting" "UIPasteControl" "UIPasteboard" "UIPencilInteraction" "UIPickerView" "UIPinchGestureRecognizer" "UIPointerAccessory" "UIPointerInteraction" "UIPointerLockState" "UIPointerRegion" "UIPointerStyle" "UIPopoverBackgroundView" "UIPopoverController" "UIPopoverPresentationController" "UIPopoverPresentationControllerSourceItem" "UIPopoverSupport" "UIPresentationController" "UIPress" "UIPressesEvent" "UIPreviewInteraction" "UIPreviewParameters" "UIPrintError" "UIPrintFormatter" "UIPrintInfo" "UIPrintInteractionController" "UIPrintPageRenderer" "UIPrintPaper" "UIPrintServiceExtension" "UIPrinter" "UIPrinterPickerController" "UIProgressView" "UIPushBehavior" "UIReferenceLibraryViewController" "UIRefreshControl" "UIRegion" "UIResponder" "UIResponder_UIActivityItemsConfiguration" "UIRotationGestureRecognizer" "UIScene" "UISceneActivationConditions" "UISceneConfiguration" "UISceneDefinitions" "UISceneDestructionCondition" "UISceneEnhancedStateRestoration" "UISceneOptions" "UISceneSession" "UISceneSessionActivationRequest" "UISceneSizeRestrictions" "UISceneSystemProtectionManager" "UISceneWindowingBehaviors" "UISceneWindowingControlStyle" "UIScene_AVAudioSession" "UIScreen" "UIScreenEdgePanGestureRecognizer" "UIScreenMode" "UIScreenshotService" "UIScribbleInteraction" "UIScrollEdgeElementContainerInteraction" "UIScrollView" "UISearchBar" "UISearchContainerViewController" "UISearchController" "UISearchDisplayController" "UISearchSuggestion" "UISearchTab" "UISearchTextField" "UISegmentedControl" "UISelectionFeedbackGenerator" "UIShadowProperties" "UIShape" "UISheetPresentationController" "UISlider" "UISliderTrackConfiguration" "UISmartReplySuggestion" "UISnapBehavior" "UISplitViewController" "UISplitViewControllerLayoutEnvironment" "UISpringLoadedInteraction" "UISpringLoadedInteractionSupporting" "UIStackView" "UIStandardTextCursorView" "UIStateRestoration" "UIStatusBarManager" "UIStepper" "UIStoryboard" "UIStoryboardPopoverSegue" "UIStoryboardSegue" "UIStringDrawing" "UISwipeActionsConfiguration" "UISwipeGestureRecognizer" "UISwitch" "UISymbolContentTransition" "UISymbolEffectCompletion" "UITab" "UITabAccessory" "UITabBar" "UITabBarAppearance" "UITabBarController" "UITabBarControllerSidebar" "UITabBarItem" "UITabGroup" "UITabSidebarItem" "UITableView" "UITableViewCell" "UITableViewController" "UITableViewHeaderFooterView" "UITapGestureRecognizer" "UITargetedDragPreview" "UITargetedPreview" "UITextChecker" "UITextCursorDropPositionAnimator" "UITextCursorView" "UITextDragPreviewRenderer" "UITextDragURLPreviews" "UITextDragging" "UITextDropProposal" "UITextDropping" "UITextField" "UITextFormattingCoordinator" "UITextFormattingViewController" "UITextFormattingViewControllerChangeValue" "UITextFormattingViewControllerComponent" "UITextFormattingViewControllerConfiguration" "UITextFormattingViewControllerFormattingDescriptor" "UITextFormattingViewControllerFormattingStyle" "UITextInput" "UITextInputContext" "UITextInputTraits" "UITextInteraction" "UITextItem" "UITextItemInteraction" "UITextLoupeSession" "UITextPasteConfigurationSupporting" "UITextPasteDelegate" "UITextSearching" "UITextSelectionDisplayInteraction" "UITextSelectionHandleView" "UITextSelectionHighlightView" "UITextView" "UITimingCurveProvider" "UITimingParameters" "UIToolTipInteraction" "UIToolbar" "UIToolbarAppearance" "UITouch" "UITrackingLayoutGuide" "UITrait" "UITraitCollection" "UITraitListEnvironment" "UIUpdateActionPhase" "UIUpdateInfo" "UIUpdateLink" "UIUserActivity" "UIUserNotificationSettings" "UIVibrancyEffect" "UIVideoEditorController" "UIView" "UIViewAnimating" "UIViewConfigurationState" "UIViewController" "UIViewControllerTransition" "UIViewControllerTransitionCoordinator" "UIViewControllerTransitioning" "UIViewLayoutRegion" "UIViewPropertyAnimator" "UIVisualEffect" "UIVisualEffectView" "UIWebView" "UIWindow" "UIWindowScene" "UIWindowSceneActivationAction" "UIWindowSceneActivationConfiguration" "UIWindowSceneActivationInteraction" "UIWindowSceneActivationRequestOptions" "UIWindowSceneDragInteraction" "UIWindowSceneGeometry" "UIWindowSceneGeometryPreferences" "UIWindowSceneGeometryPreferencesIOS" "UIWindowSceneGeometryPreferencesMac" "UIWindowSceneGeometryPreferencesVision" "UIWindowScenePlacement" "UIWindowSceneProminentPlacement" "UIWindowScenePushPlacement" "UIWindowSceneReplacePlacement" "UIWindowSceneStandardPlacement" "UIWritingToolsCoordinator" "UIWritingToolsCoordinatorAnimationParameters" "UIWritingToolsCoordinatorContext" "UIZoomTransitionOptions" "UNNotificationResponse_UIKitAdditions" "bitflags" "block2" "objc2-cloud-kit" "objc2-core-data" "objc2-core-foundation" "objc2-core-graphics" "objc2-core-image" "objc2-core-location" "objc2-core-text" "objc2-quartz-core" "objc2-user-notifications" ];
           "objc2-cloud-kit" = [ "dep:objc2-cloud-kit" ];
           "objc2-core-data" = [ "dep:objc2-core-data" ];
+          "objc2-core-foundation" = [ "dep:objc2-core-foundation" ];
+          "objc2-core-graphics" = [ "dep:objc2-core-graphics" ];
           "objc2-core-image" = [ "dep:objc2-core-image" ];
-          "objc2-core-location" = [ "dep:objc2-core-location" "objc2-cloud-kit?/objc2-core-location" "objc2-user-notifications?/objc2-core-location" ];
-          "objc2-link-presentation" = [ "dep:objc2-link-presentation" ];
+          "objc2-core-location" = [ "dep:objc2-core-location" ];
+          "objc2-core-text" = [ "dep:objc2-core-text" ];
           "objc2-quartz-core" = [ "dep:objc2-quartz-core" ];
           "objc2-symbols" = [ "dep:objc2-symbols" ];
           "objc2-uniform-type-identifiers" = [ "dep:objc2-uniform-type-identifiers" ];
           "objc2-user-notifications" = [ "dep:objc2-user-notifications" ];
-          "std" = [ "alloc" "bitflags?/std" "block2?/std" "objc2/std" "objc2-cloud-kit?/std" "objc2-core-data?/std" "objc2-core-image?/std" "objc2-core-location?/std" "objc2-foundation/std" "objc2-link-presentation?/std" "objc2-quartz-core?/std" "objc2-symbols?/std" "objc2-uniform-type-identifiers?/std" "objc2-user-notifications?/std" ];
+          "std" = [ "alloc" ];
         };
-        resolvedDefaultFeatures = [ "UIApplication" "UIDevice" "UIEvent" "UIGeometry" "UIGestureRecognizer" "UIOrientation" "UIPanGestureRecognizer" "UIPinchGestureRecognizer" "UIResponder" "UIRotationGestureRecognizer" "UIScreen" "UIScreenMode" "UITapGestureRecognizer" "UITextInput" "UITextInputTraits" "UITouch" "UITraitCollection" "UIView" "UIViewController" "UIWindow" "alloc" "bitflags" "default" "std" ];
+        resolvedDefaultFeatures = [ "UIApplication" "UIDevice" "UIEvent" "UIGeometry" "UIGestureRecognizer" "UIOrientation" "UIPanGestureRecognizer" "UIPinchGestureRecognizer" "UIResponder" "UIRotationGestureRecognizer" "UIScreen" "UIScreenMode" "UITapGestureRecognizer" "UITextInput" "UITextInputTraits" "UITouch" "UITraitCollection" "UIView" "UIViewController" "UIWindow" "alloc" "bitflags" "objc2-core-foundation" "std" ];
       };
-      "objc2-uniform-type-identifiers" = rec {
-        crateName = "objc2-uniform-type-identifiers";
-        version = "0.2.2";
-        edition = "2021";
-        sha256 = "1ziv4wkbxcaw015ypg0q49ycl7m14l3x56mpq2k1rznv92bmzyj4";
-        libName = "objc2_uniform_type_identifiers";
+      "objc_id" = rec {
+        crateName = "objc_id";
+        version = "0.1.1";
+        edition = "2015";
+        sha256 = "0fq71hnp2sdblaighjc82yrac3adfmqzhpr11irhvdfp9gdlsbf9";
+        authors = [
+          "Steven Sheldon"
+        ];
         dependencies = [
           {
-            name = "block2";
-            packageId = "block2 0.5.1";
-            optional = true;
-            usesDefaultFeatures = false;
-          }
-          {
-            name = "objc2";
-            packageId = "objc2 0.5.2";
-            usesDefaultFeatures = false;
-          }
-          {
-            name = "objc2-foundation";
-            packageId = "objc2-foundation 0.2.2";
-            usesDefaultFeatures = false;
+            name = "objc";
+            packageId = "objc";
           }
         ];
-        features = {
-          "NSItemProvider_UTType" = [ "objc2-foundation/NSArray" "objc2-foundation/NSData" "objc2-foundation/NSError" "objc2-foundation/NSItemProvider" "objc2-foundation/NSProgress" "objc2-foundation/NSURL" ];
-          "UTAdditions" = [ "objc2-foundation/NSString" "objc2-foundation/NSURL" ];
-          "UTTagClass" = [ "objc2-foundation/NSString" ];
-          "UTType" = [ "objc2-foundation/NSArray" "objc2-foundation/NSDictionary" "objc2-foundation/NSObject" "objc2-foundation/NSSet" "objc2-foundation/NSString" "objc2-foundation/NSURL" "objc2-foundation/NSValue" ];
-          "all" = [ "NSItemProvider_UTType" "UTAdditions" "UTCoreTypes" "UTDefines" "UTTagClass" "UTType" "block2" ];
-          "alloc" = [ "block2?/alloc" "objc2/alloc" "objc2-foundation/alloc" ];
-          "block2" = [ "dep:block2" "objc2-foundation/block2" ];
-          "default" = [ "std" ];
-          "std" = [ "alloc" "block2?/std" "objc2/std" "objc2-foundation/std" ];
-        };
-        resolvedDefaultFeatures = [ "alloc" "std" ];
-      };
-      "objc2-user-notifications" = rec {
-        crateName = "objc2-user-notifications";
-        version = "0.2.2";
-        edition = "2021";
-        sha256 = "1cscv2w3vxzaslz101ddv0z9ycrrs4ayikk4my4qd3im8bvcpkvn";
-        libName = "objc2_user_notifications";
-        dependencies = [
-          {
-            name = "bitflags";
-            packageId = "bitflags 2.13.2";
-            optional = true;
-            usesDefaultFeatures = false;
-          }
-          {
-            name = "block2";
-            packageId = "block2 0.5.1";
-            optional = true;
-            usesDefaultFeatures = false;
-          }
-          {
-            name = "objc2";
-            packageId = "objc2 0.5.2";
-            usesDefaultFeatures = false;
-          }
-          {
-            name = "objc2-core-location";
-            packageId = "objc2-core-location";
-            optional = true;
-            usesDefaultFeatures = false;
-          }
-          {
-            name = "objc2-foundation";
-            packageId = "objc2-foundation 0.2.2";
-            usesDefaultFeatures = false;
-          }
-        ];
-        features = {
-          "NSString_UserNotifications" = [ "objc2-foundation/NSArray" "objc2-foundation/NSString" ];
-          "UNError" = [ "objc2-foundation/NSString" ];
-          "UNNotification" = [ "objc2-foundation/NSDate" "objc2-foundation/NSObject" ];
-          "UNNotificationAction" = [ "bitflags" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
-          "UNNotificationActionIcon" = [ "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
-          "UNNotificationAttachment" = [ "objc2-foundation/NSDictionary" "objc2-foundation/NSError" "objc2-foundation/NSObject" "objc2-foundation/NSString" "objc2-foundation/NSURL" ];
-          "UNNotificationCategory" = [ "bitflags" "objc2-foundation/NSArray" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
-          "UNNotificationContent" = [ "objc2-foundation/NSArray" "objc2-foundation/NSDictionary" "objc2-foundation/NSError" "objc2-foundation/NSObject" "objc2-foundation/NSString" "objc2-foundation/NSValue" ];
-          "UNNotificationRequest" = [ "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
-          "UNNotificationResponse" = [ "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
-          "UNNotificationSettings" = [ "objc2-foundation/NSObject" ];
-          "UNNotificationSound" = [ "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
-          "UNNotificationTrigger" = [ "objc2-core-location?/CLRegion" "objc2-foundation/NSCalendar" "objc2-foundation/NSDate" "objc2-foundation/NSObject" ];
-          "UNUserNotificationCenter" = [ "bitflags" "objc2-foundation/NSArray" "objc2-foundation/NSError" "objc2-foundation/NSSet" "objc2-foundation/NSString" ];
-          "all" = [ "NSString_UserNotifications" "UNError" "UNNotification" "UNNotificationAction" "UNNotificationActionIcon" "UNNotificationAttachment" "UNNotificationCategory" "UNNotificationContent" "UNNotificationRequest" "UNNotificationResponse" "UNNotificationServiceExtension" "UNNotificationSettings" "UNNotificationSound" "UNNotificationTrigger" "UNUserNotificationCenter" "bitflags" "block2" "objc2-core-location" ];
-          "alloc" = [ "block2?/alloc" "objc2/alloc" "objc2-core-location?/alloc" "objc2-foundation/alloc" ];
-          "bitflags" = [ "dep:bitflags" "objc2-foundation/bitflags" ];
-          "block2" = [ "dep:block2" "objc2-core-location?/block2" "objc2-foundation/block2" ];
-          "default" = [ "std" ];
-          "objc2-core-location" = [ "dep:objc2-core-location" ];
-          "std" = [ "alloc" "bitflags?/std" "block2?/std" "objc2/std" "objc2-core-location?/std" "objc2-foundation/std" ];
-        };
-        resolvedDefaultFeatures = [ "alloc" "bitflags" "std" ];
+
       };
       "object" = rec {
         crateName = "object";
@@ -15402,6 +19224,100 @@ rec {
           "write_std" = [ "write_core" "std" "indexmap?/std" "crc32fast?/std" ];
         };
         resolvedDefaultFeatures = [ "archive" "coff" "elf" "macho" "pe" "read" "read_core" "std" "xcoff" ];
+      };
+      "oboe" = rec {
+        crateName = "oboe";
+        version = "0.6.1";
+        edition = "2021";
+        sha256 = "1yv7x06mwk61nsy3ckcmqwgg9q0n3j4y4zncz3sl6pcyskmipdp8";
+        authors = [
+          "K. <kayo@illumium.org>"
+        ];
+        dependencies = [
+          {
+            name = "jni";
+            packageId = "jni 0.21.1";
+            optional = true;
+          }
+          {
+            name = "ndk";
+            packageId = "ndk 0.8.0";
+            optional = true;
+            usesDefaultFeatures = false;
+          }
+          {
+            name = "ndk-context";
+            packageId = "ndk-context";
+            optional = true;
+          }
+          {
+            name = "num-derive";
+            packageId = "num-derive";
+          }
+          {
+            name = "num-traits";
+            packageId = "num-traits";
+          }
+          {
+            name = "oboe-sys";
+            packageId = "oboe-sys";
+          }
+        ];
+        features = {
+          "fetch-prebuilt" = [ "oboe-sys/fetch-prebuilt" ];
+          "generate-bindings" = [ "oboe-sys/generate-bindings" ];
+          "java-interface" = [ "ndk" "ndk-context" "jni" ];
+          "jni" = [ "dep:jni" ];
+          "ndk" = [ "dep:ndk" ];
+          "ndk-context" = [ "dep:ndk-context" ];
+          "shared-link" = [ "oboe-sys/shared-link" ];
+          "shared-stdcxx" = [ "oboe-sys/shared-stdcxx" ];
+        };
+        resolvedDefaultFeatures = [ "java-interface" "jni" "ndk" "ndk-context" ];
+      };
+      "oboe-sys" = rec {
+        crateName = "oboe-sys";
+        version = "0.6.1";
+        edition = "2021";
+        sha256 = "17g7yb4kk6bakc4rhv1izfcqjgqhpkasgq6gf20nc79b9adb12vc";
+        libName = "oboe_sys";
+        authors = [
+          "K. <kayo@illumium.org>"
+        ];
+        buildDependencies = [
+          {
+            name = "cc";
+            packageId = "cc";
+            features = [ "parallel" ];
+          }
+        ];
+        features = {
+          "bindgen" = [ "dep:bindgen" ];
+          "fetch-prebuilt" = [ "fetch_unroll" ];
+          "fetch_unroll" = [ "dep:fetch_unroll" ];
+          "generate-bindings" = [ "bindgen" ];
+        };
+      };
+      "oco_ref" = rec {
+        crateName = "oco_ref";
+        version = "0.2.1";
+        edition = "2021";
+        sha256 = "079p4q94lz860w2np7fzbg0bisw6vbyk8n87ppba9pkkk7zj617d";
+        authors = [
+          "Danik Vitek"
+          "Greg Johnston"
+        ];
+        dependencies = [
+          {
+            name = "serde";
+            packageId = "serde";
+          }
+          {
+            name = "thiserror";
+            packageId = "thiserror 2.0.21";
+          }
+        ];
+
       };
       "ogg_pager" = rec {
         crateName = "ogg_pager";
@@ -15557,6 +19473,16 @@ rec {
           "ureq" = [ "oauth2/ureq" ];
         };
         resolvedDefaultFeatures = [ "ureq" ];
+      };
+      "or_poisoned" = rec {
+        crateName = "or_poisoned";
+        version = "0.1.0";
+        edition = "2021";
+        sha256 = "1z90ciphgcxriw8jsxjjglqprgc1giichibcw3gx1r388gbza14c";
+        authors = [
+          "Greg Johnston"
+        ];
+
       };
       "orbclient" = rec {
         crateName = "orbclient";
@@ -15782,7 +19708,7 @@ rec {
           "test-vectors" = [ "dep:hex-literal" ];
           "voprf" = [ "elliptic-curve/voprf" "sha2" ];
         };
-        resolvedDefaultFeatures = [ "alloc" "arithmetic" "default" "digest" "ecdsa" "ecdsa-core" "pem" "pkcs8" "sha2" "sha256" "std" ];
+        resolvedDefaultFeatures = [ "alloc" "arithmetic" "default" "digest" "ecdh" "ecdsa" "ecdsa-core" "pem" "pkcs8" "sha2" "sha256" "std" ];
       };
       "p384" = rec {
         crateName = "p384";
@@ -15853,6 +19779,105 @@ rec {
         };
         resolvedDefaultFeatures = [ "alloc" "arithmetic" "default" "digest" "ecdh" "ecdsa" "ecdsa-core" "pem" "pkcs8" "sha2" "sha384" "std" ];
       };
+      "palette" = rec {
+        crateName = "palette";
+        version = "0.7.7";
+        edition = "2021";
+        sha256 = "0r7wf2529m3whivv49l56dc040nwngqaa1ng7nzjlz9l1mcdivnx";
+        authors = [
+          "Erik Hedvall <hello@erikhedvall.nu>"
+        ];
+        dependencies = [
+          {
+            name = "approx";
+            packageId = "approx";
+            optional = true;
+            usesDefaultFeatures = false;
+          }
+          {
+            name = "palette_derive";
+            packageId = "palette_derive";
+          }
+          {
+            name = "palette_math";
+            packageId = "palette_math";
+            usesDefaultFeatures = false;
+          }
+          {
+            name = "phf";
+            packageId = "phf";
+            optional = true;
+            usesDefaultFeatures = false;
+          }
+        ];
+        features = {
+          "alloc" = [ "palette_math/alloc" ];
+          "approx" = [ "dep:approx" ];
+          "bytemuck" = [ "dep:bytemuck" ];
+          "default" = [ "named_from_str" "std" "approx" ];
+          "find-crate" = [ "palette_derive/find-crate" ];
+          "libm" = [ "dep:libm" "palette_math/libm" ];
+          "named" = [ "phf" ];
+          "named_from_str" = [ "named" ];
+          "phf" = [ "dep:phf" ];
+          "rand" = [ "dep:rand" ];
+          "random" = [ "rand" ];
+          "serde" = [ "dep:serde" ];
+          "serializing" = [ "serde" "std" ];
+          "std" = [ "alloc" "approx?/std" "palette_math/std" ];
+          "wide" = [ "dep:wide" "palette_math/wide" ];
+        };
+        resolvedDefaultFeatures = [ "alloc" "approx" "default" "named" "named_from_str" "phf" "std" ];
+      };
+      "palette_derive" = rec {
+        crateName = "palette_derive";
+        version = "0.7.7";
+        edition = "2021";
+        sha256 = "1gjn5sh46pz4wcpyb7pnw9vz9429pwdwyk4rps0rswcv50h70lw8";
+        procMacro = true;
+        authors = [
+          "Erik Hedvall <hello@erikhedvall.nu>"
+        ];
+        dependencies = [
+          {
+            name = "by_address";
+            packageId = "by_address";
+          }
+          {
+            name = "proc-macro2";
+            packageId = "proc-macro2";
+          }
+          {
+            name = "quote";
+            packageId = "quote";
+          }
+          {
+            name = "syn";
+            packageId = "syn 2.0.119";
+            usesDefaultFeatures = false;
+            features = [ "derive" "parsing" "printing" "clone-impls" "extra-traits" "proc-macro" ];
+          }
+        ];
+        features = {
+          "find-crate" = [ "dep:find-crate" ];
+        };
+      };
+      "palette_math" = rec {
+        crateName = "palette_math";
+        version = "0.7.7";
+        edition = "2021";
+        sha256 = "04mgvcld8krwgnfpwc4c8gyddv6jxawwaig3n1gk6r4djm1b2vkf";
+        authors = [
+          "Erik Hedvall <hello@erikhedvall.nu>"
+        ];
+        features = {
+          "default" = [ "std" ];
+          "libm" = [ "dep:libm" ];
+          "std" = [ "alloc" ];
+          "wide" = [ "dep:wide" ];
+        };
+        resolvedDefaultFeatures = [ "alloc" "std" ];
+      };
       "parking" = rec {
         crateName = "parking";
         version = "2.2.1";
@@ -15922,7 +19947,7 @@ rec {
           }
           {
             name = "windows-link";
-            packageId = "windows-link";
+            packageId = "windows-link 0.2.1";
             target = { target, features }: (target."windows" or false);
           }
         ];
@@ -15954,6 +19979,18 @@ rec {
           "David Tolnay <dtolnay@gmail.com>"
         ];
 
+      };
+      "pathdiff" = rec {
+        crateName = "pathdiff";
+        version = "0.2.3";
+        edition = "2018";
+        sha256 = "1lrqp4ip05df8dzldq6gb2c1sq2gs54gly8lcnv3rhav1qhwx56z";
+        authors = [
+          "Manish Goregaokar <manishsmail@gmail.com>"
+        ];
+        features = {
+          "camino" = [ "dep:camino" ];
+        };
       };
       "pem-rfc7468" = rec {
         crateName = "pem-rfc7468";
@@ -16192,6 +20229,51 @@ rec {
         ];
         features = {
           "stack-guard" = [ "dep:stacker" "dep:psm" ];
+        };
+      };
+      "phf" = rec {
+        crateName = "phf";
+        version = "0.13.1";
+        edition = "2021";
+        sha256 = "1pzswx5gdglgjgp4azyzwyr4gh031r0kcnpqq6jblga72z3jsmn1";
+        authors = [
+          "Steven Fackler <sfackler@gmail.com>"
+        ];
+        dependencies = [
+          {
+            name = "phf_shared";
+            packageId = "phf_shared";
+            usesDefaultFeatures = false;
+          }
+        ];
+        features = {
+          "default" = [ "std" ];
+          "macros" = [ "phf_macros" ];
+          "phf_macros" = [ "dep:phf_macros" ];
+          "serde" = [ "dep:serde" ];
+          "std" = [ "phf_shared/std" "serde?/std" ];
+          "uncased" = [ "phf_macros?/uncased" "phf_shared/uncased" ];
+          "unicase" = [ "phf_macros?/unicase" "phf_shared/unicase" ];
+        };
+      };
+      "phf_shared" = rec {
+        crateName = "phf_shared";
+        version = "0.13.1";
+        edition = "2021";
+        sha256 = "0rpjchnswm0x5l4mz9xqfpw0j4w68sjvyqrdrv13h7lqqmmyyzz5";
+        authors = [
+          "Steven Fackler <sfackler@gmail.com>"
+        ];
+        dependencies = [
+          {
+            name = "siphasher";
+            packageId = "siphasher";
+          }
+        ];
+        features = {
+          "default" = [ "std" ];
+          "uncased" = [ "dep:uncased" ];
+          "unicase" = [ "dep:unicase" ];
         };
       };
       "pico-args" = rec {
@@ -16666,7 +20748,45 @@ rec {
         features = {
           "default" = [ "std" ];
         };
-        resolvedDefaultFeatures = [ "default" "std" ];
+      };
+      "prettyplease" = rec {
+        crateName = "prettyplease";
+        version = "0.3.0";
+        edition = "2021";
+        links = "prettyplease03";
+        sha256 = "1h203bs7923vf7508nsxh8i7jx1lq7qm89pnzb10yi9ffm60zzib";
+        authors = [
+          "David Tolnay <dtolnay@gmail.com>"
+        ];
+        dependencies = [
+          {
+            name = "proc-macro2";
+            packageId = "proc-macro2";
+            usesDefaultFeatures = false;
+          }
+          {
+            name = "syn";
+            packageId = "syn 3.0.6";
+            usesDefaultFeatures = false;
+            features = [ "full" ];
+          }
+        ];
+        devDependencies = [
+          {
+            name = "proc-macro2";
+            packageId = "proc-macro2";
+            usesDefaultFeatures = false;
+          }
+          {
+            name = "syn";
+            packageId = "syn 3.0.6";
+            usesDefaultFeatures = false;
+            features = [ "clone-impls" "extra-traits" "parsing" "printing" "visit-mut" ];
+          }
+        ];
+        features = {
+          "verbatim" = [ "syn/parsing" ];
+        };
       };
       "primal-check" = rec {
         crateName = "primal-check";
@@ -16728,6 +20848,45 @@ rec {
         ];
 
       };
+      "proc-macro-utils" = rec {
+        crateName = "proc-macro-utils";
+        version = "0.10.0";
+        edition = "2021";
+        sha256 = "0wbhpdb1rp4h6f6m82ignhpb2hgji30bvdbpb0hvq0747nhhibzf";
+        libName = "proc_macro_utils";
+        dependencies = [
+          {
+            name = "proc-macro2";
+            packageId = "proc-macro2";
+            optional = true;
+          }
+          {
+            name = "quote";
+            packageId = "quote";
+            optional = true;
+          }
+          {
+            name = "smallvec";
+            packageId = "smallvec";
+            optional = true;
+            features = [ "const_generics" ];
+          }
+        ];
+        devDependencies = [
+          {
+            name = "quote";
+            packageId = "quote";
+          }
+        ];
+        features = {
+          "default" = [ "proc-macro2" "proc-macro" "parser" "quote" ];
+          "parser" = [ "smallvec" "proc-macro2" ];
+          "proc-macro2" = [ "dep:proc-macro2" ];
+          "quote" = [ "dep:quote" ];
+          "smallvec" = [ "dep:smallvec" ];
+        };
+        resolvedDefaultFeatures = [ "default" "parser" "proc-macro" "proc-macro2" "quote" "smallvec" ];
+      };
       "proc-macro2" = rec {
         crateName = "proc-macro2";
         version = "1.0.107";
@@ -16747,7 +20906,50 @@ rec {
         features = {
           "default" = [ "proc-macro" ];
         };
-        resolvedDefaultFeatures = [ "default" "proc-macro" ];
+        resolvedDefaultFeatures = [ "default" "nightly" "proc-macro" "span-locations" ];
+      };
+      "proc-macro2-diagnostics" = rec {
+        crateName = "proc-macro2-diagnostics";
+        version = "0.11.0";
+        edition = "2018";
+        sha256 = "0pjr9ch6gzfn0a746wgqrgl8m4lng81hrnzzkvfwisvlz4g1x4nz";
+        libName = "proc_macro2_diagnostics";
+        authors = [
+          "Sergio Benitez <sb@sergio.bz>"
+        ];
+        dependencies = [
+          {
+            name = "proc-macro2";
+            packageId = "proc-macro2";
+          }
+          {
+            name = "quote";
+            packageId = "quote";
+          }
+          {
+            name = "syn";
+            packageId = "syn 3.0.6";
+            usesDefaultFeatures = false;
+            features = [ "parsing" "printing" ];
+          }
+        ];
+        buildDependencies = [
+          {
+            name = "version_check";
+            packageId = "version_check";
+            optional = true;
+          }
+        ];
+        devDependencies = [
+          {
+            name = "version_check";
+            packageId = "version_check";
+          }
+        ];
+        features = {
+          "nightly" = [ "dep:version_check" ];
+        };
+        resolvedDefaultFeatures = [ "nightly" ];
       };
       "profiling" = rec {
         crateName = "profiling";
@@ -17000,6 +21202,20 @@ rec {
         };
         resolvedDefaultFeatures = [ "default" "std" ];
       };
+      "qrcode" = rec {
+        crateName = "qrcode";
+        version = "0.14.1";
+        edition = "2021";
+        crateBin = [];
+        sha256 = "1v693x68yg90wfpas5v4bf6cfmnq9dq54qfgd3kb33j07r3851yn";
+        authors = [
+          "kennytm <kennytm@gmail.com>"
+        ];
+        features = {
+          "default" = [ "image" "svg" "pic" ];
+          "image" = [ "dep:image" ];
+        };
+      };
       "quick-error" = rec {
         crateName = "quick-error";
         version = "2.0.1";
@@ -17057,6 +21273,55 @@ rec {
           "proc-macro" = [ "proc-macro2/proc-macro" ];
         };
         resolvedDefaultFeatures = [ "default" "proc-macro" ];
+      };
+      "quote-use" = rec {
+        crateName = "quote-use";
+        version = "0.9.0";
+        edition = "2021";
+        sha256 = "0g9zns7bi4a02g28ywfxzf5c9kjf43zv7iwzgqfkrp13714nwda8";
+        libName = "quote_use";
+        dependencies = [
+          {
+            name = "quote";
+            packageId = "quote";
+          }
+          {
+            name = "quote-use-macros";
+            packageId = "quote-use-macros";
+          }
+        ];
+        features = {
+          "syn" = [ "dep:syn" ];
+        };
+      };
+      "quote-use-macros" = rec {
+        crateName = "quote-use-macros";
+        version = "0.9.0";
+        edition = "2021";
+        sha256 = "01078fl98a2dnmb920m7ks2rg401qyj7miq33v3k3hkwdbgcbwcc";
+        procMacro = true;
+        libName = "quote_use_macros";
+        dependencies = [
+          {
+            name = "proc-macro-utils";
+            packageId = "proc-macro-utils";
+          }
+          {
+            name = "proc-macro2";
+            packageId = "proc-macro2";
+          }
+          {
+            name = "quote";
+            packageId = "quote";
+          }
+          {
+            name = "syn";
+            packageId = "syn 3.0.6";
+            usesDefaultFeatures = false;
+            features = [ "parsing" "extra-traits" "clone-impls" "printing" ];
+          }
+        ];
+
       };
       "r-efi 5.3.0" = rec {
         crateName = "r-efi";
@@ -17670,11 +21935,198 @@ rec {
           "web_spin_lock" = [ "dep:wasm_sync" ];
         };
       };
-      "read-fonts 0.35.0" = rec {
-        crateName = "read-fonts";
-        version = "0.35.0";
+      "reactive_graph" = rec {
+        crateName = "reactive_graph";
+        version = "0.2.16";
         edition = "2021";
-        sha256 = "0n0kr71apps034i708r6vx3y2kd35da2j4vikm5zdbc8nhiwy5v7";
+        sha256 = "1mrpy43r7p04jknrfz1fijwgdxixksqp0clv2aj576hv5mmc7kiv";
+        authors = [
+          "Greg Johnston"
+        ];
+        dependencies = [
+          {
+            name = "any_spawner";
+            packageId = "any_spawner";
+          }
+          {
+            name = "async-lock";
+            packageId = "async-lock";
+          }
+          {
+            name = "futures";
+            packageId = "futures";
+          }
+          {
+            name = "guardian";
+            packageId = "guardian";
+          }
+          {
+            name = "hydration_context";
+            packageId = "hydration_context";
+            optional = true;
+          }
+          {
+            name = "indexmap";
+            packageId = "indexmap 2.14.2";
+          }
+          {
+            name = "or_poisoned";
+            packageId = "or_poisoned";
+          }
+          {
+            name = "paste";
+            packageId = "paste";
+          }
+          {
+            name = "pin-project-lite";
+            packageId = "pin-project-lite";
+          }
+          {
+            name = "rustc-hash";
+            packageId = "rustc-hash 2.1.3";
+          }
+          {
+            name = "send_wrapper";
+            packageId = "send_wrapper";
+            features = [ "futures" ];
+          }
+          {
+            name = "serde";
+            packageId = "serde";
+            optional = true;
+            features = [ "derive" ];
+          }
+          {
+            name = "slotmap";
+            packageId = "slotmap";
+          }
+          {
+            name = "thiserror";
+            packageId = "thiserror 2.0.21";
+          }
+          {
+            name = "web-sys";
+            packageId = "web-sys";
+            usesDefaultFeatures = false;
+            target = { target, features }: (("wasm32" == target."arch" or null) && ("unknown" == target."os" or null));
+            features = [ "console" ];
+          }
+        ];
+        buildDependencies = [
+          {
+            name = "rustc_version";
+            packageId = "rustc_version";
+          }
+        ];
+        devDependencies = [
+          {
+            name = "any_spawner";
+            packageId = "any_spawner";
+            features = [ "futures-executor" "tokio" ];
+          }
+        ];
+        features = {
+          "hydration" = [ "dep:hydration_context" ];
+          "serde" = [ "dep:serde" ];
+          "subsecond" = [ "dep:subsecond" ];
+          "tracing" = [ "dep:tracing" ];
+        };
+        resolvedDefaultFeatures = [ "effects" "hydration" "serde" ];
+      };
+      "reactive_stores" = rec {
+        crateName = "reactive_stores";
+        version = "0.4.4";
+        edition = "2021";
+        sha256 = "1mpbz1mjivlzx9z9mppzibcm20qsl9gzdxg9g1k4h9bgandld7m2";
+        authors = [
+          "Greg Johnston"
+        ];
+        dependencies = [
+          {
+            name = "guardian";
+            packageId = "guardian";
+          }
+          {
+            name = "indexmap";
+            packageId = "indexmap 2.14.2";
+          }
+          {
+            name = "itertools";
+            packageId = "itertools 0.14.0";
+          }
+          {
+            name = "or_poisoned";
+            packageId = "or_poisoned";
+          }
+          {
+            name = "paste";
+            packageId = "paste";
+          }
+          {
+            name = "reactive_graph";
+            packageId = "reactive_graph";
+          }
+          {
+            name = "reactive_stores_macro";
+            packageId = "reactive_stores_macro";
+          }
+          {
+            name = "rustc-hash";
+            packageId = "rustc-hash 2.1.3";
+          }
+          {
+            name = "send_wrapper";
+            packageId = "send_wrapper";
+          }
+        ];
+        devDependencies = [
+          {
+            name = "reactive_graph";
+            packageId = "reactive_graph";
+            features = [ "effects" ];
+          }
+        ];
+        features = {
+          "serde" = [ "dep:serde" ];
+          "slotmap" = [ "dep:slotmap" ];
+        };
+        resolvedDefaultFeatures = [ "default" ];
+      };
+      "reactive_stores_macro" = rec {
+        crateName = "reactive_stores_macro";
+        version = "0.4.4";
+        edition = "2021";
+        sha256 = "124syh5fz3g648z5hr1qpdn0ckwabz1kg01bi5vlbnar52wg24cd";
+        procMacro = true;
+        authors = [
+          "Greg Johnston"
+        ];
+        dependencies = [
+          {
+            name = "convert_case";
+            packageId = "convert_case 0.11.0";
+          }
+          {
+            name = "proc-macro2";
+            packageId = "proc-macro2";
+          }
+          {
+            name = "quote";
+            packageId = "quote";
+          }
+          {
+            name = "syn";
+            packageId = "syn 2.0.119";
+            features = [ "full" ];
+          }
+        ];
+
+      };
+      "read-fonts 0.37.0" = rec {
+        crateName = "read-fonts";
+        version = "0.37.0";
+        edition = "2021";
+        sha256 = "1r82vwrmsai9i7bgmnblb7sn08k2kca75lpz0x9v3yijy2mlyqvv";
         libName = "read_fonts";
         dependencies = [
           {
@@ -17688,7 +22140,7 @@ rec {
           }
           {
             name = "font-types";
-            packageId = "font-types 0.10.1";
+            packageId = "font-types 0.11.3";
             features = [ "bytemuck" ];
           }
         ];
@@ -17747,25 +22199,32 @@ rec {
         };
         resolvedDefaultFeatures = [ "default" ];
       };
-      "redox_syscall 0.4.1" = rec {
-        crateName = "redox_syscall";
-        version = "0.4.1";
-        edition = "2018";
-        sha256 = "1aiifyz5dnybfvkk4cdab9p2kmphag1yad6iknc7aszlxxldf8j7";
-        libName = "syscall";
+      "redox_event" = rec {
+        crateName = "redox_event";
+        version = "0.4.8";
+        edition = "2021";
+        sha256 = "058v00q7mfnmd60wf5xb0gmx2rwhgqbqvsia6ncm8bvd7mc8s0f5";
+        libName = "event";
         authors = [
           "Jeremy Soller <jackpot51@gmail.com>"
         ];
         dependencies = [
           {
             name = "bitflags";
-            packageId = "bitflags 1.3.2";
+            packageId = "bitflags 2.13.2";
+          }
+          {
+            name = "libredox";
+            packageId = "libredox";
+            usesDefaultFeatures = false;
+            features = [ "base" ];
           }
         ];
         features = {
-          "core" = [ "dep:core" ];
-          "rustc-dep-of-std" = [ "core" "bitflags/rustc-dep-of-std" ];
+          "default" = [ "wrappers" ];
+          "redox_syscall" = [ "dep:redox_syscall" ];
         };
+        resolvedDefaultFeatures = [ "default" "wrappers" ];
       };
       "redox_syscall 0.5.18" = rec {
         crateName = "redox_syscall";
@@ -18037,7 +22496,7 @@ rec {
           }
           {
             name = "tiny-skia";
-            packageId = "tiny-skia";
+            packageId = "tiny-skia 0.11.4";
           }
           {
             name = "usvg";
@@ -18170,6 +22629,53 @@ rec {
         };
         resolvedDefaultFeatures = [ "alloc" "default" "dev_urandom_fallback" ];
       };
+      "rodio" = rec {
+        crateName = "rodio";
+        version = "0.20.1";
+        edition = "2021";
+        sha256 = "1c8g2h6lih880rnbk7cbr275rkdp97rfya6br2dwjf6pgmhbdkp7";
+        dependencies = [
+          {
+            name = "cpal";
+            packageId = "cpal";
+          }
+          {
+            name = "symphonia";
+            packageId = "symphonia";
+            optional = true;
+            usesDefaultFeatures = false;
+          }
+        ];
+        features = {
+          "claxon" = [ "dep:claxon" ];
+          "cpal-shared-stdcxx" = [ "cpal/oboe-shared-stdcxx" ];
+          "crossbeam-channel" = [ "dep:crossbeam-channel" ];
+          "default" = [ "flac" "vorbis" "wav" "mp3" ];
+          "experimental" = [ "dep:atomic_float" ];
+          "flac" = [ "claxon" ];
+          "hound" = [ "dep:hound" ];
+          "lewton" = [ "dep:lewton" ];
+          "minimp3" = [ "dep:minimp3_fixed" ];
+          "mp3" = [ "symphonia-mp3" ];
+          "noise" = [ "rand" ];
+          "rand" = [ "dep:rand" ];
+          "symphonia" = [ "dep:symphonia" ];
+          "symphonia-aac" = [ "symphonia/aac" ];
+          "symphonia-aiff" = [ "symphonia/aiff" "symphonia/pcm" ];
+          "symphonia-alac" = [ "symphonia/isomp4" "symphonia/alac" ];
+          "symphonia-all" = [ "symphonia-aac" "symphonia-flac" "symphonia-isomp4" "symphonia-mp3" "symphonia-vorbis" "symphonia-wav" ];
+          "symphonia-flac" = [ "symphonia/flac" ];
+          "symphonia-isomp4" = [ "symphonia/isomp4" ];
+          "symphonia-mp3" = [ "symphonia/mp3" ];
+          "symphonia-vorbis" = [ "symphonia/vorbis" ];
+          "symphonia-wav" = [ "symphonia/wav" "symphonia/pcm" "symphonia/adpcm" ];
+          "tracing" = [ "dep:tracing" ];
+          "vorbis" = [ "lewton" ];
+          "wasm-bindgen" = [ "cpal/wasm-bindgen" ];
+          "wav" = [ "hound" ];
+        };
+        resolvedDefaultFeatures = [ "symphonia" "symphonia-aac" "symphonia-all" "symphonia-flac" "symphonia-isomp4" "symphonia-mp3" "symphonia-vorbis" "symphonia-wav" ];
+      };
       "roxmltree" = rec {
         crateName = "roxmltree";
         version = "0.20.0";
@@ -18282,6 +22788,57 @@ rec {
           "u64_digit" = [ "num-bigint/u64_digit" ];
         };
         resolvedDefaultFeatures = [ "default" "pem" "std" "u64_digit" ];
+      };
+      "rstml" = rec {
+        crateName = "rstml";
+        version = "0.13.1";
+        edition = "2021";
+        sha256 = "1apk4qn2y5ncsidwgrhch1jkykvlwpch8qlhmrxbbh64lgxipgf6";
+        authors = [
+          "vldm <me@vldm.cc>"
+          "stoically <stoically@protonmail.com>"
+        ];
+        dependencies = [
+          {
+            name = "derive-where";
+            packageId = "derive-where";
+          }
+          {
+            name = "proc-macro2";
+            packageId = "proc-macro2";
+            features = [ "span-locations" ];
+          }
+          {
+            name = "proc-macro2-diagnostics";
+            packageId = "proc-macro2-diagnostics";
+            usesDefaultFeatures = false;
+            features = [ "nightly" ];
+          }
+          {
+            name = "quote";
+            packageId = "quote";
+          }
+          {
+            name = "syn";
+            packageId = "syn 3.0.6";
+            features = [ "extra-traits" "full" "parsing" "visit-mut" ];
+          }
+          {
+            name = "thiserror";
+            packageId = "thiserror 2.0.21";
+          }
+        ];
+        devDependencies = [
+          {
+            name = "proc-macro2";
+            packageId = "proc-macro2";
+            features = [ "span-locations" "span-locations" ];
+          }
+        ];
+        features = {
+          "rawtext-stable-hack" = [ "rawtext-stable-hack-module" ];
+        };
+        resolvedDefaultFeatures = [ "default" ];
       };
       "rustc-hash 1.1.0" = rec {
         crateName = "rustc-hash";
@@ -18473,7 +23030,7 @@ rec {
           "thread" = [ "linux-raw-sys/prctl" ];
           "use-libc" = [ "libc_errno" "libc" "libc-extra-traits" ];
         };
-        resolvedDefaultFeatures = [ "alloc" "default" "event" "fs" "libc-extra-traits" "pipe" "process" "shm" "std" "system" "thread" "use-libc-auxv" ];
+        resolvedDefaultFeatures = [ "alloc" "default" "fs" "libc-extra-traits" "mm" "shm" "std" "use-libc-auxv" ];
       };
       "rustix 1.1.5" = rec {
         crateName = "rustix";
@@ -18580,7 +23137,7 @@ rec {
           "thread" = [ "linux-raw-sys/prctl" ];
           "use-libc" = [ "libc_errno" "libc" ];
         };
-        resolvedDefaultFeatures = [ "alloc" "default" "event" "fs" "mm" "net" "pipe" "process" "shm" "std" "system" "time" ];
+        resolvedDefaultFeatures = [ "alloc" "default" "event" "fs" "net" "pipe" "process" "shm" "std" "system" "thread" "time" ];
       };
       "rustls" = rec {
         crateName = "rustls";
@@ -19055,9 +23612,9 @@ rec {
       };
       "sctk-adwaita" = rec {
         crateName = "sctk-adwaita";
-        version = "0.10.1";
+        version = "0.11.1";
         edition = "2021";
-        sha256 = "1v14vqp7k39jk7pgaibwc06qq9vcmi82k7zlv3qpfvq52w17y9xn";
+        sha256 = "0gzilgp86a3cqj7nl0ilaz9aa76nsq8zrrh973jcxkdbp5h46apa";
         libName = "sctk_adwaita";
         authors = [
           "Poly <marynczak.bartlomiej@gmail.com>"
@@ -19074,26 +23631,36 @@ rec {
           }
           {
             name = "memmap2";
-            packageId = "memmap2";
+            packageId = "memmap2 0.9.11";
             optional = true;
           }
           {
             name = "smithay-client-toolkit";
-            packageId = "smithay-client-toolkit 0.19.2";
+            packageId = "smithay-client-toolkit";
             usesDefaultFeatures = false;
           }
           {
             name = "tiny-skia";
-            packageId = "tiny-skia";
+            packageId = "tiny-skia 0.12.0";
             usesDefaultFeatures = false;
             features = [ "std" "simd" ];
           }
         ];
+        devDependencies = [
+          {
+            name = "tiny-skia";
+            packageId = "tiny-skia 0.12.0";
+            usesDefaultFeatures = false;
+            features = [ "std" "png-format" "simd" ];
+          }
+        ];
         features = {
           "ab_glyph" = [ "dep:ab_glyph" "memmap2" ];
+          "cosmic-text" = [ "dep:cosmic-text" ];
           "crossfont" = [ "dep:crossfont" ];
           "default" = [ "ab_glyph" ];
           "memmap2" = [ "dep:memmap2" ];
+          "skrifa" = [ "dep:skrifa" "memmap2" ];
         };
         resolvedDefaultFeatures = [ "ab_glyph" "memmap2" ];
       };
@@ -19200,6 +23767,27 @@ rec {
         };
         resolvedDefaultFeatures = [ "default" "serde" "std" ];
       };
+      "send_wrapper" = rec {
+        crateName = "send_wrapper";
+        version = "0.6.0";
+        edition = "2018";
+        sha256 = "0wrxzsh9fzgkkkms621ydnz8mj30ilyq299a8cf65jn1y72hw2yd";
+        authors = [
+          "Thomas Keh"
+        ];
+        dependencies = [
+          {
+            name = "futures-core";
+            packageId = "futures-core";
+            optional = true;
+          }
+        ];
+        features = {
+          "futures" = [ "futures-core" ];
+          "futures-core" = [ "dep:futures-core" ];
+        };
+        resolvedDefaultFeatures = [ "futures" "futures-core" ];
+      };
       "serde" = rec {
         crateName = "serde";
         version = "1.0.229";
@@ -19231,7 +23819,7 @@ rec {
           "std" = [ "serde_core/std" ];
           "unstable" = [ "serde_core/unstable" ];
         };
-        resolvedDefaultFeatures = [ "alloc" "default" "derive" "serde_derive" "std" ];
+        resolvedDefaultFeatures = [ "alloc" "default" "derive" "rc" "serde_derive" "std" ];
       };
       "serde-value" = rec {
         crateName = "serde-value";
@@ -19279,7 +23867,7 @@ rec {
         features = {
           "default" = [ "std" "result" ];
         };
-        resolvedDefaultFeatures = [ "alloc" "default" "result" "std" ];
+        resolvedDefaultFeatures = [ "alloc" "default" "rc" "result" "std" ];
       };
       "serde_derive" = rec {
         crateName = "serde_derive";
@@ -19415,6 +24003,44 @@ rec {
           }
         ];
 
+      };
+      "serde_qs" = rec {
+        crateName = "serde_qs";
+        version = "0.15.0";
+        edition = "2018";
+        sha256 = "0ln32gdcsx8br54cqdbx7hb74wwmvslcag54a69s2cvmfagazypk";
+        authors = [
+          "Sam Scott <sam@osohq.com>"
+        ];
+        dependencies = [
+          {
+            name = "percent-encoding";
+            packageId = "percent-encoding";
+          }
+          {
+            name = "serde";
+            packageId = "serde";
+            features = [ "derive" ];
+          }
+          {
+            name = "thiserror";
+            packageId = "thiserror 2.0.21";
+          }
+        ];
+        features = {
+          "actix-web3" = [ "dep:actix-web3" ];
+          "actix-web4" = [ "dep:actix-web4" ];
+          "actix3" = [ "actix-web3" "futures" ];
+          "actix4" = [ "actix-web4" "futures" ];
+          "axum" = [ "axum-framework" "futures" ];
+          "axum-framework" = [ "dep:axum-framework" ];
+          "futures" = [ "dep:futures" ];
+          "indexmap" = [ "dep:indexmap" ];
+          "tracing" = [ "dep:tracing" ];
+          "warp" = [ "futures" "tracing" "warp-framework" ];
+          "warp-framework" = [ "dep:warp-framework" ];
+        };
+        resolvedDefaultFeatures = [ "default" ];
       };
       "serde_repr" = rec {
         crateName = "serde_repr";
@@ -19664,6 +24290,229 @@ rec {
         features = {
         };
       };
+      "server_fn" = rec {
+        crateName = "server_fn";
+        version = "0.8.13";
+        edition = "2021";
+        sha256 = "04i8jbldm80v6dzky9w7a6pqhnlxb0b0c59s6rz5n6xg0pfmk1dy";
+        authors = [
+          "Greg Johnston"
+          "Ben Wishovich"
+        ];
+        dependencies = [
+          {
+            name = "base64";
+            packageId = "base64 0.22.1";
+          }
+          {
+            name = "bytes";
+            packageId = "bytes";
+          }
+          {
+            name = "const-str";
+            packageId = "const-str";
+          }
+          {
+            name = "const_format";
+            packageId = "const_format";
+          }
+          {
+            name = "futures";
+            packageId = "futures";
+          }
+          {
+            name = "gloo-net";
+            packageId = "gloo-net";
+            optional = true;
+          }
+          {
+            name = "http";
+            packageId = "http";
+          }
+          {
+            name = "inventory";
+            packageId = "inventory";
+            optional = true;
+          }
+          {
+            name = "js-sys";
+            packageId = "js-sys";
+            optional = true;
+          }
+          {
+            name = "or_poisoned";
+            packageId = "or_poisoned";
+          }
+          {
+            name = "pin-project-lite";
+            packageId = "pin-project-lite";
+          }
+          {
+            name = "rustversion";
+            packageId = "rustversion";
+          }
+          {
+            name = "send_wrapper";
+            packageId = "send_wrapper";
+            optional = true;
+            features = [ "futures" ];
+          }
+          {
+            name = "serde";
+            packageId = "serde";
+            features = [ "derive" ];
+          }
+          {
+            name = "serde_json";
+            packageId = "serde_json";
+          }
+          {
+            name = "serde_qs";
+            packageId = "serde_qs";
+          }
+          {
+            name = "server_fn_macro_default";
+            packageId = "server_fn_macro_default";
+          }
+          {
+            name = "thiserror";
+            packageId = "thiserror 2.0.21";
+          }
+          {
+            name = "throw_error";
+            packageId = "throw_error";
+          }
+          {
+            name = "url";
+            packageId = "url";
+          }
+          {
+            name = "wasm-bindgen";
+            packageId = "wasm-bindgen";
+            optional = true;
+          }
+          {
+            name = "wasm-bindgen-futures";
+            packageId = "wasm-bindgen-futures";
+            optional = true;
+          }
+          {
+            name = "wasm-streams";
+            packageId = "wasm-streams";
+            optional = true;
+          }
+          {
+            name = "web-sys";
+            packageId = "web-sys";
+            optional = true;
+            features = [ "console" "ReadableStream" "ReadableStreamDefaultReader" "AbortController" "AbortSignal" ];
+          }
+          {
+            name = "xxhash-rust";
+            packageId = "xxhash-rust";
+            features = [ "const_xxh64" ];
+          }
+        ];
+        buildDependencies = [
+          {
+            name = "rustc_version";
+            packageId = "rustc_version";
+          }
+        ];
+        features = {
+          "actix" = [ "actix-web/default" "actix-no-default" ];
+          "actix-no-default" = [ "ssr" "dep:actix-web" "dep:actix-ws" "dep:send_wrapper" ];
+          "axum" = [ "axum/default" "axum-no-default" "axum/ws" "dep:tokio" ];
+          "axum-no-default" = [ "ssr" "generic" "dep:axum" "dep:hyper" "dep:http-body-util" "dep:tower" "dep:tower-layer" ];
+          "bitcode" = [ "dep:bitcode" ];
+          "bitcode-serde" = [ "dep:bitcode" "bitcode?/serde" ];
+          "browser" = [ "dep:gloo-net" "dep:js-sys" "dep:send_wrapper" "dep:wasm-bindgen" "dep:web-sys" "dep:wasm-streams" "dep:wasm-bindgen-futures" ];
+          "cbor" = [ "dep:ciborium" ];
+          "default-tls" = [ "reqwest?/default-tls" ];
+          "inventory" = [ "dep:inventory" ];
+          "msgpack" = [ "dep:rmp-serde" ];
+          "multipart" = [ "browser" "dep:multer" ];
+          "postcard" = [ "dep:postcard" ];
+          "reqwest" = [ "dep:reqwest" "dep:tokio-tungstenite" "dep:tokio" ];
+          "rkyv" = [ "dep:rkyv" ];
+          "rustls" = [ "reqwest?/rustls" "tokio-tungstenite?/rustls" ];
+          "serde-lite" = [ "dep:serde-lite" ];
+          "ssr" = [ "inventory" ];
+        };
+        resolvedDefaultFeatures = [ "browser" "form-redirects" "inventory" "ssr" ];
+      };
+      "server_fn_macro" = rec {
+        crateName = "server_fn_macro";
+        version = "0.8.12";
+        edition = "2021";
+        sha256 = "1yb5is577nkmxf31kff3sxqa7bpjcawrx6glbx79kxwkmfvdfyff";
+        authors = [
+          "Greg Johnston"
+        ];
+        dependencies = [
+          {
+            name = "const_format";
+            packageId = "const_format";
+          }
+          {
+            name = "convert_case";
+            packageId = "convert_case 0.11.0";
+          }
+          {
+            name = "proc-macro2";
+            packageId = "proc-macro2";
+          }
+          {
+            name = "quote";
+            packageId = "quote";
+          }
+          {
+            name = "syn";
+            packageId = "syn 3.0.6";
+            features = [ "full" "parsing" "extra-traits" ];
+          }
+          {
+            name = "xxhash-rust";
+            packageId = "xxhash-rust";
+            features = [ "const_xxh64" ];
+          }
+        ];
+        buildDependencies = [
+          {
+            name = "rustc_version";
+            packageId = "rustc_version";
+          }
+        ];
+        features = {
+        };
+        resolvedDefaultFeatures = [ "ssr" ];
+      };
+      "server_fn_macro_default" = rec {
+        crateName = "server_fn_macro_default";
+        version = "0.8.6";
+        edition = "2021";
+        sha256 = "0qcy1281p5z5q6wl34ysa6cdvgswllw329286jf2fpw51ldgi96r";
+        procMacro = true;
+        authors = [
+          "Greg Johnston"
+        ];
+        dependencies = [
+          {
+            name = "server_fn_macro";
+            packageId = "server_fn_macro";
+          }
+          {
+            name = "syn";
+            packageId = "syn 3.0.6";
+          }
+        ];
+        features = {
+          "actix" = [ "server_fn_macro/actix" ];
+          "axum" = [ "server_fn_macro/axum" ];
+          "nightly" = [ "server_fn_macro/nightly" ];
+          "ssr" = [ "server_fn_macro/ssr" ];
+        };
+      };
       "sha1" = rec {
         crateName = "sha1";
         version = "0.10.7";
@@ -19760,7 +24609,25 @@ rec {
           "loom" = [ "dep:loom" ];
         };
       };
-      "shlex" = rec {
+      "shlex 1.3.0" = rec {
+        crateName = "shlex";
+        version = "1.3.0";
+        edition = "2015";
+        sha256 = "0r1y6bv26c1scpxvhg2cabimrmwgbp4p3wy6syj9n0c4s3q2znhg";
+        authors = [
+          "comex <comexk@gmail.com>"
+          "Fenhl <fenhl@fenhl.net>"
+          "Adrian Taylor <adetaylor@chromium.org>"
+          "Alex Touchet <alextouchet@outlook.com>"
+          "Daniel Parks <dp+git@oxidized.org>"
+          "Garrett Berg <googberg@gmail.com>"
+        ];
+        features = {
+          "default" = [ "std" ];
+        };
+        resolvedDefaultFeatures = [ "default" "std" ];
+      };
+      "shlex 2.0.1" = rec {
         crateName = "shlex";
         version = "2.0.1";
         edition = "2018";
@@ -19899,7 +24766,7 @@ rec {
         features = {
           "default" = [ "std" ];
         };
-        resolvedDefaultFeatures = [ "std" ];
+        resolvedDefaultFeatures = [ "aarch64_neon" "public_imp" "std" ];
       };
       "simplecss" = rec {
         crateName = "simplecss";
@@ -19936,11 +24803,11 @@ rec {
         };
         resolvedDefaultFeatures = [ "default" "std" ];
       };
-      "skrifa 0.37.0" = rec {
+      "skrifa 0.40.0" = rec {
         crateName = "skrifa";
-        version = "0.37.0";
+        version = "0.40.0";
         edition = "2021";
-        sha256 = "0hcqlhgbiv5lhjv6l0hfj2gm1nabvdy9iv9zry77acpmxlfhfccc";
+        sha256 = "1b1lfid1326df2aq4cjqz7jv63m3i21czrgks7fxgyvm4hyzxgbz";
         dependencies = [
           {
             name = "bytemuck";
@@ -19948,20 +24815,20 @@ rec {
           }
           {
             name = "read-fonts";
-            packageId = "read-fonts 0.35.0";
+            packageId = "read-fonts 0.37.0";
             usesDefaultFeatures = false;
           }
         ];
         devDependencies = [
           {
             name = "read-fonts";
-            packageId = "read-fonts 0.35.0";
+            packageId = "read-fonts 0.37.0";
             usesDefaultFeatures = false;
             features = [ "scaler_test" "serde" ];
           }
         ];
         features = {
-          "default" = [ "autohint_shaping" "traversal" ];
+          "default" = [ "std" "autohint_shaping" ];
           "libm" = [ "dep:core_maths" "read-fonts/libm" ];
           "spec_next" = [ "read-fonts/spec_next" ];
           "std" = [ "read-fonts/std" ];
@@ -20068,103 +24935,7 @@ rec {
           "ndarray" = [ "dep:ndarray" ];
         };
       };
-      "smithay-client-toolkit 0.19.2" = rec {
-        crateName = "smithay-client-toolkit";
-        version = "0.19.2";
-        edition = "2021";
-        sha256 = "05h05hg4dn3v6br5jbdbs5nalk076a64s7fn6i01nqzby2hxwmrl";
-        libName = "smithay_client_toolkit";
-        authors = [
-          "Elinor Berger <elinor@safaradeg.net>"
-          "i509VCB <mail@i509.me>"
-          "Ashley Wulber <ashley@system76.com>"
-        ];
-        dependencies = [
-          {
-            name = "bitflags";
-            packageId = "bitflags 2.13.2";
-          }
-          {
-            name = "calloop";
-            packageId = "calloop 0.13.0";
-            optional = true;
-          }
-          {
-            name = "calloop-wayland-source";
-            packageId = "calloop-wayland-source 0.3.0";
-            optional = true;
-          }
-          {
-            name = "cursor-icon";
-            packageId = "cursor-icon";
-          }
-          {
-            name = "libc";
-            packageId = "libc";
-          }
-          {
-            name = "log";
-            packageId = "log";
-          }
-          {
-            name = "memmap2";
-            packageId = "memmap2";
-          }
-          {
-            name = "rustix";
-            packageId = "rustix 0.38.44";
-            features = [ "fs" "pipe" "shm" ];
-          }
-          {
-            name = "thiserror";
-            packageId = "thiserror 1.0.69";
-          }
-          {
-            name = "wayland-backend";
-            packageId = "wayland-backend";
-          }
-          {
-            name = "wayland-client";
-            packageId = "wayland-client";
-          }
-          {
-            name = "wayland-csd-frame";
-            packageId = "wayland-csd-frame";
-          }
-          {
-            name = "wayland-cursor";
-            packageId = "wayland-cursor";
-          }
-          {
-            name = "wayland-protocols";
-            packageId = "wayland-protocols";
-            features = [ "client" "staging" "unstable" ];
-          }
-          {
-            name = "wayland-protocols-wlr";
-            packageId = "wayland-protocols-wlr";
-            features = [ "client" ];
-          }
-          {
-            name = "wayland-scanner";
-            packageId = "wayland-scanner";
-          }
-          {
-            name = "xkeysym";
-            packageId = "xkeysym";
-          }
-        ];
-        features = {
-          "bytemuck" = [ "dep:bytemuck" ];
-          "calloop" = [ "dep:calloop" "calloop-wayland-source" ];
-          "calloop-wayland-source" = [ "dep:calloop-wayland-source" ];
-          "default" = [ "calloop" "xkbcommon" ];
-          "pkg-config" = [ "dep:pkg-config" ];
-          "xkbcommon" = [ "dep:xkbcommon" "bytemuck" "pkg-config" "xkeysym/bytemuck" ];
-        };
-        resolvedDefaultFeatures = [ "calloop" "calloop-wayland-source" ];
-      };
-      "smithay-client-toolkit 0.20.0" = rec {
+      "smithay-client-toolkit" = rec {
         crateName = "smithay-client-toolkit";
         version = "0.20.0";
         edition = "2021";
@@ -20181,13 +24952,18 @@ rec {
             packageId = "bitflags 2.13.2";
           }
           {
+            name = "bytemuck";
+            packageId = "bytemuck";
+            optional = true;
+          }
+          {
             name = "calloop";
-            packageId = "calloop 0.14.4";
+            packageId = "calloop";
             optional = true;
           }
           {
             name = "calloop-wayland-source";
-            packageId = "calloop-wayland-source 0.4.1";
+            packageId = "calloop-wayland-source";
             optional = true;
           }
           {
@@ -20204,7 +24980,7 @@ rec {
           }
           {
             name = "memmap2";
-            packageId = "memmap2";
+            packageId = "memmap2 0.9.11";
           }
           {
             name = "rustix";
@@ -20256,8 +25032,27 @@ rec {
             packageId = "wayland-scanner";
           }
           {
+            name = "xkbcommon";
+            packageId = "xkbcommon 0.8.0";
+            optional = true;
+            features = [ "wayland" ];
+          }
+          {
             name = "xkeysym";
             packageId = "xkeysym";
+          }
+        ];
+        buildDependencies = [
+          {
+            name = "pkg-config";
+            packageId = "pkg-config";
+            optional = true;
+          }
+        ];
+        devDependencies = [
+          {
+            name = "bytemuck";
+            packageId = "bytemuck";
           }
         ];
         features = {
@@ -20268,17 +25063,22 @@ rec {
           "pkg-config" = [ "dep:pkg-config" ];
           "xkbcommon" = [ "dep:xkbcommon" "bytemuck" "pkg-config" "xkeysym/bytemuck" ];
         };
-        resolvedDefaultFeatures = [ "calloop" "calloop-wayland-source" ];
+        resolvedDefaultFeatures = [ "bytemuck" "calloop" "calloop-wayland-source" "default" "pkg-config" "xkbcommon" ];
       };
       "smithay-clipboard" = rec {
         crateName = "smithay-clipboard";
-        version = "0.7.3";
-        edition = "2024";
-        sha256 = "09hjm3dyjq4s3nxfzi65bg95hv540fi5zr5xad879xrryw1lqw3i";
+        version = "0.8.0";
+        edition = "2021";
+        workspace_member = null;
+        src = pkgs.fetchgit {
+          url = "https://github.com/pop-os/smithay-clipboard";
+          rev = "859b02c88f45c554049a67c6ddeec1692ce0e20b";
+          sha256 = "0w070cck5nv40mg9fggw3pvidy4aivavzzls8vsc69g12qaw120s";
+        };
         libName = "smithay_clipboard";
         authors = [
           "Kirill Chibisov <contact@kchibisov.com>"
-          "Elinor Berger <elinor@safaradeg.net>"
+          "Victor Berger <victor.berger@m4x.org>"
         ];
         dependencies = [
           {
@@ -20286,8 +25086,13 @@ rec {
             packageId = "libc";
           }
           {
+            name = "raw-window-handle";
+            packageId = "raw-window-handle";
+            optional = true;
+          }
+          {
             name = "smithay-client-toolkit";
-            packageId = "smithay-client-toolkit 0.20.0";
+            packageId = "smithay-client-toolkit";
             rename = "sctk";
             usesDefaultFeatures = false;
             features = [ "calloop" ];
@@ -20302,17 +25107,19 @@ rec {
         devDependencies = [
           {
             name = "smithay-client-toolkit";
-            packageId = "smithay-client-toolkit 0.20.0";
+            packageId = "smithay-client-toolkit";
             rename = "sctk";
             usesDefaultFeatures = false;
             features = [ "calloop" "xkbcommon" ];
           }
         ];
         features = {
-          "default" = [ "dlopen" ];
+          "default" = [ "dlopen" "dnd" "rwh-6" ];
           "dlopen" = [ "wayland-backend/dlopen" ];
+          "raw-window-handle" = [ "dep:raw-window-handle" ];
+          "rwh-6" = [ "raw-window-handle" ];
         };
-        resolvedDefaultFeatures = [ "default" "dlopen" ];
+        resolvedDefaultFeatures = [ "default" "dlopen" "dnd" "raw-window-handle" "rwh-6" ];
       };
       "smol" = rec {
         crateName = "smol";
@@ -20365,32 +25172,33 @@ rec {
       };
       "smol_str" = rec {
         crateName = "smol_str";
-        version = "0.2.2";
-        edition = "2018";
-        sha256 = "1bfylqf2vnqaglw58930vpxm2rfzji5gjp15a2c0kh8aj6v8ylyx";
+        version = "0.3.7";
+        edition = "2024";
+        sha256 = "041gpvv9qi81h6jp89yv14d7p2rwc5j59pn09jfn26gk4ffi1dzf";
         authors = [
           "Aleksey Kladov <aleksey.kladov@gmail.com>"
+          "Lukas Wirth <lukastw97@gmail.com>"
         ];
         dependencies = [
           {
-            name = "serde";
-            packageId = "serde";
+            name = "borsh";
+            packageId = "borsh";
+            optional = true;
+            usesDefaultFeatures = false;
+          }
+          {
+            name = "serde_core";
+            packageId = "serde_core";
             optional = true;
             usesDefaultFeatures = false;
           }
         ];
-        devDependencies = [
-          {
-            name = "serde";
-            packageId = "serde";
-            features = [ "derive" ];
-          }
-        ];
         features = {
           "arbitrary" = [ "dep:arbitrary" ];
+          "borsh" = [ "dep:borsh" ];
           "default" = [ "std" ];
-          "serde" = [ "dep:serde" ];
-          "std" = [ "serde?/std" ];
+          "serde" = [ "dep:serde_core" ];
+          "std" = [ "serde_core?/std" "borsh?/std" ];
         };
         resolvedDefaultFeatures = [ "default" "std" ];
       };
@@ -20422,81 +25230,80 @@ rec {
       };
       "softbuffer" = rec {
         crateName = "softbuffer";
-        version = "0.4.8";
+        version = "0.4.1";
         edition = "2021";
-        sha256 = "1hznrcdzhhlr2x84926g28ybnlx649y1anr7mc4m3w5v3sl8vhda";
+        workspace_member = null;
+        src = pkgs.fetchgit {
+          url = "https://github.com/pop-os/softbuffer";
+          rev = "c2b2c19ddb38ff17495643699f97cb1f2064a1be";
+          sha256 = "1qkg1hbazngldcrh1q88pd5sxi2sfbblsz92wdji2y72fzzas5zm";
+        };
         dependencies = [
           {
             name = "as-raw-xcb-connection";
             packageId = "as-raw-xcb-connection";
             optional = true;
-            target = { target, features }: (!(("android" == target."os" or null) || ("apple" == target."vendor" or null) || ("redox" == target."os" or null) || (builtins.elem "wasm" target."family") || ("windows" == target."os" or null)));
+            target = { target, features }: ((target."unix" or false) && (!(("apple" == target."vendor" or null) || ("android" == target."os" or null) || ("redox" == target."os" or null))));
           }
           {
             name = "bytemuck";
             packageId = "bytemuck";
             optional = true;
-            target = { target, features }: (!(("android" == target."os" or null) || ("apple" == target."vendor" or null) || ("redox" == target."os" or null) || (builtins.elem "wasm" target."family") || ("windows" == target."os" or null)));
+            target = { target, features }: ((target."unix" or false) && (!(("apple" == target."vendor" or null) || ("android" == target."os" or null) || ("redox" == target."os" or null))));
           }
           {
             name = "bytemuck";
             packageId = "bytemuck";
-            target = { target, features }: ("android" == target."os" or null);
+            target = { target, features }: ("macos" == target."os" or null);
+            features = [ "extern_crate_alloc" ];
+          }
+          {
+            name = "cocoa";
+            packageId = "cocoa";
+            target = { target, features }: ("macos" == target."os" or null);
+          }
+          {
+            name = "core-graphics";
+            packageId = "core-graphics";
+            target = { target, features }: ("macos" == target."os" or null);
+          }
+          {
+            name = "drm";
+            packageId = "drm";
+            optional = true;
+            usesDefaultFeatures = false;
+            target = { target, features }: ((target."unix" or false) && (!(("apple" == target."vendor" or null) || ("android" == target."os" or null) || ("redox" == target."os" or null))));
           }
           {
             name = "fastrand";
             packageId = "fastrand";
             optional = true;
-            target = { target, features }: (!(("android" == target."os" or null) || ("apple" == target."vendor" or null) || ("redox" == target."os" or null) || (builtins.elem "wasm" target."family") || ("windows" == target."os" or null)));
+            target = { target, features }: ((target."unix" or false) && (!(("apple" == target."vendor" or null) || ("android" == target."os" or null) || ("redox" == target."os" or null))));
+          }
+          {
+            name = "foreign-types";
+            packageId = "foreign-types";
+            target = { target, features }: ("macos" == target."os" or null);
           }
           {
             name = "js-sys";
             packageId = "js-sys";
-            target = { target, features }: (builtins.elem "wasm" target."family");
+            target = { target, features }: ("wasm32" == target."arch" or null);
+          }
+          {
+            name = "log";
+            packageId = "log";
           }
           {
             name = "memmap2";
-            packageId = "memmap2";
+            packageId = "memmap2 0.9.11";
             optional = true;
-            target = { target, features }: (!(("android" == target."os" or null) || ("apple" == target."vendor" or null) || ("redox" == target."os" or null) || (builtins.elem "wasm" target."family") || ("windows" == target."os" or null)));
+            target = { target, features }: ((target."unix" or false) && (!(("apple" == target."vendor" or null) || ("android" == target."os" or null) || ("redox" == target."os" or null))));
           }
           {
-            name = "ndk";
-            packageId = "ndk";
-            target = { target, features }: ("android" == target."os" or null);
-          }
-          {
-            name = "objc2";
-            packageId = "objc2 0.6.4";
-            target = { target, features }: ("apple" == target."vendor" or null);
-          }
-          {
-            name = "objc2-core-foundation";
-            packageId = "objc2-core-foundation";
-            usesDefaultFeatures = false;
-            target = { target, features }: ("apple" == target."vendor" or null);
-            features = [ "std" "CFCGTypes" ];
-          }
-          {
-            name = "objc2-core-graphics";
-            packageId = "objc2-core-graphics";
-            usesDefaultFeatures = false;
-            target = { target, features }: ("apple" == target."vendor" or null);
-            features = [ "std" "objc2" "CGColorSpace" "CGDataProvider" "CGImage" ];
-          }
-          {
-            name = "objc2-foundation";
-            packageId = "objc2-foundation 0.3.2";
-            usesDefaultFeatures = false;
-            target = { target, features }: ("apple" == target."vendor" or null);
-            features = [ "std" "objc2-core-foundation" "NSDictionary" "NSGeometry" "NSKeyValueObserving" "NSString" "NSThread" "NSValue" ];
-          }
-          {
-            name = "objc2-quartz-core";
-            packageId = "objc2-quartz-core 0.3.2";
-            usesDefaultFeatures = false;
-            target = { target, features }: ("apple" == target."vendor" or null);
-            features = [ "std" "objc2-core-foundation" "CALayer" "CATransaction" ];
+            name = "objc";
+            packageId = "objc";
+            target = { target, features }: ("macos" == target."os" or null);
           }
           {
             name = "raw-window-handle";
@@ -20511,72 +25318,72 @@ rec {
           }
           {
             name = "rustix";
-            packageId = "rustix 1.1.5";
+            packageId = "rustix 0.38.44";
             optional = true;
             usesDefaultFeatures = false;
-            target = { target, features }: (!(("android" == target."os" or null) || ("apple" == target."vendor" or null) || ("redox" == target."os" or null) || (builtins.elem "wasm" target."family") || ("windows" == target."os" or null)));
+            target = { target, features }: ((target."unix" or false) && (!(("apple" == target."vendor" or null) || ("android" == target."os" or null) || ("redox" == target."os" or null))));
             features = [ "fs" "mm" "shm" "std" ];
           }
           {
             name = "tiny-xlib";
             packageId = "tiny-xlib";
             optional = true;
-            target = { target, features }: (!(("android" == target."os" or null) || ("apple" == target."vendor" or null) || ("redox" == target."os" or null) || (builtins.elem "wasm" target."family") || ("windows" == target."os" or null)));
-          }
-          {
-            name = "tracing";
-            packageId = "tracing";
-            usesDefaultFeatures = false;
+            target = { target, features }: ((target."unix" or false) && (!(("apple" == target."vendor" or null) || ("android" == target."os" or null) || ("redox" == target."os" or null))));
           }
           {
             name = "wasm-bindgen";
             packageId = "wasm-bindgen";
-            target = { target, features }: (builtins.elem "wasm" target."family");
+            target = { target, features }: ("wasm32" == target."arch" or null);
           }
           {
             name = "wayland-backend";
             packageId = "wayland-backend";
             optional = true;
-            target = { target, features }: (!(("android" == target."os" or null) || ("apple" == target."vendor" or null) || ("redox" == target."os" or null) || (builtins.elem "wasm" target."family") || ("windows" == target."os" or null)));
+            target = { target, features }: ((target."unix" or false) && (!(("apple" == target."vendor" or null) || ("android" == target."os" or null) || ("redox" == target."os" or null))));
             features = [ "client_system" ];
           }
           {
             name = "wayland-client";
             packageId = "wayland-client";
             optional = true;
-            target = { target, features }: (!(("android" == target."os" or null) || ("apple" == target."vendor" or null) || ("redox" == target."os" or null) || (builtins.elem "wasm" target."family") || ("windows" == target."os" or null)));
+            target = { target, features }: ((target."unix" or false) && (!(("apple" == target."vendor" or null) || ("android" == target."os" or null) || ("redox" == target."os" or null))));
           }
           {
             name = "wayland-sys";
             packageId = "wayland-sys";
-            optional = true;
-            target = { target, features }: (!(("android" == target."os" or null) || ("apple" == target."vendor" or null) || ("redox" == target."os" or null) || (builtins.elem "wasm" target."family") || ("windows" == target."os" or null)));
+            target = { target, features }: ((target."unix" or false) && (!(("apple" == target."vendor" or null) || ("android" == target."os" or null) || ("redox" == target."os" or null))));
           }
           {
             name = "web-sys";
             packageId = "web-sys";
-            target = { target, features }: (builtins.elem "wasm" target."family");
+            target = { target, features }: ("wasm32" == target."arch" or null);
             features = [ "CanvasRenderingContext2d" "Document" "Element" "HtmlCanvasElement" "ImageData" "OffscreenCanvas" "OffscreenCanvasRenderingContext2d" "Window" ];
           }
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.61.2";
+            packageId = "windows-sys 0.52.0";
             target = { target, features }: ("windows" == target."os" or null);
-            features = [ "Win32_Graphics_Gdi" "Win32_UI_Shell" "Win32_UI_WindowsAndMessaging" "Win32_Foundation" ];
+            features = [ "Win32_Graphics_Gdi" "Win32_UI_WindowsAndMessaging" "Win32_Foundation" ];
           }
           {
             name = "x11rb";
             packageId = "x11rb";
             optional = true;
-            target = { target, features }: (!(("android" == target."os" or null) || ("apple" == target."vendor" or null) || ("redox" == target."os" or null) || (builtins.elem "wasm" target."family") || ("windows" == target."os" or null)));
+            target = { target, features }: ((target."unix" or false) && (!(("apple" == target."vendor" or null) || ("android" == target."os" or null) || ("redox" == target."os" or null))));
             features = [ "allow-unsafe-code" "shm" ];
+          }
+        ];
+        buildDependencies = [
+          {
+            name = "cfg_aliases";
+            packageId = "cfg_aliases";
           }
         ];
         devDependencies = [
           {
             name = "rustix";
-            packageId = "rustix 1.1.5";
-            target = {target, features}: (!(("android" == target."os" or null) || ("apple" == target."vendor" or null) || ("redox" == target."os" or null) || (builtins.elem "wasm" target."family") || ("windows" == target."os" or null)));
+            packageId = "rustix 0.38.44";
+            target = {target, features}: ((target."unix" or false) && (!(("apple" == target."vendor" or null) || ("android" == target."os" or null) || ("redox" == target."os" or null))));
             features = [ "event" ];
           }
         ];
@@ -20590,16 +25397,15 @@ rec {
           "memmap2" = [ "dep:memmap2" ];
           "rustix" = [ "dep:rustix" ];
           "tiny-xlib" = [ "dep:tiny-xlib" ];
-          "wayland" = [ "wayland-backend" "wayland-client" "wayland-sys" "memmap2" "rustix" "fastrand" ];
+          "wayland" = [ "wayland-backend" "wayland-client" "memmap2" "rustix" "fastrand" ];
           "wayland-backend" = [ "dep:wayland-backend" ];
           "wayland-client" = [ "dep:wayland-client" ];
           "wayland-dlopen" = [ "wayland-sys/dlopen" ];
-          "wayland-sys" = [ "dep:wayland-sys" ];
           "x11" = [ "as-raw-xcb-connection" "bytemuck" "fastrand" "rustix" "tiny-xlib" "x11rb" ];
           "x11-dlopen" = [ "tiny-xlib/dlopen" "x11rb/dl-libxcb" ];
           "x11rb" = [ "dep:x11rb" ];
         };
-        resolvedDefaultFeatures = [ "as-raw-xcb-connection" "bytemuck" "fastrand" "memmap2" "rustix" "tiny-xlib" "wayland" "wayland-backend" "wayland-client" "wayland-dlopen" "wayland-sys" "x11" "x11-dlopen" "x11rb" ];
+        resolvedDefaultFeatures = [ "as-raw-xcb-connection" "bytemuck" "default" "drm" "fastrand" "kms" "memmap2" "rustix" "tiny-xlib" "wayland" "wayland-backend" "wayland-client" "wayland-dlopen" "x11" "x11-dlopen" "x11rb" ];
       };
       "spin" = rec {
         crateName = "spin";
@@ -20906,6 +25712,421 @@ rec {
         };
         resolvedDefaultFeatures = [ "render" "scale" "std" ];
       };
+      "symphonia" = rec {
+        crateName = "symphonia";
+        version = "0.5.5";
+        edition = "2018";
+        sha256 = "0fbhlmvf1m9rb5xdy057vzymvirmzx39gx4hl3x9p7d1630a8wsp";
+        authors = [
+          "Philip Deljanov <philip.deljanov@gmail.com>"
+        ];
+        dependencies = [
+          {
+            name = "lazy_static";
+            packageId = "lazy_static";
+          }
+          {
+            name = "symphonia-bundle-flac";
+            packageId = "symphonia-bundle-flac";
+            optional = true;
+          }
+          {
+            name = "symphonia-bundle-mp3";
+            packageId = "symphonia-bundle-mp3";
+            optional = true;
+            usesDefaultFeatures = false;
+          }
+          {
+            name = "symphonia-codec-aac";
+            packageId = "symphonia-codec-aac";
+            optional = true;
+          }
+          {
+            name = "symphonia-codec-adpcm";
+            packageId = "symphonia-codec-adpcm";
+            optional = true;
+          }
+          {
+            name = "symphonia-codec-pcm";
+            packageId = "symphonia-codec-pcm";
+            optional = true;
+          }
+          {
+            name = "symphonia-codec-vorbis";
+            packageId = "symphonia-codec-vorbis";
+            optional = true;
+          }
+          {
+            name = "symphonia-core";
+            packageId = "symphonia-core";
+          }
+          {
+            name = "symphonia-format-isomp4";
+            packageId = "symphonia-format-isomp4";
+            optional = true;
+          }
+          {
+            name = "symphonia-format-riff";
+            packageId = "symphonia-format-riff";
+            optional = true;
+            usesDefaultFeatures = false;
+          }
+          {
+            name = "symphonia-metadata";
+            packageId = "symphonia-metadata";
+          }
+        ];
+        features = {
+          "aac" = [ "symphonia-codec-aac" ];
+          "adpcm" = [ "symphonia-codec-adpcm" ];
+          "aiff" = [ "symphonia-format-riff/aiff" ];
+          "alac" = [ "symphonia-codec-alac" ];
+          "all" = [ "all-codecs" "all-formats" ];
+          "all-codecs" = [ "aac" "adpcm" "alac" "flac" "mp1" "mp2" "mp3" "pcm" "vorbis" ];
+          "all-formats" = [ "caf" "isomp4" "mkv" "ogg" "aiff" "wav" ];
+          "caf" = [ "symphonia-format-caf" ];
+          "default" = [ "adpcm" "flac" "mkv" "ogg" "pcm" "vorbis" "wav" ];
+          "flac" = [ "symphonia-bundle-flac" ];
+          "isomp4" = [ "symphonia-format-isomp4" ];
+          "mkv" = [ "symphonia-format-mkv" ];
+          "mp1" = [ "symphonia-bundle-mp3/mp1" ];
+          "mp2" = [ "symphonia-bundle-mp3/mp2" ];
+          "mp3" = [ "symphonia-bundle-mp3/mp3" ];
+          "mpa" = [ "mp1" "mp2" "mp3" ];
+          "ogg" = [ "symphonia-format-ogg" ];
+          "opt-simd" = [ "opt-simd-sse" "opt-simd-avx" "opt-simd-neon" ];
+          "opt-simd-avx" = [ "symphonia-core/opt-simd-avx" ];
+          "opt-simd-neon" = [ "symphonia-core/opt-simd-neon" ];
+          "opt-simd-sse" = [ "symphonia-core/opt-simd-sse" ];
+          "pcm" = [ "symphonia-codec-pcm" ];
+          "symphonia-bundle-flac" = [ "dep:symphonia-bundle-flac" ];
+          "symphonia-bundle-mp3" = [ "dep:symphonia-bundle-mp3" ];
+          "symphonia-codec-aac" = [ "dep:symphonia-codec-aac" ];
+          "symphonia-codec-adpcm" = [ "dep:symphonia-codec-adpcm" ];
+          "symphonia-codec-alac" = [ "dep:symphonia-codec-alac" ];
+          "symphonia-codec-pcm" = [ "dep:symphonia-codec-pcm" ];
+          "symphonia-codec-vorbis" = [ "dep:symphonia-codec-vorbis" ];
+          "symphonia-format-caf" = [ "dep:symphonia-format-caf" ];
+          "symphonia-format-isomp4" = [ "dep:symphonia-format-isomp4" ];
+          "symphonia-format-mkv" = [ "dep:symphonia-format-mkv" ];
+          "symphonia-format-ogg" = [ "dep:symphonia-format-ogg" ];
+          "symphonia-format-riff" = [ "dep:symphonia-format-riff" ];
+          "vorbis" = [ "symphonia-codec-vorbis" ];
+          "wav" = [ "symphonia-format-riff/wav" ];
+        };
+        resolvedDefaultFeatures = [ "aac" "adpcm" "flac" "isomp4" "mp3" "pcm" "symphonia-bundle-flac" "symphonia-bundle-mp3" "symphonia-codec-aac" "symphonia-codec-adpcm" "symphonia-codec-pcm" "symphonia-codec-vorbis" "symphonia-format-isomp4" "symphonia-format-riff" "vorbis" "wav" ];
+      };
+      "symphonia-bundle-flac" = rec {
+        crateName = "symphonia-bundle-flac";
+        version = "0.5.5";
+        edition = "2018";
+        sha256 = "0xlrdil9prgbwds8j2rd0z8gy9i5h13ca459h2dmv8mfh3hna5f9";
+        libName = "symphonia_bundle_flac";
+        authors = [
+          "Philip Deljanov <philip.deljanov@gmail.com>"
+        ];
+        dependencies = [
+          {
+            name = "log";
+            packageId = "log";
+          }
+          {
+            name = "symphonia-core";
+            packageId = "symphonia-core";
+          }
+          {
+            name = "symphonia-metadata";
+            packageId = "symphonia-metadata";
+          }
+          {
+            name = "symphonia-utils-xiph";
+            packageId = "symphonia-utils-xiph";
+          }
+        ];
+
+      };
+      "symphonia-bundle-mp3" = rec {
+        crateName = "symphonia-bundle-mp3";
+        version = "0.5.5";
+        edition = "2018";
+        sha256 = "1vapgi7haxmi4fnf09rvc4z6q24136m5gsg3k73ymxbbnmmxswj8";
+        libName = "symphonia_bundle_mp3";
+        authors = [
+          "Philip Deljanov <philip.deljanov@gmail.com>"
+        ];
+        dependencies = [
+          {
+            name = "lazy_static";
+            packageId = "lazy_static";
+          }
+          {
+            name = "log";
+            packageId = "log";
+          }
+          {
+            name = "symphonia-core";
+            packageId = "symphonia-core";
+          }
+          {
+            name = "symphonia-metadata";
+            packageId = "symphonia-metadata";
+          }
+        ];
+        features = {
+          "default" = [ "mp1" "mp2" "mp3" ];
+        };
+        resolvedDefaultFeatures = [ "mp3" ];
+      };
+      "symphonia-codec-aac" = rec {
+        crateName = "symphonia-codec-aac";
+        version = "0.5.5";
+        edition = "2018";
+        sha256 = "1457ffg88inyb6x1s4cnid7icmbz9jjjj5wwhhb19246m92kh9jc";
+        libName = "symphonia_codec_aac";
+        authors = [
+          "Philip Deljanov <philip.deljanov@gmail.com>"
+          "Kostya Shishkov <kostya.shiskov@gmail.com>"
+        ];
+        dependencies = [
+          {
+            name = "lazy_static";
+            packageId = "lazy_static";
+          }
+          {
+            name = "log";
+            packageId = "log";
+          }
+          {
+            name = "symphonia-core";
+            packageId = "symphonia-core";
+          }
+        ];
+
+      };
+      "symphonia-codec-adpcm" = rec {
+        crateName = "symphonia-codec-adpcm";
+        version = "0.5.5";
+        edition = "2018";
+        sha256 = "0zyhvllh2da36j7sn1c6fhcz7fa6gkkyq7j44zhcz95y5c7cbp9d";
+        libName = "symphonia_codec_adpcm";
+        authors = [
+          "Philip Deljanov <philip.deljanov@gmail.com>"
+          "Johannes Hackel <geckoxx90@gmail.com>"
+        ];
+        dependencies = [
+          {
+            name = "log";
+            packageId = "log";
+          }
+          {
+            name = "symphonia-core";
+            packageId = "symphonia-core";
+          }
+        ];
+
+      };
+      "symphonia-codec-pcm" = rec {
+        crateName = "symphonia-codec-pcm";
+        version = "0.5.5";
+        edition = "2018";
+        sha256 = "158x0g5v13qh1c4jyyrzd8kcz9rqim6cx4bwpqzash8mq0bdg2af";
+        libName = "symphonia_codec_pcm";
+        authors = [
+          "Philip Deljanov <philip.deljanov@gmail.com>"
+        ];
+        dependencies = [
+          {
+            name = "log";
+            packageId = "log";
+          }
+          {
+            name = "symphonia-core";
+            packageId = "symphonia-core";
+          }
+        ];
+
+      };
+      "symphonia-codec-vorbis" = rec {
+        crateName = "symphonia-codec-vorbis";
+        version = "0.5.5";
+        edition = "2018";
+        sha256 = "0wqwbnwb3ibwf14mx6irqm99bdap4950nxbjypz9zmlw61y869gh";
+        libName = "symphonia_codec_vorbis";
+        authors = [
+          "Philip Deljanov <philip.deljanov@gmail.com>"
+        ];
+        dependencies = [
+          {
+            name = "log";
+            packageId = "log";
+          }
+          {
+            name = "symphonia-core";
+            packageId = "symphonia-core";
+          }
+          {
+            name = "symphonia-utils-xiph";
+            packageId = "symphonia-utils-xiph";
+          }
+        ];
+
+      };
+      "symphonia-core" = rec {
+        crateName = "symphonia-core";
+        version = "0.5.5";
+        edition = "2018";
+        sha256 = "1by293wrwb37as89fx8qzr1klvq6l5jw1pbyz1zvpxmpg57wq07a";
+        libName = "symphonia_core";
+        authors = [
+          "Philip Deljanov <philip.deljanov@gmail.com>"
+        ];
+        dependencies = [
+          {
+            name = "arrayvec";
+            packageId = "arrayvec";
+          }
+          {
+            name = "bitflags";
+            packageId = "bitflags 1.3.2";
+          }
+          {
+            name = "bytemuck";
+            packageId = "bytemuck";
+          }
+          {
+            name = "lazy_static";
+            packageId = "lazy_static";
+          }
+          {
+            name = "log";
+            packageId = "log";
+          }
+        ];
+        features = {
+          "opt-simd" = [ "opt-simd-sse" "opt-simd-avx" "opt-simd-neon" ];
+          "opt-simd-avx" = [ "rustfft/avx" ];
+          "opt-simd-neon" = [ "rustfft/neon" ];
+          "opt-simd-sse" = [ "rustfft/sse" ];
+          "rustfft" = [ "dep:rustfft" ];
+        };
+        resolvedDefaultFeatures = [ "default" ];
+      };
+      "symphonia-format-isomp4" = rec {
+        crateName = "symphonia-format-isomp4";
+        version = "0.5.5";
+        edition = "2018";
+        sha256 = "19g060n3hjrnzisrc9csq3v9hy6c30yrz3dcinpivy0ibmc3jdr4";
+        libName = "symphonia_format_isomp4";
+        authors = [
+          "Philip Deljanov <philip.deljanov@gmail.com>"
+        ];
+        dependencies = [
+          {
+            name = "encoding_rs";
+            packageId = "encoding_rs";
+          }
+          {
+            name = "log";
+            packageId = "log";
+          }
+          {
+            name = "symphonia-core";
+            packageId = "symphonia-core";
+          }
+          {
+            name = "symphonia-metadata";
+            packageId = "symphonia-metadata";
+          }
+          {
+            name = "symphonia-utils-xiph";
+            packageId = "symphonia-utils-xiph";
+          }
+        ];
+
+      };
+      "symphonia-format-riff" = rec {
+        crateName = "symphonia-format-riff";
+        version = "0.5.5";
+        edition = "2018";
+        sha256 = "0vx9247jsn9cjr0s3hay1ns04g77x831kn01hjvfz53x1vgw7my2";
+        libName = "symphonia_format_riff";
+        authors = [
+          "Philip Deljanov <philip.deljanov@gmail.com>"
+          "dedobbin <dedobbindedobbin@gmail.com>"
+        ];
+        dependencies = [
+          {
+            name = "extended";
+            packageId = "extended";
+          }
+          {
+            name = "log";
+            packageId = "log";
+          }
+          {
+            name = "symphonia-core";
+            packageId = "symphonia-core";
+          }
+          {
+            name = "symphonia-metadata";
+            packageId = "symphonia-metadata";
+          }
+        ];
+        features = {
+          "default" = [ "aiff" "wav" ];
+        };
+        resolvedDefaultFeatures = [ "wav" ];
+      };
+      "symphonia-metadata" = rec {
+        crateName = "symphonia-metadata";
+        version = "0.5.5";
+        edition = "2018";
+        sha256 = "05kbkshrzqj83mlbkdwxkgkjzmhb3q99xm4rzid6xzlz5gs6yc1n";
+        libName = "symphonia_metadata";
+        authors = [
+          "Philip Deljanov <philip.deljanov@gmail.com>"
+        ];
+        dependencies = [
+          {
+            name = "encoding_rs";
+            packageId = "encoding_rs";
+          }
+          {
+            name = "lazy_static";
+            packageId = "lazy_static";
+          }
+          {
+            name = "log";
+            packageId = "log";
+          }
+          {
+            name = "symphonia-core";
+            packageId = "symphonia-core";
+          }
+        ];
+
+      };
+      "symphonia-utils-xiph" = rec {
+        crateName = "symphonia-utils-xiph";
+        version = "0.5.5";
+        edition = "2018";
+        sha256 = "05lzmgxppqn647hmc1j9pgqsdqa2pxxcgvk8dd23i8wrnxdch9zf";
+        libName = "symphonia_utils_xiph";
+        authors = [
+          "Philip Deljanov <philip.deljanov@gmail.com>"
+        ];
+        dependencies = [
+          {
+            name = "symphonia-core";
+            packageId = "symphonia-core";
+          }
+          {
+            name = "symphonia-metadata";
+            packageId = "symphonia-metadata";
+          }
+        ];
+
+      };
       "syn 1.0.109" = rec {
         crateName = "syn";
         version = "1.0.109";
@@ -21073,6 +26294,133 @@ rec {
           "wasm-bindgen" = [ "dep:wasm-bindgen" ];
           "web-sys" = [ "dep:web-sys" ];
         };
+      };
+      "tachys" = rec {
+        crateName = "tachys";
+        version = "0.2.19";
+        edition = "2021";
+        sha256 = "0s5cfmv910mw7g5sa7mikd4q82ssd2vhyam2fvlknalxpch24zp4";
+        authors = [
+          "Greg Johnston"
+        ];
+        dependencies = [
+          {
+            name = "any_spawner";
+            packageId = "any_spawner";
+            optional = true;
+          }
+          {
+            name = "async-trait";
+            packageId = "async-trait";
+          }
+          {
+            name = "const_str_slice_concat";
+            packageId = "const_str_slice_concat";
+          }
+          {
+            name = "drain_filter_polyfill";
+            packageId = "drain_filter_polyfill";
+          }
+          {
+            name = "either_of";
+            packageId = "either_of";
+          }
+          {
+            name = "erased";
+            packageId = "erased";
+          }
+          {
+            name = "futures";
+            packageId = "futures";
+          }
+          {
+            name = "html-escape";
+            packageId = "html-escape";
+          }
+          {
+            name = "indexmap";
+            packageId = "indexmap 2.14.2";
+          }
+          {
+            name = "itertools";
+            packageId = "itertools 0.14.0";
+          }
+          {
+            name = "js-sys";
+            packageId = "js-sys";
+          }
+          {
+            name = "next_tuple";
+            packageId = "next_tuple";
+          }
+          {
+            name = "oco_ref";
+            packageId = "oco_ref";
+            optional = true;
+          }
+          {
+            name = "or_poisoned";
+            packageId = "or_poisoned";
+          }
+          {
+            name = "paste";
+            packageId = "paste";
+          }
+          {
+            name = "reactive_graph";
+            packageId = "reactive_graph";
+            optional = true;
+          }
+          {
+            name = "reactive_stores";
+            packageId = "reactive_stores";
+            optional = true;
+          }
+          {
+            name = "rustc-hash";
+            packageId = "rustc-hash 2.1.3";
+          }
+          {
+            name = "send_wrapper";
+            packageId = "send_wrapper";
+          }
+          {
+            name = "slotmap";
+            packageId = "slotmap";
+            optional = true;
+          }
+          {
+            name = "throw_error";
+            packageId = "throw_error";
+          }
+          {
+            name = "wasm-bindgen";
+            packageId = "wasm-bindgen";
+          }
+          {
+            name = "web-sys";
+            packageId = "web-sys";
+            features = [ "Window" "Document" "HtmlElement" "HtmlInputElement" "Element" "Event" "console" "Comment" "Text" "Node" "HtmlTemplateElement" "DocumentFragment" "DomTokenList" "CssStyleDeclaration" "ShadowRoot" "HtmlCollection" "DomStringMap" "AddEventListenerOptions" "AnimationEvent" "BeforeUnloadEvent" "ClipboardEvent" "CompositionEvent" "CustomEvent" "DeviceMotionEvent" "DeviceOrientationEvent" "DragEvent" "ErrorEvent" "Event" "FocusEvent" "GamepadEvent" "HashChangeEvent" "InputEvent" "KeyboardEvent" "MessageEvent" "MouseEvent" "PageTransitionEvent" "PointerEvent" "PopStateEvent" "ProgressEvent" "PromiseRejectionEvent" "SecurityPolicyViolationEvent" "StorageEvent" "SubmitEvent" "TouchEvent" "TransitionEvent" "UiEvent" "WheelEvent" "HtmlHtmlElement" "HtmlBaseElement" "HtmlHeadElement" "HtmlLinkElement" "HtmlMetaElement" "HtmlStyleElement" "HtmlTitleElement" "HtmlBodyElement" "HtmlHeadingElement" "HtmlQuoteElement" "HtmlDivElement" "HtmlDListElement" "HtmlHrElement" "HtmlLiElement" "HtmlOListElement" "HtmlParagraphElement" "HtmlPreElement" "HtmlUListElement" "HtmlAnchorElement" "HtmlBrElement" "HtmlDataElement" "HtmlQuoteElement" "HtmlSpanElement" "HtmlTimeElement" "HtmlAreaElement" "HtmlAudioElement" "HtmlImageElement" "HtmlMapElement" "HtmlTrackElement" "HtmlVideoElement" "HtmlEmbedElement" "HtmlIFrameElement" "HtmlObjectElement" "HtmlParamElement" "HtmlPictureElement" "HtmlSourceElement" "SvgElement" "HtmlCanvasElement" "HtmlScriptElement" "HtmlModElement" "HtmlTableCaptionElement" "HtmlTableColElement" "HtmlTableColElement" "HtmlTableElement" "HtmlTableSectionElement" "HtmlTableCellElement" "HtmlTableSectionElement" "HtmlTableCellElement" "HtmlTableSectionElement" "HtmlTableRowElement" "HtmlButtonElement" "HtmlDataListElement" "HtmlFieldSetElement" "HtmlFormElement" "HtmlInputElement" "HtmlLabelElement" "HtmlLegendElement" "HtmlMeterElement" "HtmlOptGroupElement" "HtmlOutputElement" "HtmlProgressElement" "HtmlSelectElement" "HtmlTextAreaElement" "HtmlDetailsElement" "HtmlDialogElement" "HtmlMenuElement" "HtmlSlotElement" "HtmlTemplateElement" "HtmlOptionElement" ];
+          }
+        ];
+        buildDependencies = [
+          {
+            name = "rustc_version";
+            packageId = "rustc_version";
+          }
+        ];
+        features = {
+          "default" = [ "testing" ];
+          "islands" = [ "dep:serde" "dep:serde_json" ];
+          "nightly" = [ "reactive_graph/nightly" ];
+          "oco" = [ "dep:oco_ref" ];
+          "reactive_graph" = [ "dep:reactive_graph" "dep:any_spawner" ];
+          "reactive_stores" = [ "reactive_graph" "dep:reactive_stores" ];
+          "sledgehammer" = [ "dep:sledgehammer_bindgen" "dep:sledgehammer_utils" ];
+          "testing" = [ "dep:slotmap" ];
+          "tracing" = [ "dep:tracing" ];
+        };
+        resolvedDefaultFeatures = [ "default" "hydrate" "oco" "reactive_graph" "reactive_stores" "ssr" "testing" ];
       };
       "tar" = rec {
         crateName = "tar";
@@ -21305,6 +26653,22 @@ rec {
         features = {
         };
       };
+      "throw_error" = rec {
+        crateName = "throw_error";
+        version = "0.3.1";
+        edition = "2021";
+        sha256 = "0r4g7jqx54j40i720yb6jlxmfdm6vlyrd4kwr9d7kh6biw1xc3nw";
+        authors = [
+          "Greg Johnston"
+        ];
+        dependencies = [
+          {
+            name = "pin-project-lite";
+            packageId = "pin-project-lite";
+          }
+        ];
+
+      };
       "tiff" = rec {
         crateName = "tiff";
         version = "0.11.3";
@@ -21463,7 +26827,7 @@ rec {
         };
         resolvedDefaultFeatures = [ "formatting" "parsing" "serde" ];
       };
-      "tiny-skia" = rec {
+      "tiny-skia 0.11.4" = rec {
         crateName = "tiny-skia";
         version = "0.11.4";
         edition = "2018";
@@ -21502,7 +26866,7 @@ rec {
           }
           {
             name = "tiny-skia-path";
-            packageId = "tiny-skia-path";
+            packageId = "tiny-skia-path 0.11.4";
             usesDefaultFeatures = false;
           }
         ];
@@ -21515,7 +26879,53 @@ rec {
         };
         resolvedDefaultFeatures = [ "default" "png" "png-format" "simd" "std" ];
       };
-      "tiny-skia-path" = rec {
+      "tiny-skia 0.12.0" = rec {
+        crateName = "tiny-skia";
+        version = "0.12.0";
+        edition = "2021";
+        sha256 = "1sliba6ghl038ig7r4wds7aq9v5x1swmdqxh1xipylpmm9gfxzs7";
+        libName = "tiny_skia";
+        authors = [
+          "Yevhenii Reizner <razrfalcon@gmail.com>"
+        ];
+        dependencies = [
+          {
+            name = "arrayref";
+            packageId = "arrayref";
+          }
+          {
+            name = "arrayvec";
+            packageId = "arrayvec";
+            usesDefaultFeatures = false;
+          }
+          {
+            name = "bytemuck";
+            packageId = "bytemuck";
+            features = [ "aarch64_simd" ];
+          }
+          {
+            name = "cfg-if";
+            packageId = "cfg-if";
+          }
+          {
+            name = "log";
+            packageId = "log";
+          }
+          {
+            name = "tiny-skia-path";
+            packageId = "tiny-skia-path 0.12.0";
+            usesDefaultFeatures = false;
+          }
+        ];
+        features = {
+          "default" = [ "std" "simd" "png-format" ];
+          "no-std-float" = [ "tiny-skia-path/no-std-float" ];
+          "png-format" = [ "std" "dep:png" ];
+          "std" = [ "tiny-skia-path/std" ];
+        };
+        resolvedDefaultFeatures = [ "simd" "std" ];
+      };
+      "tiny-skia-path 0.11.4" = rec {
         crateName = "tiny-skia-path";
         version = "0.11.4";
         edition = "2018";
@@ -21545,6 +26955,37 @@ rec {
           "no-std-float" = [ "libm" ];
         };
         resolvedDefaultFeatures = [ "default" "std" ];
+      };
+      "tiny-skia-path 0.12.0" = rec {
+        crateName = "tiny-skia-path";
+        version = "0.12.0";
+        edition = "2021";
+        sha256 = "1fgfzl0mzf2vfcqk3817wxynhmvcza05jg2r0rysdk5c7xf3djpd";
+        libName = "tiny_skia_path";
+        authors = [
+          "Yevhenii Reizner <razrfalcon@gmail.com>"
+        ];
+        dependencies = [
+          {
+            name = "arrayref";
+            packageId = "arrayref";
+          }
+          {
+            name = "bytemuck";
+            packageId = "bytemuck";
+          }
+          {
+            name = "strict-num";
+            packageId = "strict-num";
+            usesDefaultFeatures = false;
+          }
+        ];
+        features = {
+          "default" = [ "std" ];
+          "libm" = [ "dep:libm" ];
+          "no-std-float" = [ "libm" ];
+        };
+        resolvedDefaultFeatures = [ "std" ];
       };
       "tiny-xlib" = rec {
         crateName = "tiny-xlib";
@@ -21794,6 +27235,44 @@ rec {
         ];
 
       };
+      "tokio-rustls" = rec {
+        crateName = "tokio-rustls";
+        version = "0.26.6";
+        edition = "2021";
+        sha256 = "1nq5s413p6hkwrgjrpag1gi2mnjajpbszqhmhbpnkmfdq9w2dk69";
+        libName = "tokio_rustls";
+        dependencies = [
+          {
+            name = "rustls";
+            packageId = "rustls";
+            usesDefaultFeatures = false;
+            features = [ "std" ];
+          }
+          {
+            name = "tokio";
+            packageId = "tokio";
+          }
+        ];
+        devDependencies = [
+          {
+            name = "tokio";
+            packageId = "tokio";
+            features = [ "full" ];
+          }
+        ];
+        features = {
+          "aws-lc-rs" = [ "aws_lc_rs" ];
+          "aws_lc_rs" = [ "rustls/aws_lc_rs" ];
+          "brotli" = [ "rustls/brotli" ];
+          "default" = [ "logging" "tls12" "aws_lc_rs" ];
+          "fips" = [ "rustls/fips" ];
+          "logging" = [ "rustls/logging" ];
+          "ring" = [ "rustls/ring" ];
+          "tls12" = [ "rustls/tls12" ];
+          "zlib" = [ "rustls/zlib" ];
+        };
+        resolvedDefaultFeatures = [ "logging" "ring" "tls12" ];
+      };
       "tokio-tungstenite" = rec {
         crateName = "tokio-tungstenite";
         version = "0.24.0";
@@ -21878,6 +27357,12 @@ rec {
             packageId = "futures-sink";
           }
           {
+            name = "libc";
+            packageId = "libc";
+            optional = true;
+            target = { target, features }: (target."unix" or false);
+          }
+          {
             name = "pin-project-lite";
             packageId = "pin-project-lite";
           }
@@ -21911,7 +27396,7 @@ rec {
           "time" = [ "tokio/time" "slab" ];
           "tracing" = [ "dep:tracing" ];
         };
-        resolvedDefaultFeatures = [ "io" ];
+        resolvedDefaultFeatures = [ "codec" "default" "io" "libc" ];
       };
       "toml" = rec {
         crateName = "toml";
@@ -22214,7 +27699,7 @@ rec {
           }
           {
             name = "mime";
-            packageId = "mime";
+            packageId = "mime 0.3.17";
             optional = true;
             usesDefaultFeatures = false;
           }
@@ -22912,7 +28397,7 @@ rec {
           }
           {
             name = "memmap2";
-            packageId = "memmap2";
+            packageId = "memmap2 0.9.11";
           }
           {
             name = "num-integer";
@@ -23132,6 +28617,52 @@ rec {
           "webpki-roots" = [ "dep:webpki-roots" ];
         };
         resolvedDefaultFeatures = [ "__rustls-tls" "data-encoding" "handshake" "http" "httparse" "rustls" "rustls-pki-types" "rustls-tls-webpki-roots" "sha1" "webpki-roots" ];
+      };
+      "typed-builder" = rec {
+        crateName = "typed-builder";
+        version = "0.23.2";
+        edition = "2024";
+        sha256 = "1npzaxvjhwkyfjwrx6dniqygka6a1v68r10xa0149ybh3d983aii";
+        libName = "typed_builder";
+        authors = [
+          "IdanArye <idanarye@gmail.com>"
+          "Chris Morgan <me@chrismorgan.info>"
+        ];
+        dependencies = [
+          {
+            name = "typed-builder-macro";
+            packageId = "typed-builder-macro";
+          }
+        ];
+
+      };
+      "typed-builder-macro" = rec {
+        crateName = "typed-builder-macro";
+        version = "0.23.2";
+        edition = "2024";
+        sha256 = "09pvj20y47cs73lmv5byfhi1xyxw83nq50lw5rf7jinxakf04sh7";
+        procMacro = true;
+        libName = "typed_builder_macro";
+        authors = [
+          "IdanArye <idanarye@gmail.com>"
+          "Chris Morgan <me@chrismorgan.info>"
+        ];
+        dependencies = [
+          {
+            name = "proc-macro2";
+            packageId = "proc-macro2";
+          }
+          {
+            name = "quote";
+            packageId = "quote";
+          }
+          {
+            name = "syn";
+            packageId = "syn 2.0.119";
+            features = [ "full" "extra-traits" ];
+          }
+        ];
+
       };
       "typenum" = rec {
         crateName = "typenum";
@@ -23354,6 +28885,21 @@ rec {
           "std" = [ "dep:std" ];
         };
         resolvedDefaultFeatures = [ "cjk" "default" ];
+      };
+      "unicode-xid" = rec {
+        crateName = "unicode-xid";
+        version = "0.2.6";
+        edition = "2015";
+        sha256 = "0lzqaky89fq0bcrh6jj6bhlz37scfd8c7dsj5dq7y32if56c1hgb";
+        libName = "unicode_xid";
+        authors = [
+          "erick.tryzelaar <erick.tryzelaar@gmail.com>"
+          "kwantam <kwantam@gmail.com>"
+          "Manish Goregaokar <manishsmail@gmail.com>"
+        ];
+        features = {
+        };
+        resolvedDefaultFeatures = [ "default" ];
       };
       "uniffi" = rec {
         crateName = "uniffi";
@@ -23930,7 +29476,7 @@ rec {
           }
           {
             name = "tiny-skia-path";
-            packageId = "tiny-skia-path";
+            packageId = "tiny-skia-path 0.11.4";
           }
           {
             name = "unicode-bidi";
@@ -23998,6 +29544,12 @@ rec {
         ];
         dependencies = [
           {
+            name = "getrandom";
+            packageId = "getrandom 0.4.3";
+            optional = true;
+            target = { target, features }: (!(("wasm32" == target."arch" or null) && (("unknown" == target."os" or null) || ("none" == target."os" or null))));
+          }
+          {
             name = "js-sys";
             packageId = "js-sys";
             optional = true;
@@ -24050,7 +29602,7 @@ rec {
           "v7" = [ "rng" ];
           "zerocopy" = [ "dep:zerocopy" ];
         };
-        resolvedDefaultFeatures = [ "default" "serde" "std" ];
+        resolvedDefaultFeatures = [ "default" "rng" "serde" "std" "v4" ];
       };
       "v_frame" = rec {
         crateName = "v_frame";
@@ -24307,6 +29859,102 @@ rec {
         ];
 
       };
+      "wasm-streams" = rec {
+        crateName = "wasm-streams";
+        version = "0.5.0";
+        edition = "2021";
+        sha256 = "1fqbcx33w8ys5i5dv3p28a82g4yiclmhn80fcfp137kwa7vc87lx";
+        libName = "wasm_streams";type = [ "cdylib" "rlib" ];
+        authors = [
+          "Mattias Buelens <mattias@buelens.com>"
+        ];
+        dependencies = [
+          {
+            name = "futures-util";
+            packageId = "futures-util";
+            features = [ "io" "sink" ];
+          }
+          {
+            name = "js-sys";
+            packageId = "js-sys";
+          }
+          {
+            name = "wasm-bindgen";
+            packageId = "wasm-bindgen";
+          }
+          {
+            name = "wasm-bindgen-futures";
+            packageId = "wasm-bindgen-futures";
+          }
+          {
+            name = "web-sys";
+            packageId = "web-sys";
+            features = [ "AbortSignal" "QueuingStrategy" "ReadableStream" "ReadableStreamType" "ReadableWritablePair" "ReadableStreamByobReader" "ReadableStreamReaderMode" "ReadableStreamReadResult" "ReadableStreamByobRequest" "ReadableStreamDefaultReader" "ReadableByteStreamController" "ReadableStreamGetReaderOptions" "ReadableStreamDefaultController" "StreamPipeOptions" "TransformStream" "TransformStreamDefaultController" "Transformer" "UnderlyingSink" "UnderlyingSource" "WritableStream" "WritableStreamDefaultController" "WritableStreamDefaultWriter" ];
+          }
+        ];
+        devDependencies = [
+          {
+            name = "web-sys";
+            packageId = "web-sys";
+            features = [ "console" "AbortSignal" "ErrorEvent" "PromiseRejectionEvent" "Response" "ReadableStream" "Window" ];
+          }
+        ];
+
+      };
+      "wasm_split_helpers" = rec {
+        crateName = "wasm_split_helpers";
+        version = "0.2.3";
+        edition = "2021";
+        sha256 = "1fl5nckwmva8yvp0rni2asbb11qgsn3k3106xbd6x4g25yp8lmxb";
+        authors = [
+          "Greg Johnston <greg.johnston@gmail.com>"
+          "Jeremy Maitin-Shepard <jbms@google.com>"
+          "Martin Molzer <worldsbegin@gmx.de>"
+        ];
+        dependencies = [
+          {
+            name = "async-once-cell";
+            packageId = "async-once-cell";
+          }
+          {
+            name = "wasm_split_macros";
+            packageId = "wasm_split_macros";
+          }
+        ];
+
+      };
+      "wasm_split_macros" = rec {
+        crateName = "wasm_split_macros";
+        version = "0.2.2";
+        edition = "2021";
+        sha256 = "1j760zjcc79fhvsz9d6ds0hdwy6b8dpyrac1wkyg17jaxvvklr9y";
+        procMacro = true;
+        authors = [
+          "Greg Johnston <greg.johnston@gmail.com>"
+          "Jeremy Maitin-Shepard <jbms@google.com>"
+          "Martin Molzer <worldsbegin@gmx.de>"
+        ];
+        dependencies = [
+          {
+            name = "base16";
+            packageId = "base16";
+          }
+          {
+            name = "quote";
+            packageId = "quote";
+          }
+          {
+            name = "sha2";
+            packageId = "sha2";
+          }
+          {
+            name = "syn";
+            packageId = "syn 2.0.119";
+            features = [ "full" ];
+          }
+        ];
+
+      };
       "wasmtimer" = rec {
         crateName = "wasmtimer";
         version = "0.4.3";
@@ -24534,6 +30182,11 @@ rec {
             name = "wayland-scanner";
             packageId = "wayland-scanner";
           }
+          {
+            name = "wayland-server";
+            packageId = "wayland-server";
+            optional = true;
+          }
         ];
         features = {
           "client" = [ "wayland-client" ];
@@ -24541,7 +30194,7 @@ rec {
           "wayland-client" = [ "dep:wayland-client" ];
           "wayland-server" = [ "dep:wayland-server" ];
         };
-        resolvedDefaultFeatures = [ "client" "staging" "unstable" "wayland-client" ];
+        resolvedDefaultFeatures = [ "client" "server" "staging" "unstable" "wayland-client" "wayland-server" ];
       };
       "wayland-protocols-experimental" = rec {
         crateName = "wayland-protocols-experimental";
@@ -24696,6 +30349,11 @@ rec {
             name = "wayland-scanner";
             packageId = "wayland-scanner";
           }
+          {
+            name = "wayland-server";
+            packageId = "wayland-server";
+            optional = true;
+          }
         ];
         features = {
           "client" = [ "wayland-client" "wayland-protocols/client" ];
@@ -24703,7 +30361,7 @@ rec {
           "wayland-client" = [ "dep:wayland-client" ];
           "wayland-server" = [ "dep:wayland-server" ];
         };
-        resolvedDefaultFeatures = [ "client" "wayland-client" ];
+        resolvedDefaultFeatures = [ "client" "server" "wayland-client" "wayland-server" ];
       };
       "wayland-scanner" = rec {
         crateName = "wayland-scanner";
@@ -24730,6 +30388,46 @@ rec {
           }
         ];
 
+      };
+      "wayland-server" = rec {
+        crateName = "wayland-server";
+        version = "0.31.14";
+        edition = "2021";
+        sha256 = "0xad6xz36fyxz5s0lwsj6shdzwsv8pp53pkp75bklwhgpqlrrphd";
+        libName = "wayland_server";
+        authors = [
+          "Elinor Berger <elinor@safaradeg.net>"
+        ];
+        dependencies = [
+          {
+            name = "bitflags";
+            packageId = "bitflags 2.13.2";
+          }
+          {
+            name = "downcast-rs";
+            packageId = "downcast-rs";
+          }
+          {
+            name = "rustix";
+            packageId = "rustix 1.1.5";
+            features = [ "fs" ];
+          }
+          {
+            name = "wayland-backend";
+            packageId = "wayland-backend";
+          }
+          {
+            name = "wayland-scanner";
+            packageId = "wayland-scanner";
+          }
+        ];
+        features = {
+          "dlopen" = [ "wayland-backend/dlopen" ];
+          "libwayland_1_22" = [ "wayland-backend/libwayland_server_1_22" ];
+          "libwayland_1_23" = [ "libwayland_1_22" "wayland-backend/libwayland_server_1_23" ];
+          "log" = [ "dep:log" ];
+          "system" = [ "wayland-backend/server_system" ];
+        };
       };
       "wayland-sys" = rec {
         crateName = "wayland-sys";
@@ -25275,7 +30973,7 @@ rec {
           "default" = [ "std" ];
           "std" = [ "wasm-bindgen/std" "js-sys/std" ];
         };
-        resolvedDefaultFeatures = [ "AbortController" "AbortSignal" "AngleInstancedArrays" "BinaryType" "Blob" "BlobPropertyBag" "CanvasRenderingContext2d" "Clipboard" "CloseEvent" "CssStyleDeclaration" "DataTransfer" "Document" "DomException" "DomRect" "DomRectReadOnly" "DomTokenList" "DragEvent" "Element" "Event" "EventTarget" "ExtBlendMinmax" "ExtColorBufferFloat" "ExtColorBufferHalfFloat" "ExtDisjointTimerQuery" "ExtFragDepth" "ExtSRgb" "ExtShaderTextureLod" "ExtTextureFilterAnisotropic" "File" "FileList" "FocusEvent" "Headers" "History" "HtmlAudioElement" "HtmlCanvasElement" "HtmlElement" "HtmlImageElement" "HtmlInputElement" "HtmlMediaElement" "HtmlVideoElement" "ImageBitmap" "ImageBitmapOptions" "ImageBitmapRenderingContext" "ImageData" "IntersectionObserver" "IntersectionObserverEntry" "KeyboardEvent" "Location" "MediaQueryList" "MediaQueryListEvent" "MessageChannel" "MessageEvent" "MessagePort" "MouseEvent" "Navigator" "Node" "NodeList" "OesElementIndexUint" "OesStandardDerivatives" "OesTextureFloat" "OesTextureFloatLinear" "OesTextureHalfFloat" "OesTextureHalfFloatLinear" "OesVertexArrayObject" "OffscreenCanvas" "OffscreenCanvasRenderingContext2d" "OrientationLockType" "OrientationType" "OvrMultiview2" "PageTransitionEvent" "PermissionState" "PermissionStatus" "Permissions" "PointerEvent" "PremultiplyAlpha" "Request" "RequestInit" "ResizeObserver" "ResizeObserverBoxOptions" "ResizeObserverEntry" "ResizeObserverOptions" "ResizeObserverSize" "Response" "Screen" "ScreenOrientation" "Storage" "UiEvent" "Url" "VideoFrame" "VisibilityState" "WebGl2RenderingContext" "WebGlActiveInfo" "WebGlBuffer" "WebGlFramebuffer" "WebGlProgram" "WebGlQuery" "WebGlRenderbuffer" "WebGlRenderingContext" "WebGlSampler" "WebGlShader" "WebGlShaderPrecisionFormat" "WebGlSync" "WebGlTexture" "WebGlTransformFeedback" "WebGlUniformLocation" "WebGlVertexArrayObject" "WebSocket" "WebglColorBufferFloat" "WebglCompressedTextureAstc" "WebglCompressedTextureEtc" "WebglCompressedTextureEtc1" "WebglCompressedTexturePvrtc" "WebglCompressedTextureS3tc" "WebglCompressedTextureS3tcSrgb" "WebglDebugRendererInfo" "WebglDebugShaders" "WebglDepthTexture" "WebglDrawBuffers" "WebglLoseContext" "WheelEvent" "Window" "Worker" "WorkerGlobalScope" "WorkerNavigator" "console" "default" "std" ];
+        resolvedDefaultFeatures = [ "AbortController" "AbortSignal" "AddEventListenerOptions" "AngleInstancedArrays" "AnimationEvent" "AudioBuffer" "AudioBufferSourceNode" "AudioContext" "AudioContextOptions" "AudioContextState" "AudioDestinationNode" "AudioNode" "AudioScheduledSourceNode" "BaseAudioContext" "BeforeUnloadEvent" "BinaryType" "Blob" "BlobPropertyBag" "CanvasRenderingContext2d" "CharacterData" "Clipboard" "ClipboardEvent" "CloseEvent" "CloseEventInit" "Comment" "CompositionEvent" "CssStyleDeclaration" "CustomEvent" "DeviceMotionEvent" "DeviceOrientationEvent" "Document" "DocumentFragment" "DomException" "DomRect" "DomRectReadOnly" "DomStringMap" "DomTokenList" "DragEvent" "Element" "ErrorEvent" "Event" "EventSource" "EventTarget" "ExtBlendMinmax" "ExtColorBufferFloat" "ExtColorBufferHalfFloat" "ExtDisjointTimerQuery" "ExtFragDepth" "ExtSRgb" "ExtShaderTextureLod" "ExtTextureFilterAnisotropic" "File" "FileList" "FileReader" "FocusEvent" "FormData" "GamepadEvent" "HashChangeEvent" "Headers" "History" "HtmlAnchorElement" "HtmlAreaElement" "HtmlAudioElement" "HtmlBaseElement" "HtmlBodyElement" "HtmlBrElement" "HtmlButtonElement" "HtmlCanvasElement" "HtmlCollection" "HtmlDListElement" "HtmlDataElement" "HtmlDataListElement" "HtmlDetailsElement" "HtmlDialogElement" "HtmlDivElement" "HtmlDocument" "HtmlElement" "HtmlEmbedElement" "HtmlFieldSetElement" "HtmlFormElement" "HtmlHeadElement" "HtmlHeadingElement" "HtmlHrElement" "HtmlHtmlElement" "HtmlIFrameElement" "HtmlImageElement" "HtmlInputElement" "HtmlLabelElement" "HtmlLegendElement" "HtmlLiElement" "HtmlLinkElement" "HtmlMapElement" "HtmlMediaElement" "HtmlMenuElement" "HtmlMetaElement" "HtmlMeterElement" "HtmlModElement" "HtmlOListElement" "HtmlObjectElement" "HtmlOptGroupElement" "HtmlOptionElement" "HtmlOutputElement" "HtmlParagraphElement" "HtmlParamElement" "HtmlPictureElement" "HtmlPreElement" "HtmlProgressElement" "HtmlQuoteElement" "HtmlScriptElement" "HtmlSelectElement" "HtmlSlotElement" "HtmlSourceElement" "HtmlSpanElement" "HtmlStyleElement" "HtmlTableCaptionElement" "HtmlTableCellElement" "HtmlTableColElement" "HtmlTableElement" "HtmlTableRowElement" "HtmlTableSectionElement" "HtmlTemplateElement" "HtmlTextAreaElement" "HtmlTimeElement" "HtmlTitleElement" "HtmlTrackElement" "HtmlUListElement" "HtmlVideoElement" "ImageBitmap" "ImageBitmapOptions" "ImageBitmapRenderingContext" "ImageData" "InputEvent" "IntersectionObserver" "IntersectionObserverEntry" "KeyboardEvent" "Location" "MediaError" "MediaQueryList" "MediaQueryListEvent" "MessageChannel" "MessageEvent" "MessagePort" "MouseEvent" "Navigator" "Node" "NodeList" "ObserverCallback" "OesElementIndexUint" "OesStandardDerivatives" "OesTextureFloat" "OesTextureFloatLinear" "OesTextureHalfFloat" "OesTextureHalfFloatLinear" "OesVertexArrayObject" "OffscreenCanvas" "OffscreenCanvasRenderingContext2d" "OrientationLockType" "OrientationType" "OvrMultiview2" "PageTransitionEvent" "PermissionState" "PermissionStatus" "Permissions" "PointerEvent" "PopStateEvent" "PremultiplyAlpha" "ProgressEvent" "PromiseRejectionEvent" "QueuingStrategy" "ReadableByteStreamController" "ReadableStream" "ReadableStreamByobReader" "ReadableStreamByobRequest" "ReadableStreamDefaultController" "ReadableStreamDefaultReader" "ReadableStreamGetReaderOptions" "ReadableStreamReadResult" "ReadableStreamReaderMode" "ReadableStreamType" "ReadableWritablePair" "ReferrerPolicy" "Request" "RequestCache" "RequestCredentials" "RequestInit" "RequestMode" "RequestRedirect" "ResizeObserver" "ResizeObserverBoxOptions" "ResizeObserverEntry" "ResizeObserverOptions" "ResizeObserverSize" "Response" "ResponseInit" "ResponseType" "Screen" "ScreenOrientation" "ScrollIntoViewOptions" "ScrollLogicalPosition" "SecurityPolicyViolationEvent" "ShadowRoot" "ShadowRootInit" "ShadowRootMode" "Storage" "StorageEvent" "StreamPipeOptions" "SubmitEvent" "SvgElement" "Text" "TouchEvent" "TransformStream" "TransformStreamDefaultController" "Transformer" "TransitionEvent" "UiEvent" "UnderlyingSink" "UnderlyingSource" "Url" "UrlSearchParams" "VideoFrame" "VisibilityState" "WebGl2RenderingContext" "WebGlActiveInfo" "WebGlBuffer" "WebGlFramebuffer" "WebGlProgram" "WebGlQuery" "WebGlRenderbuffer" "WebGlRenderingContext" "WebGlSampler" "WebGlShader" "WebGlShaderPrecisionFormat" "WebGlSync" "WebGlTexture" "WebGlTransformFeedback" "WebGlUniformLocation" "WebGlVertexArrayObject" "WebSocket" "WebglColorBufferFloat" "WebglCompressedTextureAstc" "WebglCompressedTextureEtc" "WebglCompressedTextureEtc1" "WebglCompressedTexturePvrtc" "WebglCompressedTextureS3tc" "WebglCompressedTextureS3tcSrgb" "WebglDebugRendererInfo" "WebglDebugShaders" "WebglDepthTexture" "WebglDrawBuffers" "WebglLoseContext" "WheelEvent" "Window" "Worker" "WorkerGlobalScope" "WorkerNavigator" "WritableStream" "WritableStreamDefaultController" "WritableStreamDefaultWriter" "console" "default" "std" ];
       };
       "web-time" = rec {
         crateName = "web-time";
@@ -25368,9 +31066,9 @@ rec {
       };
       "wgpu" = rec {
         crateName = "wgpu";
-        version = "27.0.1";
+        version = "28.0.0";
         edition = "2021";
-        sha256 = "0xvsrmcp862zh3sd6nkr0cbsznna4c3l1hrilzkms4nygjn8prmz";
+        sha256 = "17ypgaygh18pzvf2b9jm92wylq4ywbd4rwrm25yrq47xbx6m7jzr";
         authors = [
           "gfx-rs developers"
         ];
@@ -25383,6 +31081,11 @@ rec {
           {
             name = "bitflags";
             packageId = "bitflags 2.13.2";
+          }
+          {
+            name = "bytemuck";
+            packageId = "bytemuck";
+            features = [ "extern_crate_alloc" "min_const_generics" ];
           }
           {
             name = "cfg-if";
@@ -25529,6 +31232,13 @@ rec {
             packageId = "cfg_aliases";
           }
         ];
+        devDependencies = [
+          {
+            name = "bytemuck";
+            packageId = "bytemuck";
+            features = [ "extern_crate_alloc" "min_const_generics" ];
+          }
+        ];
         features = {
           "angle" = [ "wgpu-core?/angle" ];
           "counters" = [ "wgpu-core?/counters" ];
@@ -25554,13 +31264,13 @@ rec {
           "wgpu-core" = [ "dep:wgpu-core" ];
           "wgsl" = [ "wgpu-core?/wgsl" ];
         };
-        resolvedDefaultFeatures = [ "default" "dx12" "gles" "metal" "parking_lot" "std" "vulkan" "web" "webgl" "webgpu" "wgpu-core" "wgsl" ];
+        resolvedDefaultFeatures = [ "default" "dx12" "gles" "metal" "parking_lot" "std" "vulkan" "web" "webgpu" "wgsl" ];
       };
       "wgpu-core" = rec {
         crateName = "wgpu-core";
-        version = "27.0.3";
+        version = "28.0.1";
         edition = "2021";
-        sha256 = "1rya571frb73y32iwnhnxada31dk64vzj6b1nabihfsl2pjmv9r7";
+        sha256 = "1y8h3i6ydjwhddliivqs220nc7jd2ymihcidzpf6lrizym14cgyj";
         libName = "wgpu_core";
         authors = [
           "gfx-rs developers"
@@ -25667,12 +31377,6 @@ rec {
             target = { target, features }: ("emscripten" == target."os" or null);
           }
           {
-            name = "wgpu-core-deps-wasm";
-            packageId = "wgpu-core-deps-wasm";
-            optional = true;
-            target = { target, features }: (("wasm32" == target."arch" or null) && (!("emscripten" == target."os" or null)));
-          }
-          {
             name = "wgpu-core-deps-windows-linux-android";
             packageId = "wgpu-core-deps-windows-linux-android";
             optional = true;
@@ -25702,13 +31406,14 @@ rec {
           "fragile-send-sync-non-atomic-wasm" = [ "wgpu-hal/fragile-send-sync-non-atomic-wasm" ];
           "gles" = [ "wgpu-core-deps-windows-linux-android/gles" "wgpu-core-deps-emscripten/gles" ];
           "glsl" = [ "naga/glsl-in" ];
+          "macro_rules_attribute" = [ "dep:macro_rules_attribute" ];
           "metal" = [ "wgpu-core-deps-apple/metal" ];
           "observe_locks" = [ "std" "dep:ron" "serde/serde_derive" ];
           "portable-atomic" = [ "dep:portable-atomic" "wgpu-hal/portable-atomic" ];
           "raw-window-handle" = [ "dep:raw-window-handle" ];
           "renderdoc" = [ "wgpu-core-deps-windows-linux-android/renderdoc" ];
           "replay" = [ "serde" "naga/deserialize" ];
-          "serde" = [ "dep:serde" "wgpu-types/serde" "arrayvec/serde" "hashbrown/serde" ];
+          "serde" = [ "dep:serde" "wgpu-types/serde" "arrayvec/serde" "hashbrown/serde" "smallvec/serde" "macro_rules_attribute" ];
           "spirv" = [ "naga/spv-in" ];
           "static-dxc" = [ "wgpu-hal/static-dxc" ];
           "strict_asserts" = [ "wgpu-types/strict_asserts" ];
@@ -25722,13 +31427,13 @@ rec {
           "wgpu-core-deps-windows-linux-android" = [ "dep:wgpu-core-deps-windows-linux-android" ];
           "wgsl" = [ "naga/wgsl-in" ];
         };
-        resolvedDefaultFeatures = [ "default" "dx12" "gles" "metal" "portable-atomic" "raw-window-handle" "renderdoc" "std" "vulkan" "webgl" "wgpu-core-deps-apple" "wgpu-core-deps-emscripten" "wgpu-core-deps-wasm" "wgpu-core-deps-windows-linux-android" "wgsl" ];
+        resolvedDefaultFeatures = [ "default" "dx12" "gles" "metal" "portable-atomic" "raw-window-handle" "renderdoc" "std" "vulkan" "wgpu-core-deps-apple" "wgpu-core-deps-emscripten" "wgpu-core-deps-windows-linux-android" "wgsl" ];
       };
       "wgpu-core-deps-apple" = rec {
         crateName = "wgpu-core-deps-apple";
-        version = "27.0.0";
+        version = "28.0.0";
         edition = "2021";
-        sha256 = "0cyjas0gx6wxjshv3f25p7gvqycnl7ckyphxaqlwgq4visaswwh7";
+        sha256 = "1nj7024j30plwhqqmfijg2ik42h8ahj194xzhv23gwqqp6bbddw7";
         libName = "wgpu_core_deps_apple";
         authors = [
           "gfx-rs developers"
@@ -25749,9 +31454,9 @@ rec {
       };
       "wgpu-core-deps-emscripten" = rec {
         crateName = "wgpu-core-deps-emscripten";
-        version = "27.0.0";
+        version = "28.0.0";
         edition = "2021";
-        sha256 = "1dd69pd9z8m4a88h7qmkcjr20qmnfhkxn7fqrwz83c4m992c6smh";
+        sha256 = "0ydxim2s0krqfhdyxmsxm4i2c4a5maillg6y8z0ylkzq671m3cil";
         libName = "wgpu_core_deps_emscripten";
         authors = [
           "gfx-rs developers"
@@ -25768,32 +31473,11 @@ rec {
         };
         resolvedDefaultFeatures = [ "gles" ];
       };
-      "wgpu-core-deps-wasm" = rec {
-        crateName = "wgpu-core-deps-wasm";
-        version = "27.0.0";
-        edition = "2021";
-        sha256 = "1dshg8m7qg3crlscvy1hi1brhbhfxdydy6a8wivsh9xhygf2f44v";
-        libName = "wgpu_core_deps_wasm";
-        authors = [
-          "gfx-rs developers"
-        ];
-        dependencies = [
-          {
-            name = "wgpu-hal";
-            packageId = "wgpu-hal";
-            target = { target, features }: (("wasm32" == target."arch" or null) && (!("emscripten" == target."os" or null)));
-          }
-        ];
-        features = {
-          "webgl" = [ "wgpu-hal/gles" ];
-        };
-        resolvedDefaultFeatures = [ "webgl" ];
-      };
       "wgpu-core-deps-windows-linux-android" = rec {
         crateName = "wgpu-core-deps-windows-linux-android";
-        version = "27.0.0";
+        version = "28.0.0";
         edition = "2021";
-        sha256 = "1hq3ka3mm507fysc3y017hp19bdj8a95mw1086778w8ssqkp06bi";
+        sha256 = "1bmszr0aw4nsvhh0k4h9whaaa53zrvv83qj3n979djdjf9p9gjk8";
         libName = "wgpu_core_deps_windows_linux_android";
         authors = [
           "gfx-rs developers"
@@ -25815,9 +31499,9 @@ rec {
       };
       "wgpu-hal" = rec {
         crateName = "wgpu-hal";
-        version = "27.0.4";
+        version = "28.0.1";
         edition = "2021";
-        sha256 = "1khk8gb81izrd9815fdy4ywq1fsczynswwgz9ay9iqbyqmhwn8av";
+        sha256 = "1sqfqb5619bx80kzp6vqca972gwpkmkwxqf9vhj8h8gb9d3wpmj4";
         libName = "wgpu_hal";
         authors = [
           "gfx-rs developers"
@@ -25886,17 +31570,12 @@ rec {
             target = { target, features }: (target."windows" or false);
           }
           {
-            name = "gpu-alloc";
-            packageId = "gpu-alloc";
-            optional = true;
-            target = { target, features }: (!("wasm32" == target."arch" or null));
-          }
-          {
             name = "gpu-allocator";
             packageId = "gpu-allocator";
             optional = true;
             usesDefaultFeatures = false;
-            target = { target, features }: (target."windows" or false);
+            target = { target, features }: (!("wasm32" == target."arch" or null));
+            features = [ "hashbrown" ];
           }
           {
             name = "gpu-descriptor";
@@ -25967,7 +31646,7 @@ rec {
           }
           {
             name = "ndk-sys";
-            packageId = "ndk-sys";
+            packageId = "ndk-sys 0.6.0+11769913";
             optional = true;
             target = { target, features }: ("android" == target."os" or null);
           }
@@ -26064,14 +31743,14 @@ rec {
           }
           {
             name = "windows";
-            packageId = "windows 0.58.0";
+            packageId = "windows 0.62.2";
             optional = true;
             usesDefaultFeatures = false;
             target = { target, features }: (target."windows" or false);
           }
           {
             name = "windows-core";
-            packageId = "windows-core 0.58.0";
+            packageId = "windows-core 0.62.2";
             optional = true;
             usesDefaultFeatures = false;
             target = { target, features }: (target."windows" or false);
@@ -26085,31 +31764,33 @@ rec {
         ];
         devDependencies = [
           {
+            name = "log";
+            packageId = "log";
+          }
+          {
             name = "naga";
             packageId = "naga";
             features = [ "wgsl-in" "termcolor" ];
           }
         ];
         features = {
-          "dx12" = [ "naga/hlsl-out" "dep:arrayvec" "dep:bit-set" "dep:bytemuck" "dep:hashbrown" "dep:libloading" "dep:log" "dep:ordered-float" "dep:once_cell" "dep:parking_lot" "dep:profiling" "dep:range-alloc" "dep:windows-core" "gpu-allocator/d3d12" "windows/Win32_Graphics_Direct3D_Fxc" "windows/Win32_Graphics_Direct3D_Dxc" "windows/Win32_Graphics_Direct3D" "windows/Win32_Graphics_Direct3D12" "windows/Win32_Graphics_DirectComposition" "windows/Win32_Graphics_Dxgi_Common" "windows/Win32_Security" "windows/Win32_System_Diagnostics_Debug" "windows/Win32_System_Kernel" "windows/Win32_System_Performance" "windows/Win32_System_Threading" "windows/Win32_UI_WindowsAndMessaging" ];
+          "dx12" = [ "naga/hlsl-out" "dep:arrayvec" "dep:bit-set" "dep:bytemuck" "dep:hashbrown" "dep:libloading" "dep:log" "dep:ordered-float" "dep:once_cell" "dep:parking_lot" "dep:profiling" "dep:range-alloc" "dep:windows-core" "dep:gpu-allocator" "gpu-allocator/d3d12" "windows/Win32_Devices_DeviceAndDriverInstallation" "windows/Win32_Graphics_Direct3D_Fxc" "windows/Win32_Graphics_Direct3D_Dxc" "windows/Win32_Graphics_Direct3D" "windows/Win32_Graphics_Direct3D12" "windows/Win32_Graphics_DirectComposition" "windows/Win32_Graphics_Dxgi_Common" "windows/Win32_Security" "windows/Win32_System_Diagnostics_Debug" "windows/Win32_System_Kernel" "windows/Win32_System_Performance" "windows/Win32_System_Threading" "windows/Win32_UI_WindowsAndMessaging" ];
           "fragile-send-sync-non-atomic-wasm" = [ "wgpu-types/fragile-send-sync-non-atomic-wasm" ];
           "gles" = [ "naga/glsl-out" "dep:arrayvec" "dep:bytemuck" "dep:glow" "dep:glutin_wgl_sys" "dep:hashbrown" "dep:js-sys" "dep:khronos-egl" "dep:libloading" "dep:log" "dep:ndk-sys" "dep:objc" "dep:parking_lot" "dep:profiling" "dep:wasm-bindgen" "dep:web-sys" "wgpu-types/web" "windows/Win32_Graphics_OpenGL" "windows/Win32_Graphics_Gdi" "windows/Win32_System_LibraryLoader" "windows/Win32_UI_WindowsAndMessaging" ];
-          "gpu-allocator" = [ "dep:gpu-allocator" ];
-          "metal" = [ "naga/msl-out" "dep:arrayvec" "dep:block" "dep:core-graphics-types" "dep:hashbrown" "dep:libc" "dep:log" "dep:metal" "dep:objc" "dep:parking_lot" "dep:profiling" ];
+          "metal" = [ "naga/msl-out" "dep:arrayvec" "dep:block" "dep:core-graphics-types" "dep:hashbrown" "dep:libc" "dep:log" "dep:metal" "dep:objc" "dep:parking_lot" "dep:profiling" "dep:smallvec" ];
           "portable-atomic" = [ "dep:portable-atomic" "dep:portable-atomic-util" ];
           "renderdoc" = [ "dep:libloading" "dep:renderdoc-sys" "dep:log" ];
-          "rustc-hash" = [ "dep:rustc-hash" ];
           "static-dxc" = [ "dep:mach-dxcompiler-rs" ];
           "validation_canary" = [ "dep:parking_lot" ];
-          "vulkan" = [ "naga/spv-out" "dep:android_system_properties" "dep:arrayvec" "dep:ash" "dep:bytemuck" "dep:gpu-alloc" "dep:gpu-descriptor" "dep:hashbrown" "dep:libc" "dep:libloading" "dep:log" "dep:ordered-float" "dep:parking_lot" "dep:profiling" "dep:smallvec" "dep:windows" "windows/Win32" ];
+          "vulkan" = [ "naga/spv-out" "dep:android_system_properties" "dep:arrayvec" "dep:ash" "dep:bytemuck" "dep:gpu-descriptor" "dep:hashbrown" "dep:libc" "dep:libloading" "dep:log" "dep:ordered-float" "dep:parking_lot" "dep:profiling" "dep:smallvec" "dep:windows" "gpu-allocator/vulkan" "windows/Win32" ];
         };
-        resolvedDefaultFeatures = [ "dx12" "gles" "gpu-allocator" "metal" "portable-atomic" "renderdoc" "vulkan" ];
+        resolvedDefaultFeatures = [ "dx12" "gles" "metal" "portable-atomic" "renderdoc" "vulkan" ];
       };
       "wgpu-types" = rec {
         crateName = "wgpu-types";
-        version = "27.0.1";
+        version = "28.0.0";
         edition = "2021";
-        sha256 = "1sx5blmyas6k40ilhlrfsy31xcvcf0l1dn9dgxrxp42r756gip5g";
+        sha256 = "0344ym97a5mhn7ha4clxh61schlw2dmb3nyx4z6x4kjrgrshi0z1";
         libName = "wgpu_types";
         authors = [
           "gfx-rs developers"
@@ -26136,12 +31817,6 @@ rec {
             packageId = "log";
           }
           {
-            name = "thiserror";
-            packageId = "thiserror 2.0.21";
-            optional = true;
-            usesDefaultFeatures = false;
-          }
-          {
             name = "web-sys";
             packageId = "web-sys";
             optional = true;
@@ -26153,12 +31828,46 @@ rec {
         features = {
           "default" = [ "std" ];
           "serde" = [ "dep:serde" "bitflags/serde" ];
-          "std" = [ "js-sys?/std" "web-sys?/std" "thiserror/std" ];
-          "thiserror" = [ "dep:thiserror" ];
+          "std" = [ "js-sys?/std" "web-sys?/std" ];
           "trace" = [ "std" ];
           "web" = [ "dep:js-sys" "dep:web-sys" ];
         };
-        resolvedDefaultFeatures = [ "std" "thiserror" "web" ];
+        resolvedDefaultFeatures = [ "std" "web" ];
+      };
+      "winapi" = rec {
+        crateName = "winapi";
+        version = "0.3.9";
+        edition = "2015";
+        sha256 = "06gl025x418lchw1wxj64ycr7gha83m44cjr5sarhynd9xkrm0sw";
+        authors = [
+          "Peter Atashian <retep998@gmail.com>"
+        ];
+        dependencies = [
+          {
+            name = "winapi-i686-pc-windows-gnu";
+            packageId = "winapi-i686-pc-windows-gnu";
+            target = { target, features }: (target."name" == "i686-pc-windows-gnu");
+          }
+          {
+            name = "winapi-x86_64-pc-windows-gnu";
+            packageId = "winapi-x86_64-pc-windows-gnu";
+            target = { target, features }: (target."name" == "x86_64-pc-windows-gnu");
+          }
+        ];
+        features = {
+          "debug" = [ "impl-debug" ];
+        };
+      };
+      "winapi-i686-pc-windows-gnu" = rec {
+        crateName = "winapi-i686-pc-windows-gnu";
+        version = "0.4.0";
+        edition = "2015";
+        sha256 = "1dmpa6mvcvzz16zg6d5vrfy4bxgg541wxrcip7cnshi06v38ffxc";
+        libName = "winapi_i686_pc_windows_gnu";
+        authors = [
+          "Peter Atashian <retep998@gmail.com>"
+        ];
+
       };
       "winapi-util" = rec {
         crateName = "winapi-util";
@@ -26179,11 +31888,27 @@ rec {
         ];
 
       };
+      "winapi-x86_64-pc-windows-gnu" = rec {
+        crateName = "winapi-x86_64-pc-windows-gnu";
+        version = "0.4.0";
+        edition = "2015";
+        sha256 = "0gqq64czqb64kskjryj8isp62m2sgvx25yyj3kpc2myh85w24bki";
+        libName = "winapi_x86_64_pc_windows_gnu";
+        authors = [
+          "Peter Atashian <retep998@gmail.com>"
+        ];
+
+      };
       "window_clipboard" = rec {
         crateName = "window_clipboard";
-        version = "0.5.1";
+        version = "0.4.1";
         edition = "2021";
-        sha256 = "0cyph2xr8g9rx24cnh5xrg75v3njc4l4iyski3g2vbsy60k44rfm";
+        workspace_member = null;
+        src = pkgs.fetchgit {
+          url = "https://github.com/pop-os/window_clipboard.git";
+          rev = "f68595ee0e62fbd6589f4709b5aaa5c3c7ea5f6c";
+          sha256 = "1bd0y0hl61kpaj7f4b072nx8d73r0mqswcgr068l9s1yn4awkvaq";
+        };
         authors = [
           "Héctor Ramón Jiménez <hector0193@gmail.com>"
         ];
@@ -26202,14 +31927,20 @@ rec {
           {
             name = "clipboard_wayland";
             packageId = "clipboard_wayland";
-            optional = true;
             target = { target, features }: ((target."unix" or false) && (!(("macos" == target."os" or null) || ("android" == target."os" or null) || ("emscripten" == target."os" or null) || ("ios" == target."os" or null) || ("redox" == target."os" or null))));
           }
           {
             name = "clipboard_x11";
             packageId = "clipboard_x11";
-            optional = true;
             target = { target, features }: ((target."unix" or false) && (!(("macos" == target."os" or null) || ("android" == target."os" or null) || ("emscripten" == target."os" or null) || ("ios" == target."os" or null) || ("redox" == target."os" or null))));
+          }
+          {
+            name = "dnd";
+            packageId = "dnd";
+          }
+          {
+            name = "mime";
+            packageId = "mime 0.1.0";
           }
           {
             name = "raw-window-handle";
@@ -26218,34 +31949,754 @@ rec {
           }
           {
             name = "thiserror";
-            packageId = "thiserror 2.0.21";
+            packageId = "thiserror 1.0.69";
           }
         ];
-        features = {
-          "clipboard_wayland" = [ "dep:clipboard_wayland" ];
-          "clipboard_x11" = [ "dep:clipboard_x11" ];
-          "default" = [ "x11" "wayland" ];
-          "wayland" = [ "clipboard_wayland" ];
-          "x11" = [ "clipboard_x11" ];
-        };
-        resolvedDefaultFeatures = [ "clipboard_wayland" "clipboard_x11" "wayland" "x11" ];
+
       };
-      "windows 0.58.0" = rec {
+      "windows 0.54.0" = rec {
         crateName = "windows";
-        version = "0.58.0";
+        version = "0.54.0";
         edition = "2021";
-        sha256 = "1dkjj94b0gn91nn1n22cvm4afsj98f5qrhcl3112v6f4jcfx816x";
+        sha256 = "0j8vd8sg2rbln6g3a608qg1a7r2lwxcga78mmxjjin5ybmrfallj";
         authors = [
           "Microsoft"
         ];
         dependencies = [
           {
             name = "windows-core";
-            packageId = "windows-core 0.58.0";
+            packageId = "windows-core 0.54.0";
           }
           {
             name = "windows-targets";
             packageId = "windows-targets 0.52.6";
+          }
+        ];
+        features = {
+          "AI" = [ "Foundation" ];
+          "AI_MachineLearning" = [ "AI" ];
+          "ApplicationModel" = [ "Foundation" ];
+          "ApplicationModel_Activation" = [ "ApplicationModel" ];
+          "ApplicationModel_AppExtensions" = [ "ApplicationModel" ];
+          "ApplicationModel_AppService" = [ "ApplicationModel" ];
+          "ApplicationModel_Appointments" = [ "ApplicationModel" ];
+          "ApplicationModel_Appointments_AppointmentsProvider" = [ "ApplicationModel_Appointments" ];
+          "ApplicationModel_Appointments_DataProvider" = [ "ApplicationModel_Appointments" ];
+          "ApplicationModel_Background" = [ "ApplicationModel" ];
+          "ApplicationModel_Calls" = [ "ApplicationModel" ];
+          "ApplicationModel_Calls_Background" = [ "ApplicationModel_Calls" ];
+          "ApplicationModel_Calls_Provider" = [ "ApplicationModel_Calls" ];
+          "ApplicationModel_Chat" = [ "ApplicationModel" ];
+          "ApplicationModel_CommunicationBlocking" = [ "ApplicationModel" ];
+          "ApplicationModel_Contacts" = [ "ApplicationModel" ];
+          "ApplicationModel_Contacts_DataProvider" = [ "ApplicationModel_Contacts" ];
+          "ApplicationModel_Contacts_Provider" = [ "ApplicationModel_Contacts" ];
+          "ApplicationModel_ConversationalAgent" = [ "ApplicationModel" ];
+          "ApplicationModel_Core" = [ "ApplicationModel" ];
+          "ApplicationModel_DataTransfer" = [ "ApplicationModel" ];
+          "ApplicationModel_DataTransfer_DragDrop" = [ "ApplicationModel_DataTransfer" ];
+          "ApplicationModel_DataTransfer_DragDrop_Core" = [ "ApplicationModel_DataTransfer_DragDrop" ];
+          "ApplicationModel_DataTransfer_ShareTarget" = [ "ApplicationModel_DataTransfer" ];
+          "ApplicationModel_Email" = [ "ApplicationModel" ];
+          "ApplicationModel_Email_DataProvider" = [ "ApplicationModel_Email" ];
+          "ApplicationModel_ExtendedExecution" = [ "ApplicationModel" ];
+          "ApplicationModel_ExtendedExecution_Foreground" = [ "ApplicationModel_ExtendedExecution" ];
+          "ApplicationModel_Holographic" = [ "ApplicationModel" ];
+          "ApplicationModel_LockScreen" = [ "ApplicationModel" ];
+          "ApplicationModel_Payments" = [ "ApplicationModel" ];
+          "ApplicationModel_Payments_Provider" = [ "ApplicationModel_Payments" ];
+          "ApplicationModel_Preview" = [ "ApplicationModel" ];
+          "ApplicationModel_Preview_Holographic" = [ "ApplicationModel_Preview" ];
+          "ApplicationModel_Preview_InkWorkspace" = [ "ApplicationModel_Preview" ];
+          "ApplicationModel_Preview_Notes" = [ "ApplicationModel_Preview" ];
+          "ApplicationModel_Resources" = [ "ApplicationModel" ];
+          "ApplicationModel_Resources_Core" = [ "ApplicationModel_Resources" ];
+          "ApplicationModel_Resources_Management" = [ "ApplicationModel_Resources" ];
+          "ApplicationModel_Search" = [ "ApplicationModel" ];
+          "ApplicationModel_Search_Core" = [ "ApplicationModel_Search" ];
+          "ApplicationModel_Store" = [ "ApplicationModel" ];
+          "ApplicationModel_Store_LicenseManagement" = [ "ApplicationModel_Store" ];
+          "ApplicationModel_Store_Preview" = [ "ApplicationModel_Store" ];
+          "ApplicationModel_Store_Preview_InstallControl" = [ "ApplicationModel_Store_Preview" ];
+          "ApplicationModel_UserActivities" = [ "ApplicationModel" ];
+          "ApplicationModel_UserActivities_Core" = [ "ApplicationModel_UserActivities" ];
+          "ApplicationModel_UserDataAccounts" = [ "ApplicationModel" ];
+          "ApplicationModel_UserDataAccounts_Provider" = [ "ApplicationModel_UserDataAccounts" ];
+          "ApplicationModel_UserDataAccounts_SystemAccess" = [ "ApplicationModel_UserDataAccounts" ];
+          "ApplicationModel_UserDataTasks" = [ "ApplicationModel" ];
+          "ApplicationModel_UserDataTasks_DataProvider" = [ "ApplicationModel_UserDataTasks" ];
+          "ApplicationModel_VoiceCommands" = [ "ApplicationModel" ];
+          "ApplicationModel_Wallet" = [ "ApplicationModel" ];
+          "ApplicationModel_Wallet_System" = [ "ApplicationModel_Wallet" ];
+          "Data" = [ "Foundation" ];
+          "Data_Html" = [ "Data" ];
+          "Data_Json" = [ "Data" ];
+          "Data_Pdf" = [ "Data" ];
+          "Data_Text" = [ "Data" ];
+          "Data_Xml" = [ "Data" ];
+          "Data_Xml_Dom" = [ "Data_Xml" ];
+          "Data_Xml_Xsl" = [ "Data_Xml" ];
+          "Devices" = [ "Foundation" ];
+          "Devices_Adc" = [ "Devices" ];
+          "Devices_Adc_Provider" = [ "Devices_Adc" ];
+          "Devices_Background" = [ "Devices" ];
+          "Devices_Bluetooth" = [ "Devices" ];
+          "Devices_Bluetooth_Advertisement" = [ "Devices_Bluetooth" ];
+          "Devices_Bluetooth_Background" = [ "Devices_Bluetooth" ];
+          "Devices_Bluetooth_GenericAttributeProfile" = [ "Devices_Bluetooth" ];
+          "Devices_Bluetooth_Rfcomm" = [ "Devices_Bluetooth" ];
+          "Devices_Custom" = [ "Devices" ];
+          "Devices_Display" = [ "Devices" ];
+          "Devices_Display_Core" = [ "Devices_Display" ];
+          "Devices_Enumeration" = [ "Devices" ];
+          "Devices_Enumeration_Pnp" = [ "Devices_Enumeration" ];
+          "Devices_Geolocation" = [ "Devices" ];
+          "Devices_Geolocation_Geofencing" = [ "Devices_Geolocation" ];
+          "Devices_Geolocation_Provider" = [ "Devices_Geolocation" ];
+          "Devices_Gpio" = [ "Devices" ];
+          "Devices_Gpio_Provider" = [ "Devices_Gpio" ];
+          "Devices_Haptics" = [ "Devices" ];
+          "Devices_HumanInterfaceDevice" = [ "Devices" ];
+          "Devices_I2c" = [ "Devices" ];
+          "Devices_I2c_Provider" = [ "Devices_I2c" ];
+          "Devices_Input" = [ "Devices" ];
+          "Devices_Input_Preview" = [ "Devices_Input" ];
+          "Devices_Lights" = [ "Devices" ];
+          "Devices_Lights_Effects" = [ "Devices_Lights" ];
+          "Devices_Midi" = [ "Devices" ];
+          "Devices_PointOfService" = [ "Devices" ];
+          "Devices_PointOfService_Provider" = [ "Devices_PointOfService" ];
+          "Devices_Portable" = [ "Devices" ];
+          "Devices_Power" = [ "Devices" ];
+          "Devices_Printers" = [ "Devices" ];
+          "Devices_Printers_Extensions" = [ "Devices_Printers" ];
+          "Devices_Pwm" = [ "Devices" ];
+          "Devices_Pwm_Provider" = [ "Devices_Pwm" ];
+          "Devices_Radios" = [ "Devices" ];
+          "Devices_Scanners" = [ "Devices" ];
+          "Devices_Sensors" = [ "Devices" ];
+          "Devices_Sensors_Custom" = [ "Devices_Sensors" ];
+          "Devices_SerialCommunication" = [ "Devices" ];
+          "Devices_SmartCards" = [ "Devices" ];
+          "Devices_Sms" = [ "Devices" ];
+          "Devices_Spi" = [ "Devices" ];
+          "Devices_Spi_Provider" = [ "Devices_Spi" ];
+          "Devices_Usb" = [ "Devices" ];
+          "Devices_WiFi" = [ "Devices" ];
+          "Devices_WiFiDirect" = [ "Devices" ];
+          "Devices_WiFiDirect_Services" = [ "Devices_WiFiDirect" ];
+          "Embedded" = [ "Foundation" ];
+          "Embedded_DeviceLockdown" = [ "Embedded" ];
+          "Foundation_Collections" = [ "Foundation" ];
+          "Foundation_Diagnostics" = [ "Foundation" ];
+          "Foundation_Metadata" = [ "Foundation" ];
+          "Foundation_Numerics" = [ "Foundation" ];
+          "Gaming" = [ "Foundation" ];
+          "Gaming_Input" = [ "Gaming" ];
+          "Gaming_Input_Custom" = [ "Gaming_Input" ];
+          "Gaming_Input_ForceFeedback" = [ "Gaming_Input" ];
+          "Gaming_Input_Preview" = [ "Gaming_Input" ];
+          "Gaming_Preview" = [ "Gaming" ];
+          "Gaming_Preview_GamesEnumeration" = [ "Gaming_Preview" ];
+          "Gaming_UI" = [ "Gaming" ];
+          "Gaming_XboxLive" = [ "Gaming" ];
+          "Gaming_XboxLive_Storage" = [ "Gaming_XboxLive" ];
+          "Globalization" = [ "Foundation" ];
+          "Globalization_Collation" = [ "Globalization" ];
+          "Globalization_DateTimeFormatting" = [ "Globalization" ];
+          "Globalization_Fonts" = [ "Globalization" ];
+          "Globalization_NumberFormatting" = [ "Globalization" ];
+          "Globalization_PhoneNumberFormatting" = [ "Globalization" ];
+          "Graphics" = [ "Foundation" ];
+          "Graphics_Capture" = [ "Graphics" ];
+          "Graphics_DirectX" = [ "Graphics" ];
+          "Graphics_DirectX_Direct3D11" = [ "Graphics_DirectX" ];
+          "Graphics_Display" = [ "Graphics" ];
+          "Graphics_Display_Core" = [ "Graphics_Display" ];
+          "Graphics_Effects" = [ "Graphics" ];
+          "Graphics_Holographic" = [ "Graphics" ];
+          "Graphics_Imaging" = [ "Graphics" ];
+          "Graphics_Printing" = [ "Graphics" ];
+          "Graphics_Printing3D" = [ "Graphics" ];
+          "Graphics_Printing_OptionDetails" = [ "Graphics_Printing" ];
+          "Graphics_Printing_PrintSupport" = [ "Graphics_Printing" ];
+          "Graphics_Printing_PrintTicket" = [ "Graphics_Printing" ];
+          "Graphics_Printing_Workflow" = [ "Graphics_Printing" ];
+          "Management" = [ "Foundation" ];
+          "Management_Core" = [ "Management" ];
+          "Management_Deployment" = [ "Management" ];
+          "Management_Deployment_Preview" = [ "Management_Deployment" ];
+          "Management_Policies" = [ "Management" ];
+          "Management_Update" = [ "Management" ];
+          "Management_Workplace" = [ "Management" ];
+          "Media" = [ "Foundation" ];
+          "Media_AppBroadcasting" = [ "Media" ];
+          "Media_AppRecording" = [ "Media" ];
+          "Media_Audio" = [ "Media" ];
+          "Media_Capture" = [ "Media" ];
+          "Media_Capture_Core" = [ "Media_Capture" ];
+          "Media_Capture_Frames" = [ "Media_Capture" ];
+          "Media_Casting" = [ "Media" ];
+          "Media_ClosedCaptioning" = [ "Media" ];
+          "Media_ContentRestrictions" = [ "Media" ];
+          "Media_Control" = [ "Media" ];
+          "Media_Core" = [ "Media" ];
+          "Media_Core_Preview" = [ "Media_Core" ];
+          "Media_Devices" = [ "Media" ];
+          "Media_Devices_Core" = [ "Media_Devices" ];
+          "Media_DialProtocol" = [ "Media" ];
+          "Media_Editing" = [ "Media" ];
+          "Media_Effects" = [ "Media" ];
+          "Media_FaceAnalysis" = [ "Media" ];
+          "Media_Import" = [ "Media" ];
+          "Media_MediaProperties" = [ "Media" ];
+          "Media_Miracast" = [ "Media" ];
+          "Media_Ocr" = [ "Media" ];
+          "Media_PlayTo" = [ "Media" ];
+          "Media_Playback" = [ "Media" ];
+          "Media_Playlists" = [ "Media" ];
+          "Media_Protection" = [ "Media" ];
+          "Media_Protection_PlayReady" = [ "Media_Protection" ];
+          "Media_Render" = [ "Media" ];
+          "Media_SpeechRecognition" = [ "Media" ];
+          "Media_SpeechSynthesis" = [ "Media" ];
+          "Media_Streaming" = [ "Media" ];
+          "Media_Streaming_Adaptive" = [ "Media_Streaming" ];
+          "Media_Transcoding" = [ "Media" ];
+          "Networking" = [ "Foundation" ];
+          "Networking_BackgroundTransfer" = [ "Networking" ];
+          "Networking_Connectivity" = [ "Networking" ];
+          "Networking_NetworkOperators" = [ "Networking" ];
+          "Networking_Proximity" = [ "Networking" ];
+          "Networking_PushNotifications" = [ "Networking" ];
+          "Networking_ServiceDiscovery" = [ "Networking" ];
+          "Networking_ServiceDiscovery_Dnssd" = [ "Networking_ServiceDiscovery" ];
+          "Networking_Sockets" = [ "Networking" ];
+          "Networking_Vpn" = [ "Networking" ];
+          "Networking_XboxLive" = [ "Networking" ];
+          "Perception" = [ "Foundation" ];
+          "Perception_Automation" = [ "Perception" ];
+          "Perception_Automation_Core" = [ "Perception_Automation" ];
+          "Perception_People" = [ "Perception" ];
+          "Perception_Spatial" = [ "Perception" ];
+          "Perception_Spatial_Preview" = [ "Perception_Spatial" ];
+          "Perception_Spatial_Surfaces" = [ "Perception_Spatial" ];
+          "Phone" = [ "Foundation" ];
+          "Phone_ApplicationModel" = [ "Phone" ];
+          "Phone_Devices" = [ "Phone" ];
+          "Phone_Devices_Notification" = [ "Phone_Devices" ];
+          "Phone_Devices_Power" = [ "Phone_Devices" ];
+          "Phone_Management" = [ "Phone" ];
+          "Phone_Management_Deployment" = [ "Phone_Management" ];
+          "Phone_Media" = [ "Phone" ];
+          "Phone_Media_Devices" = [ "Phone_Media" ];
+          "Phone_Notification" = [ "Phone" ];
+          "Phone_Notification_Management" = [ "Phone_Notification" ];
+          "Phone_PersonalInformation" = [ "Phone" ];
+          "Phone_PersonalInformation_Provisioning" = [ "Phone_PersonalInformation" ];
+          "Phone_Speech" = [ "Phone" ];
+          "Phone_Speech_Recognition" = [ "Phone_Speech" ];
+          "Phone_StartScreen" = [ "Phone" ];
+          "Phone_System" = [ "Phone" ];
+          "Phone_System_Power" = [ "Phone_System" ];
+          "Phone_System_Profile" = [ "Phone_System" ];
+          "Phone_System_UserProfile" = [ "Phone_System" ];
+          "Phone_System_UserProfile_GameServices" = [ "Phone_System_UserProfile" ];
+          "Phone_System_UserProfile_GameServices_Core" = [ "Phone_System_UserProfile_GameServices" ];
+          "Phone_UI" = [ "Phone" ];
+          "Phone_UI_Input" = [ "Phone_UI" ];
+          "Security" = [ "Foundation" ];
+          "Security_Authentication" = [ "Security" ];
+          "Security_Authentication_Identity" = [ "Security_Authentication" ];
+          "Security_Authentication_Identity_Core" = [ "Security_Authentication_Identity" ];
+          "Security_Authentication_OnlineId" = [ "Security_Authentication" ];
+          "Security_Authentication_Web" = [ "Security_Authentication" ];
+          "Security_Authentication_Web_Core" = [ "Security_Authentication_Web" ];
+          "Security_Authentication_Web_Provider" = [ "Security_Authentication_Web" ];
+          "Security_Authorization" = [ "Security" ];
+          "Security_Authorization_AppCapabilityAccess" = [ "Security_Authorization" ];
+          "Security_Credentials" = [ "Security" ];
+          "Security_Credentials_UI" = [ "Security_Credentials" ];
+          "Security_Cryptography" = [ "Security" ];
+          "Security_Cryptography_Certificates" = [ "Security_Cryptography" ];
+          "Security_Cryptography_Core" = [ "Security_Cryptography" ];
+          "Security_Cryptography_DataProtection" = [ "Security_Cryptography" ];
+          "Security_DataProtection" = [ "Security" ];
+          "Security_EnterpriseData" = [ "Security" ];
+          "Security_ExchangeActiveSyncProvisioning" = [ "Security" ];
+          "Security_Isolation" = [ "Security" ];
+          "Services" = [ "Foundation" ];
+          "Services_Maps" = [ "Services" ];
+          "Services_Maps_Guidance" = [ "Services_Maps" ];
+          "Services_Maps_LocalSearch" = [ "Services_Maps" ];
+          "Services_Maps_OfflineMaps" = [ "Services_Maps" ];
+          "Services_Store" = [ "Services" ];
+          "Services_TargetedContent" = [ "Services" ];
+          "Storage" = [ "Foundation" ];
+          "Storage_AccessCache" = [ "Storage" ];
+          "Storage_BulkAccess" = [ "Storage" ];
+          "Storage_Compression" = [ "Storage" ];
+          "Storage_FileProperties" = [ "Storage" ];
+          "Storage_Pickers" = [ "Storage" ];
+          "Storage_Pickers_Provider" = [ "Storage_Pickers" ];
+          "Storage_Provider" = [ "Storage" ];
+          "Storage_Search" = [ "Storage" ];
+          "Storage_Streams" = [ "Storage" ];
+          "System" = [ "Foundation" ];
+          "System_Diagnostics" = [ "System" ];
+          "System_Diagnostics_DevicePortal" = [ "System_Diagnostics" ];
+          "System_Diagnostics_Telemetry" = [ "System_Diagnostics" ];
+          "System_Diagnostics_TraceReporting" = [ "System_Diagnostics" ];
+          "System_Display" = [ "System" ];
+          "System_Implementation" = [ "System" ];
+          "System_Implementation_FileExplorer" = [ "System_Implementation" ];
+          "System_Inventory" = [ "System" ];
+          "System_Power" = [ "System" ];
+          "System_Profile" = [ "System" ];
+          "System_Profile_SystemManufacturers" = [ "System_Profile" ];
+          "System_RemoteDesktop" = [ "System" ];
+          "System_RemoteDesktop_Input" = [ "System_RemoteDesktop" ];
+          "System_RemoteDesktop_Provider" = [ "System_RemoteDesktop" ];
+          "System_RemoteSystems" = [ "System" ];
+          "System_Threading" = [ "System" ];
+          "System_Threading_Core" = [ "System_Threading" ];
+          "System_Update" = [ "System" ];
+          "System_UserProfile" = [ "System" ];
+          "UI" = [ "Foundation" ];
+          "UI_Accessibility" = [ "UI" ];
+          "UI_ApplicationSettings" = [ "UI" ];
+          "UI_Composition" = [ "UI" ];
+          "UI_Composition_Core" = [ "UI_Composition" ];
+          "UI_Composition_Desktop" = [ "UI_Composition" ];
+          "UI_Composition_Diagnostics" = [ "UI_Composition" ];
+          "UI_Composition_Effects" = [ "UI_Composition" ];
+          "UI_Composition_Interactions" = [ "UI_Composition" ];
+          "UI_Composition_Scenes" = [ "UI_Composition" ];
+          "UI_Core" = [ "UI" ];
+          "UI_Core_AnimationMetrics" = [ "UI_Core" ];
+          "UI_Core_Preview" = [ "UI_Core" ];
+          "UI_Input" = [ "UI" ];
+          "UI_Input_Core" = [ "UI_Input" ];
+          "UI_Input_Inking" = [ "UI_Input" ];
+          "UI_Input_Inking_Analysis" = [ "UI_Input_Inking" ];
+          "UI_Input_Inking_Core" = [ "UI_Input_Inking" ];
+          "UI_Input_Inking_Preview" = [ "UI_Input_Inking" ];
+          "UI_Input_Preview" = [ "UI_Input" ];
+          "UI_Input_Preview_Injection" = [ "UI_Input_Preview" ];
+          "UI_Input_Spatial" = [ "UI_Input" ];
+          "UI_Notifications" = [ "UI" ];
+          "UI_Notifications_Management" = [ "UI_Notifications" ];
+          "UI_Notifications_Preview" = [ "UI_Notifications" ];
+          "UI_Popups" = [ "UI" ];
+          "UI_Shell" = [ "UI" ];
+          "UI_StartScreen" = [ "UI" ];
+          "UI_Text" = [ "UI" ];
+          "UI_Text_Core" = [ "UI_Text" ];
+          "UI_UIAutomation" = [ "UI" ];
+          "UI_UIAutomation_Core" = [ "UI_UIAutomation" ];
+          "UI_ViewManagement" = [ "UI" ];
+          "UI_ViewManagement_Core" = [ "UI_ViewManagement" ];
+          "UI_WebUI" = [ "UI" ];
+          "UI_WebUI_Core" = [ "UI_WebUI" ];
+          "UI_WindowManagement" = [ "UI" ];
+          "UI_WindowManagement_Preview" = [ "UI_WindowManagement" ];
+          "Wdk" = [ "Win32_Foundation" ];
+          "Wdk_Devices" = [ "Wdk" ];
+          "Wdk_Devices_HumanInterfaceDevice" = [ "Wdk_Devices" ];
+          "Wdk_Foundation" = [ "Wdk" ];
+          "Wdk_Graphics" = [ "Wdk" ];
+          "Wdk_Graphics_Direct3D" = [ "Wdk_Graphics" ];
+          "Wdk_NetworkManagement" = [ "Wdk" ];
+          "Wdk_NetworkManagement_Ndis" = [ "Wdk_NetworkManagement" ];
+          "Wdk_NetworkManagement_WindowsFilteringPlatform" = [ "Wdk_NetworkManagement" ];
+          "Wdk_Storage" = [ "Wdk" ];
+          "Wdk_Storage_FileSystem" = [ "Wdk_Storage" ];
+          "Wdk_Storage_FileSystem_Minifilters" = [ "Wdk_Storage_FileSystem" ];
+          "Wdk_System" = [ "Wdk" ];
+          "Wdk_System_IO" = [ "Wdk_System" ];
+          "Wdk_System_OfflineRegistry" = [ "Wdk_System" ];
+          "Wdk_System_Registry" = [ "Wdk_System" ];
+          "Wdk_System_SystemInformation" = [ "Wdk_System" ];
+          "Wdk_System_SystemServices" = [ "Wdk_System" ];
+          "Wdk_System_Threading" = [ "Wdk_System" ];
+          "Web" = [ "Foundation" ];
+          "Web_AtomPub" = [ "Web" ];
+          "Web_Http" = [ "Web" ];
+          "Web_Http_Diagnostics" = [ "Web_Http" ];
+          "Web_Http_Filters" = [ "Web_Http" ];
+          "Web_Http_Headers" = [ "Web_Http" ];
+          "Web_Syndication" = [ "Web" ];
+          "Web_UI" = [ "Web" ];
+          "Web_UI_Interop" = [ "Web_UI" ];
+          "Win32" = [ "Win32_Foundation" ];
+          "Win32_AI" = [ "Win32" ];
+          "Win32_AI_MachineLearning" = [ "Win32_AI" ];
+          "Win32_AI_MachineLearning_DirectML" = [ "Win32_AI_MachineLearning" ];
+          "Win32_AI_MachineLearning_WinML" = [ "Win32_AI_MachineLearning" ];
+          "Win32_Data" = [ "Win32" ];
+          "Win32_Data_HtmlHelp" = [ "Win32_Data" ];
+          "Win32_Data_RightsManagement" = [ "Win32_Data" ];
+          "Win32_Data_Xml" = [ "Win32_Data" ];
+          "Win32_Data_Xml_MsXml" = [ "Win32_Data_Xml" ];
+          "Win32_Data_Xml_XmlLite" = [ "Win32_Data_Xml" ];
+          "Win32_Devices" = [ "Win32" ];
+          "Win32_Devices_AllJoyn" = [ "Win32_Devices" ];
+          "Win32_Devices_BiometricFramework" = [ "Win32_Devices" ];
+          "Win32_Devices_Bluetooth" = [ "Win32_Devices" ];
+          "Win32_Devices_Communication" = [ "Win32_Devices" ];
+          "Win32_Devices_DeviceAccess" = [ "Win32_Devices" ];
+          "Win32_Devices_DeviceAndDriverInstallation" = [ "Win32_Devices" ];
+          "Win32_Devices_DeviceQuery" = [ "Win32_Devices" ];
+          "Win32_Devices_Display" = [ "Win32_Devices" ];
+          "Win32_Devices_Enumeration" = [ "Win32_Devices" ];
+          "Win32_Devices_Enumeration_Pnp" = [ "Win32_Devices_Enumeration" ];
+          "Win32_Devices_Fax" = [ "Win32_Devices" ];
+          "Win32_Devices_FunctionDiscovery" = [ "Win32_Devices" ];
+          "Win32_Devices_Geolocation" = [ "Win32_Devices" ];
+          "Win32_Devices_HumanInterfaceDevice" = [ "Win32_Devices" ];
+          "Win32_Devices_ImageAcquisition" = [ "Win32_Devices" ];
+          "Win32_Devices_PortableDevices" = [ "Win32_Devices" ];
+          "Win32_Devices_Properties" = [ "Win32_Devices" ];
+          "Win32_Devices_Pwm" = [ "Win32_Devices" ];
+          "Win32_Devices_Sensors" = [ "Win32_Devices" ];
+          "Win32_Devices_SerialCommunication" = [ "Win32_Devices" ];
+          "Win32_Devices_Tapi" = [ "Win32_Devices" ];
+          "Win32_Devices_Usb" = [ "Win32_Devices" ];
+          "Win32_Devices_WebServicesOnDevices" = [ "Win32_Devices" ];
+          "Win32_Foundation" = [ "Win32" ];
+          "Win32_Gaming" = [ "Win32" ];
+          "Win32_Globalization" = [ "Win32" ];
+          "Win32_Graphics" = [ "Win32" ];
+          "Win32_Graphics_CompositionSwapchain" = [ "Win32_Graphics" ];
+          "Win32_Graphics_DXCore" = [ "Win32_Graphics" ];
+          "Win32_Graphics_Direct2D" = [ "Win32_Graphics" ];
+          "Win32_Graphics_Direct2D_Common" = [ "Win32_Graphics_Direct2D" ];
+          "Win32_Graphics_Direct3D" = [ "Win32_Graphics" ];
+          "Win32_Graphics_Direct3D10" = [ "Win32_Graphics" ];
+          "Win32_Graphics_Direct3D11" = [ "Win32_Graphics" ];
+          "Win32_Graphics_Direct3D11on12" = [ "Win32_Graphics" ];
+          "Win32_Graphics_Direct3D12" = [ "Win32_Graphics" ];
+          "Win32_Graphics_Direct3D9" = [ "Win32_Graphics" ];
+          "Win32_Graphics_Direct3D9on12" = [ "Win32_Graphics" ];
+          "Win32_Graphics_Direct3D_Dxc" = [ "Win32_Graphics_Direct3D" ];
+          "Win32_Graphics_Direct3D_Fxc" = [ "Win32_Graphics_Direct3D" ];
+          "Win32_Graphics_DirectComposition" = [ "Win32_Graphics" ];
+          "Win32_Graphics_DirectDraw" = [ "Win32_Graphics" ];
+          "Win32_Graphics_DirectManipulation" = [ "Win32_Graphics" ];
+          "Win32_Graphics_DirectWrite" = [ "Win32_Graphics" ];
+          "Win32_Graphics_Dwm" = [ "Win32_Graphics" ];
+          "Win32_Graphics_Dxgi" = [ "Win32_Graphics" ];
+          "Win32_Graphics_Dxgi_Common" = [ "Win32_Graphics_Dxgi" ];
+          "Win32_Graphics_Gdi" = [ "Win32_Graphics" ];
+          "Win32_Graphics_GdiPlus" = [ "Win32_Graphics" ];
+          "Win32_Graphics_Hlsl" = [ "Win32_Graphics" ];
+          "Win32_Graphics_Imaging" = [ "Win32_Graphics" ];
+          "Win32_Graphics_Imaging_D2D" = [ "Win32_Graphics_Imaging" ];
+          "Win32_Graphics_OpenGL" = [ "Win32_Graphics" ];
+          "Win32_Graphics_Printing" = [ "Win32_Graphics" ];
+          "Win32_Graphics_Printing_PrintTicket" = [ "Win32_Graphics_Printing" ];
+          "Win32_Management" = [ "Win32" ];
+          "Win32_Management_MobileDeviceManagementRegistration" = [ "Win32_Management" ];
+          "Win32_Media" = [ "Win32" ];
+          "Win32_Media_Audio" = [ "Win32_Media" ];
+          "Win32_Media_Audio_Apo" = [ "Win32_Media_Audio" ];
+          "Win32_Media_Audio_DirectMusic" = [ "Win32_Media_Audio" ];
+          "Win32_Media_Audio_DirectSound" = [ "Win32_Media_Audio" ];
+          "Win32_Media_Audio_Endpoints" = [ "Win32_Media_Audio" ];
+          "Win32_Media_Audio_XAudio2" = [ "Win32_Media_Audio" ];
+          "Win32_Media_DeviceManager" = [ "Win32_Media" ];
+          "Win32_Media_DirectShow" = [ "Win32_Media" ];
+          "Win32_Media_DirectShow_Tv" = [ "Win32_Media_DirectShow" ];
+          "Win32_Media_DirectShow_Xml" = [ "Win32_Media_DirectShow" ];
+          "Win32_Media_DxMediaObjects" = [ "Win32_Media" ];
+          "Win32_Media_KernelStreaming" = [ "Win32_Media" ];
+          "Win32_Media_LibrarySharingServices" = [ "Win32_Media" ];
+          "Win32_Media_MediaFoundation" = [ "Win32_Media" ];
+          "Win32_Media_MediaPlayer" = [ "Win32_Media" ];
+          "Win32_Media_Multimedia" = [ "Win32_Media" ];
+          "Win32_Media_PictureAcquisition" = [ "Win32_Media" ];
+          "Win32_Media_Speech" = [ "Win32_Media" ];
+          "Win32_Media_Streaming" = [ "Win32_Media" ];
+          "Win32_Media_WindowsMediaFormat" = [ "Win32_Media" ];
+          "Win32_NetworkManagement" = [ "Win32" ];
+          "Win32_NetworkManagement_Dhcp" = [ "Win32_NetworkManagement" ];
+          "Win32_NetworkManagement_Dns" = [ "Win32_NetworkManagement" ];
+          "Win32_NetworkManagement_InternetConnectionWizard" = [ "Win32_NetworkManagement" ];
+          "Win32_NetworkManagement_IpHelper" = [ "Win32_NetworkManagement" ];
+          "Win32_NetworkManagement_MobileBroadband" = [ "Win32_NetworkManagement" ];
+          "Win32_NetworkManagement_Multicast" = [ "Win32_NetworkManagement" ];
+          "Win32_NetworkManagement_Ndis" = [ "Win32_NetworkManagement" ];
+          "Win32_NetworkManagement_NetBios" = [ "Win32_NetworkManagement" ];
+          "Win32_NetworkManagement_NetManagement" = [ "Win32_NetworkManagement" ];
+          "Win32_NetworkManagement_NetShell" = [ "Win32_NetworkManagement" ];
+          "Win32_NetworkManagement_NetworkDiagnosticsFramework" = [ "Win32_NetworkManagement" ];
+          "Win32_NetworkManagement_NetworkPolicyServer" = [ "Win32_NetworkManagement" ];
+          "Win32_NetworkManagement_P2P" = [ "Win32_NetworkManagement" ];
+          "Win32_NetworkManagement_QoS" = [ "Win32_NetworkManagement" ];
+          "Win32_NetworkManagement_Rras" = [ "Win32_NetworkManagement" ];
+          "Win32_NetworkManagement_Snmp" = [ "Win32_NetworkManagement" ];
+          "Win32_NetworkManagement_WNet" = [ "Win32_NetworkManagement" ];
+          "Win32_NetworkManagement_WebDav" = [ "Win32_NetworkManagement" ];
+          "Win32_NetworkManagement_WiFi" = [ "Win32_NetworkManagement" ];
+          "Win32_NetworkManagement_WindowsConnectNow" = [ "Win32_NetworkManagement" ];
+          "Win32_NetworkManagement_WindowsConnectionManager" = [ "Win32_NetworkManagement" ];
+          "Win32_NetworkManagement_WindowsFilteringPlatform" = [ "Win32_NetworkManagement" ];
+          "Win32_NetworkManagement_WindowsFirewall" = [ "Win32_NetworkManagement" ];
+          "Win32_NetworkManagement_WindowsNetworkVirtualization" = [ "Win32_NetworkManagement" ];
+          "Win32_Networking" = [ "Win32" ];
+          "Win32_Networking_ActiveDirectory" = [ "Win32_Networking" ];
+          "Win32_Networking_BackgroundIntelligentTransferService" = [ "Win32_Networking" ];
+          "Win32_Networking_Clustering" = [ "Win32_Networking" ];
+          "Win32_Networking_HttpServer" = [ "Win32_Networking" ];
+          "Win32_Networking_Ldap" = [ "Win32_Networking" ];
+          "Win32_Networking_NetworkListManager" = [ "Win32_Networking" ];
+          "Win32_Networking_RemoteDifferentialCompression" = [ "Win32_Networking" ];
+          "Win32_Networking_WebSocket" = [ "Win32_Networking" ];
+          "Win32_Networking_WinHttp" = [ "Win32_Networking" ];
+          "Win32_Networking_WinInet" = [ "Win32_Networking" ];
+          "Win32_Networking_WinSock" = [ "Win32_Networking" ];
+          "Win32_Networking_WindowsWebServices" = [ "Win32_Networking" ];
+          "Win32_Security" = [ "Win32" ];
+          "Win32_Security_AppLocker" = [ "Win32_Security" ];
+          "Win32_Security_Authentication" = [ "Win32_Security" ];
+          "Win32_Security_Authentication_Identity" = [ "Win32_Security_Authentication" ];
+          "Win32_Security_Authentication_Identity_Provider" = [ "Win32_Security_Authentication_Identity" ];
+          "Win32_Security_Authorization" = [ "Win32_Security" ];
+          "Win32_Security_Authorization_UI" = [ "Win32_Security_Authorization" ];
+          "Win32_Security_ConfigurationSnapin" = [ "Win32_Security" ];
+          "Win32_Security_Credentials" = [ "Win32_Security" ];
+          "Win32_Security_Cryptography" = [ "Win32_Security" ];
+          "Win32_Security_Cryptography_Catalog" = [ "Win32_Security_Cryptography" ];
+          "Win32_Security_Cryptography_Certificates" = [ "Win32_Security_Cryptography" ];
+          "Win32_Security_Cryptography_Sip" = [ "Win32_Security_Cryptography" ];
+          "Win32_Security_Cryptography_UI" = [ "Win32_Security_Cryptography" ];
+          "Win32_Security_DiagnosticDataQuery" = [ "Win32_Security" ];
+          "Win32_Security_DirectoryServices" = [ "Win32_Security" ];
+          "Win32_Security_EnterpriseData" = [ "Win32_Security" ];
+          "Win32_Security_ExtensibleAuthenticationProtocol" = [ "Win32_Security" ];
+          "Win32_Security_Isolation" = [ "Win32_Security" ];
+          "Win32_Security_LicenseProtection" = [ "Win32_Security" ];
+          "Win32_Security_NetworkAccessProtection" = [ "Win32_Security" ];
+          "Win32_Security_Tpm" = [ "Win32_Security" ];
+          "Win32_Security_WinTrust" = [ "Win32_Security" ];
+          "Win32_Security_WinWlx" = [ "Win32_Security" ];
+          "Win32_Storage" = [ "Win32" ];
+          "Win32_Storage_Cabinets" = [ "Win32_Storage" ];
+          "Win32_Storage_CloudFilters" = [ "Win32_Storage" ];
+          "Win32_Storage_Compression" = [ "Win32_Storage" ];
+          "Win32_Storage_DataDeduplication" = [ "Win32_Storage" ];
+          "Win32_Storage_DistributedFileSystem" = [ "Win32_Storage" ];
+          "Win32_Storage_EnhancedStorage" = [ "Win32_Storage" ];
+          "Win32_Storage_FileHistory" = [ "Win32_Storage" ];
+          "Win32_Storage_FileServerResourceManager" = [ "Win32_Storage" ];
+          "Win32_Storage_FileSystem" = [ "Win32_Storage" ];
+          "Win32_Storage_Imapi" = [ "Win32_Storage" ];
+          "Win32_Storage_IndexServer" = [ "Win32_Storage" ];
+          "Win32_Storage_InstallableFileSystems" = [ "Win32_Storage" ];
+          "Win32_Storage_IscsiDisc" = [ "Win32_Storage" ];
+          "Win32_Storage_Jet" = [ "Win32_Storage" ];
+          "Win32_Storage_Nvme" = [ "Win32_Storage" ];
+          "Win32_Storage_OfflineFiles" = [ "Win32_Storage" ];
+          "Win32_Storage_OperationRecorder" = [ "Win32_Storage" ];
+          "Win32_Storage_Packaging" = [ "Win32_Storage" ];
+          "Win32_Storage_Packaging_Appx" = [ "Win32_Storage_Packaging" ];
+          "Win32_Storage_Packaging_Opc" = [ "Win32_Storage_Packaging" ];
+          "Win32_Storage_ProjectedFileSystem" = [ "Win32_Storage" ];
+          "Win32_Storage_StructuredStorage" = [ "Win32_Storage" ];
+          "Win32_Storage_Vhd" = [ "Win32_Storage" ];
+          "Win32_Storage_VirtualDiskService" = [ "Win32_Storage" ];
+          "Win32_Storage_Vss" = [ "Win32_Storage" ];
+          "Win32_Storage_Xps" = [ "Win32_Storage" ];
+          "Win32_Storage_Xps_Printing" = [ "Win32_Storage_Xps" ];
+          "Win32_System" = [ "Win32" ];
+          "Win32_System_AddressBook" = [ "Win32_System" ];
+          "Win32_System_Antimalware" = [ "Win32_System" ];
+          "Win32_System_ApplicationInstallationAndServicing" = [ "Win32_System" ];
+          "Win32_System_ApplicationVerifier" = [ "Win32_System" ];
+          "Win32_System_AssessmentTool" = [ "Win32_System" ];
+          "Win32_System_ClrHosting" = [ "Win32_System" ];
+          "Win32_System_Com" = [ "Win32_System" ];
+          "Win32_System_Com_CallObj" = [ "Win32_System_Com" ];
+          "Win32_System_Com_ChannelCredentials" = [ "Win32_System_Com" ];
+          "Win32_System_Com_Events" = [ "Win32_System_Com" ];
+          "Win32_System_Com_Marshal" = [ "Win32_System_Com" ];
+          "Win32_System_Com_StructuredStorage" = [ "Win32_System_Com" ];
+          "Win32_System_Com_UI" = [ "Win32_System_Com" ];
+          "Win32_System_Com_Urlmon" = [ "Win32_System_Com" ];
+          "Win32_System_ComponentServices" = [ "Win32_System" ];
+          "Win32_System_Console" = [ "Win32_System" ];
+          "Win32_System_Contacts" = [ "Win32_System" ];
+          "Win32_System_CorrelationVector" = [ "Win32_System" ];
+          "Win32_System_DataExchange" = [ "Win32_System" ];
+          "Win32_System_DeploymentServices" = [ "Win32_System" ];
+          "Win32_System_DesktopSharing" = [ "Win32_System" ];
+          "Win32_System_DeveloperLicensing" = [ "Win32_System" ];
+          "Win32_System_Diagnostics" = [ "Win32_System" ];
+          "Win32_System_Diagnostics_Ceip" = [ "Win32_System_Diagnostics" ];
+          "Win32_System_Diagnostics_ClrProfiling" = [ "Win32_System_Diagnostics" ];
+          "Win32_System_Diagnostics_Debug" = [ "Win32_System_Diagnostics" ];
+          "Win32_System_Diagnostics_Debug_ActiveScript" = [ "Win32_System_Diagnostics_Debug" ];
+          "Win32_System_Diagnostics_Debug_Extensions" = [ "Win32_System_Diagnostics_Debug" ];
+          "Win32_System_Diagnostics_Etw" = [ "Win32_System_Diagnostics" ];
+          "Win32_System_Diagnostics_ProcessSnapshotting" = [ "Win32_System_Diagnostics" ];
+          "Win32_System_Diagnostics_ToolHelp" = [ "Win32_System_Diagnostics" ];
+          "Win32_System_Diagnostics_TraceLogging" = [ "Win32_System_Diagnostics" ];
+          "Win32_System_DistributedTransactionCoordinator" = [ "Win32_System" ];
+          "Win32_System_Environment" = [ "Win32_System" ];
+          "Win32_System_ErrorReporting" = [ "Win32_System" ];
+          "Win32_System_EventCollector" = [ "Win32_System" ];
+          "Win32_System_EventLog" = [ "Win32_System" ];
+          "Win32_System_EventNotificationService" = [ "Win32_System" ];
+          "Win32_System_GroupPolicy" = [ "Win32_System" ];
+          "Win32_System_HostCompute" = [ "Win32_System" ];
+          "Win32_System_HostComputeNetwork" = [ "Win32_System" ];
+          "Win32_System_HostComputeSystem" = [ "Win32_System" ];
+          "Win32_System_Hypervisor" = [ "Win32_System" ];
+          "Win32_System_IO" = [ "Win32_System" ];
+          "Win32_System_Iis" = [ "Win32_System" ];
+          "Win32_System_Ioctl" = [ "Win32_System" ];
+          "Win32_System_JobObjects" = [ "Win32_System" ];
+          "Win32_System_Js" = [ "Win32_System" ];
+          "Win32_System_Kernel" = [ "Win32_System" ];
+          "Win32_System_LibraryLoader" = [ "Win32_System" ];
+          "Win32_System_Mailslots" = [ "Win32_System" ];
+          "Win32_System_Mapi" = [ "Win32_System" ];
+          "Win32_System_Memory" = [ "Win32_System" ];
+          "Win32_System_Memory_NonVolatile" = [ "Win32_System_Memory" ];
+          "Win32_System_MessageQueuing" = [ "Win32_System" ];
+          "Win32_System_MixedReality" = [ "Win32_System" ];
+          "Win32_System_Mmc" = [ "Win32_System" ];
+          "Win32_System_Ole" = [ "Win32_System" ];
+          "Win32_System_ParentalControls" = [ "Win32_System" ];
+          "Win32_System_PasswordManagement" = [ "Win32_System" ];
+          "Win32_System_Performance" = [ "Win32_System" ];
+          "Win32_System_Performance_HardwareCounterProfiling" = [ "Win32_System_Performance" ];
+          "Win32_System_Pipes" = [ "Win32_System" ];
+          "Win32_System_Power" = [ "Win32_System" ];
+          "Win32_System_ProcessStatus" = [ "Win32_System" ];
+          "Win32_System_RealTimeCommunications" = [ "Win32_System" ];
+          "Win32_System_Recovery" = [ "Win32_System" ];
+          "Win32_System_Registry" = [ "Win32_System" ];
+          "Win32_System_RemoteAssistance" = [ "Win32_System" ];
+          "Win32_System_RemoteDesktop" = [ "Win32_System" ];
+          "Win32_System_RemoteManagement" = [ "Win32_System" ];
+          "Win32_System_RestartManager" = [ "Win32_System" ];
+          "Win32_System_Restore" = [ "Win32_System" ];
+          "Win32_System_Rpc" = [ "Win32_System" ];
+          "Win32_System_Search" = [ "Win32_System" ];
+          "Win32_System_Search_Common" = [ "Win32_System_Search" ];
+          "Win32_System_SecurityCenter" = [ "Win32_System" ];
+          "Win32_System_ServerBackup" = [ "Win32_System" ];
+          "Win32_System_Services" = [ "Win32_System" ];
+          "Win32_System_SettingsManagementInfrastructure" = [ "Win32_System" ];
+          "Win32_System_SetupAndMigration" = [ "Win32_System" ];
+          "Win32_System_Shutdown" = [ "Win32_System" ];
+          "Win32_System_SideShow" = [ "Win32_System" ];
+          "Win32_System_StationsAndDesktops" = [ "Win32_System" ];
+          "Win32_System_SubsystemForLinux" = [ "Win32_System" ];
+          "Win32_System_SystemInformation" = [ "Win32_System" ];
+          "Win32_System_SystemServices" = [ "Win32_System" ];
+          "Win32_System_TaskScheduler" = [ "Win32_System" ];
+          "Win32_System_Threading" = [ "Win32_System" ];
+          "Win32_System_Time" = [ "Win32_System" ];
+          "Win32_System_TpmBaseServices" = [ "Win32_System" ];
+          "Win32_System_TransactionServer" = [ "Win32_System" ];
+          "Win32_System_UpdateAgent" = [ "Win32_System" ];
+          "Win32_System_UpdateAssessment" = [ "Win32_System" ];
+          "Win32_System_UserAccessLogging" = [ "Win32_System" ];
+          "Win32_System_Variant" = [ "Win32_System" ];
+          "Win32_System_VirtualDosMachines" = [ "Win32_System" ];
+          "Win32_System_WinRT" = [ "Win32_System" ];
+          "Win32_System_WinRT_AllJoyn" = [ "Win32_System_WinRT" ];
+          "Win32_System_WinRT_Composition" = [ "Win32_System_WinRT" ];
+          "Win32_System_WinRT_CoreInputView" = [ "Win32_System_WinRT" ];
+          "Win32_System_WinRT_Direct3D11" = [ "Win32_System_WinRT" ];
+          "Win32_System_WinRT_Display" = [ "Win32_System_WinRT" ];
+          "Win32_System_WinRT_Graphics" = [ "Win32_System_WinRT" ];
+          "Win32_System_WinRT_Graphics_Capture" = [ "Win32_System_WinRT_Graphics" ];
+          "Win32_System_WinRT_Graphics_Direct2D" = [ "Win32_System_WinRT_Graphics" ];
+          "Win32_System_WinRT_Graphics_Imaging" = [ "Win32_System_WinRT_Graphics" ];
+          "Win32_System_WinRT_Holographic" = [ "Win32_System_WinRT" ];
+          "Win32_System_WinRT_Isolation" = [ "Win32_System_WinRT" ];
+          "Win32_System_WinRT_ML" = [ "Win32_System_WinRT" ];
+          "Win32_System_WinRT_Media" = [ "Win32_System_WinRT" ];
+          "Win32_System_WinRT_Metadata" = [ "Win32_System_WinRT" ];
+          "Win32_System_WinRT_Pdf" = [ "Win32_System_WinRT" ];
+          "Win32_System_WinRT_Printing" = [ "Win32_System_WinRT" ];
+          "Win32_System_WinRT_Shell" = [ "Win32_System_WinRT" ];
+          "Win32_System_WinRT_Storage" = [ "Win32_System_WinRT" ];
+          "Win32_System_WindowsProgramming" = [ "Win32_System" ];
+          "Win32_System_WindowsSync" = [ "Win32_System" ];
+          "Win32_System_Wmi" = [ "Win32_System" ];
+          "Win32_UI" = [ "Win32" ];
+          "Win32_UI_Accessibility" = [ "Win32_UI" ];
+          "Win32_UI_Animation" = [ "Win32_UI" ];
+          "Win32_UI_ColorSystem" = [ "Win32_UI" ];
+          "Win32_UI_Controls" = [ "Win32_UI" ];
+          "Win32_UI_Controls_Dialogs" = [ "Win32_UI_Controls" ];
+          "Win32_UI_Controls_RichEdit" = [ "Win32_UI_Controls" ];
+          "Win32_UI_HiDpi" = [ "Win32_UI" ];
+          "Win32_UI_Input" = [ "Win32_UI" ];
+          "Win32_UI_Input_Ime" = [ "Win32_UI_Input" ];
+          "Win32_UI_Input_Ink" = [ "Win32_UI_Input" ];
+          "Win32_UI_Input_KeyboardAndMouse" = [ "Win32_UI_Input" ];
+          "Win32_UI_Input_Pointer" = [ "Win32_UI_Input" ];
+          "Win32_UI_Input_Radial" = [ "Win32_UI_Input" ];
+          "Win32_UI_Input_Touch" = [ "Win32_UI_Input" ];
+          "Win32_UI_Input_XboxController" = [ "Win32_UI_Input" ];
+          "Win32_UI_InteractionContext" = [ "Win32_UI" ];
+          "Win32_UI_LegacyWindowsEnvironmentFeatures" = [ "Win32_UI" ];
+          "Win32_UI_Magnification" = [ "Win32_UI" ];
+          "Win32_UI_Notifications" = [ "Win32_UI" ];
+          "Win32_UI_Ribbon" = [ "Win32_UI" ];
+          "Win32_UI_Shell" = [ "Win32_UI" ];
+          "Win32_UI_Shell_Common" = [ "Win32_UI_Shell" ];
+          "Win32_UI_Shell_PropertiesSystem" = [ "Win32_UI_Shell" ];
+          "Win32_UI_TabletPC" = [ "Win32_UI" ];
+          "Win32_UI_TextServices" = [ "Win32_UI" ];
+          "Win32_UI_WindowsAndMessaging" = [ "Win32_UI" ];
+          "Win32_UI_Wpf" = [ "Win32_UI" ];
+          "Win32_Web" = [ "Win32" ];
+          "Win32_Web_InternetExplorer" = [ "Win32_Web" ];
+          "implement" = [ "windows-implement" "windows-interface" "windows-core/implement" ];
+          "windows-implement" = [ "dep:windows-implement" ];
+          "windows-interface" = [ "dep:windows-interface" ];
+        };
+        resolvedDefaultFeatures = [ "Win32" "Win32_Devices" "Win32_Devices_Properties" "Win32_Foundation" "Win32_Media" "Win32_Media_Audio" "Win32_Media_KernelStreaming" "Win32_Media_Multimedia" "Win32_Security" "Win32_System" "Win32_System_Com" "Win32_System_Com_StructuredStorage" "Win32_System_SystemServices" "Win32_System_Threading" "Win32_System_Variant" "Win32_UI" "Win32_UI_Shell" "Win32_UI_Shell_PropertiesSystem" "default" ];
+      };
+      "windows 0.61.3" = rec {
+        crateName = "windows";
+        version = "0.61.3";
+        edition = "2021";
+        sha256 = "14v8dln7i4ccskd8danzri22bkjkbmgzh284j3vaxhd4cykx7awv";
+        authors = [
+          "Microsoft"
+        ];
+        dependencies = [
+          {
+            name = "windows-collections";
+            packageId = "windows-collections 0.2.0";
+            usesDefaultFeatures = false;
+          }
+          {
+            name = "windows-core";
+            packageId = "windows-core 0.61.2";
+            usesDefaultFeatures = false;
+          }
+          {
+            name = "windows-future";
+            packageId = "windows-future 0.2.1";
+            usesDefaultFeatures = false;
+          }
+          {
+            name = "windows-link";
+            packageId = "windows-link 0.1.3";
+            usesDefaultFeatures = false;
+          }
+          {
+            name = "windows-numerics";
+            packageId = "windows-numerics 0.2.0";
+            usesDefaultFeatures = false;
           }
         ];
         features = {
@@ -26617,13 +33068,16 @@ rec {
           "Win32_Data_Xml_XmlLite" = [ "Win32_Data_Xml" ];
           "Win32_Devices" = [ "Win32" ];
           "Win32_Devices_AllJoyn" = [ "Win32_Devices" ];
+          "Win32_Devices_Beep" = [ "Win32_Devices" ];
           "Win32_Devices_BiometricFramework" = [ "Win32_Devices" ];
           "Win32_Devices_Bluetooth" = [ "Win32_Devices" ];
+          "Win32_Devices_Cdrom" = [ "Win32_Devices" ];
           "Win32_Devices_Communication" = [ "Win32_Devices" ];
           "Win32_Devices_DeviceAccess" = [ "Win32_Devices" ];
           "Win32_Devices_DeviceAndDriverInstallation" = [ "Win32_Devices" ];
           "Win32_Devices_DeviceQuery" = [ "Win32_Devices" ];
           "Win32_Devices_Display" = [ "Win32_Devices" ];
+          "Win32_Devices_Dvd" = [ "Win32_Devices" ];
           "Win32_Devices_Enumeration" = [ "Win32_Devices" ];
           "Win32_Devices_Enumeration_Pnp" = [ "Win32_Devices_Enumeration" ];
           "Win32_Devices_Fax" = [ "Win32_Devices" ];
@@ -26631,6 +33085,8 @@ rec {
           "Win32_Devices_Geolocation" = [ "Win32_Devices" ];
           "Win32_Devices_HumanInterfaceDevice" = [ "Win32_Devices" ];
           "Win32_Devices_ImageAcquisition" = [ "Win32_Devices" ];
+          "Win32_Devices_Nfc" = [ "Win32_Devices" ];
+          "Win32_Devices_Nfp" = [ "Win32_Devices" ];
           "Win32_Devices_PortableDevices" = [ "Win32_Devices" ];
           "Win32_Devices_Properties" = [ "Win32_Devices" ];
           "Win32_Devices_Pwm" = [ "Win32_Devices" ];
@@ -26937,7 +33393,7 @@ rec {
           "default" = [ "std" ];
           "std" = [ "windows-core/std" ];
         };
-        resolvedDefaultFeatures = [ "Win32" "Win32_Foundation" "Win32_Graphics" "Win32_Graphics_Direct3D" "Win32_Graphics_Direct3D12" "Win32_Graphics_Direct3D_Dxc" "Win32_Graphics_Direct3D_Fxc" "Win32_Graphics_DirectComposition" "Win32_Graphics_Dxgi" "Win32_Graphics_Dxgi_Common" "Win32_Graphics_Gdi" "Win32_Graphics_OpenGL" "Win32_Security" "Win32_System" "Win32_System_Diagnostics" "Win32_System_Diagnostics_Debug" "Win32_System_Kernel" "Win32_System_LibraryLoader" "Win32_System_Performance" "Win32_System_Threading" "Win32_UI" "Win32_UI_WindowsAndMessaging" "default" "std" ];
+        resolvedDefaultFeatures = [ "Win32" "Win32_Foundation" "Win32_Globalization" "Win32_Graphics" "Win32_Graphics_Gdi" "Win32_System" "Win32_System_Com" "Win32_System_LibraryLoader" "Win32_System_Ole" "Win32_System_Variant" "Win32_UI" "Win32_UI_Accessibility" "Win32_UI_Input" "Win32_UI_Input_KeyboardAndMouse" "Win32_UI_WindowsAndMessaging" "default" "std" ];
       };
       "windows 0.62.2" = rec {
         crateName = "windows";
@@ -26947,7 +33403,7 @@ rec {
         dependencies = [
           {
             name = "windows-collections";
-            packageId = "windows-collections";
+            packageId = "windows-collections 0.3.2";
             usesDefaultFeatures = false;
           }
           {
@@ -26957,12 +33413,12 @@ rec {
           }
           {
             name = "windows-future";
-            packageId = "windows-future";
+            packageId = "windows-future 0.3.2";
             usesDefaultFeatures = false;
           }
           {
             name = "windows-numerics";
-            packageId = "windows-numerics";
+            packageId = "windows-numerics 0.3.1";
             usesDefaultFeatures = false;
           }
         ];
@@ -27640,9 +34096,26 @@ rec {
           "default" = [ "std" ];
           "std" = [ "windows-collections/std" "windows-core/std" "windows-future/std" "windows-numerics/std" ];
         };
-        resolvedDefaultFeatures = [ "Foundation" "UI" "UI_ViewManagement" "Win32" "Win32_Foundation" "Win32_System" "Win32_System_Threading" "Win32_System_WinRT" "Win32_UI" "Win32_UI_WindowsAndMessaging" "default" "std" ];
+        resolvedDefaultFeatures = [ "Foundation" "UI" "UI_ViewManagement" "Win32" "Win32_Devices" "Win32_Devices_DeviceAndDriverInstallation" "Win32_Foundation" "Win32_Graphics" "Win32_Graphics_Direct3D" "Win32_Graphics_Direct3D12" "Win32_Graphics_Direct3D_Dxc" "Win32_Graphics_Direct3D_Fxc" "Win32_Graphics_DirectComposition" "Win32_Graphics_Dxgi" "Win32_Graphics_Dxgi_Common" "Win32_Graphics_Gdi" "Win32_Graphics_OpenGL" "Win32_Security" "Win32_System" "Win32_System_Diagnostics" "Win32_System_Diagnostics_Debug" "Win32_System_Kernel" "Win32_System_LibraryLoader" "Win32_System_Performance" "Win32_System_Threading" "Win32_System_WinRT" "Win32_UI" "Win32_UI_WindowsAndMessaging" "default" "std" ];
       };
-      "windows-collections" = rec {
+      "windows-collections 0.2.0" = rec {
+        crateName = "windows-collections";
+        version = "0.2.0";
+        edition = "2021";
+        sha256 = "1s65anr609qvsjga7w971p6iq964h87670dkfqfypnfgwnswxviv";
+        libName = "windows_collections";
+        dependencies = [
+          {
+            name = "windows-core";
+            packageId = "windows-core 0.61.2";
+            usesDefaultFeatures = false;
+          }
+        ];
+        features = {
+          "default" = [ "std" ];
+        };
+      };
+      "windows-collections 0.3.2" = rec {
         crateName = "windows-collections";
         version = "0.3.2";
         edition = "2021";
@@ -27661,31 +34134,19 @@ rec {
         };
         resolvedDefaultFeatures = [ "std" ];
       };
-      "windows-core 0.58.0" = rec {
+      "windows-core 0.54.0" = rec {
         crateName = "windows-core";
-        version = "0.58.0";
+        version = "0.54.0";
         edition = "2021";
-        sha256 = "16czypy425jzmiys4yb3pwsh7cm6grxn9kjp889iqnf2r17d99kb";
+        sha256 = "0r8x2sgl4qq1h23ldf4z7cj213k0bz7479m8a156h79mi6f1nrhj";
         libName = "windows_core";
         authors = [
           "Microsoft"
         ];
         dependencies = [
           {
-            name = "windows-implement";
-            packageId = "windows-implement 0.58.0";
-          }
-          {
-            name = "windows-interface";
-            packageId = "windows-interface 0.58.0";
-          }
-          {
             name = "windows-result";
-            packageId = "windows-result 0.2.0";
-          }
-          {
-            name = "windows-strings";
-            packageId = "windows-strings 0.1.0";
+            packageId = "windows-result 0.1.2";
           }
           {
             name = "windows-targets";
@@ -27693,7 +34154,48 @@ rec {
           }
         ];
         features = {
+        };
+        resolvedDefaultFeatures = [ "default" ];
+      };
+      "windows-core 0.61.2" = rec {
+        crateName = "windows-core";
+        version = "0.61.2";
+        edition = "2021";
+        sha256 = "1qsa3iw14wk4ngfl7ipcvdf9xyq456ms7cx2i9iwf406p7fx7zf0";
+        libName = "windows_core";
+        authors = [
+          "Microsoft"
+        ];
+        dependencies = [
+          {
+            name = "windows-implement";
+            packageId = "windows-implement";
+            usesDefaultFeatures = false;
+          }
+          {
+            name = "windows-interface";
+            packageId = "windows-interface";
+            usesDefaultFeatures = false;
+          }
+          {
+            name = "windows-link";
+            packageId = "windows-link 0.1.3";
+            usesDefaultFeatures = false;
+          }
+          {
+            name = "windows-result";
+            packageId = "windows-result 0.3.4";
+            usesDefaultFeatures = false;
+          }
+          {
+            name = "windows-strings";
+            packageId = "windows-strings 0.4.2";
+            usesDefaultFeatures = false;
+          }
+        ];
+        features = {
           "default" = [ "std" ];
+          "std" = [ "windows-result/std" "windows-strings/std" ];
         };
         resolvedDefaultFeatures = [ "default" "std" ];
       };
@@ -27706,17 +34208,17 @@ rec {
         dependencies = [
           {
             name = "windows-implement";
-            packageId = "windows-implement 0.60.2";
+            packageId = "windows-implement";
             usesDefaultFeatures = false;
           }
           {
             name = "windows-interface";
-            packageId = "windows-interface 0.59.3";
+            packageId = "windows-interface";
             usesDefaultFeatures = false;
           }
           {
             name = "windows-link";
-            packageId = "windows-link";
+            packageId = "windows-link 0.2.1";
             usesDefaultFeatures = false;
           }
           {
@@ -27736,7 +34238,34 @@ rec {
         };
         resolvedDefaultFeatures = [ "default" "std" ];
       };
-      "windows-future" = rec {
+      "windows-future 0.2.1" = rec {
+        crateName = "windows-future";
+        version = "0.2.1";
+        edition = "2021";
+        sha256 = "13mdzcdn51ckpzp3frb8glnmkyjr1c30ym9wnzj9zc97hkll2spw";
+        libName = "windows_future";
+        dependencies = [
+          {
+            name = "windows-core";
+            packageId = "windows-core 0.61.2";
+            usesDefaultFeatures = false;
+          }
+          {
+            name = "windows-link";
+            packageId = "windows-link 0.1.3";
+            usesDefaultFeatures = false;
+          }
+          {
+            name = "windows-threading";
+            packageId = "windows-threading 0.1.0";
+            usesDefaultFeatures = false;
+          }
+        ];
+        features = {
+          "default" = [ "std" ];
+        };
+      };
+      "windows-future 0.3.2" = rec {
         crateName = "windows-future";
         version = "0.3.2";
         edition = "2021";
@@ -27750,12 +34279,12 @@ rec {
           }
           {
             name = "windows-link";
-            packageId = "windows-link";
+            packageId = "windows-link 0.2.1";
             usesDefaultFeatures = false;
           }
           {
             name = "windows-threading";
-            packageId = "windows-threading";
+            packageId = "windows-threading 0.2.1";
             usesDefaultFeatures = false;
           }
         ];
@@ -27765,35 +34294,7 @@ rec {
         };
         resolvedDefaultFeatures = [ "std" ];
       };
-      "windows-implement 0.58.0" = rec {
-        crateName = "windows-implement";
-        version = "0.58.0";
-        edition = "2021";
-        sha256 = "16spr5z65z21qyv379rv2mb1s5q2i9ibd1p2pkn0dr9qr535pg9b";
-        procMacro = true;
-        libName = "windows_implement";
-        authors = [
-          "Microsoft"
-        ];
-        dependencies = [
-          {
-            name = "proc-macro2";
-            packageId = "proc-macro2";
-          }
-          {
-            name = "quote";
-            packageId = "quote";
-          }
-          {
-            name = "syn";
-            packageId = "syn 2.0.119";
-            usesDefaultFeatures = false;
-            features = [ "parsing" "proc-macro" "printing" "full" "derive" ];
-          }
-        ];
-
-      };
-      "windows-implement 0.60.2" = rec {
+      "windows-implement" = rec {
         crateName = "windows-implement";
         version = "0.60.2";
         edition = "2021";
@@ -27820,35 +34321,7 @@ rec {
         ];
 
       };
-      "windows-interface 0.58.0" = rec {
-        crateName = "windows-interface";
-        version = "0.58.0";
-        edition = "2021";
-        sha256 = "059mxmfvx3x88q74ms0qlxmj2pnidmr5mzn60hakn7f95m34qg05";
-        procMacro = true;
-        libName = "windows_interface";
-        authors = [
-          "Microsoft"
-        ];
-        dependencies = [
-          {
-            name = "proc-macro2";
-            packageId = "proc-macro2";
-          }
-          {
-            name = "quote";
-            packageId = "quote";
-          }
-          {
-            name = "syn";
-            packageId = "syn 2.0.119";
-            usesDefaultFeatures = false;
-            features = [ "parsing" "proc-macro" "printing" "full" "derive" "clone-impls" ];
-          }
-        ];
-
-      };
-      "windows-interface 0.59.3" = rec {
+      "windows-interface" = rec {
         crateName = "windows-interface";
         version = "0.59.3";
         edition = "2021";
@@ -27875,7 +34348,18 @@ rec {
         ];
 
       };
-      "windows-link" = rec {
+      "windows-link 0.1.3" = rec {
+        crateName = "windows-link";
+        version = "0.1.3";
+        edition = "2021";
+        sha256 = "12kr1p46dbhpijr4zbwr2spfgq8i8c5x55mvvfmyl96m01cx4sjy";
+        libName = "windows_link";
+        authors = [
+          "Microsoft"
+        ];
+
+      };
+      "windows-link 0.2.1" = rec {
         crateName = "windows-link";
         version = "0.2.1";
         edition = "2021";
@@ -27883,7 +34367,29 @@ rec {
         libName = "windows_link";
 
       };
-      "windows-numerics" = rec {
+      "windows-numerics 0.2.0" = rec {
+        crateName = "windows-numerics";
+        version = "0.2.0";
+        edition = "2021";
+        sha256 = "1cf2j8nbqf0hqqa7chnyid91wxsl2m131kn0vl3mqk3c0rlayl4i";
+        libName = "windows_numerics";
+        dependencies = [
+          {
+            name = "windows-core";
+            packageId = "windows-core 0.61.2";
+            usesDefaultFeatures = false;
+          }
+          {
+            name = "windows-link";
+            packageId = "windows-link 0.1.3";
+            usesDefaultFeatures = false;
+          }
+        ];
+        features = {
+          "default" = [ "std" ];
+        };
+      };
+      "windows-numerics 0.3.1" = rec {
         crateName = "windows-numerics";
         version = "0.3.1";
         edition = "2021";
@@ -27897,7 +34403,7 @@ rec {
           }
           {
             name = "windows-link";
-            packageId = "windows-link";
+            packageId = "windows-link 0.2.1";
             usesDefaultFeatures = false;
           }
         ];
@@ -27907,11 +34413,11 @@ rec {
         };
         resolvedDefaultFeatures = [ "std" ];
       };
-      "windows-result 0.2.0" = rec {
+      "windows-result 0.1.2" = rec {
         crateName = "windows-result";
-        version = "0.2.0";
+        version = "0.1.2";
         edition = "2021";
-        sha256 = "03mf2z1xcy2slhhsm15z24p76qxgm2m74xdjp8bihyag47c4640x";
+        sha256 = "1y274q1v0vy21lhkgslpxpq1m08hvr1mcs2l88h1b1gcx0136f2y";
         libName = "windows_result";
         authors = [
           "Microsoft"
@@ -27926,6 +34432,27 @@ rec {
           "default" = [ "std" ];
         };
         resolvedDefaultFeatures = [ "default" "std" ];
+      };
+      "windows-result 0.3.4" = rec {
+        crateName = "windows-result";
+        version = "0.3.4";
+        edition = "2021";
+        sha256 = "1il60l6idrc6hqsij0cal0mgva6n3w6gq4ziban8wv6c6b9jpx2n";
+        libName = "windows_result";
+        authors = [
+          "Microsoft"
+        ];
+        dependencies = [
+          {
+            name = "windows-link";
+            packageId = "windows-link 0.1.3";
+            usesDefaultFeatures = false;
+          }
+        ];
+        features = {
+          "default" = [ "std" ];
+        };
+        resolvedDefaultFeatures = [ "std" ];
       };
       "windows-result 0.4.1" = rec {
         crateName = "windows-result";
@@ -27936,7 +34463,7 @@ rec {
         dependencies = [
           {
             name = "windows-link";
-            packageId = "windows-link";
+            packageId = "windows-link 0.2.1";
             usesDefaultFeatures = false;
           }
         ];
@@ -27945,30 +34472,26 @@ rec {
         };
         resolvedDefaultFeatures = [ "std" ];
       };
-      "windows-strings 0.1.0" = rec {
+      "windows-strings 0.4.2" = rec {
         crateName = "windows-strings";
-        version = "0.1.0";
+        version = "0.4.2";
         edition = "2021";
-        sha256 = "042dxvi3133f7dyi2pgcvknwkikk47k8bddwxbq5s0l6qhjv3nac";
+        sha256 = "0mrv3plibkla4v5kaakc2rfksdd0b14plcmidhbkcfqc78zwkrjn";
         libName = "windows_strings";
         authors = [
           "Microsoft"
         ];
         dependencies = [
           {
-            name = "windows-result";
-            packageId = "windows-result 0.2.0";
+            name = "windows-link";
+            packageId = "windows-link 0.1.3";
             usesDefaultFeatures = false;
-          }
-          {
-            name = "windows-targets";
-            packageId = "windows-targets 0.52.6";
           }
         ];
         features = {
           "default" = [ "std" ];
         };
-        resolvedDefaultFeatures = [ "default" "std" ];
+        resolvedDefaultFeatures = [ "std" ];
       };
       "windows-strings 0.5.1" = rec {
         crateName = "windows-strings";
@@ -27979,7 +34502,7 @@ rec {
         dependencies = [
           {
             name = "windows-link";
-            packageId = "windows-link";
+            packageId = "windows-link 0.2.1";
             usesDefaultFeatures = false;
           }
         ];
@@ -27987,6 +34510,293 @@ rec {
           "default" = [ "std" ];
         };
         resolvedDefaultFeatures = [ "std" ];
+      };
+      "windows-sys 0.45.0" = rec {
+        crateName = "windows-sys";
+        version = "0.45.0";
+        edition = "2018";
+        sha256 = "1l36bcqm4g89pknfp8r9rl1w4bn017q6a8qlx8viv0xjxzjkna3m";
+        libName = "windows_sys";
+        authors = [
+          "Microsoft"
+        ];
+        dependencies = [
+          {
+            name = "windows-targets";
+            packageId = "windows-targets 0.42.2";
+            target = { target, features }: (!(target."windows_raw_dylib" or false));
+          }
+        ];
+        features = {
+          "Win32_Data" = [ "Win32" ];
+          "Win32_Data_HtmlHelp" = [ "Win32_Data" ];
+          "Win32_Data_RightsManagement" = [ "Win32_Data" ];
+          "Win32_Data_Xml" = [ "Win32_Data" ];
+          "Win32_Data_Xml_MsXml" = [ "Win32_Data_Xml" ];
+          "Win32_Data_Xml_XmlLite" = [ "Win32_Data_Xml" ];
+          "Win32_Devices" = [ "Win32" ];
+          "Win32_Devices_AllJoyn" = [ "Win32_Devices" ];
+          "Win32_Devices_BiometricFramework" = [ "Win32_Devices" ];
+          "Win32_Devices_Bluetooth" = [ "Win32_Devices" ];
+          "Win32_Devices_Communication" = [ "Win32_Devices" ];
+          "Win32_Devices_DeviceAccess" = [ "Win32_Devices" ];
+          "Win32_Devices_DeviceAndDriverInstallation" = [ "Win32_Devices" ];
+          "Win32_Devices_DeviceQuery" = [ "Win32_Devices" ];
+          "Win32_Devices_Display" = [ "Win32_Devices" ];
+          "Win32_Devices_Enumeration" = [ "Win32_Devices" ];
+          "Win32_Devices_Enumeration_Pnp" = [ "Win32_Devices_Enumeration" ];
+          "Win32_Devices_Fax" = [ "Win32_Devices" ];
+          "Win32_Devices_FunctionDiscovery" = [ "Win32_Devices" ];
+          "Win32_Devices_Geolocation" = [ "Win32_Devices" ];
+          "Win32_Devices_HumanInterfaceDevice" = [ "Win32_Devices" ];
+          "Win32_Devices_ImageAcquisition" = [ "Win32_Devices" ];
+          "Win32_Devices_PortableDevices" = [ "Win32_Devices" ];
+          "Win32_Devices_Properties" = [ "Win32_Devices" ];
+          "Win32_Devices_Pwm" = [ "Win32_Devices" ];
+          "Win32_Devices_Sensors" = [ "Win32_Devices" ];
+          "Win32_Devices_SerialCommunication" = [ "Win32_Devices" ];
+          "Win32_Devices_Tapi" = [ "Win32_Devices" ];
+          "Win32_Devices_Usb" = [ "Win32_Devices" ];
+          "Win32_Devices_WebServicesOnDevices" = [ "Win32_Devices" ];
+          "Win32_Foundation" = [ "Win32" ];
+          "Win32_Gaming" = [ "Win32" ];
+          "Win32_Globalization" = [ "Win32" ];
+          "Win32_Graphics" = [ "Win32" ];
+          "Win32_Graphics_Dwm" = [ "Win32_Graphics" ];
+          "Win32_Graphics_Gdi" = [ "Win32_Graphics" ];
+          "Win32_Graphics_Hlsl" = [ "Win32_Graphics" ];
+          "Win32_Graphics_OpenGL" = [ "Win32_Graphics" ];
+          "Win32_Graphics_Printing" = [ "Win32_Graphics" ];
+          "Win32_Graphics_Printing_PrintTicket" = [ "Win32_Graphics_Printing" ];
+          "Win32_Management" = [ "Win32" ];
+          "Win32_Management_MobileDeviceManagementRegistration" = [ "Win32_Management" ];
+          "Win32_Media" = [ "Win32" ];
+          "Win32_Media_Audio" = [ "Win32_Media" ];
+          "Win32_Media_Audio_Apo" = [ "Win32_Media_Audio" ];
+          "Win32_Media_Audio_DirectMusic" = [ "Win32_Media_Audio" ];
+          "Win32_Media_Audio_Endpoints" = [ "Win32_Media_Audio" ];
+          "Win32_Media_Audio_XAudio2" = [ "Win32_Media_Audio" ];
+          "Win32_Media_DeviceManager" = [ "Win32_Media" ];
+          "Win32_Media_DxMediaObjects" = [ "Win32_Media" ];
+          "Win32_Media_KernelStreaming" = [ "Win32_Media" ];
+          "Win32_Media_LibrarySharingServices" = [ "Win32_Media" ];
+          "Win32_Media_MediaPlayer" = [ "Win32_Media" ];
+          "Win32_Media_Multimedia" = [ "Win32_Media" ];
+          "Win32_Media_Speech" = [ "Win32_Media" ];
+          "Win32_Media_Streaming" = [ "Win32_Media" ];
+          "Win32_Media_WindowsMediaFormat" = [ "Win32_Media" ];
+          "Win32_NetworkManagement" = [ "Win32" ];
+          "Win32_NetworkManagement_Dhcp" = [ "Win32_NetworkManagement" ];
+          "Win32_NetworkManagement_Dns" = [ "Win32_NetworkManagement" ];
+          "Win32_NetworkManagement_InternetConnectionWizard" = [ "Win32_NetworkManagement" ];
+          "Win32_NetworkManagement_IpHelper" = [ "Win32_NetworkManagement" ];
+          "Win32_NetworkManagement_MobileBroadband" = [ "Win32_NetworkManagement" ];
+          "Win32_NetworkManagement_Multicast" = [ "Win32_NetworkManagement" ];
+          "Win32_NetworkManagement_Ndis" = [ "Win32_NetworkManagement" ];
+          "Win32_NetworkManagement_NetBios" = [ "Win32_NetworkManagement" ];
+          "Win32_NetworkManagement_NetManagement" = [ "Win32_NetworkManagement" ];
+          "Win32_NetworkManagement_NetShell" = [ "Win32_NetworkManagement" ];
+          "Win32_NetworkManagement_NetworkDiagnosticsFramework" = [ "Win32_NetworkManagement" ];
+          "Win32_NetworkManagement_NetworkPolicyServer" = [ "Win32_NetworkManagement" ];
+          "Win32_NetworkManagement_P2P" = [ "Win32_NetworkManagement" ];
+          "Win32_NetworkManagement_QoS" = [ "Win32_NetworkManagement" ];
+          "Win32_NetworkManagement_Rras" = [ "Win32_NetworkManagement" ];
+          "Win32_NetworkManagement_Snmp" = [ "Win32_NetworkManagement" ];
+          "Win32_NetworkManagement_WNet" = [ "Win32_NetworkManagement" ];
+          "Win32_NetworkManagement_WebDav" = [ "Win32_NetworkManagement" ];
+          "Win32_NetworkManagement_WiFi" = [ "Win32_NetworkManagement" ];
+          "Win32_NetworkManagement_WindowsConnectNow" = [ "Win32_NetworkManagement" ];
+          "Win32_NetworkManagement_WindowsConnectionManager" = [ "Win32_NetworkManagement" ];
+          "Win32_NetworkManagement_WindowsFilteringPlatform" = [ "Win32_NetworkManagement" ];
+          "Win32_NetworkManagement_WindowsFirewall" = [ "Win32_NetworkManagement" ];
+          "Win32_NetworkManagement_WindowsNetworkVirtualization" = [ "Win32_NetworkManagement" ];
+          "Win32_Networking" = [ "Win32" ];
+          "Win32_Networking_ActiveDirectory" = [ "Win32_Networking" ];
+          "Win32_Networking_BackgroundIntelligentTransferService" = [ "Win32_Networking" ];
+          "Win32_Networking_Clustering" = [ "Win32_Networking" ];
+          "Win32_Networking_HttpServer" = [ "Win32_Networking" ];
+          "Win32_Networking_Ldap" = [ "Win32_Networking" ];
+          "Win32_Networking_NetworkListManager" = [ "Win32_Networking" ];
+          "Win32_Networking_RemoteDifferentialCompression" = [ "Win32_Networking" ];
+          "Win32_Networking_WebSocket" = [ "Win32_Networking" ];
+          "Win32_Networking_WinHttp" = [ "Win32_Networking" ];
+          "Win32_Networking_WinInet" = [ "Win32_Networking" ];
+          "Win32_Networking_WinSock" = [ "Win32_Networking" ];
+          "Win32_Networking_WindowsWebServices" = [ "Win32_Networking" ];
+          "Win32_Security" = [ "Win32" ];
+          "Win32_Security_AppLocker" = [ "Win32_Security" ];
+          "Win32_Security_Authentication" = [ "Win32_Security" ];
+          "Win32_Security_Authentication_Identity" = [ "Win32_Security_Authentication" ];
+          "Win32_Security_Authentication_Identity_Provider" = [ "Win32_Security_Authentication_Identity" ];
+          "Win32_Security_Authorization" = [ "Win32_Security" ];
+          "Win32_Security_Authorization_UI" = [ "Win32_Security_Authorization" ];
+          "Win32_Security_ConfigurationSnapin" = [ "Win32_Security" ];
+          "Win32_Security_Credentials" = [ "Win32_Security" ];
+          "Win32_Security_Cryptography" = [ "Win32_Security" ];
+          "Win32_Security_Cryptography_Catalog" = [ "Win32_Security_Cryptography" ];
+          "Win32_Security_Cryptography_Certificates" = [ "Win32_Security_Cryptography" ];
+          "Win32_Security_Cryptography_Sip" = [ "Win32_Security_Cryptography" ];
+          "Win32_Security_Cryptography_UI" = [ "Win32_Security_Cryptography" ];
+          "Win32_Security_DiagnosticDataQuery" = [ "Win32_Security" ];
+          "Win32_Security_DirectoryServices" = [ "Win32_Security" ];
+          "Win32_Security_EnterpriseData" = [ "Win32_Security" ];
+          "Win32_Security_ExtensibleAuthenticationProtocol" = [ "Win32_Security" ];
+          "Win32_Security_Isolation" = [ "Win32_Security" ];
+          "Win32_Security_LicenseProtection" = [ "Win32_Security" ];
+          "Win32_Security_NetworkAccessProtection" = [ "Win32_Security" ];
+          "Win32_Security_Tpm" = [ "Win32_Security" ];
+          "Win32_Security_WinTrust" = [ "Win32_Security" ];
+          "Win32_Security_WinWlx" = [ "Win32_Security" ];
+          "Win32_Storage" = [ "Win32" ];
+          "Win32_Storage_Cabinets" = [ "Win32_Storage" ];
+          "Win32_Storage_CloudFilters" = [ "Win32_Storage" ];
+          "Win32_Storage_Compression" = [ "Win32_Storage" ];
+          "Win32_Storage_DataDeduplication" = [ "Win32_Storage" ];
+          "Win32_Storage_DistributedFileSystem" = [ "Win32_Storage" ];
+          "Win32_Storage_EnhancedStorage" = [ "Win32_Storage" ];
+          "Win32_Storage_FileHistory" = [ "Win32_Storage" ];
+          "Win32_Storage_FileServerResourceManager" = [ "Win32_Storage" ];
+          "Win32_Storage_FileSystem" = [ "Win32_Storage" ];
+          "Win32_Storage_Imapi" = [ "Win32_Storage" ];
+          "Win32_Storage_IndexServer" = [ "Win32_Storage" ];
+          "Win32_Storage_InstallableFileSystems" = [ "Win32_Storage" ];
+          "Win32_Storage_IscsiDisc" = [ "Win32_Storage" ];
+          "Win32_Storage_Jet" = [ "Win32_Storage" ];
+          "Win32_Storage_OfflineFiles" = [ "Win32_Storage" ];
+          "Win32_Storage_OperationRecorder" = [ "Win32_Storage" ];
+          "Win32_Storage_Packaging" = [ "Win32_Storage" ];
+          "Win32_Storage_Packaging_Appx" = [ "Win32_Storage_Packaging" ];
+          "Win32_Storage_Packaging_Opc" = [ "Win32_Storage_Packaging" ];
+          "Win32_Storage_ProjectedFileSystem" = [ "Win32_Storage" ];
+          "Win32_Storage_StructuredStorage" = [ "Win32_Storage" ];
+          "Win32_Storage_Vhd" = [ "Win32_Storage" ];
+          "Win32_Storage_VirtualDiskService" = [ "Win32_Storage" ];
+          "Win32_Storage_Vss" = [ "Win32_Storage" ];
+          "Win32_Storage_Xps" = [ "Win32_Storage" ];
+          "Win32_Storage_Xps_Printing" = [ "Win32_Storage_Xps" ];
+          "Win32_System" = [ "Win32" ];
+          "Win32_System_AddressBook" = [ "Win32_System" ];
+          "Win32_System_Antimalware" = [ "Win32_System" ];
+          "Win32_System_ApplicationInstallationAndServicing" = [ "Win32_System" ];
+          "Win32_System_ApplicationVerifier" = [ "Win32_System" ];
+          "Win32_System_AssessmentTool" = [ "Win32_System" ];
+          "Win32_System_Com" = [ "Win32_System" ];
+          "Win32_System_Com_CallObj" = [ "Win32_System_Com" ];
+          "Win32_System_Com_ChannelCredentials" = [ "Win32_System_Com" ];
+          "Win32_System_Com_Events" = [ "Win32_System_Com" ];
+          "Win32_System_Com_Marshal" = [ "Win32_System_Com" ];
+          "Win32_System_Com_StructuredStorage" = [ "Win32_System_Com" ];
+          "Win32_System_Com_UI" = [ "Win32_System_Com" ];
+          "Win32_System_Com_Urlmon" = [ "Win32_System_Com" ];
+          "Win32_System_ComponentServices" = [ "Win32_System" ];
+          "Win32_System_Console" = [ "Win32_System" ];
+          "Win32_System_Contacts" = [ "Win32_System" ];
+          "Win32_System_CorrelationVector" = [ "Win32_System" ];
+          "Win32_System_DataExchange" = [ "Win32_System" ];
+          "Win32_System_DeploymentServices" = [ "Win32_System" ];
+          "Win32_System_DesktopSharing" = [ "Win32_System" ];
+          "Win32_System_DeveloperLicensing" = [ "Win32_System" ];
+          "Win32_System_Diagnostics" = [ "Win32_System" ];
+          "Win32_System_Diagnostics_Ceip" = [ "Win32_System_Diagnostics" ];
+          "Win32_System_Diagnostics_Debug" = [ "Win32_System_Diagnostics" ];
+          "Win32_System_Diagnostics_Etw" = [ "Win32_System_Diagnostics" ];
+          "Win32_System_Diagnostics_ProcessSnapshotting" = [ "Win32_System_Diagnostics" ];
+          "Win32_System_Diagnostics_ToolHelp" = [ "Win32_System_Diagnostics" ];
+          "Win32_System_DistributedTransactionCoordinator" = [ "Win32_System" ];
+          "Win32_System_Environment" = [ "Win32_System" ];
+          "Win32_System_ErrorReporting" = [ "Win32_System" ];
+          "Win32_System_EventCollector" = [ "Win32_System" ];
+          "Win32_System_EventLog" = [ "Win32_System" ];
+          "Win32_System_EventNotificationService" = [ "Win32_System" ];
+          "Win32_System_GroupPolicy" = [ "Win32_System" ];
+          "Win32_System_HostCompute" = [ "Win32_System" ];
+          "Win32_System_HostComputeNetwork" = [ "Win32_System" ];
+          "Win32_System_HostComputeSystem" = [ "Win32_System" ];
+          "Win32_System_Hypervisor" = [ "Win32_System" ];
+          "Win32_System_IO" = [ "Win32_System" ];
+          "Win32_System_Iis" = [ "Win32_System" ];
+          "Win32_System_Ioctl" = [ "Win32_System" ];
+          "Win32_System_JobObjects" = [ "Win32_System" ];
+          "Win32_System_Js" = [ "Win32_System" ];
+          "Win32_System_Kernel" = [ "Win32_System" ];
+          "Win32_System_LibraryLoader" = [ "Win32_System" ];
+          "Win32_System_Mailslots" = [ "Win32_System" ];
+          "Win32_System_Mapi" = [ "Win32_System" ];
+          "Win32_System_Memory" = [ "Win32_System" ];
+          "Win32_System_Memory_NonVolatile" = [ "Win32_System_Memory" ];
+          "Win32_System_MessageQueuing" = [ "Win32_System" ];
+          "Win32_System_MixedReality" = [ "Win32_System" ];
+          "Win32_System_Mmc" = [ "Win32_System" ];
+          "Win32_System_Ole" = [ "Win32_System" ];
+          "Win32_System_ParentalControls" = [ "Win32_System" ];
+          "Win32_System_PasswordManagement" = [ "Win32_System" ];
+          "Win32_System_Performance" = [ "Win32_System" ];
+          "Win32_System_Performance_HardwareCounterProfiling" = [ "Win32_System_Performance" ];
+          "Win32_System_Pipes" = [ "Win32_System" ];
+          "Win32_System_Power" = [ "Win32_System" ];
+          "Win32_System_ProcessStatus" = [ "Win32_System" ];
+          "Win32_System_RealTimeCommunications" = [ "Win32_System" ];
+          "Win32_System_Recovery" = [ "Win32_System" ];
+          "Win32_System_Registry" = [ "Win32_System" ];
+          "Win32_System_RemoteAssistance" = [ "Win32_System" ];
+          "Win32_System_RemoteDesktop" = [ "Win32_System" ];
+          "Win32_System_RemoteManagement" = [ "Win32_System" ];
+          "Win32_System_RestartManager" = [ "Win32_System" ];
+          "Win32_System_Restore" = [ "Win32_System" ];
+          "Win32_System_Rpc" = [ "Win32_System" ];
+          "Win32_System_Search" = [ "Win32_System" ];
+          "Win32_System_Search_Common" = [ "Win32_System_Search" ];
+          "Win32_System_SecurityCenter" = [ "Win32_System" ];
+          "Win32_System_ServerBackup" = [ "Win32_System" ];
+          "Win32_System_Services" = [ "Win32_System" ];
+          "Win32_System_SettingsManagementInfrastructure" = [ "Win32_System" ];
+          "Win32_System_SetupAndMigration" = [ "Win32_System" ];
+          "Win32_System_Shutdown" = [ "Win32_System" ];
+          "Win32_System_StationsAndDesktops" = [ "Win32_System" ];
+          "Win32_System_SubsystemForLinux" = [ "Win32_System" ];
+          "Win32_System_SystemInformation" = [ "Win32_System" ];
+          "Win32_System_SystemServices" = [ "Win32_System" ];
+          "Win32_System_TaskScheduler" = [ "Win32_System" ];
+          "Win32_System_Threading" = [ "Win32_System" ];
+          "Win32_System_Time" = [ "Win32_System" ];
+          "Win32_System_TpmBaseServices" = [ "Win32_System" ];
+          "Win32_System_UpdateAgent" = [ "Win32_System" ];
+          "Win32_System_UpdateAssessment" = [ "Win32_System" ];
+          "Win32_System_UserAccessLogging" = [ "Win32_System" ];
+          "Win32_System_VirtualDosMachines" = [ "Win32_System" ];
+          "Win32_System_WindowsProgramming" = [ "Win32_System" ];
+          "Win32_System_WindowsSync" = [ "Win32_System" ];
+          "Win32_System_Wmi" = [ "Win32_System" ];
+          "Win32_UI" = [ "Win32" ];
+          "Win32_UI_Accessibility" = [ "Win32_UI" ];
+          "Win32_UI_Animation" = [ "Win32_UI" ];
+          "Win32_UI_ColorSystem" = [ "Win32_UI" ];
+          "Win32_UI_Controls" = [ "Win32_UI" ];
+          "Win32_UI_Controls_Dialogs" = [ "Win32_UI_Controls" ];
+          "Win32_UI_Controls_RichEdit" = [ "Win32_UI_Controls" ];
+          "Win32_UI_HiDpi" = [ "Win32_UI" ];
+          "Win32_UI_Input" = [ "Win32_UI" ];
+          "Win32_UI_Input_Ime" = [ "Win32_UI_Input" ];
+          "Win32_UI_Input_Ink" = [ "Win32_UI_Input" ];
+          "Win32_UI_Input_KeyboardAndMouse" = [ "Win32_UI_Input" ];
+          "Win32_UI_Input_Pointer" = [ "Win32_UI_Input" ];
+          "Win32_UI_Input_Radial" = [ "Win32_UI_Input" ];
+          "Win32_UI_Input_Touch" = [ "Win32_UI_Input" ];
+          "Win32_UI_Input_XboxController" = [ "Win32_UI_Input" ];
+          "Win32_UI_InteractionContext" = [ "Win32_UI" ];
+          "Win32_UI_LegacyWindowsEnvironmentFeatures" = [ "Win32_UI" ];
+          "Win32_UI_Magnification" = [ "Win32_UI" ];
+          "Win32_UI_Notifications" = [ "Win32_UI" ];
+          "Win32_UI_Ribbon" = [ "Win32_UI" ];
+          "Win32_UI_Shell" = [ "Win32_UI" ];
+          "Win32_UI_Shell_Common" = [ "Win32_UI_Shell" ];
+          "Win32_UI_Shell_PropertiesSystem" = [ "Win32_UI_Shell" ];
+          "Win32_UI_TabletPC" = [ "Win32_UI" ];
+          "Win32_UI_TextServices" = [ "Win32_UI" ];
+          "Win32_UI_WindowsAndMessaging" = [ "Win32_UI" ];
+          "Win32_UI_Wpf" = [ "Win32_UI" ];
+        };
+        resolvedDefaultFeatures = [ "Win32" "Win32_Globalization" "default" ];
       };
       "windows-sys 0.52.0" = rec {
         crateName = "windows-sys";
@@ -28234,7 +35044,7 @@ rec {
           "Win32_Web" = [ "Win32" ];
           "Win32_Web_InternetExplorer" = [ "Win32_Web" ];
         };
-        resolvedDefaultFeatures = [ "Win32" "Win32_Devices" "Win32_Devices_HumanInterfaceDevice" "Win32_Foundation" "Win32_Globalization" "Win32_Graphics" "Win32_Graphics_Dwm" "Win32_Graphics_Gdi" "Win32_Media" "Win32_Security" "Win32_System" "Win32_System_Com" "Win32_System_Com_StructuredStorage" "Win32_System_LibraryLoader" "Win32_System_Ole" "Win32_System_SystemInformation" "Win32_System_SystemServices" "Win32_System_Threading" "Win32_System_WindowsProgramming" "Win32_UI" "Win32_UI_Accessibility" "Win32_UI_Controls" "Win32_UI_HiDpi" "Win32_UI_Input" "Win32_UI_Input_Ime" "Win32_UI_Input_KeyboardAndMouse" "Win32_UI_Input_Pointer" "Win32_UI_Input_Touch" "Win32_UI_Shell" "Win32_UI_TextServices" "Win32_UI_WindowsAndMessaging" "default" ];
+        resolvedDefaultFeatures = [ "Win32" "Win32_Foundation" "Win32_Globalization" "Win32_Graphics" "Win32_Graphics_Gdi" "Win32_System" "Win32_System_Com" "Win32_System_Threading" "Win32_UI" "Win32_UI_Shell" "Win32_UI_WindowsAndMessaging" "default" ];
       };
       "windows-sys 0.59.0" = rec {
         crateName = "windows-sys";
@@ -28493,7 +35303,7 @@ rec {
           "Win32_Web" = [ "Win32" ];
           "Win32_Web_InternetExplorer" = [ "Win32_Web" ];
         };
-        resolvedDefaultFeatures = [ "Win32" "Win32_Foundation" "Win32_NetworkManagement" "Win32_NetworkManagement_IpHelper" "Win32_Networking" "Win32_Networking_WinSock" "Win32_System" "Win32_System_Threading" "default" ];
+        resolvedDefaultFeatures = [ "Win32" "Win32_Devices" "Win32_Devices_HumanInterfaceDevice" "Win32_Foundation" "Win32_Globalization" "Win32_Graphics" "Win32_Graphics_Dwm" "Win32_Graphics_Gdi" "Win32_Media" "Win32_NetworkManagement" "Win32_NetworkManagement_IpHelper" "Win32_Networking" "Win32_Networking_WinSock" "Win32_Security" "Win32_System" "Win32_System_Com" "Win32_System_Com_StructuredStorage" "Win32_System_LibraryLoader" "Win32_System_Ole" "Win32_System_SystemInformation" "Win32_System_SystemServices" "Win32_System_Threading" "Win32_System_WindowsProgramming" "Win32_UI" "Win32_UI_Accessibility" "Win32_UI_Controls" "Win32_UI_HiDpi" "Win32_UI_Input" "Win32_UI_Input_Ime" "Win32_UI_Input_KeyboardAndMouse" "Win32_UI_Input_Pointer" "Win32_UI_Input_Touch" "Win32_UI_Shell" "Win32_UI_TextServices" "Win32_UI_WindowsAndMessaging" "default" ];
       };
       "windows-sys 0.60.2" = rec {
         crateName = "windows-sys";
@@ -28769,7 +35579,7 @@ rec {
         dependencies = [
           {
             name = "windows-link";
-            packageId = "windows-link";
+            packageId = "windows-link 0.2.1";
             usesDefaultFeatures = false;
           }
         ];
@@ -29020,7 +35830,80 @@ rec {
           "Win32_Web" = [ "Win32" ];
           "Win32_Web_InternetExplorer" = [ "Win32_Web" ];
         };
-        resolvedDefaultFeatures = [ "Wdk" "Wdk_Foundation" "Wdk_Storage" "Wdk_Storage_FileSystem" "Wdk_System" "Wdk_System_IO" "Win32" "Win32_Foundation" "Win32_Graphics" "Win32_Graphics_Gdi" "Win32_NetworkManagement" "Win32_NetworkManagement_IpHelper" "Win32_Networking" "Win32_Networking_WinSock" "Win32_Security" "Win32_Security_Authorization" "Win32_Storage" "Win32_Storage_FileSystem" "Win32_System" "Win32_System_Console" "Win32_System_Diagnostics" "Win32_System_Diagnostics_Debug" "Win32_System_IO" "Win32_System_LibraryLoader" "Win32_System_Memory" "Win32_System_Pipes" "Win32_System_SystemInformation" "Win32_System_SystemServices" "Win32_System_Threading" "Win32_System_WindowsProgramming" "Win32_UI" "Win32_UI_Shell" "Win32_UI_WindowsAndMessaging" "default" ];
+        resolvedDefaultFeatures = [ "Wdk" "Wdk_Foundation" "Wdk_Storage" "Wdk_Storage_FileSystem" "Wdk_System" "Wdk_System_IO" "Win32" "Win32_Foundation" "Win32_NetworkManagement" "Win32_NetworkManagement_IpHelper" "Win32_Networking" "Win32_Networking_WinSock" "Win32_Security" "Win32_Security_Authorization" "Win32_Storage" "Win32_Storage_FileSystem" "Win32_System" "Win32_System_Console" "Win32_System_Diagnostics" "Win32_System_Diagnostics_Debug" "Win32_System_IO" "Win32_System_LibraryLoader" "Win32_System_Memory" "Win32_System_Pipes" "Win32_System_SystemInformation" "Win32_System_SystemServices" "Win32_System_Threading" "Win32_System_WindowsProgramming" "default" ];
+      };
+      "windows-targets 0.42.2" = rec {
+        crateName = "windows-targets";
+        version = "0.42.2";
+        edition = "2018";
+        sha256 = "0wfhnib2fisxlx8c507dbmh97kgij4r6kcxdi0f9nk6l1k080lcf";
+        libName = "windows_targets";
+        authors = [
+          "Microsoft"
+        ];
+        dependencies = [
+          {
+            name = "windows_aarch64_gnullvm";
+            packageId = "windows_aarch64_gnullvm 0.42.2";
+            target = { target, features }: (target."name" == "aarch64-pc-windows-gnullvm");
+          }
+          {
+            name = "windows_aarch64_msvc";
+            packageId = "windows_aarch64_msvc 0.42.2";
+            target = { target, features }: (target."name" == "aarch64-pc-windows-msvc");
+          }
+          {
+            name = "windows_aarch64_msvc";
+            packageId = "windows_aarch64_msvc 0.42.2";
+            target = { target, features }: (target."name" == "aarch64-uwp-windows-msvc");
+          }
+          {
+            name = "windows_i686_gnu";
+            packageId = "windows_i686_gnu 0.42.2";
+            target = { target, features }: (target."name" == "i686-pc-windows-gnu");
+          }
+          {
+            name = "windows_i686_gnu";
+            packageId = "windows_i686_gnu 0.42.2";
+            target = { target, features }: (target."name" == "i686-uwp-windows-gnu");
+          }
+          {
+            name = "windows_i686_msvc";
+            packageId = "windows_i686_msvc 0.42.2";
+            target = { target, features }: (target."name" == "i686-pc-windows-msvc");
+          }
+          {
+            name = "windows_i686_msvc";
+            packageId = "windows_i686_msvc 0.42.2";
+            target = { target, features }: (target."name" == "i686-uwp-windows-msvc");
+          }
+          {
+            name = "windows_x86_64_gnu";
+            packageId = "windows_x86_64_gnu 0.42.2";
+            target = { target, features }: (target."name" == "x86_64-pc-windows-gnu");
+          }
+          {
+            name = "windows_x86_64_gnu";
+            packageId = "windows_x86_64_gnu 0.42.2";
+            target = { target, features }: (target."name" == "x86_64-uwp-windows-gnu");
+          }
+          {
+            name = "windows_x86_64_gnullvm";
+            packageId = "windows_x86_64_gnullvm 0.42.2";
+            target = { target, features }: (target."name" == "x86_64-pc-windows-gnullvm");
+          }
+          {
+            name = "windows_x86_64_msvc";
+            packageId = "windows_x86_64_msvc 0.42.2";
+            target = { target, features }: (target."name" == "x86_64-pc-windows-msvc");
+          }
+          {
+            name = "windows_x86_64_msvc";
+            packageId = "windows_x86_64_msvc 0.42.2";
+            target = { target, features }: (target."name" == "x86_64-uwp-windows-msvc");
+          }
+        ];
+
       };
       "windows-targets 0.52.6" = rec {
         crateName = "windows-targets";
@@ -29084,7 +35967,7 @@ rec {
         dependencies = [
           {
             name = "windows-link";
-            packageId = "windows-link";
+            packageId = "windows-link 0.2.1";
             usesDefaultFeatures = false;
             target = { target, features }: (target."windows_raw_dylib" or false);
           }
@@ -29131,7 +36014,25 @@ rec {
         ];
 
       };
-      "windows-threading" = rec {
+      "windows-threading 0.1.0" = rec {
+        crateName = "windows-threading";
+        version = "0.1.0";
+        edition = "2021";
+        sha256 = "19jpn37zpjj2q7pn07dpq0ay300w65qx7wdp13wbp8qf5snn6r5n";
+        libName = "windows_threading";
+        authors = [
+          "Microsoft"
+        ];
+        dependencies = [
+          {
+            name = "windows-link";
+            packageId = "windows-link 0.1.3";
+            usesDefaultFeatures = false;
+          }
+        ];
+
+      };
+      "windows-threading 0.2.1" = rec {
         crateName = "windows-threading";
         version = "0.2.1";
         edition = "2021";
@@ -29140,9 +36041,19 @@ rec {
         dependencies = [
           {
             name = "windows-link";
-            packageId = "windows-link";
+            packageId = "windows-link 0.2.1";
             usesDefaultFeatures = false;
           }
+        ];
+
+      };
+      "windows_aarch64_gnullvm 0.42.2" = rec {
+        crateName = "windows_aarch64_gnullvm";
+        version = "0.42.2";
+        edition = "2018";
+        sha256 = "1y4q0qmvl0lvp7syxvfykafvmwal5hrjb4fmv04bqs0bawc52yjr";
+        authors = [
+          "Microsoft"
         ];
 
       };
@@ -29163,6 +36074,16 @@ rec {
         sha256 = "0lqvdm510mka9w26vmga7hbkmrw9glzc90l4gya5qbxlm1pl3n59";
 
       };
+      "windows_aarch64_msvc 0.42.2" = rec {
+        crateName = "windows_aarch64_msvc";
+        version = "0.42.2";
+        edition = "2018";
+        sha256 = "0hsdikjl5sa1fva5qskpwlxzpc5q9l909fpl1w6yy1hglrj8i3p0";
+        authors = [
+          "Microsoft"
+        ];
+
+      };
       "windows_aarch64_msvc 0.52.6" = rec {
         crateName = "windows_aarch64_msvc";
         version = "0.52.6";
@@ -29178,6 +36099,16 @@ rec {
         version = "0.53.1";
         edition = "2021";
         sha256 = "01jh2adlwx043rji888b22whx4bm8alrk3khjpik5xn20kl85mxr";
+
+      };
+      "windows_i686_gnu 0.42.2" = rec {
+        crateName = "windows_i686_gnu";
+        version = "0.42.2";
+        edition = "2018";
+        sha256 = "0kx866dfrby88lqs9v1vgmrkk1z6af9lhaghh5maj7d4imyr47f6";
+        authors = [
+          "Microsoft"
+        ];
 
       };
       "windows_i686_gnu 0.52.6" = rec {
@@ -29214,6 +36145,16 @@ rec {
         sha256 = "030qaxqc4salz6l4immfb6sykc6gmhyir9wzn2w8mxj8038mjwzs";
 
       };
+      "windows_i686_msvc 0.42.2" = rec {
+        crateName = "windows_i686_msvc";
+        version = "0.42.2";
+        edition = "2018";
+        sha256 = "0q0h9m2aq1pygc199pa5jgc952qhcnf0zn688454i7v4xjv41n24";
+        authors = [
+          "Microsoft"
+        ];
+
+      };
       "windows_i686_msvc 0.52.6" = rec {
         crateName = "windows_i686_msvc";
         version = "0.52.6";
@@ -29229,6 +36170,16 @@ rec {
         version = "0.53.1";
         edition = "2021";
         sha256 = "1hi6scw3mn2pbdl30ji5i4y8vvspb9b66l98kkz350pig58wfyhy";
+
+      };
+      "windows_x86_64_gnu 0.42.2" = rec {
+        crateName = "windows_x86_64_gnu";
+        version = "0.42.2";
+        edition = "2018";
+        sha256 = "0dnbf2xnp3xrvy8v9mgs3var4zq9v9yh9kv79035rdgyp2w15scd";
+        authors = [
+          "Microsoft"
+        ];
 
       };
       "windows_x86_64_gnu 0.52.6" = rec {
@@ -29248,6 +36199,16 @@ rec {
         sha256 = "16d4yiysmfdlsrghndr97y57gh3kljkwhfdbcs05m1jasz6l4f4w";
 
       };
+      "windows_x86_64_gnullvm 0.42.2" = rec {
+        crateName = "windows_x86_64_gnullvm";
+        version = "0.42.2";
+        edition = "2018";
+        sha256 = "18wl9r8qbsl475j39zvawlidp1bsbinliwfymr43fibdld31pm16";
+        authors = [
+          "Microsoft"
+        ];
+
+      };
       "windows_x86_64_gnullvm 0.52.6" = rec {
         crateName = "windows_x86_64_gnullvm";
         version = "0.52.6";
@@ -29263,6 +36224,16 @@ rec {
         version = "0.53.1";
         edition = "2021";
         sha256 = "1qbspgv4g3q0vygkg8rnql5c6z3caqv38japiynyivh75ng1gyhg";
+
+      };
+      "windows_x86_64_msvc 0.42.2" = rec {
+        crateName = "windows_x86_64_msvc";
+        version = "0.42.2";
+        edition = "2018";
+        sha256 = "1w5r0q0yzx827d10dpjza2ww0j8iajqhmb54s735hhaj66imvv4s";
+        authors = [
+          "Microsoft"
+        ];
 
       };
       "windows_x86_64_msvc 0.52.6" = rec {
@@ -29284,67 +36255,18 @@ rec {
       };
       "winit" = rec {
         crateName = "winit";
-        version = "0.30.13";
-        edition = "2021";
-        sha256 = "13cpylyvdl066fivncw96pn29y15rhzlqba73sym10wziajmyxd6";
-        authors = [
-          "The winit contributors"
-          "Pierre Krieger <pierre.krieger1708@gmail.com>"
-        ];
+        version = "0.31.0-beta.2";
+        edition = "2024";
+        workspace_member = null;
+        src = pkgs.fetchgit {
+          url = "https://github.com/pop-os/winit.git";
+          rev = "9567503d34130113e36b0167a2b8829c3756e429";
+          sha256 = "0g1xpd5aziblymj9yw37k3hd9jrrll3ij6x8ggnyfsny5kcq6zzw";
+        };
         dependencies = [
-          {
-            name = "ahash";
-            packageId = "ahash";
-            optional = true;
-            target = { target, features }: ((target."unix" or false) && (!(("redox" == target."os" or null) || (builtins.elem "wasm" target."family") || ("android" == target."os" or null) || ("ios" == target."os" or null) || ("macos" == target."os" or null))));
-            features = [ "no-rng" ];
-          }
-          {
-            name = "android-activity";
-            packageId = "android-activity";
-            target = { target, features }: ("android" == target."os" or null);
-          }
-          {
-            name = "atomic-waker";
-            packageId = "atomic-waker";
-            target = { target, features }: ((builtins.elem "wasm" target."family") && (builtins.elem "atomics" targetFeatures));
-          }
           {
             name = "bitflags";
             packageId = "bitflags 2.13.2";
-          }
-          {
-            name = "block2";
-            packageId = "block2 0.5.1";
-            target = { target, features }: (("ios" == target."os" or null) || ("macos" == target."os" or null));
-          }
-          {
-            name = "bytemuck";
-            packageId = "bytemuck";
-            optional = true;
-            usesDefaultFeatures = false;
-            target = { target, features }: ((target."unix" or false) && (!(("redox" == target."os" or null) || (builtins.elem "wasm" target."family") || ("android" == target."os" or null) || ("ios" == target."os" or null) || ("macos" == target."os" or null))));
-          }
-          {
-            name = "calloop";
-            packageId = "calloop 0.13.0";
-            target = { target, features }: ((target."unix" or false) && (!(("redox" == target."os" or null) || (builtins.elem "wasm" target."family") || ("android" == target."os" or null) || ("ios" == target."os" or null) || ("macos" == target."os" or null))));
-          }
-          {
-            name = "concurrent-queue";
-            packageId = "concurrent-queue";
-            usesDefaultFeatures = false;
-            target = { target, features }: ((builtins.elem "wasm" target."family") && (builtins.elem "atomics" targetFeatures));
-          }
-          {
-            name = "core-foundation";
-            packageId = "core-foundation 0.9.4";
-            target = { target, features }: (("ios" == target."os" or null) || ("macos" == target."os" or null));
-          }
-          {
-            name = "core-graphics";
-            packageId = "core-graphics";
-            target = { target, features }: ("macos" == target."os" or null);
           }
           {
             name = "cursor-icon";
@@ -29355,108 +36277,22 @@ rec {
             packageId = "dpi";
           }
           {
-            name = "js-sys";
-            packageId = "js-sys";
-            target = { target, features }: (builtins.elem "wasm" target."family");
-          }
-          {
             name = "libc";
             packageId = "libc";
-            target = { target, features }: ((target."unix" or false) && (!(("redox" == target."os" or null) || (builtins.elem "wasm" target."family") || ("android" == target."os" or null) || ("ios" == target."os" or null) || ("macos" == target."os" or null))));
-          }
-          {
-            name = "memmap2";
-            packageId = "memmap2";
-            optional = true;
-            target = { target, features }: ((target."unix" or false) && (!(("redox" == target."os" or null) || (builtins.elem "wasm" target."family") || ("android" == target."os" or null) || ("ios" == target."os" or null) || ("macos" == target."os" or null))));
-          }
-          {
-            name = "ndk";
-            packageId = "ndk";
-            usesDefaultFeatures = false;
-            target = { target, features }: ("android" == target."os" or null);
-          }
-          {
-            name = "objc2";
-            packageId = "objc2 0.5.2";
-            target = { target, features }: (("ios" == target."os" or null) || ("macos" == target."os" or null));
-            features = [ "relax-sign-encoding" ];
-          }
-          {
-            name = "objc2-app-kit";
-            packageId = "objc2-app-kit 0.2.2";
-            target = { target, features }: ("macos" == target."os" or null);
-            features = [ "NSAppearance" "NSApplication" "NSBitmapImageRep" "NSButton" "NSColor" "NSControl" "NSCursor" "NSDragging" "NSEvent" "NSGraphics" "NSGraphicsContext" "NSImage" "NSImageRep" "NSMenu" "NSMenuItem" "NSOpenGLView" "NSPasteboard" "NSResponder" "NSRunningApplication" "NSScreen" "NSTextInputClient" "NSTextInputContext" "NSView" "NSWindow" "NSWindowScripting" "NSWindowTabGroup" ];
-          }
-          {
-            name = "objc2-foundation";
-            packageId = "objc2-foundation 0.2.2";
-            target = { target, features }: ("ios" == target."os" or null);
-            features = [ "block2" "dispatch" "NSArray" "NSEnumerator" "NSGeometry" "NSObjCRuntime" "NSOperation" "NSString" "NSProcessInfo" "NSThread" "NSSet" ];
-          }
-          {
-            name = "objc2-foundation";
-            packageId = "objc2-foundation 0.2.2";
-            target = { target, features }: ("macos" == target."os" or null);
-            features = [ "block2" "dispatch" "NSArray" "NSAttributedString" "NSData" "NSDictionary" "NSDistributedNotificationCenter" "NSEnumerator" "NSKeyValueObserving" "NSNotification" "NSObjCRuntime" "NSPathUtilities" "NSProcessInfo" "NSRunLoop" "NSString" "NSThread" "NSValue" ];
-          }
-          {
-            name = "objc2-ui-kit";
-            packageId = "objc2-ui-kit";
-            target = { target, features }: ("ios" == target."os" or null);
-            features = [ "UIApplication" "UIDevice" "UIEvent" "UIGeometry" "UIGestureRecognizer" "UITextInput" "UITextInputTraits" "UIOrientation" "UIPanGestureRecognizer" "UIPinchGestureRecognizer" "UIResponder" "UIRotationGestureRecognizer" "UIScreen" "UIScreenMode" "UITapGestureRecognizer" "UITouch" "UITraitCollection" "UIView" "UIViewController" "UIWindow" ];
-          }
-          {
-            name = "orbclient";
-            packageId = "orbclient";
-            usesDefaultFeatures = false;
-            target = { target, features }: ("redox" == target."os" or null);
-          }
-          {
-            name = "percent-encoding";
-            packageId = "percent-encoding";
-            optional = true;
-            target = { target, features }: ((target."unix" or false) && (!(("redox" == target."os" or null) || (builtins.elem "wasm" target."family") || ("android" == target."os" or null) || ("ios" == target."os" or null) || ("macos" == target."os" or null))));
-          }
-          {
-            name = "pin-project";
-            packageId = "pin-project";
-            target = { target, features }: (builtins.elem "wasm" target."family");
+            target = { target, features }: ((target."unix" or false) && (!(("redox" == target."os" or null) || (builtins.elem "wasm" target."family") || ("android" == target."os" or null) || ("apple" == target."vendor" or null))));
           }
           {
             name = "raw-window-handle";
             packageId = "raw-window-handle";
             rename = "rwh_06";
-            optional = true;
             features = [ "std" ];
           }
           {
-            name = "redox_syscall";
-            packageId = "redox_syscall 0.4.1";
-            target = { target, features }: ("redox" == target."os" or null);
-          }
-          {
             name = "rustix";
-            packageId = "rustix 0.38.44";
+            packageId = "rustix 1.1.5";
             usesDefaultFeatures = false;
-            target = { target, features }: ((target."unix" or false) && (!(("redox" == target."os" or null) || (builtins.elem "wasm" target."family") || ("android" == target."os" or null) || ("ios" == target."os" or null) || ("macos" == target."os" or null))));
-            features = [ "std" "system" "thread" "process" ];
-          }
-          {
-            name = "sctk-adwaita";
-            packageId = "sctk-adwaita";
-            optional = true;
-            usesDefaultFeatures = false;
-            target = { target, features }: ((target."unix" or false) && (!(("redox" == target."os" or null) || (builtins.elem "wasm" target."family") || ("android" == target."os" or null) || ("ios" == target."os" or null) || ("macos" == target."os" or null))));
-          }
-          {
-            name = "smithay-client-toolkit";
-            packageId = "smithay-client-toolkit 0.19.2";
-            rename = "sctk";
-            optional = true;
-            usesDefaultFeatures = false;
-            target = { target, features }: ((target."unix" or false) && (!(("redox" == target."os" or null) || (builtins.elem "wasm" target."family") || ("android" == target."os" or null) || ("ios" == target."os" or null) || ("macos" == target."os" or null))));
-            features = [ "calloop" ];
+            target = { target, features }: ((target."unix" or false) && (!(("redox" == target."os" or null) || (builtins.elem "wasm" target."family") || ("android" == target."os" or null) || ("apple" == target."vendor" or null))));
+            features = [ "std" "thread" ];
           }
           {
             name = "smol_str";
@@ -29468,84 +36304,57 @@ rec {
             usesDefaultFeatures = false;
           }
           {
-            name = "unicode-segmentation";
-            packageId = "unicode-segmentation";
+            name = "winit-android";
+            packageId = "winit-android";
+            target = { target, features }: ("android" == target."os" or null);
+          }
+          {
+            name = "winit-appkit";
+            packageId = "winit-appkit";
+            target = { target, features }: ("macos" == target."os" or null);
+          }
+          {
+            name = "winit-common";
+            packageId = "winit-common";
+            target = { target, features }: ((target."unix" or false) && (!(("redox" == target."os" or null) || (builtins.elem "wasm" target."family") || ("android" == target."os" or null) || ("apple" == target."vendor" or null))));
+            features = [ "xkb" ];
+          }
+          {
+            name = "winit-core";
+            packageId = "winit-core";
+          }
+          {
+            name = "winit-orbital";
+            packageId = "winit-orbital";
+            target = { target, features }: ("redox" == target."os" or null);
+          }
+          {
+            name = "winit-uikit";
+            packageId = "winit-uikit";
+            target = { target, features }: (("apple" == target."vendor" or null) && (!("macos" == target."os" or null)));
+          }
+          {
+            name = "winit-wayland";
+            packageId = "winit-wayland";
+            optional = true;
+            usesDefaultFeatures = false;
+            target = { target, features }: ((target."unix" or false) && (!(("redox" == target."os" or null) || (builtins.elem "wasm" target."family") || ("android" == target."os" or null) || ("apple" == target."vendor" or null))));
+          }
+          {
+            name = "winit-web";
+            packageId = "winit-web";
+            target = { target, features }: (builtins.elem "wasm" target."family");
+          }
+          {
+            name = "winit-win32";
+            packageId = "winit-win32";
             target = { target, features }: ("windows" == target."os" or null);
           }
           {
-            name = "wasm-bindgen";
-            packageId = "wasm-bindgen";
-            target = { target, features }: (builtins.elem "wasm" target."family");
-          }
-          {
-            name = "wasm-bindgen-futures";
-            packageId = "wasm-bindgen-futures";
-            target = { target, features }: (builtins.elem "wasm" target."family");
-          }
-          {
-            name = "wayland-backend";
-            packageId = "wayland-backend";
+            name = "winit-x11";
+            packageId = "winit-x11";
             optional = true;
-            usesDefaultFeatures = false;
-            target = { target, features }: ((target."unix" or false) && (!(("redox" == target."os" or null) || (builtins.elem "wasm" target."family") || ("android" == target."os" or null) || ("ios" == target."os" or null) || ("macos" == target."os" or null))));
-            features = [ "client_system" ];
-          }
-          {
-            name = "wayland-client";
-            packageId = "wayland-client";
-            optional = true;
-            target = { target, features }: ((target."unix" or false) && (!(("redox" == target."os" or null) || (builtins.elem "wasm" target."family") || ("android" == target."os" or null) || ("ios" == target."os" or null) || ("macos" == target."os" or null))));
-          }
-          {
-            name = "wayland-protocols";
-            packageId = "wayland-protocols";
-            optional = true;
-            target = { target, features }: ((target."unix" or false) && (!(("redox" == target."os" or null) || (builtins.elem "wasm" target."family") || ("android" == target."os" or null) || ("ios" == target."os" or null) || ("macos" == target."os" or null))));
-            features = [ "staging" ];
-          }
-          {
-            name = "wayland-protocols-plasma";
-            packageId = "wayland-protocols-plasma";
-            optional = true;
-            target = { target, features }: ((target."unix" or false) && (!(("redox" == target."os" or null) || (builtins.elem "wasm" target."family") || ("android" == target."os" or null) || ("ios" == target."os" or null) || ("macos" == target."os" or null))));
-            features = [ "client" ];
-          }
-          {
-            name = "web-sys";
-            packageId = "web-sys";
-            rename = "web_sys";
-            target = { target, features }: (builtins.elem "wasm" target."family");
-            features = [ "AbortController" "AbortSignal" "Blob" "BlobPropertyBag" "console" "CssStyleDeclaration" "Document" "DomException" "DomRect" "DomRectReadOnly" "Element" "Event" "EventTarget" "FocusEvent" "HtmlCanvasElement" "HtmlElement" "HtmlImageElement" "ImageBitmap" "ImageBitmapOptions" "ImageBitmapRenderingContext" "ImageData" "IntersectionObserver" "IntersectionObserverEntry" "KeyboardEvent" "MediaQueryList" "MessageChannel" "MessagePort" "Navigator" "Node" "OrientationLockType" "OrientationType" "PageTransitionEvent" "Permissions" "PermissionState" "PermissionStatus" "PointerEvent" "PremultiplyAlpha" "ResizeObserver" "ResizeObserverBoxOptions" "ResizeObserverEntry" "ResizeObserverOptions" "ResizeObserverSize" "Screen" "ScreenOrientation" "Url" "VisibilityState" "WheelEvent" "Window" "Worker" ];
-          }
-          {
-            name = "web-time";
-            packageId = "web-time";
-            target = { target, features }: (builtins.elem "wasm" target."family");
-          }
-          {
-            name = "windows-sys";
-            packageId = "windows-sys 0.52.0";
-            target = { target, features }: ("windows" == target."os" or null);
-            features = [ "Win32_Devices_HumanInterfaceDevice" "Win32_Foundation" "Win32_Globalization" "Win32_Graphics_Dwm" "Win32_Graphics_Gdi" "Win32_Media" "Win32_System_Com_StructuredStorage" "Win32_System_Com" "Win32_System_LibraryLoader" "Win32_System_Ole" "Win32_Security" "Win32_System_SystemInformation" "Win32_System_SystemServices" "Win32_System_Threading" "Win32_System_WindowsProgramming" "Win32_UI_Accessibility" "Win32_UI_Controls" "Win32_UI_HiDpi" "Win32_UI_Input_Ime" "Win32_UI_Input_KeyboardAndMouse" "Win32_UI_Input_Pointer" "Win32_UI_Input_Touch" "Win32_UI_Shell" "Win32_UI_TextServices" "Win32_UI_WindowsAndMessaging" ];
-          }
-          {
-            name = "x11-dl";
-            packageId = "x11-dl";
-            optional = true;
-            target = { target, features }: ((target."unix" or false) && (!(("redox" == target."os" or null) || (builtins.elem "wasm" target."family") || ("android" == target."os" or null) || ("ios" == target."os" or null) || ("macos" == target."os" or null))));
-          }
-          {
-            name = "x11rb";
-            packageId = "x11rb";
-            optional = true;
-            usesDefaultFeatures = false;
-            target = { target, features }: ((target."unix" or false) && (!(("redox" == target."os" or null) || (builtins.elem "wasm" target."family") || ("android" == target."os" or null) || ("ios" == target."os" or null) || ("macos" == target."os" or null))));
-            features = [ "allow-unsafe-code" "dl-libxcb" "randr" "resource_manager" "xinput" "xkb" ];
-          }
-          {
-            name = "xkbcommon-dl";
-            packageId = "xkbcommon-dl";
-            target = { target, features }: ((target."unix" or false) && (!(("redox" == target."os" or null) || (builtins.elem "wasm" target."family") || ("android" == target."os" or null) || ("ios" == target."os" or null) || ("macos" == target."os" or null))));
+            target = { target, features }: ((target."unix" or false) && (!(("redox" == target."os" or null) || (builtins.elem "wasm" target."family") || ("android" == target."os" or null) || ("apple" == target."vendor" or null))));
           }
         ];
         buildDependencies = [
@@ -29563,34 +36372,795 @@ rec {
           }
         ];
         features = {
-          "ahash" = [ "dep:ahash" ];
-          "android-game-activity" = [ "android-activity/game-activity" ];
-          "android-native-activity" = [ "android-activity/native-activity" ];
-          "bytemuck" = [ "dep:bytemuck" ];
-          "default" = [ "rwh_06" "x11" "wayland" "wayland-dlopen" "wayland-csd-adwaita" ];
-          "memmap2" = [ "dep:memmap2" ];
+          "android-game-activity" = [ "winit-android/game-activity" ];
+          "android-native-activity" = [ "winit-android/native-activity" ];
+          "default" = [ "x11" "wayland" "wayland-dlopen" "wayland-csd-adwaita" ];
           "mint" = [ "dpi/mint" ];
-          "percent-encoding" = [ "dep:percent-encoding" ];
-          "rwh_04" = [ "dep:rwh_04" "ndk/rwh_04" ];
-          "rwh_05" = [ "dep:rwh_05" "ndk/rwh_05" ];
-          "rwh_06" = [ "dep:rwh_06" "ndk/rwh_06" ];
-          "sctk" = [ "dep:sctk" ];
-          "sctk-adwaita" = [ "dep:sctk-adwaita" ];
-          "serde" = [ "dep:serde" "cursor-icon/serde" "smol_str/serde" "dpi/serde" ];
-          "wayland" = [ "wayland-client" "wayland-backend" "wayland-protocols" "wayland-protocols-plasma" "sctk" "ahash" "memmap2" ];
-          "wayland-backend" = [ "dep:wayland-backend" ];
-          "wayland-client" = [ "dep:wayland-client" ];
-          "wayland-csd-adwaita" = [ "sctk-adwaita" "sctk-adwaita/ab_glyph" ];
-          "wayland-csd-adwaita-crossfont" = [ "sctk-adwaita" "sctk-adwaita/crossfont" ];
-          "wayland-csd-adwaita-notitle" = [ "sctk-adwaita" ];
-          "wayland-dlopen" = [ "wayland-backend/dlopen" ];
-          "wayland-protocols" = [ "dep:wayland-protocols" ];
-          "wayland-protocols-plasma" = [ "dep:wayland-protocols-plasma" ];
-          "x11" = [ "x11-dl" "bytemuck" "percent-encoding" "xkbcommon-dl/x11" "x11rb" ];
-          "x11-dl" = [ "dep:x11-dl" ];
-          "x11rb" = [ "dep:x11rb" ];
+          "serde" = [ "dep:serde" "cursor-icon/serde" "smol_str/serde" "dpi/serde" "bitflags/serde" "winit-core/serde" "winit-uikit/serde" ];
+          "wayland" = [ "winit-wayland" ];
+          "wayland-csd-adwaita" = [ "winit-wayland/csd-adwaita" ];
+          "wayland-csd-adwaita-crossfont" = [ "winit-wayland/csd-adwaita-crossfont" ];
+          "wayland-csd-adwaita-notitle" = [ "winit-wayland/csd-adwaita-notitle" ];
+          "wayland-csd-adwaita-notitlebar" = [ "winit-wayland/csd-adwaita-notitlebar" ];
+          "wayland-dlopen" = [ "winit-wayland/dlopen" ];
+          "winit-wayland" = [ "dep:winit-wayland" ];
+          "winit-x11" = [ "dep:winit-x11" ];
+          "x11" = [ "winit-x11" ];
         };
-        resolvedDefaultFeatures = [ "ahash" "bytemuck" "memmap2" "percent-encoding" "rwh_06" "sctk" "sctk-adwaita" "wayland" "wayland-backend" "wayland-client" "wayland-csd-adwaita" "wayland-dlopen" "wayland-protocols" "wayland-protocols-plasma" "x11" "x11-dl" "x11rb" ];
+        resolvedDefaultFeatures = [ "default" "wayland" "wayland-csd-adwaita" "wayland-dlopen" "winit-wayland" "winit-x11" "x11" ];
+      };
+      "winit-android" = rec {
+        crateName = "winit-android";
+        version = "0.31.0-beta.2";
+        edition = "2024";
+        workspace_member = null;
+        src = pkgs.fetchgit {
+          url = "https://github.com/pop-os/winit.git";
+          rev = "9567503d34130113e36b0167a2b8829c3756e429";
+          sha256 = "0g1xpd5aziblymj9yw37k3hd9jrrll3ij6x8ggnyfsny5kcq6zzw";
+        };
+        libName = "winit_android";
+        dependencies = [
+          {
+            name = "android-activity";
+            packageId = "android-activity";
+            target = { target, features }: ("android" == target."os" or null);
+          }
+          {
+            name = "bitflags";
+            packageId = "bitflags 2.13.2";
+          }
+          {
+            name = "dpi";
+            packageId = "dpi";
+          }
+          {
+            name = "ndk";
+            packageId = "ndk 0.9.0";
+            usesDefaultFeatures = false;
+            target = { target, features }: ("android" == target."os" or null);
+            features = [ "rwh_06" ];
+          }
+          {
+            name = "raw-window-handle";
+            packageId = "raw-window-handle";
+            rename = "rwh_06";
+            features = [ "std" ];
+          }
+          {
+            name = "smol_str";
+            packageId = "smol_str";
+          }
+          {
+            name = "tracing";
+            packageId = "tracing";
+            usesDefaultFeatures = false;
+          }
+          {
+            name = "winit-core";
+            packageId = "winit-core";
+          }
+        ];
+        features = {
+          "game-activity" = [ "android-activity/game-activity" ];
+          "native-activity" = [ "android-activity/native-activity" ];
+          "serde" = [ "dep:serde" "bitflags/serde" "smol_str/serde" "dpi/serde" "winit-core/serde" ];
+        };
+      };
+      "winit-appkit" = rec {
+        crateName = "winit-appkit";
+        version = "0.31.0-beta.2";
+        edition = "2024";
+        workspace_member = null;
+        src = pkgs.fetchgit {
+          url = "https://github.com/pop-os/winit.git";
+          rev = "9567503d34130113e36b0167a2b8829c3756e429";
+          sha256 = "0g1xpd5aziblymj9yw37k3hd9jrrll3ij6x8ggnyfsny5kcq6zzw";
+        };
+        libName = "winit_appkit";
+        dependencies = [
+          {
+            name = "bitflags";
+            packageId = "bitflags 2.13.2";
+          }
+          {
+            name = "block2";
+            packageId = "block2 0.6.2";
+            target = { target, features }: ("apple" == target."vendor" or null);
+          }
+          {
+            name = "dispatch2";
+            packageId = "dispatch2";
+            usesDefaultFeatures = false;
+            target = { target, features }: ("apple" == target."vendor" or null);
+            features = [ "std" "objc2" "std" "objc2" ];
+          }
+          {
+            name = "dpi";
+            packageId = "dpi";
+          }
+          {
+            name = "objc2";
+            packageId = "objc2 0.6.4";
+            target = { target, features }: ("apple" == target."vendor" or null);
+            features = [ "relax-sign-encoding" ];
+          }
+          {
+            name = "objc2-app-kit";
+            packageId = "objc2-app-kit 0.3.2";
+            usesDefaultFeatures = false;
+            target = { target, features }: ("apple" == target."vendor" or null);
+            features = [ "std" "objc2-core-foundation" "NSAppearance" "NSApplication" "NSBitmapImageRep" "NSButton" "NSColor" "NSControl" "NSCursor" "NSDragging" "NSEvent" "NSGraphics" "NSGraphicsContext" "NSImage" "NSImageRep" "NSMenu" "NSMenuItem" "NSOpenGLView" "NSPanel" "NSPasteboard" "NSResponder" "NSRunningApplication" "NSScreen" "NSTextInputClient" "NSTextInputContext" "NSToolbar" "NSView" "NSWindow" "NSWindowScripting" "NSWindowTabGroup" ];
+          }
+          {
+            name = "objc2-core-foundation";
+            packageId = "objc2-core-foundation";
+            usesDefaultFeatures = false;
+            target = { target, features }: ("apple" == target."vendor" or null);
+            features = [ "std" "block2" "CFBase" "CFCGTypes" "CFData" "CFRunLoop" "CFString" "CFUUID" ];
+          }
+          {
+            name = "objc2-core-graphics";
+            packageId = "objc2-core-graphics";
+            usesDefaultFeatures = false;
+            target = { target, features }: ("apple" == target."vendor" or null);
+            features = [ "std" "libc" "CGDirectDisplay" "CGDisplayConfiguration" "CGDisplayFade" "CGError" "CGRemoteOperation" "CGWindowLevel" ];
+          }
+          {
+            name = "objc2-core-video";
+            packageId = "objc2-core-video";
+            usesDefaultFeatures = false;
+            target = { target, features }: ("apple" == target."vendor" or null);
+            features = [ "std" "objc2-core-graphics" "CVBase" "CVReturn" "CVDisplayLink" ];
+          }
+          {
+            name = "objc2-foundation";
+            packageId = "objc2-foundation 0.3.2";
+            usesDefaultFeatures = false;
+            target = { target, features }: ("apple" == target."vendor" or null);
+            features = [ "std" "block2" "objc2-core-foundation" "NSArray" "NSAttributedString" "NSData" "NSDictionary" "NSDistributedNotificationCenter" "NSEnumerator" "NSGeometry" "NSKeyValueObserving" "NSNotification" "NSObjCRuntime" "NSOperation" "NSPathUtilities" "NSProcessInfo" "NSRunLoop" "NSString" "NSThread" "NSValue" ];
+          }
+          {
+            name = "raw-window-handle";
+            packageId = "raw-window-handle";
+            rename = "rwh_06";
+            features = [ "std" ];
+          }
+          {
+            name = "smol_str";
+            packageId = "smol_str";
+          }
+          {
+            name = "tracing";
+            packageId = "tracing";
+            usesDefaultFeatures = false;
+          }
+          {
+            name = "winit-common";
+            packageId = "winit-common";
+            target = { target, features }: ("apple" == target."vendor" or null);
+            features = [ "core-foundation" "event-handler" ];
+          }
+          {
+            name = "winit-core";
+            packageId = "winit-core";
+          }
+        ];
+        features = {
+          "serde" = [ "dep:serde" "bitflags/serde" "smol_str/serde" "dpi/serde" ];
+        };
+      };
+      "winit-common" = rec {
+        crateName = "winit-common";
+        version = "0.31.0-beta.2";
+        edition = "2024";
+        workspace_member = null;
+        src = pkgs.fetchgit {
+          url = "https://github.com/pop-os/winit.git";
+          rev = "9567503d34130113e36b0167a2b8829c3756e429";
+          sha256 = "0g1xpd5aziblymj9yw37k3hd9jrrll3ij6x8ggnyfsny5kcq6zzw";
+        };
+        libName = "winit_common";
+        dependencies = [
+          {
+            name = "memmap2";
+            packageId = "memmap2 0.9.11";
+            optional = true;
+          }
+          {
+            name = "objc2";
+            packageId = "objc2 0.6.4";
+            optional = true;
+            features = [ "relax-sign-encoding" ];
+          }
+          {
+            name = "objc2-core-foundation";
+            packageId = "objc2-core-foundation";
+            optional = true;
+            usesDefaultFeatures = false;
+            features = [ "std" "CFRunLoop" "CFString" ];
+          }
+          {
+            name = "smol_str";
+            packageId = "smol_str";
+            optional = true;
+          }
+          {
+            name = "tracing";
+            packageId = "tracing";
+            usesDefaultFeatures = false;
+          }
+          {
+            name = "winit-core";
+            packageId = "winit-core";
+          }
+          {
+            name = "x11-dl";
+            packageId = "x11-dl";
+            optional = true;
+          }
+          {
+            name = "xkbcommon-dl";
+            packageId = "xkbcommon-dl";
+            optional = true;
+          }
+        ];
+        features = {
+          "core-foundation" = [ "dep:objc2" "dep:objc2-core-foundation" ];
+          "wayland" = [ "dep:memmap2" ];
+          "x11" = [ "xkbcommon-dl?/x11" "dep:x11-dl" ];
+          "xkb" = [ "dep:xkbcommon-dl" "dep:smol_str" ];
+        };
+        resolvedDefaultFeatures = [ "core-foundation" "event-handler" "wayland" "x11" "xkb" ];
+      };
+      "winit-core" = rec {
+        crateName = "winit-core";
+        version = "0.31.0-beta.2";
+        edition = "2024";
+        workspace_member = null;
+        src = pkgs.fetchgit {
+          url = "https://github.com/pop-os/winit.git";
+          rev = "9567503d34130113e36b0167a2b8829c3756e429";
+          sha256 = "0g1xpd5aziblymj9yw37k3hd9jrrll3ij6x8ggnyfsny5kcq6zzw";
+        };
+        libName = "winit_core";
+        authors = [
+          "The winit contributors"
+          "Kirill Chibisov <contact@kchibisov.com>"
+        ];
+        dependencies = [
+          {
+            name = "bitflags";
+            packageId = "bitflags 2.13.2";
+          }
+          {
+            name = "cursor-icon";
+            packageId = "cursor-icon";
+          }
+          {
+            name = "dpi";
+            packageId = "dpi";
+          }
+          {
+            name = "keyboard-types";
+            packageId = "keyboard-types";
+          }
+          {
+            name = "raw-window-handle";
+            packageId = "raw-window-handle";
+            rename = "rwh_06";
+            features = [ "std" ];
+          }
+          {
+            name = "smol_str";
+            packageId = "smol_str";
+          }
+          {
+            name = "web-time";
+            packageId = "web-time";
+            target = { target, features }: ((builtins.elem "wasm" target."family") && (("unknown" == target."os" or null) || ("none" == target."os" or null)));
+          }
+        ];
+        features = {
+          "serde" = [ "dep:serde" "bitflags/serde" "cursor-icon/serde" "dpi/serde" "keyboard-types/serde" "smol_str/serde" ];
+        };
+      };
+      "winit-orbital" = rec {
+        crateName = "winit-orbital";
+        version = "0.31.0-beta.2";
+        edition = "2024";
+        workspace_member = null;
+        src = pkgs.fetchgit {
+          url = "https://github.com/pop-os/winit.git";
+          rev = "9567503d34130113e36b0167a2b8829c3756e429";
+          sha256 = "0g1xpd5aziblymj9yw37k3hd9jrrll3ij6x8ggnyfsny5kcq6zzw";
+        };
+        libName = "winit_orbital";
+        dependencies = [
+          {
+            name = "bitflags";
+            packageId = "bitflags 2.13.2";
+          }
+          {
+            name = "dpi";
+            packageId = "dpi";
+          }
+          {
+            name = "libredox";
+            packageId = "libredox";
+          }
+          {
+            name = "orbclient";
+            packageId = "orbclient";
+            usesDefaultFeatures = false;
+          }
+          {
+            name = "raw-window-handle";
+            packageId = "raw-window-handle";
+            rename = "rwh_06";
+            features = [ "std" ];
+          }
+          {
+            name = "redox_event";
+            packageId = "redox_event";
+            rename = "redox_event";
+          }
+          {
+            name = "smol_str";
+            packageId = "smol_str";
+          }
+          {
+            name = "tracing";
+            packageId = "tracing";
+            usesDefaultFeatures = false;
+          }
+          {
+            name = "winit-core";
+            packageId = "winit-core";
+          }
+        ];
+        features = {
+          "serde" = [ "dep:serde" "bitflags/serde" "smol_str/serde" "dpi/serde" ];
+        };
+      };
+      "winit-uikit" = rec {
+        crateName = "winit-uikit";
+        version = "0.31.0-beta.2";
+        edition = "2024";
+        workspace_member = null;
+        src = pkgs.fetchgit {
+          url = "https://github.com/pop-os/winit.git";
+          rev = "9567503d34130113e36b0167a2b8829c3756e429";
+          sha256 = "0g1xpd5aziblymj9yw37k3hd9jrrll3ij6x8ggnyfsny5kcq6zzw";
+        };
+        libName = "winit_uikit";
+        dependencies = [
+          {
+            name = "bitflags";
+            packageId = "bitflags 2.13.2";
+          }
+          {
+            name = "block2";
+            packageId = "block2 0.6.2";
+            target = { target, features }: ("apple" == target."vendor" or null);
+          }
+          {
+            name = "dispatch2";
+            packageId = "dispatch2";
+            usesDefaultFeatures = false;
+            target = { target, features }: ("apple" == target."vendor" or null);
+            features = [ "std" "objc2" ];
+          }
+          {
+            name = "dpi";
+            packageId = "dpi";
+          }
+          {
+            name = "objc2";
+            packageId = "objc2 0.6.4";
+            target = { target, features }: ("apple" == target."vendor" or null);
+            features = [ "relax-sign-encoding" ];
+          }
+          {
+            name = "objc2-core-foundation";
+            packageId = "objc2-core-foundation";
+            usesDefaultFeatures = false;
+            target = { target, features }: ("apple" == target."vendor" or null);
+            features = [ "std" "CFCGTypes" "CFBase" "CFRunLoop" "CFString" ];
+          }
+          {
+            name = "objc2-foundation";
+            packageId = "objc2-foundation 0.3.2";
+            usesDefaultFeatures = false;
+            target = { target, features }: ("apple" == target."vendor" or null);
+            features = [ "std" "block2" "objc2-core-foundation" "NSArray" "NSEnumerator" "NSGeometry" "NSObjCRuntime" "NSOperation" "NSString" "NSThread" "NSSet" ];
+          }
+          {
+            name = "objc2-ui-kit";
+            packageId = "objc2-ui-kit";
+            usesDefaultFeatures = false;
+            target = { target, features }: ("apple" == target."vendor" or null);
+            features = [ "std" "objc2-core-foundation" "UIApplication" "UIDevice" "UIEvent" "UIGeometry" "UIGestureRecognizer" "UITextInput" "UITextInputTraits" "UIOrientation" "UIPanGestureRecognizer" "UIPinchGestureRecognizer" "UIResponder" "UIRotationGestureRecognizer" "UIScreen" "UIScreenMode" "UITapGestureRecognizer" "UITouch" "UITraitCollection" "UIView" "UIViewController" "UIWindow" ];
+          }
+          {
+            name = "raw-window-handle";
+            packageId = "raw-window-handle";
+            rename = "rwh_06";
+            features = [ "std" ];
+          }
+          {
+            name = "smol_str";
+            packageId = "smol_str";
+          }
+          {
+            name = "tracing";
+            packageId = "tracing";
+            usesDefaultFeatures = false;
+          }
+          {
+            name = "winit-common";
+            packageId = "winit-common";
+            target = { target, features }: ("apple" == target."vendor" or null);
+            features = [ "core-foundation" "event-handler" ];
+          }
+          {
+            name = "winit-core";
+            packageId = "winit-core";
+          }
+        ];
+        features = {
+          "serde" = [ "dep:serde" "bitflags/serde" "smol_str/serde" "dpi/serde" ];
+        };
+      };
+      "winit-wayland" = rec {
+        crateName = "winit-wayland";
+        version = "0.31.0-beta.2";
+        edition = "2024";
+        workspace_member = null;
+        src = pkgs.fetchgit {
+          url = "https://github.com/pop-os/winit.git";
+          rev = "9567503d34130113e36b0167a2b8829c3756e429";
+          sha256 = "0g1xpd5aziblymj9yw37k3hd9jrrll3ij6x8ggnyfsny5kcq6zzw";
+        };
+        libName = "winit_wayland";
+        dependencies = [
+          {
+            name = "ahash";
+            packageId = "ahash";
+            features = [ "no-rng" ];
+          }
+          {
+            name = "bitflags";
+            packageId = "bitflags 2.13.2";
+          }
+          {
+            name = "calloop";
+            packageId = "calloop";
+          }
+          {
+            name = "cursor-icon";
+            packageId = "cursor-icon";
+          }
+          {
+            name = "dpi";
+            packageId = "dpi";
+          }
+          {
+            name = "libc";
+            packageId = "libc";
+          }
+          {
+            name = "memmap2";
+            packageId = "memmap2 0.9.11";
+          }
+          {
+            name = "raw-window-handle";
+            packageId = "raw-window-handle";
+            rename = "rwh_06";
+            features = [ "std" ];
+          }
+          {
+            name = "rustix";
+            packageId = "rustix 1.1.5";
+            usesDefaultFeatures = false;
+            features = [ "std" "system" "thread" "process" "event" "pipe" ];
+          }
+          {
+            name = "sctk-adwaita";
+            packageId = "sctk-adwaita";
+            optional = true;
+            usesDefaultFeatures = false;
+          }
+          {
+            name = "smithay-client-toolkit";
+            packageId = "smithay-client-toolkit";
+            rename = "sctk";
+            usesDefaultFeatures = false;
+            features = [ "calloop" ];
+          }
+          {
+            name = "smol_str";
+            packageId = "smol_str";
+          }
+          {
+            name = "tracing";
+            packageId = "tracing";
+            usesDefaultFeatures = false;
+          }
+          {
+            name = "wayland-backend";
+            packageId = "wayland-backend";
+            usesDefaultFeatures = false;
+            features = [ "client_system" ];
+          }
+          {
+            name = "wayland-client";
+            packageId = "wayland-client";
+          }
+          {
+            name = "wayland-protocols";
+            packageId = "wayland-protocols";
+            features = [ "staging" ];
+          }
+          {
+            name = "wayland-protocols-plasma";
+            packageId = "wayland-protocols-plasma";
+            features = [ "client" ];
+          }
+          {
+            name = "winit-common";
+            packageId = "winit-common";
+            features = [ "xkb" "wayland" ];
+          }
+          {
+            name = "winit-core";
+            packageId = "winit-core";
+          }
+        ];
+        features = {
+          "csd-adwaita" = [ "sctk-adwaita" "sctk-adwaita/ab_glyph" ];
+          "csd-adwaita-crossfont" = [ "sctk-adwaita" "sctk-adwaita/crossfont" ];
+          "csd-adwaita-notitle" = [ "sctk-adwaita" ];
+          "csd-adwaita-notitlebar" = [ "csd-adwaita-notitle" ];
+          "default" = [ "dlopen" "csd-adwaita" ];
+          "dlopen" = [ "wayland-backend/dlopen" ];
+          "sctk-adwaita" = [ "dep:sctk-adwaita" ];
+          "serde" = [ "dep:serde" "bitflags/serde" "smol_str/serde" "dpi/serde" ];
+        };
+        resolvedDefaultFeatures = [ "csd-adwaita" "dlopen" "sctk-adwaita" ];
+      };
+      "winit-web" = rec {
+        crateName = "winit-web";
+        version = "0.31.0-beta.2";
+        edition = "2024";
+        workspace_member = null;
+        src = pkgs.fetchgit {
+          url = "https://github.com/pop-os/winit.git";
+          rev = "9567503d34130113e36b0167a2b8829c3756e429";
+          sha256 = "0g1xpd5aziblymj9yw37k3hd9jrrll3ij6x8ggnyfsny5kcq6zzw";
+        };
+        libName = "winit_web";
+        dependencies = [
+          {
+            name = "atomic-waker";
+            packageId = "atomic-waker";
+            target = { target, features }: (builtins.elem "atomics" targetFeatures);
+          }
+          {
+            name = "bitflags";
+            packageId = "bitflags 2.13.2";
+          }
+          {
+            name = "concurrent-queue";
+            packageId = "concurrent-queue";
+            usesDefaultFeatures = false;
+            target = { target, features }: (builtins.elem "atomics" targetFeatures);
+          }
+          {
+            name = "cursor-icon";
+            packageId = "cursor-icon";
+          }
+          {
+            name = "dpi";
+            packageId = "dpi";
+          }
+          {
+            name = "js-sys";
+            packageId = "js-sys";
+          }
+          {
+            name = "pin-project";
+            packageId = "pin-project";
+          }
+          {
+            name = "raw-window-handle";
+            packageId = "raw-window-handle";
+            rename = "rwh_06";
+            features = [ "std" ];
+          }
+          {
+            name = "smol_str";
+            packageId = "smol_str";
+          }
+          {
+            name = "tracing";
+            packageId = "tracing";
+            usesDefaultFeatures = false;
+          }
+          {
+            name = "wasm-bindgen";
+            packageId = "wasm-bindgen";
+          }
+          {
+            name = "wasm-bindgen-futures";
+            packageId = "wasm-bindgen-futures";
+          }
+          {
+            name = "web-sys";
+            packageId = "web-sys";
+            rename = "web_sys";
+            features = [ "AbortController" "AbortSignal" "Blob" "BlobPropertyBag" "console" "CssStyleDeclaration" "Document" "DomException" "DomRect" "DomRectReadOnly" "Element" "Event" "EventTarget" "FocusEvent" "HtmlCanvasElement" "HtmlElement" "HtmlHtmlElement" "HtmlImageElement" "ImageBitmap" "ImageBitmapOptions" "ImageBitmapRenderingContext" "ImageData" "IntersectionObserver" "IntersectionObserverEntry" "KeyboardEvent" "MediaQueryList" "MessageChannel" "MessagePort" "Navigator" "Node" "OrientationLockType" "OrientationType" "PageTransitionEvent" "Permissions" "PermissionState" "PermissionStatus" "PointerEvent" "PremultiplyAlpha" "ResizeObserver" "ResizeObserverBoxOptions" "ResizeObserverEntry" "ResizeObserverOptions" "ResizeObserverSize" "Screen" "ScreenOrientation" "Url" "VisibilityState" "WheelEvent" "Window" "Worker" ];
+          }
+          {
+            name = "web-time";
+            packageId = "web-time";
+          }
+          {
+            name = "winit-core";
+            packageId = "winit-core";
+          }
+        ];
+        features = {
+          "serde" = [ "dep:serde" "bitflags/serde" "smol_str/serde" "dpi/serde" ];
+        };
+      };
+      "winit-win32" = rec {
+        crateName = "winit-win32";
+        version = "0.31.0-beta.2";
+        edition = "2024";
+        workspace_member = null;
+        src = pkgs.fetchgit {
+          url = "https://github.com/pop-os/winit.git";
+          rev = "9567503d34130113e36b0167a2b8829c3756e429";
+          sha256 = "0g1xpd5aziblymj9yw37k3hd9jrrll3ij6x8ggnyfsny5kcq6zzw";
+        };
+        libName = "winit_win32";
+        dependencies = [
+          {
+            name = "bitflags";
+            packageId = "bitflags 2.13.2";
+          }
+          {
+            name = "cursor-icon";
+            packageId = "cursor-icon";
+          }
+          {
+            name = "dpi";
+            packageId = "dpi";
+          }
+          {
+            name = "raw-window-handle";
+            packageId = "raw-window-handle";
+            rename = "rwh_06";
+            features = [ "std" ];
+          }
+          {
+            name = "smol_str";
+            packageId = "smol_str";
+          }
+          {
+            name = "tracing";
+            packageId = "tracing";
+            usesDefaultFeatures = false;
+          }
+          {
+            name = "unicode-segmentation";
+            packageId = "unicode-segmentation";
+          }
+          {
+            name = "windows-sys";
+            packageId = "windows-sys 0.59.0";
+            features = [ "Win32_Devices_HumanInterfaceDevice" "Win32_Foundation" "Win32_Globalization" "Win32_Graphics_Dwm" "Win32_Graphics_Gdi" "Win32_Media" "Win32_System_Com_StructuredStorage" "Win32_System_Com" "Win32_System_LibraryLoader" "Win32_System_Ole" "Win32_Security" "Win32_System_SystemInformation" "Win32_System_SystemServices" "Win32_System_Threading" "Win32_System_WindowsProgramming" "Win32_UI_Accessibility" "Win32_UI_Controls" "Win32_UI_HiDpi" "Win32_UI_Input_Ime" "Win32_UI_Input_KeyboardAndMouse" "Win32_UI_Input_Pointer" "Win32_UI_Input_Touch" "Win32_UI_Shell" "Win32_UI_TextServices" "Win32_UI_WindowsAndMessaging" ];
+          }
+          {
+            name = "winit-core";
+            packageId = "winit-core";
+          }
+        ];
+        features = {
+          "serde" = [ "dep:serde" "bitflags/serde" "smol_str/serde" "dpi/serde" "winit-core/serde" ];
+        };
+      };
+      "winit-x11" = rec {
+        crateName = "winit-x11";
+        version = "0.31.0-beta.2";
+        edition = "2024";
+        workspace_member = null;
+        src = pkgs.fetchgit {
+          url = "https://github.com/pop-os/winit.git";
+          rev = "9567503d34130113e36b0167a2b8829c3756e429";
+          sha256 = "0g1xpd5aziblymj9yw37k3hd9jrrll3ij6x8ggnyfsny5kcq6zzw";
+        };
+        libName = "winit_x11";
+        dependencies = [
+          {
+            name = "bitflags";
+            packageId = "bitflags 2.13.2";
+          }
+          {
+            name = "bytemuck";
+            packageId = "bytemuck";
+            usesDefaultFeatures = false;
+          }
+          {
+            name = "calloop";
+            packageId = "calloop";
+          }
+          {
+            name = "cursor-icon";
+            packageId = "cursor-icon";
+          }
+          {
+            name = "dpi";
+            packageId = "dpi";
+          }
+          {
+            name = "libc";
+            packageId = "libc";
+          }
+          {
+            name = "percent-encoding";
+            packageId = "percent-encoding";
+          }
+          {
+            name = "raw-window-handle";
+            packageId = "raw-window-handle";
+            rename = "rwh_06";
+            features = [ "std" ];
+          }
+          {
+            name = "rustix";
+            packageId = "rustix 1.1.5";
+            usesDefaultFeatures = false;
+            features = [ "std" "system" "thread" "process" ];
+          }
+          {
+            name = "smol_str";
+            packageId = "smol_str";
+          }
+          {
+            name = "tracing";
+            packageId = "tracing";
+            usesDefaultFeatures = false;
+          }
+          {
+            name = "winit-common";
+            packageId = "winit-common";
+            features = [ "xkb" "x11" ];
+          }
+          {
+            name = "winit-core";
+            packageId = "winit-core";
+          }
+          {
+            name = "x11-dl";
+            packageId = "x11-dl";
+          }
+          {
+            name = "x11rb";
+            packageId = "x11rb";
+            usesDefaultFeatures = false;
+            features = [ "allow-unsafe-code" "cursor" "dl-libxcb" "randr" "resource_manager" "sync" "xinput" "xkb" ];
+          }
+          {
+            name = "xkbcommon-dl";
+            packageId = "xkbcommon-dl";
+            features = [ "x11" ];
+          }
+        ];
+        features = {
+          "serde" = [ "dep:serde" "bitflags/serde" "smol_str/serde" "dpi/serde" ];
+        };
       };
       "winnow" = rec {
         crateName = "winnow";
@@ -29726,6 +37296,11 @@ rec {
             usesDefaultFeatures = false;
             features = [ "std" ];
           }
+          {
+            name = "xcursor";
+            packageId = "xcursor";
+            optional = true;
+          }
         ];
         features = {
           "all-extensions" = [ "x11rb-protocol/all-extensions" "composite" "damage" "dbe" "dpms" "dri2" "dri3" "glx" "present" "randr" "record" "render" "res" "screensaver" "shape" "shm" "sync" "xevie" "xf86dri" "xf86vidmode" "xfixes" "xinerama" "xinput" "xkb" "xprint" "xselinux" "xtest" "xv" "xvmc" ];
@@ -29771,7 +37346,7 @@ rec {
           "xv" = [ "x11rb-protocol/xv" "shm" ];
           "xvmc" = [ "x11rb-protocol/xvmc" "xv" ];
         };
-        resolvedDefaultFeatures = [ "allow-unsafe-code" "as-raw-xcb-connection" "dl-libxcb" "libc" "libloading" "once_cell" "randr" "render" "resource_manager" "shape" "shm" "xfixes" "xinput" "xkb" ];
+        resolvedDefaultFeatures = [ "allow-unsafe-code" "as-raw-xcb-connection" "cursor" "dl-libxcb" "dri3" "libc" "libloading" "once_cell" "randr" "render" "resource_manager" "shape" "shm" "sync" "xcursor" "xfixes" "xinput" "xkb" ];
       };
       "x11rb-protocol" = rec {
         crateName = "x11rb-protocol";
@@ -29798,7 +37373,7 @@ rec {
           "xv" = [ "shm" ];
           "xvmc" = [ "xv" ];
         };
-        resolvedDefaultFeatures = [ "randr" "render" "resource_manager" "shape" "shm" "std" "xfixes" "xinput" "xkb" ];
+        resolvedDefaultFeatures = [ "dri3" "randr" "render" "resource_manager" "shape" "shm" "std" "sync" "xfixes" "xinput" "xkb" ];
       };
       "xattr" = rec {
         crateName = "xattr";
@@ -29836,6 +37411,70 @@ rec {
           "Samuele Esposito"
         ];
 
+      };
+      "xkbcommon 0.7.0" = rec {
+        crateName = "xkbcommon";
+        version = "0.7.0";
+        edition = "2021";
+        sha256 = "07n9shhcls66wjvmk5pzqql46ipfdv7b8hbc384wgv9hk4jpv1hk";
+        authors = [
+          "Remi THEBAULT <remi.thebault@gmail.com>"
+        ];
+        dependencies = [
+          {
+            name = "libc";
+            packageId = "libc";
+          }
+          {
+            name = "memmap2";
+            packageId = "memmap2 0.8.0";
+            optional = true;
+          }
+          {
+            name = "xkeysym";
+            packageId = "xkeysym";
+          }
+        ];
+        features = {
+          "as-raw-xcb-connection" = [ "dep:as-raw-xcb-connection" ];
+          "default" = [ "wayland" ];
+          "memmap2" = [ "dep:memmap2" ];
+          "wayland" = [ "memmap2" ];
+          "x11" = [ "as-raw-xcb-connection" ];
+        };
+        resolvedDefaultFeatures = [ "default" "memmap2" "wayland" ];
+      };
+      "xkbcommon 0.8.0" = rec {
+        crateName = "xkbcommon";
+        version = "0.8.0";
+        edition = "2021";
+        sha256 = "1j8s1sfwc6bw9phsca65rw3q3b5l2651v1s0pk5yxm6baa9wlrld";
+        authors = [
+          "Remi THEBAULT <remi.thebault@gmail.com>"
+        ];
+        dependencies = [
+          {
+            name = "libc";
+            packageId = "libc";
+          }
+          {
+            name = "memmap2";
+            packageId = "memmap2 0.9.11";
+            optional = true;
+          }
+          {
+            name = "xkeysym";
+            packageId = "xkeysym";
+          }
+        ];
+        features = {
+          "as-raw-xcb-connection" = [ "dep:as-raw-xcb-connection" ];
+          "default" = [ "wayland" ];
+          "memmap2" = [ "dep:memmap2" ];
+          "wayland" = [ "memmap2" ];
+          "x11" = [ "as-raw-xcb-connection" ];
+        };
+        resolvedDefaultFeatures = [ "default" "memmap2" "wayland" ];
       };
       "xkbcommon-dl" = rec {
         crateName = "xkbcommon-dl";
@@ -29880,10 +37519,26 @@ rec {
         authors = [
           "John Nunley <jtnunley01@gmail.com>"
         ];
+        dependencies = [
+          {
+            name = "bytemuck";
+            packageId = "bytemuck";
+            optional = true;
+            usesDefaultFeatures = false;
+            features = [ "derive" ];
+          }
+        ];
+        devDependencies = [
+          {
+            name = "bytemuck";
+            packageId = "bytemuck";
+          }
+        ];
         features = {
           "bytemuck" = [ "dep:bytemuck" ];
           "serde" = [ "dep:serde" ];
         };
+        resolvedDefaultFeatures = [ "bytemuck" ];
       };
       "xml-rs" = rec {
         crateName = "xml-rs";
@@ -29906,6 +37561,19 @@ rec {
           "Evgeniy Reizner <razrfalcon@gmail.com>"
         ];
 
+      };
+      "xxhash-rust" = rec {
+        crateName = "xxhash-rust";
+        version = "0.8.19";
+        edition = "2018";
+        sha256 = "1xvsfnqr67nkji3dczj3m8l4n9pz9fwc7maj7hwnlj321f9jn2jm";
+        libName = "xxhash_rust";
+        authors = [
+          "Douman <douman@gmx.se>"
+        ];
+        features = {
+        };
+        resolvedDefaultFeatures = [ "const_xxh64" ];
       };
       "y4m" = rec {
         crateName = "y4m";

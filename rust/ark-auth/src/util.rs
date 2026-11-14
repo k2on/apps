@@ -76,3 +76,24 @@ pub fn with_code(url: &str, code: &str) -> String {
     let sep = if url.contains('?') { '&' } else { '?' };
     format!("{url}{sep}code={}", percent_encode(code))
 }
+
+/// The cookie a browser's session is kept in ([`crate::server`]'s
+/// `/auth/session`): `HttpOnly`, so no script on the page reads the token,
+/// and `SameSite=Strict`, so no other site's page sends it. The sync
+/// socket takes it when a connection's first message is empty
+/// ([`COOKIE_HELLO`]).
+pub const COOKIE: &str = "ark-session";
+
+/// What a page's socket says first in place of a token: nothing — the
+/// session is the cookie the browser sends with the socket's upgrade.
+pub const COOKIE_HELLO: &str = "";
+
+/// The session cookie's value in a request's `Cookie` header, if it has one.
+pub fn cookie_token(header: &str) -> Option<&str> {
+    header
+        .split(';')
+        .filter_map(|kv| kv.trim().split_once('='))
+        .find(|(k, _)| *k == COOKIE)
+        .map(|(_, v)| v.trim_matches('"'))
+        .filter(|v| !v.is_empty())
+}

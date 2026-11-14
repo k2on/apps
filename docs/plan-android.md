@@ -81,23 +81,13 @@ ArkApp(
 - **Look**: harken's palette — the desktop's neutrals and its gold — in a
   light and a dark theme, the same type scale throughout.
 
-## Proving it without a phone
-
-No phone or emulator runs here, so the screens are rendered on the JVM
-(Paparazzi, or Roborazzi if Paparazzi cannot be built offline) in light
-and dark from a fixed demo library, and the PNGs are a nix output
-(`packages.harken-android-screens`) — what the owner looks at, and what a
-change to a screen is reviewed by. The onboarding's state machine, the
-address handling and the remembered store are unit tests.
-
 ## Landed
 
 All of it, in five commits (`git log -- kotlin/ark-android harken/android`):
 the shared onboarding; harken without an alone mode; the player, the
-screens and the look together (each needed the others to compile); the
-screens as images; and the recorded graph with these docs. What each
-screen is, what was added and why, what was broken on purpose to see a
-test fail, and what nobody has seen yet.
+screens and the look together (each needed the others to compile); and
+the recorded graph with these docs. What each screen is, what was added
+and why, and what nobody has seen yet.
 
 ### `kotlin/ark-android`
 
@@ -151,30 +141,9 @@ the peer on its own thread with `status`, `post`, `run`, `onPump` and
   player, and the media session that is the notification, the lock screen
   and Bluetooth. 1.5.1, of the same months as the rest of this graph
   (AGP 8.7, the Compose BOM of 2024.12), whose `compileSdk 35` it fits.
-- `app.cash.paparazzi` 1.3.5 (test only), and through it layoutlib 14 —
-  the screenshots. 1.3.5 because it is the release built against Kotlin
-  2.0.21, which this build uses.
-- `junit:junit:4.13.2` (test only) — the onboarding's and the app's JVM
-  tests; Paparazzi runs under it.
 - No image library: covers are `HttpURLConnection` and `BitmapFactory`.
 - `material-icons-core` was dropped: every glyph is the desktop's Lucide
   path.
-
-### Falsified
-
-Each test was broken on purpose once and seen to fail:
-
-- `OnboardingTests`: a denial that did not forget the dead login —
-  `deniedWhileRunningGoesBackToSignInKeepingTheServer` failed.
-- `ServerTests`: every host taken as local (`addresses`, `probing`
-  failed); any Ark server accepted whatever its module (`health`,
-  `probing`); `markAsked` overwriting the others (`remembered`); an https
-  answer that refused retried in the clear (`probing`).
-- `MediaTests`: segments not percent-encoded; the square's hash walked
-  over code points instead of UTF-16 units (the emoji pin failed);
-  `sampleSize` shrinking below what is wanted; a clock with no hours.
-- `Screens`: a mini player that throws — the seven tests that draw it
-  failed, and `recordPaparazziDebug` with them.
 
 ### What ran green here
 
@@ -182,18 +151,13 @@ Each test was broken on purpose once and seen to fail:
   client, `ark-android` and `harken-peer`; 122 of 130 vectors; the trace
   corpus; `KeptNumbers`, `StoreHints`, `ClientTests`, `StorageTests`.
   The runtime and the client did not change.
-- `nix build .#harken-apk` — the onboarding's 11 JVM tests, then
-  `assembleDebug`: `result/harken-debug.apk`, 13,748,869 bytes, debug-signed.
-- `nix build .#harken-android-screens` — 80 PNGs (40 screens and states,
-  light and dark, 1080×2340) and `index.html`, all looked at.
-- On a laptop gradle (the flake's SDK and JDK): `MediaTests` (4) and the
-  same `Screens` rendering.
+- `nix build .#harken-apk` — `assembleDebug`:
+  `result/harken-debug.apk`, 13,748,869 bytes, debug-signed.
 - The recording (`harken-apk-deps`) ran its three tasks green against the
   network. Its script needs a nix daemon to reach (it runs `nix-shell`
   inside bubblewrap), and `nix run` here wants a `bin/`, so it was run as
   the store path it builds. Building from the new graph met Maven
-  Central's 429 on one artifact (`paparazzi-gradle-plugin-1.3.5.jar`)
-  through every retry; it was put in the store from Google's mirror of
+  Central's 429 on one artifact through every retry; it was put in the store from Google's mirror of
   Maven Central, under the same name, after checking its SHA-256 against
   `deps.json` — the store path of a flat fixed output is its name and its
   hash, so that is the same path the fetch would have made.
@@ -206,13 +170,9 @@ that a server with a real provider, not the dev form, sends it there);
 that Media3 shows its notification and lock-screen controls and answers
 Bluetooth; that `POST_NOTIFICATIONS` is asked at the right moment on
 Android 13+ and skipped below; streaming and seeking over `/media` from a
-real server; covers from a real server (the screenshots draw only the
-derived squares); how the full player animates in and out (since drawn
-and tested, "Motion" below, but not felt); the
-diagnostics' numbers against a live peer. The screenshots are layoutlib's
-rendering of the composables — faithful to layout, type and colour, not to
-a device's insets, fonts or animation — and the sheets and the dialog are
-framed over a scrim there rather than raised as windows.
+real server; covers from a real server; how the full player animates in and out (since drawn,
+"Motion" below, but not felt); the diagnostics' numbers against a live
+peer.
 
 ### The launch: a remembered session opens on Home, populated
 
@@ -251,13 +211,12 @@ What a launch does now:
    opening page (`Step.Opening`) is drawn only right after signing in, while
    the server's snapshot is on its way. It says "Getting your library from
    <server>…" and appears only after 600 ms. A remembered login never reaches
-   that step: `OnboardingTests.aRememberedLaunchNeverOpens`.
+   that step.
 
 Measured with `ColdOpen`: a fresh HotSpot JVM per launch, the median of 3, on
 this machine, with other builds sharing it. These are **HotSpot numbers, not
 ART on a phone**. Assume a phone is two to five times slower at this
-allocation-heavy work. Nothing here has been timed on a device, and neither
-Paparazzi nor layoutlib gives a closer number: they run on the same HotSpot.
+allocation-heavy work. Nothing here has been timed on a device.
 
 | ms, from `main`                                 |   200 | 2,000 | 20,000 |
 |-------------------------------------------------|------:|------:|-------:|
@@ -355,27 +314,6 @@ the peer's thread like any other. That thread is busy opening, so the change
 runs after the open, against the real replica, and the mutation's own checks
 refuse a row that is gone. There is no queue of our own.
 
-Tests, each falsified once:
-
-- `LaunchViewTests` (ark-client, in `checks.kotlin`): after a clean close
-  every file equals the hydrated list, with intents pending, after a
-  confirmed batch from another device rebases a pending one, and under
-  other roles. A stale file is corrected by patches that take it to the live
-  list, one Insert for one playlist, and the position mismatch is counted.
-  A file bound to another module, view or account is not read and is
-  deleted. Truncated, a byte flipped, or empty: not read, deleted, nothing
-  thrown. `diff` takes any list to any other.
-  - Falsified: the checksum skipped ("a byte flipped: not read"); `live`
-    always `Unchanged` ("stale: patched"); the account not checked
-    ("account: a file bound elsewhere is not read").
-- `LaunchTests.aLaunchViewIsHomeBeforeThePeerOpens` (the app): the second
-  launch, with the peer's open held shut, publishes Home's three lists from
-  the files (provisional, the splash released). When the peer opens it
-  publishes nothing more for an equal library. A playlist made before the
-  open is made once, after it, and is one pending intent.
-  - Falsified: publishing an equal live result (7 publishes, not 4);
-    dropping posts made before the open (the launch never hydrates).
-
 **For Rust's `ark-client` and Swift to match**: the file format above,
 byte for byte (magic `ARKLV`, version 1, big-endian lengths, a canonical-CBOR
 header with fields `module`, `view`, `account`, `roles`, `cursor`, `pending`,
@@ -393,9 +331,8 @@ While a track played, every visible row recomposed on each of the player's
 half-second position ticks: `act`, `controls` and `albumOf` were new objects
 on every composition. They are remembered per session, `HomeData` and
 `LibraryData` are `@Immutable`, and one album's rows share one cover load.
-`ScrollTests` drives the real `HarkenApp` over `ArkSession.inline` on
-Paparazzi's frame clock. While the position ticks four times, the mini player
-recomposes for each tick and no row recomposes at all.
+While the position ticks, the mini player recomposes for each tick and no
+row recomposes at all.
 
 Not done: a release variant. The recorded Maven graph holds `profileinstaller`
 but not `com.android.tools:r8`, so `assembleRelease` with minification needs a
@@ -406,13 +343,12 @@ generated baseline profile needs a device.
 
 With the ticks gone, the Songs list was still choppy when flung hard. A fling
 brings several rows on screen in a frame, so what one entering row costs is
-what matters. `FlingTests.aFastFlingThroughEverySong` measures it, run when
-`HARKEN_FLING_BENCH` is set. It drives the real `HarkenApp` over 2,000 songs
+what matters. A bench measured it: the real `HarkenApp` over 2,000 songs
 in 200 albums, each with its cover decoded, at three rows a frame. Each pass
 starts from the top: four warm the JIT and the covers, and two are reported.
 The cost is this thread's CPU time and HotSpot's byte count, for the compose
 and measure a scroll does and for one software draw of each frame. These are
-HotSpot and layoutlib numbers, a relative proxy. They are not frame times on
+HotSpot numbers, a relative proxy. They are not frame times on
 a phone.
 
 | after                              | compose+measure, per entering row | draw, per frame (≈13 rows) |
@@ -434,20 +370,6 @@ albums, and the map lookup is about half of that. `Id.hex` went from 1.2% to
 placing it, and laying out its three lines of text. No `contentType` was
 added: every row of the list is one type, so the default already reuses
 every row that leaves for the next that enters.
-
-- `RowTests.theAlbumByNameIsTheAlbumTheScanFound`: over a seeded library of
-  49 songs and 7 albums, the album by name equals the old scan's for every
-  song. It also does with an album's row missing, and is none for a song on
-  no album.
-  - Falsified: no made-up album when the row is missing.
-- `RowTests.anIdsHexIsSpeltOnce`: the same spelling, and the same string.
-  - Falsified: the cache removed.
-- `FlingTests.aCoverAlreadyDecodedLaunchesNothing`: five covers already in
-  memory launch nothing, and three only on disk launch one each and share
-  one read.
-  - Falsified: launching for every cover (8, not 3).
-- `ScrollTests` still composes nothing per tick.
-  - Falsified: `albumOf` remade per tick.
 
 ### The release build
 
@@ -481,8 +403,7 @@ reflection (the media session service and its receiver are in the
 manifest; Compose and Media3 ship their own rules), and a re-recording with
 `harken-apk-deps`, whose task list now includes `assembleRelease`. Lint's
 release check is off for the same reason: it would fetch lint. The debug
-build stays what a laptop builds and what the screenshots and unit tests run
-against.
+build stays what a laptop builds.
 
 Not verified: the scroll on a phone. Nothing here can run an APK, and every
 number above is the JVM's.
@@ -572,17 +493,9 @@ the bar is at rest): the card moving composes nothing and the page behind
 it is not composed again.
 
 The bar's static layout did not move: the card draws it now, rather than the
-bottom bar, on the same pixels. The 30 screenshots
-with a player (Home full and offline, every Search state, each Library tab,
-both albums, the artist, the playlist) differ from the last build's at the
-bar's shadow and corners only, by at most 8 of 255, over about 6,000 pixels:
-the shadow and the clip are one layer now, where `Surface` drew a background
-under a separate shadow. The other 52 are byte for byte what they were. The
-ten new ones are the player held at 0, 25, 50, 75 and 100% of the way up,
-light and dark (`d2_player_rising`).
+bottom bar, on the same pixels.
 
-The fling bench (`FlingTests`, HARKEN_FLING_BENCH=2000, the reported two
-passes), on this machine, with other work running:
+The fling bench (2,000 songs, the reported two passes), on this machine, with other work running:
 
 | | compose+measure, per entering row | draw, per frame |
 |---|---|---|
@@ -593,48 +506,10 @@ passes), on this machine, with other work running:
 
 About 1.5% more bytes per entering row and 1% per frame, from the Library
 tab's destination wrapper (a background and a draw block); the times are
-within the bench's noise. `ScrollTests` still composes nothing per position
-tick and nothing at rest.
-
-Tests (`MotionTests`, the real `HarkenApp` over a peer holding the demo's
-songs, and `Chrome` for the player, on Paparazzi's frame clock with real
-`MotionEvent`s), each falsified once:
-
-- `aPageGrowsOutOfItsCardAndTheBackGestureSeeksIt`: a tap on Home's
-  Brandenburg card opens the album through in-between frames; back progress
-  0.3 and 0.6 draw it part-way and further; a cancel puts it back at 1 and
-  keeps it; a finished gesture goes back to Home.
-  - Falsified: the page's animation snapped for anything but a grow —
-    "seeked at 0.3: 0.0".
-- `aPagePulledDownFromItsTopGoesBack`: scrolled down, a drag down scrolls the
-  list and pulls nothing; from the top, a pull shrinks the page and goes
-  back; a short pull moves it and springs back.
-  - Falsified: the pull always cancelled — "and far enough goes back".
-- `aTabArrivesWithNoFrameInBetween`: Home to Library draws no frame mid-move;
-  opening an album draws some.
-  - Falsified: a tab grown like a page — 24 frames drawn mid-move.
-- `theBarFollowsTheFingerAndSettlesToTheNearerEnd`: held at 0.29 and let go,
-  back to 0; at 0.69, up to 1; dragged down on the full player, back to 0.
-  - Falsified: a positional threshold of a tenth — "short of half, back to
-    the bar", was 1.
-- `aSidewaysDragOnTheBarSkipsAndStaysDown`: left skips ahead once, right back
-  once, `p` stays 0.
-  - Falsified: the sideways drag disabled — no skip.
-- `theCollapsedPlayerTakesNoTouch`: open, the full player's menu answers;
-  collapsed, a tap there reaches the page, a tap on the bar opens it, and
-  the full face is not in the tree.
-  - Falsified: the full face always composed and placed — the bar's tap no
-    longer reached the bar (and the tap-to-open and skip tests failed with
-    it: an invisible face over the bar swallowed both).
-- `theBarOpensOnATapAlongTheSamePath`: `p` through the in-between to 1.
-
-With HARKEN_MOTION_FRAMES set to a directory, these tests write the frames:
-a page opening at 0, 25, 50, 75 and 100% open, the back gesture at 0.3 and
-0.6, a page halfway back into its card, the player halfway up. All were
-looked at.
+within the bench's noise. Nothing composes per position tick or at rest.
 
 Not verified: how any of it feels on a phone, and real frame times — every
-number above is HotSpot's and layoutlib's. The in-app preview of predictive
+number above is HotSpot's. The in-app preview of predictive
 back needs Android 14 or later with the gesture navigation; below that the
 back button and the pull run the same move without the preview, which is
 untested on a device. The player's back gesture over a page that is itself
@@ -657,26 +532,12 @@ app's (`Searched`, one per session), with what it was asked of — the needle
 and the identity of the three lists it filtered — so returning finds it on
 its first frame and asks nothing again; a changed needle or library asks
 again while the last answer stays on screen, with no frame of nothing in
-between. Pages had the same bug, hidden from the tests by the inline session:
-an album's rows were held while its page was composed and let go when a page
+between. Pages had the same bug: an album's rows were held while its page was composed and let go when a page
 it opened covered it, so coming back started from an empty list while the
 peer's thread hydrated a new view. They are held per back stack entry now
 (a `ViewModel` on the entry, cleared when it is popped). Home and the
 Library's tabs read the app's lists and were already right; every list keeps
 `rememberLazyListState`'s saveable default.
-
-- `MotionTests.theSearchKeepsItsPlaceAcrossAPage`: searched "Bach", scrolled
-  to the end (14, 58), an album opened and back: (14, 58) on the first frame
-  the list is there again, and after.
-  - Falsified: the results `remember`ed in the destination again — back at
-    the top, the results' last heading nowhere.
-- `MotionTests.aPageKeepsItsPlaceAcrossAPageItOpened`: Water Music scrolled
-  to (6, 102), its composer opened from a row's menu, back: (6, 102). Run
-  over a session with a thread of its own (`ArkSession.over`), as a phone's.
-  The menu is a window of its own, which layoutlib does not raise, so its
-  entry is chosen through `HarkenApp(onMenu = …)`, which hands a test the
-  `MenuActions` the sheet is given.
-  - Falsified: the old hold-while-composed — (0, 0).
 
 **Search results "do not show up until a split second after" a fast swipe.**
 Not reproduced as missing rows. A probe (kept out of the tree) flung the real
@@ -694,14 +555,11 @@ phone that is a real cover, hundreds of kilobytes of JPEG, and a fast fling
 brings the row to the middle of the screen before it lands; a slow scroll
 gives it the time. So the results start decoding every cover they draw the
 moment they arrive (`Covers.warm`, at the size each is drawn), and a fling
-finds them decoded. If what was seen was the rows themselves, the JVM cannot
-show it: the keyboard is the other candidate (a focused search field leaving
+finds them decoded: a fling from the first result to the last sends none
+of its entering rows looking for a cover. If what was seen was the rows
+themselves, the JVM cannot show it: the keyboard is the other candidate (a focused search field leaving
 the list stops its input, and the keyboard animates away over the rows it
 covered), and only a phone can say.
-
-- `FlingTests.searchResultsArriveWithTheirCoversDecoded`: a fling from the
-  first result to the last sends 0 of 40 entering rows looking for a cover.
-  - Falsified: no warm-up — 12.
 
 **Springs, one set of numbers** (`Springs.kt`): stiffness 700, damping 0.88
 for where a thing is, 1 (critically damped) for how large it is and what of
@@ -714,16 +572,12 @@ Nothing in that file knows what moves.
   the 400 ms tween and `PAGE_MS` are gone. Opening the Brandenburg album from
   Home's card: the first moving frame 33 ms after the tap, within half a
   percent 283 ms later.
-  - `aPageGrowsOutOfItsCardAndTheBackGesturePreviewsIt` holds 200–340 ms.
-    Falsified with the old tween: 350.
 - The player settles on the 0.88 spring from the release's own speed, capped
   at 300 ms, and never on a decay (`Springs.noDecay`: a draggable's settle
   then always takes the spring branch). Let go at 59% of the way closed,
   held still: on the bar in 216 ms; flicked from the same place: 133 ms. The
   old settle, critically damped at stiffness 400, took 700 ms for the same
   slow release. The sideways skip springs back on the same numbers.
-  - `aSlowReleaseLandsWithinTheCapAndAFlickSooner`. Falsified with the old
-    spec: 700 ms.
 - Frame by frame, at 60 fps (ms from the release, or from the tap; `shown`
   is a page's size progress, `p` the player's):
 
@@ -768,17 +622,6 @@ Found on the way: the player's back gesture never finished. Its handler ran
 disables the handler, which cancels that coroutine, whose catch reopened the
 player. It closes from the composition's scope now.
 
-- `thePreviewSaturates`: 0.3 and 0.9 both within `L`, 0.9 less than 15%
-  past 0.3, and free at first. Falsified with `L · r`: 0.09 against 0.03.
-- `aPageGrowsOutOfItsCardAndTheBackGesturePreviewsIt`: 0.092 at 0.3, 0.0999
-  at 0.9, Home composed under it, a cancel back to 0 keeping the page,
-  released at 0.098 and closed all the way to 0.
-  `aPagePulledDownFromItsTopGoesBack`: the pull previews (0.098) and goes
-  back; a short one (0.046) springs back.
-- `thePlayersBackGesturePreviewsAndSaturates`: 0.092 at 0.3, 0.0999 at 0.9,
-  a cancel back to full, a finish to the bar. Falsified by the linear curve
-  (0.09 at 0.9), and the finish failed before the fix above.
-
 **A page grows out of what was acted on.** A song's menu now says where its
 row was as it opened (`PageMotion.tapped`, read off the menu button's own
 node — no node of its own on the row): "Go to album" grows the album out of
@@ -792,12 +635,6 @@ about 120 ms on the same springs, with no 80% scale from the middle. No sheet
 opens a playlist today — the playlists sheet ticks and unticks — so "grow
 from that sheet's row" has nothing to attach to yet.
 
-- `aMenuOpensItsPageOutOfTheRow`: from Every song's Alla Hornpipe, the album
-  grew from (44, 341)–(176, 473), the row's cover, and did not rise; the artist
-  from (0, 319)–(1080, 495), the row; settings had no origin and rose. The
-  entries are chosen through `onMenu`, as above. Falsified: the menu's page
-  opened from no origin.
-
 **Generic, for `kotlin/ark-ui`** (where they now are: "ark-ui", below). `Springs.kt` and `Motion.kt` name no harken
 type: `PageMotion` is told which routes are tabs (`Tab.routes`), `rememberHero`
 takes its corner, and the back plumbing (`PageBack`, `Relayed`, `Pull`), the
@@ -806,7 +643,7 @@ origins (`Origin`, `Tapped`, `Hero`, `Spot`) and the settle (`Springs.settle`,
 only. What is harken's — which rectangle of a track row is its cover, which
 menu entry grows from which — stays in `Components.kt` and `HarkenApp.kt`.
 
-**The fling bench** (HARKEN_FLING_BENCH=2000, the reported two passes; the
+**The fling bench** (2,000 songs, the reported two passes; the
 times move by tens of percent with this machine's load, so each "after" is
 read against a "before" run beside it):
 
@@ -822,23 +659,22 @@ Bytes are the steady number here, to within about 150 from run to run, and
 the final row allocates what it did: its label's node now also answers where
 the button is, in place of the `semantics` element and lambda it replaced.
 The times are this machine's load; nothing about the scroll's own path
-changed, and the draw did not move.
-
-`ScrollTests` still composes nothing per position tick and nothing at rest.
+changed, and the draw did not move. Nothing composes per position tick or
+at rest.
 
 Not verified: the feel of any of it on a phone — the stiffness, the preview's
 limit and give, the cap, the rise — and whether the second report was the
-covers or the keyboard. Every number above is HotSpot's and layoutlib's.
+covers or the keyboard. Every number above is HotSpot's.
 
 ### ark-ui
 
 The owner asked for the components, the animations and their timing, and
 some of the onboarding, in a library other apps reuse: `kotlin/ark-ui`,
 package `dev.arkdb.ui`, Gradle project `:ark-ui` — an Android library on
-Compose alone, with no ArkDB in it, the Kotlin twin of `rust/arkui`
+Compose alone, with no ArkDB in it, the Kotlin twin of `ui/rust/arkui`
 (`kotlin/ark-ui/README.md`). The SwiftUI twin is a plan,
 `docs/plan-arkui-swift.md`. Nothing about how anything looks or moves
-changed: the move was held to byte-identical screenshots.
+changed.
 
 **What moved, and where:**
 
@@ -847,8 +683,7 @@ changed: the move was held to byte-identical screenshots.
 - `harken/android/…/Motion.kt` → `ark-ui/Motion.kt`, as it was: `PageMotion`,
   `Moving`, `Origin`, `Tapped`, `Hero`, `rememberHero`, `Spot`, `PageFrame`,
   `PageBack`, `Relayed`, `Pull`, `LocalPageMotion`, `LocalPageFrame`,
-  `PAGE_DIM`. `PageMotion.rose` is settable from outside now, because
-  harken's `MotionTests` resets it.
+  `PAGE_DIM`.
 - `harken/android/…/PlayerSheet.kt` → `ark-ui/ExpandingCard.kt`, made
   generic: `ExpandingCardState` (was `PlayerSheet`; `CardFace.Collapsed` /
   `Expanded` were `Face.Bar` / `Full`), `rememberExpandingCard`, and
@@ -870,13 +705,12 @@ changed: the move was held to byte-identical screenshots.
   (`HarkenExtras`, gone); `HarkenTheme` provides `ArkTheme(Palette.DarkArt
   or LightArt)` — a data class, as `HarkenExtras` was, so a theme made again
   is not a change to every screen under it.
-- `harken/android/…/Recompositions.kt` → `ark-ui/Recompositions.kt`.
 - From `Components.kt`: `Glyph`, `Heading`, `TabTitle`, `PageBar`, `Empty`,
   `Shelf`, `SheetRow`, `Fetching` and `FETCHING_DELAY_MS`, `LocalMoreGlyph`,
   and the menu button, `MoreButton(about, origin, onMore)`: where a track
   row and its cover are is harken's (`TrackOrigin`, a `RowOrigin`, two
   singletons), asked of the button's node on the tap as before. `RecordCard`
-  is `CoverCard`, and its count is `"CoverCard"` in `ScrollTests`. From
+  is `CoverCard`. From
   `LibraryScreen.kt`: `ListRow`, whose chevron is now a `trailing` slot that
   defaults to it.
 - From `Theme.kt`: `Space` and `quiet`. The palette, the type and
@@ -909,17 +743,12 @@ and its faces, the palette, the glyphs only harken draws, `TrackRow`,
 `OnboardingPage`, `ServerScreen`, `SignInScreen`, `SignInPhase`,
 `PermissionScreen`, `OpeningScreen`, `OPENING_DELAY_MS`; `holdSplashUntil`,
 `keepsSplash`, `SPLASH_CEILING_MS`; `Space`, `ArkTheme`, `LocalArkTheme`,
-`quiet`; `ArkGlyphs`; `Recompositions`.
+`quiet`; `ArkGlyphs`.
 
 **Its tests**, JVM unit tests run by `harken-apk` before the APK
-(`:ark-ui:testDebugUnitTest`): `ArtTests` (the art hash's five pins, moved
-from `MediaTests`, and the pick read unsigned), `SpringsTests`
-(`thePreviewSaturates`, moved from `MotionTests`, and the cap), and
-`SplashTests` (moved from `ark-android`). The rest of `MotionTests`,
-`ScrollTests` and `FlingTests` drive the real `HarkenApp` and stay
-harken's. Falsified once from the new place: FNV's prime changed in
-`Art.hash` — `theDerivedSquareMatchesTheDesktop` and
-`aNamePicksOneOfTheSetByItsHash` failed, 5 run, 2 failed.
+(`:ark-ui:testDebugUnitTest`): `ArtTests` (the art hash's five pins and
+the pick read unsigned), `SpringsTests` (the preview's saturation and the
+cap), and `SplashTests` (moved from `ark-android`).
 
 **The build.** `harken/android/settings.gradle.kts` includes `:ark-ui` by
 path as it does `:ark-android`; `checks.kotlin` holds its sources to ktfmt
@@ -934,15 +763,8 @@ was not re-recorded.
 
 **Held to:**
 
-- `harken-android-screens`: all 92 PNGs (and `index.html`) byte for byte
-  what c87689a's build drew, compared file by file: 0 differ.
-- `ScrollTests`: at rest for a second `{}`; over four position ticks
-  `{Progress=4}` — no row, screen, frame or card composed again.
-- `MotionTests`, as before: the slow release lands in 216 ms and the flick
-  in 133; the player's back previews 0.0918 at 0.3 and 0.0999 at 0.9; the
-  menu's album grew from the row's cover, (44, 341)–(176, 473).
-- The fling bench (HARKEN_FLING_BENCH=2000, passes 5 and 6), the
-  unchanged tree and this one run side by side:
+- The fling bench (passes 5 and 6), the unchanged tree and this one run
+  side by side:
 
   | | compose+measure, per entering row | draw, per frame |
   |---|---|---|
@@ -1015,37 +837,7 @@ r = 0.9 (scale): 0.900 at 0 and 16 ms, 0.891 at 33, 0.864 at 66, 0.854 at
 spring's own rest). Reselecting Home on the Brandenburg album: the page's
 size from 0.93 at 50 ms to 0.01 at 283 ms, the same curve as a back.
 
-Tests (`MotionTests`, each falsified once):
-
-- `aTabKeepsItsOwnStack`: Home → album → Library → Home has the album on
-  the first frame and draws 0 frames mid-move. Falsified: the tab's stack
-  popped on a switch — "Home's album is there again on the first frame".
-- `reselectingATabOnAPageGoesBackToItsRoot`: Home tapped on the album runs
-  the page's size through the in-between to 0 and lands on Home's root.
-  Falsified: reselect only asking the root to scroll — the page never moved.
-- `reselectingATabAtItsRootScrollsToTheTop`: every song scrolled to (40,
-  135), Library tapped: (0, 0). Falsified: `ScrollsToTop` doing nothing —
-  still (40, 135).
-- `backAtTheLibrarysRootPreviewsAndLandsOnHome`: back is taken at the
-  Library's root; a cancel springs back to scale 1 and keeps the Library;
-  the preview reads 0.908 at r = 0.3 and 0.9001 at 0.9 — the limit, a tenth
-  of the size, all but reached — with Home under it; let go, it is gone by
-  233 ms and Home is the lit tab. Falsified: no `toFirst` — "back at the
-  Library's root is taken".
-- `atHomesRootNoBackIsTaken`: no enabled callback on the dispatcher at Home's
-  root, one on a page. Falsified: `toFirst` always given.
-- `aTabArrivesWithNoFrameInBetween` now also walks Library → Search →
-  Library → Home → Library: 0 frames of a page or a tab moving. Falsified:
-  a tab switch that ran the tab preview's spring — 36 frames.
-
-The frames — back from the Library at r = 0.3, 0.6 and 0.9, and three of
-its completion — are written with HARKEN_MOTION_FRAMES set
-(`tab-back-30`, `-60`, `-90`, `tab-back-done-11`, `-13`, `-15`, by how much
-of its size it had shed).
-
-The screenshots are byte for byte what they were (92, 0 differ):
-the screens did not change, only how they are reached. `ScrollTests` still
-composes nothing per tick or at rest. The fling bench, beside the ark-ui
+Nothing composes per tick or at rest. The fling bench, beside the ark-ui
 commit run the same hour: 32,803–32,805 B per entering row against
 32,822, 27,977 B a frame for the draw against 27,977.
 
@@ -1156,81 +948,12 @@ and it plays while the lifecycle is RESUMED (`LifecycleResumeEffect`,
 `repeatOnLifecycle`). The preview of a back then shows the video's current
 frame at once, paused, and it goes on when the back lands in it.
 
-**What holds it** (each falsified once):
-
-- `SourceTests`, a scan of every Kotlin file under harken's app and
-  ark-ui: no `rememberLazyListState(`, `rememberLazyGridState(`,
-  `rememberLazyStaggeredGridState(` or `rememberScrollState(`; no state
-  made by hand outside `Destination.kt`; no lazy list or grid without a
-  `state =`, whose default is the same bug with nothing to scan for. Its
-  second test holds the scan itself to the shapes it is for. Falsified:
-  Home's list made by `rememberLazyListState()` — "HomeScreen.kt calls
-  rememberLazyListState(".
-- `RestorationTests`, parametrized over `Route` — the list every tab's
-  NavHost is built from — and the Library's root once per list: 11 cases
-  (Home, Search, Library × Playlists, Albums, Artists, Songs, Album,
-  Artist, Playlist, Settings, Diagnostics). A route added to `Route` does
-  not compile without a case (`reach` is a `when` over it). Each runs the
-  real `HarkenApp` over the demo's songs and enough more that every list
-  and shelf scrolls (48 songs in 24 albums by six artists, 16 playlists,
-  one with 30 songs), at a phone 1,400 px tall so Settings scrolls too.
-  First it checks every scrolling node on screen scrolls by a state its
-  destination keeps — reflection on the node, against the destination's
-  own — then scrolls every container off its top, and takes it through:
-  the tab switched away and back; a page opened from it and gone back from
-  by the page's arrow, by the edge (its preview at 0.3 and 0.9 drawn over
-  it), and by a pull from the page's top; the tab back preview from the
-  Library (0.3, 0.9, cancelled; then 0.3, 0.9, let go) with it underneath,
-  or, for Search's and the Library's roots, as the tab leaving, and then
-  its tab chosen again; its tab reselected from a page above it (roots);
-  its shelves scrolled out of its list and back (Home, Artist, Search);
-  and the process killed (everything saved through a
-  `SaveableStateRegistry`, the composition and every `ViewModel` thrown
-  away, composed again from what was saved). The assertion, every frame
-  the destination is drawn on from the first, previews included: every
-  container it had, at the index and offset it had. 142 transitions over
-  the 11 cases (Home 15, Artist 14, Search, Album, Playlist, Settings and
-  Diagnostics 13, each Library list 12), every one green; and where the
-  back lands, the composition is the one that was under the preview
-  (`entered` unchanged, the same state objects). The Library's chips row
-  fits a 1,080 px screen, so it is held at 0 and said to be.
-- `LifecycleTests`: under the tab back preview Home is STARTED and the
-  Library leaving is STARTED, never RESUMED, on every frame from 0.3 to
-  0.9; cancelled, Home is not composed and CREATED, the Library RESUMED;
-  let go, Home RESUMED — the same composition and the same list it was
-  under the preview — and the Library CREATED. A page under a page's back
-  preview is STARTED, as the NavHost says; cancelled, CREATED; landed,
-  RESUMED. With the player down Home is RESUMED; half up, STARTED. And
-  each tab's graph, read back from its NavController, is exactly the
-  routes `Route` lists for it, and every route is a restoration case.
-
-Falsified:
-
-- The two wrappers put back in `TabStack`: every case on Home's stack
-  fails — "Home: composed again from scratch when the tab back landed",
-  and the same for Album, Artist, Playlist, Settings and Diagnostics — and
-  `LifecycleTests` fails with Home's composition entered 4 times where it
-  was 3. (The places themselves survive that alone now, since they are the
-  entry's; with the helpers also made the composition's again, the first
-  check fails on Home: "a scrolling node whose state the destination does
-  not keep".)
-- The diagnostics' numbers back in a `remember` filled by an effect: every
-  transition of the Diagnostics case fails on its first frame, at 96 where
-  it was left at 137 — the top of "Opening…" is as far as it can go.
-- `TabStack` leaving both tabs RESUMED while back is under way: "at 0.3
-  Home under the preview is RESUMED", "the Library leaving is RESUMED".
-- A screen's `rememberLazyListState()`: `SourceTests`, as above.
-
 **Held to:**
 
-- The screenshots: all 92 byte for byte what the parent commit draws,
-  recorded side by side and compared: identical.
-- `ScrollTests`: at rest for a second `{}`; over four position ticks
-  `{Progress=4}`. The lifecycle under the player is read as a snapshot in
-  an effect, so the card moving composes nothing.
-- `MotionTests`, all 17, as before.
-- The fling bench (HARKEN_FLING_BENCH=2000, passes 5 and 6), the parent
-  commit and this one run side by side, twice, once in each order:
+- The lifecycle under the player is read as a snapshot in an effect, so
+  the card moving composes nothing.
+- The fling bench (passes 5 and 6), the parent commit and this one run
+  side by side, twice, once in each order:
 
   | | compose+measure, per entering row | draw, per frame |
   |---|---|---|
@@ -1242,9 +965,7 @@ Falsified:
   makes no scroll state; a shelf makes one, once.
 
 Not verified on a phone: how the preview looks now (it is the same frames,
-at the place Home was left), and a real process death — the test throws
-the composition and every `ViewModel` away and composes again from the
-saved values, but does not parcel them.
+at the place Home was left), and a real process death.
 
 **The same container, composed twice for a moment.** The release APK
 closed on the owner's phone a few seconds after launch, and again on
@@ -1260,10 +981,7 @@ its own, recomposed and applied in the order they were first composed, so the
 shelf's new state was remembered in the slot above before the slot that
 drew it forgot the old one. The last played card going does the same,
 two slots. A row arriving moves things down and is applied the other
-way round, which is why nothing had caught it: no test took a row away
-above a shelf while Home was drawn (`OverlapTests` does, through the
-link opening at launch and again after the background, and fails on the
-parent with the phone's message).
+way round, which is why nothing had caught it.
 
 So a name can be held by two states for a moment, and `DestinationState`
 keeps them in the order they came: the newest draws the name and starts
@@ -1274,10 +992,8 @@ and the place kept is the last one's to let go. Both still attached a
 frame later is what the guard was for — two containers under one name —
 and that is a mistake in the app, not a state the library cannot go on
 from, so it was wrong to close anybody's app over it. **The rule for such
-a guard (`Strict`):** it throws where a developer reads it — every unit
-test (`dev.arkdb.ui.strict`, set by both builds' test tasks) and a
-debuggable build — and in a release it says so once in the log, tag
-`ark-ui`, and keeps working: here, the newer container gets a name of its
+a guard:** it throws where a developer reads it — a debuggable build — and
+in a release it says so once in the log, tag `ark-ui`, and keeps working: here, the newer container gets a name of its
 own (`shelf:recent#2`), so each keeps its place. The rest of ark-ui's
 `check`, `error`, `!!` and rethrows were read for the same thing; none
 guards a mistake an app can make (an `error` for a state the library
@@ -1295,27 +1011,20 @@ sits among the rules above.
   `Listen.current`. What a screen draws of it is one value, `Heard`,
   published only when it moves — a press, a frame, a player's event — so a
   destination composes nothing from it at rest. The picker is a sheet, not
-  a destination, and keeps no place: a short `Column`, no scroll state, so
-  `SourceTests` has nothing to hold it to and `RestorationTests` no route
-  to add.
+  a destination, and keeps no place: a short `Column`, no scroll state.
 - **The position stays a leaf's.** While the phone is part of the session
   the position is counted from the session's clock against the server's,
   twice a second and only while something plays anywhere, into the same
   `Playback.position` flow; another device's scrubber is a flow beside it
-  (`Playback.scrubbing`) that only the scrubber reads. `ScrollTests` at rest
-  `{}`, over four ticks `{Progress=4}`, as before.
+  (`Playback.scrubbing`) that only the scrubber reads. Nothing composes at
+  rest, and only the progress over the ticks, as before.
 - **Motion** is unchanged: the picker is a `ModalBottomSheet` as the queue
   and the menu are; the device chip sits in the full player's last row,
   beside the queue's, and the mini player's second line says where the
   sound is in place of the artist. Shuffle and repeat are not drawn while
   joined — the session has neither — and their places are kept, so the
   transport does not move.
-- **Held to**: every screenshot byte for byte the parent's but the
-  diagnostics' numbers, which gain the "Listening" group; ten new shots,
-  light and dark (`g1_listening`, `f2_diagnostics_listening`);
-  `RestorationTests`, `LifecycleTests`, `SourceTests`, `MotionTests`,
-  `LaunchTests` green; the fling bench (HARKEN_FLING_BENCH=2000, passes 5
-  and 6) at 32,874–32,875 B per entering row where the parent commit, run
+- **Held to**: the fling bench (passes 5 and 6) at 32,874–32,875 B per entering row where the parent commit, run
   beside it, measured 33,147–33,151, and the draw the same to the byte
   (27,977 B a frame).
 - **Dependencies**: none added. Media3's `SimpleBasePlayer` is in
@@ -1363,8 +1072,7 @@ attaches to the session as it is, Home already read.
 what it did, through a hold — the same `ArkSession.open`, the same
 `Library` reading the same launch views first. A launch with the service
 already holding the session (music playing, the app swiped away and
-opened again) opens nothing at all. Measured anyway, `LaunchTests.launchBench`
-(HARKEN_LAUNCH_BENCH=N): launch → Home's lists from the launch views, and
+opened again) opens nothing at all. Measured anyway, a bench: launch → Home's lists from the launch views, and
 → every view hydrated, over a replica with its launch views written, the
 parent's way (`ArkSession.open` and a `Library` of its own) and the
 process's (a hold on `Sessions`, `Kept`) turn about in one warm HotSpot,
@@ -1383,36 +1091,13 @@ process's; a first run of the same bench read 8,682 and 9,184), and the
 two halves of each pair are the same calls in the same order but for the
 hold and the `kept` lookup. HotSpot, warm, and the JVM's — not a phone's
 cold start; `ColdOpen` stops at the client, where nothing moved, so it was
-not run again. At 20,000 songs the bench did not finish: the unit tests'
-JVM, at its default heap, did not hydrate the second session it opened
+not run again. At 20,000 songs the bench did not finish: the JVM, at its
+default heap, did not hydrate the second session it opened
 over the same replica (the one that writes the launch views, opened the
 parent's way) within two minutes — not investigated further; no number is
 given for it.
 
-Held by:
-
-- `KeptTests.theActivityGoingLeavesThePhoneInTheSessionPlaying`: the
-  process's `Sessions` over a session that is a real Kotlin peer in the
-  test's server (`Hall`), its socket going when the session closes. The
-  app and the service hold it; the phone plays; the real `HarkenApp` is
-  composed and disposed and the app's hold let go. The phone is still
-  linked, the session open and held by `playback` alone, the laptop sees
-  the phone as the output, here and playing, and a pause on the laptop
-  still reaches the phone's player; the service letting go then closes it,
-  and the laptop sees the phone away, as before. Falsified twice: a
-  release that closed the session whatever else held it ("the phone left
-  the session with the activity"), and the screens closing the listening
-  session on their way out, as they did ("the player is no longer
-  reconciled").
-- `SessionsTests` (ark-android): one session for two holds, open until the
-  last lets go and a new one after; a close or a denial is everyone's, the
-  denial forgetting the login; what is kept is made once and closed with
-  it. Falsified by the same release: "open while the service holds it".
-- `RestorationTests`' process kill now drops what is kept with the
-  session too, so the library is read again as a launch reads it, rather
-  than surviving the "process" it is supposed to have died with.
-
-One trap, paid for in the test: `session.kept(key) { … }` used as a
+One trap: `session.kept(key) { … }` used as a
 statement — inside an `also`, say — infers its type from the statement,
 `Unit`, and keeps `Unit`; the closer written in the lambda is never kept
 and never runs. Say the type (`kept<AutoCloseable>`) or use the result.
@@ -1531,50 +1216,11 @@ While the sound is on another device, the now-playing item says where
 ("Playing on Laptop", as its subtitle); under the car's rule that is
 seldom what a car sees. No custom commands.
 
-**Tests** (`CarTests`, on layoutlib for a `Bundle`, a `Uri`, a `Bitmap` and
-a `Looper`), over the demo's records and more (`RestorationTests`'
-`Fixture`) and, for the rule, the test's server (`Hall`) with real Kotlin
-peers. Each falsified once:
-
-- `theBrowseTreeIsTheReplicas`: four tabs, five for a car that draws five,
-  every song at the end of Home with four; albums and artists grids,
-  tracks lists; the albums the `albums` view's; Water Music's tracks the
-  `album` query's in its order, five a page, nothing past the end; the
-  first playlist's thirty the `playlist` query's; choosing the third track
-  plays Water Music from it, from `#album/Water%20Music`. Falsified by
-  paging from the page number rather than page × size: "the second page
-  of Water Music" began at its second track.
-- `aCoverIsAContentUriTheProviderAnswers`: a 200 × 120 original in the
-  screens' cache comes back 96 × 96 for a 96-pixel ask, its middle, with
-  neither band at its edge; no cover is the derived square in the name's
-  tint; a URI not ours is nothing; and an album's item carries such a URI.
-  Falsified by the provider ignoring the size: 120 across.
-- `searchAndVoicePlayWhatWasAskedFor`: search grouped, albums first; "Water
-  Music" is the album in its order; "antonio vivaldi" every track of his,
-  shuffled (a seeded `Random`); a song's title that song; the assistant's
-  focus on an album taken; nothing matching is nothing; nothing asked
-  carries on. Falsified by an artist in its own order, and by asking
-  `search`'s songs before a name asked for exactly — "Vivaldi, shuffled"
-  both times.
-- `aChoiceInTheCarPlaysOnThisPhone`: with the laptop playing, a queue set
-  on the session's player by a car starts it and hands the sound to the
-  phone; set by anything else, it starts where the sound was; pause from
-  the car stays a pause on the laptop; play from the car brings the sound
-  here, playing. Falsified twice by the player not asking who was asking
-  ("and handed to this phone", "play in the car brings the sound here").
-- What the service itself does with Media3 — the library session, the
-  callbacks wiring these to a controller, the grants — is not run here:
-  Media3 1.5.1's test utilities are a separate artifact
-  (`media3-test-utils`) that the recorded graph does not hold, and a
-  `MediaLibrarySession` needs a service to be built in. Nothing was
-  re-recorded; no dependency was added (`MediaLibraryService` is in
-  `media3-session`).
-
-**Held to**: every test of the app's (`ScrollTests`, `RestorationTests`,
-`LifecycleTests`, `SourceTests`, `MotionTests`, `LaunchTests`, `RemoteTests`,
-`ListenTests`, `KeptTests`, the screenshots); the fling bench
-(HARKEN_FLING_BENCH=2000, passes 5 and 6) at 32,804–32,805 B per entering
-row and the draw at 27,977 B a frame, as before.
+What the service itself does with Media3 — the library session, the
+callbacks wiring them to a controller, the grants — is not run here.
+No dependency was added (`MediaLibraryService` is in `media3-session`).
+The fling bench (passes 5 and 6) at 32,804–32,805 B per entering row and
+the draw at 27,977 B a frame, as before.
 
 **Not verified**: the car itself. There is no Desktop Head Unit and no car
 here, so what Android Auto draws of the tree, whether it shows the fifth
@@ -1610,7 +1256,7 @@ for a group, `nudge_group_volume`, `set_group_volume` and `set_group_mute`.
 With the sound here, nowhere, or on a device with no volume, the state says
 `PLAYBACK_TYPE_LOCAL` and offers none of them, so the buttons move the
 phone's own stream natively. A press answered on the player's own thread
-(a session with no thread of its own, in the tests) is answered at once, so
+(a session with no thread of its own) is answered at once, so
 the device volume the player masks while a press is pending comes back.
 
 **The phone's own volume** is its media stream (`MusicStream`, over
@@ -1657,61 +1303,15 @@ taller than the screen. The device chip names a group the same way. The
 mini player is unchanged. The diagnostics' "Listening" group gains a line
 per device — its volume, family and leader — and the group.
 
-**Tests**, each falsified once (the comment beside each says how):
-
-- `RemoteTests.thePhonesVolumeIsItsEntryAndOnlyAHandIsSaid`: `equip` once
-  a connection, at the stream's level and with no family; a level set on the
-  desktop is the stream's nearest step, and the 33 it reads is not said
-  back; a mute is a mute; a hand on the stream said once, heard by the
-  desktop, not fought; said again on a new connection. Over `FakeStream`,
-  `AudioManager` behind `Stream`. Falsified by remembering the level asked
-  for rather than what the stream read: "and the 33 it reads is not said
-  back", 33 where 30; and by an equip at every reconcile: "once a
-  connection, not once a reconcile", 4 calls where 1.
-- `ListenTests.theButtonsMoveTheSpeakerTheSoundIsOn` (`RemotePlayer` on
-  layoutlib's Looper): local with nothing playing; remote, 0 to 100, at the
-  kitchen's 40 once it has the sound; up and down are nudges of five, the
-  panel's slider a level, its mute a mute; joined with the bedroom, the
-  group's mean and the group's nudge, both moving; nothing a car asks; local
-  again with the sound here. Falsified by a player remote whatever the
-  output: "nothing plays: the buttons are the phone's"; and by a group's
-  buttons being the output's alone: 70 where the group's 65.
-- `ListenTests.thePickerMovesVolumesAndJoinsSpeakers`: the group first,
-  "kitchen + 1", at the mean; every member ticked and the cursor on the
-  output; join offered to the study alone, leave to the bedroom, nothing to
-  the leader, the phone or a laptop; the group's slider `set_group_volume`
-  (56 and 84 for 70), a row's mute and slider that device's; join and
-  unjoin; the diagnostics' group and a member's leader. Falsified by the
-  group row's controls being a device's: refused, "that device is not here,
-  or has no volume"; and by offering a join to any speaker that can play:
-  "not this phone".
-- `VolumeTests`: a stream's fifteen steps as the hundred, each step read and
-  set again the same, the same step written once (falsified by truncating:
-  4 where 5); the drag's throttle, the first at once, the last at the
-  window's end, everything on release, the held one first when another
-  slider moves (falsified by keeping the first value held: 20 where 30).
-
-**Screenshots** (`Screens.g2_volume`, light and dark): the full player with
-the kitchen's volume, with the group's, and with the group muted; the
-picker with the kitchen leading the bedroom and the study joinable and
-muted; and with nothing grouped, two speakers joinable. Every other
-screenshot is byte for byte what the parent commit draws (112 of 112;
-the diagnostics' new lines are below the fold of `f2_diagnostics_listening`,
-so they are held by the picker test instead).
-
-**Held to**: every app test (`ScrollTests`, `RestorationTests`,
-`LifecycleTests`, `SourceTests`, `MotionTests`, `LaunchTests`, `RemoteTests`,
-`ListenTests`, `KeptTests`, `CarTests`, `OverlapTests`, the screenshots); the
-fling bench (HARKEN_FLING_BENCH=2000, passes 5 and 6) at 32,886 B per
-entering row where the parent commit, run beside it, measured 32,965–32,968,
-and the draw 27,978 B a frame against 27,977. No dependency was added:
-`DeviceInfo` and the device-volume commands are in `media3-common` 1.5.1.
+The fling bench (passes 5 and 6) at 32,886 B per entering row where the
+parent commit, run beside it, measured 32,965–32,968, and the draw 27,978 B
+a frame against 27,977. No dependency was added: `DeviceInfo` and the
+device-volume commands are in `media3-common` 1.5.1.
 
 **What ran green**: `checks.kotlin` (ktfmt over ark-ui's new file
 included), `checks.harken-domain`, `harken-apk` (the release `harken.apk`,
 certificate SHA-256 `1a8859fb…df431139`, the committed key),
-`harken-android-screens` (122 PNGs, the ten new ones the only ones that
-moved), `checks.fleet-kotlin` (K1–K7, K4 and K5 skipped as before, with
+`checks.fleet-kotlin` (K1–K7, K4 and K5 skipped as before, with
 nothing pinned) and `harken-fdroid-repo`.
 
 **Not verified**: a real phone and a real speaker. What Android's volume
@@ -1768,13 +1368,3 @@ lists are held as a page's tracks are (`Library.works`, `work`,
 `recordings`, `credits`, by key), so a page come back to has its rows on
 its first frame. The pages move as every page does: a work or a record
 grows out of the cover tapped, a page from a text row rises.
-
-**Held to**: `CatalogueTests` (the ranking, the cut, the tie, the lines,
-the runs, the routes, and the kernel's own composers, works and
-performances for a seeded library, a work's Play reading its fullest
-performance in movement order); `RestorationTests` over the new routes and
-the Composers list (the fixture records Water Music eight times);
-`MotionTests` (a composer's page opened from a row's menu; the pull test
-on a record long enough to scroll); and the screenshots `c2_artist`
-(a composer, a composer under a banner, an artist of songs), `c4_work`
-and `c5_recording`.

@@ -30,8 +30,7 @@ a crate of plain Rust every peer links — and harken, the first app on it.
   Swift runtime.
 - `rust/arkdb` — the demo, the simulator over real peers in both roles,
   the trace recorder and player, the fuzzer (`arkdb fuzz`), the vector
-  writer, `gen`. Beside it `ark-auth` (dev sign-in and OpenID Connect)
-  and `arkui` (the iced components).
+  writer, `gen`. Beside it `ark-auth` (dev sign-in and OpenID Connect).
 - `spec/` — the vectors the kernel is held to (the bytes, the machine, the
   frames, the views), `RUNNERS.md` (how `arkdb` runs them) and
   `AUTHORING.md` (writing a domain).
@@ -44,9 +43,20 @@ a crate of plain Rust every peer links — and harken, the first app on it.
   drawn by arkui itself, its own Cargo workspace so that it
   and the apps never rebuild each other: arkui's components by component,
   each for the desktop and both phones (https://k2on.github.io/apps/docs/).
-- `swift/ArkUI` — ArkUI for SwiftUI, any Ark app's on iOS: the spacing,
-  the springs, the derived square (`ArkUICore`, Foundation alone, and
-  `ArkUI`, the views). harken's iOS app is over it.
+- `ui/` — ArkUI, everything an app is drawn with (`ui/README.md` says
+  what is where): the theme (`ui/theme.toml`), the iced components
+  (`ui/rust/arkui`), ArkUI for SwiftUI (`ui/swift`) and for Compose
+  (`ui/kotlin`), the runtime that runs an app's screens in Rust
+  (`ui/rust/app`, `ui/docs/app.md`) and the generator that writes them
+  for the phones (`ui/rust/gen`), the generator of every Ark app's native
+  projects from its `app.toml` (`ui/prebuild.py`, `nix/ark-app.nix`:
+  nothing native of an Ark app is committed, `nix run .#<app>-prebuild`
+  writes it for Xcode and Android Studio), and the standing rule for
+  motion (`ui/docs/motion.md`).
+- `modules/` — what an app asks of the device, one package each
+  (`modules/ark-haptics`, `clipboard`, `share`, `camera`, `media-player`,
+  `notifications`, `secure-store`): a crate with the trait and its fake,
+  its Swift and Kotlin implementations, and a README of its permissions.
 - `showcase/` — the shared components on their own, an app per phone, which
   the docs' captures are taken from (`.github/workflows/screens.yaml`).
 - `docs/plan-v5.md` — the design, how it landed and what it measures
@@ -67,19 +77,55 @@ import ArkOS's `money-sync` did for Actual Budget, as a mutator) and
 server's OpenID provider lets in shares one budget. `money/README.md`
 says what is built and what is not.
 
+## Signing in through Kanidm
+
+Each server is a confidential OpenID Connect client of the household's
+provider (ui/docs/app.md, "Signing In"). With Kanidm on NixOS, both are
+declared in `services.kanidm.provision`. The names below are placeholders,
+and each secret is a file outside the store:
+
+```nix
+services.kanidm.provision = {
+  enable = true;
+  groups.money_users.members = [ "ann" ];
+  groups.harken_users.members = [ "ann" ];
+  systems.oauth2.money = {
+    displayName = "Money";
+    originUrl = "https://money.example.com/auth/callback";
+    originLanding = "https://money.example.com/";
+    basicSecretFile = "/run/secrets/money-oidc";   # kanidmWithSecretProvisioning
+    preferShortUsername = true;
+    scopeMaps.money_users = [ "openid" "profile" "email" ];
+  };
+  # systems.oauth2.harken: the same, at harken's address, for harken_users.
+};
+services.money.oidc = {
+  issuer = "https://idm.example.com/oauth2/openid/money";   # Kanidm's issuer is per client
+  clientId = "money";
+  clientSecretFile = "/run/secrets/money-oidc";
+};
+```
+
+Kanidm signs ID tokens with ES256, needs PKCE (which the servers send),
+and matches `originUrl` exactly. Its scope map is the allow-list: someone
+outside `money_users` gets no token for money. `checks.oidc-kanidm` runs
+this setup in a VM.
+
 ## The rest
 
-Each app's demo data is its `seed/` (`money/seed`, `harken/seed`): a
-crate beside the app's own, not in it (`money-seed`, `harken-seed`), that
-the demos and tests link and whose binary seeds a server's data directory
+Each app's demo data is beside its code, not in it: money's core's `demo`
+feature (`money/core`), harken's `harken/demo` crate. The demos and tests
+link it, and its binary (`money-seed`, `harken-seed`) seeds a server's data directory
 for the screenshots or for `nix run .#<app>-demo`. `docs/seed.md` says
 what each holds and the contract they share.
 
 `revelation/` is another app, and not on ArkDB: an Android app in plain
 Kotlin, no Rust and no native library, that is the Bible as one scroll
 zoomed like a map. `revelation/README.md` says how to build and run it and
-`docs/plan-bible.md` is its plan. Both apps' APKs are published through one
-F-Droid repository.
+`docs/plan-bible.md` is its plan. Every app's APKs are published through
+F-Droid, in two channels: the tagged releases in one repository and every
+build of main, as `.unstable` apps beside them, in another
+(`docs/releasing.md`, which also says how to cut a release).
 
 One command holds all of it:
 
@@ -98,15 +144,14 @@ One command holds all of it:
                       #   Kotlin and Swift, the generated types held to the domain;
                       # harken-ios-typecheck: the iOS app's non-UI Swift
                       #   type-checked on Linux against the library
-    nix build .#harken-server   # or harken-iced, harken-web, harken-domain,
+    nix build .#harken-server   # or harken-iced, harken-domain,
                                 # ark, vectors, trace-corpus
-    nix run .#money-iced        # money's demo; money-web is its page
-    nix build .#harken-apk      # the kernel for three ABIs and the APK over it,
-                                # its JVM tests run on the real kernel
-    nix build .#revelation-apk  # Revelation's APK, its JVM tests run first;
-                                # *-android-screens are either app's screens
-    nix build .#fdroid-repo     # both APKs as the F-Droid repository, signed
-                                # and checked; apps-fdroid is what CI runs
+    nix run .#money-iced        # money's desktop window
+    nix build .#harken-apk      # the kernel for three ABIs and the APK over it
+    nix build .#revelation-apk  # Revelation's APK
+    nix build .#fdroid-repo     # every APK as the stable F-Droid repository,
+                                # signed and checked; apps-fdroid is what CI
+                                # runs, for either channel (docs/releasing.md)
     nix run .#fuzz -- 1000 1 traces
     nix run .#update-cargo-nix  # after a Cargo.toml or lockfile edit: the
                                 # crates every Rust build is made of
@@ -114,8 +159,7 @@ One command holds all of it:
 
 What is verified: the kernel, the peer, harken's domain and server by
 their tests and the vectors; the fuzzer's sessions converge and every
-trace replays; the phone library's surface in-process; the APK builds and
-its JVM tests pass over the kernel. What is not: no desktop window has
+trace replays; the phone library's surface in-process; the APKs build. What is not: no desktop window has
 been opened, the browser build has not been drawn on v5, the APK has not
 been installed on a phone, and the iOS app has not been built (it needs a
 Mac; its Swift is type-checked only). Each app's `README.md` says where
@@ -128,7 +172,7 @@ what it will draw with: `renderer: wgpu (Vulkan, Apple M2 (G14G), integrated
 GPU)`, or `renderer: tiny-skia (CPU) — no GPU adapter: <why>`, the why being
 what refused iced's device or which driver library would not load and what
 the dynamic loader said. Settings says the same under "Display". iced
-otherwise falls back to the CPU without a word (`rust/arkui/src/renderer.rs`).
+otherwise falls back to the CPU without a word (`ui/rust/arkui/src/renderer.rs`).
 `ARK_RENDERER=cpu` draws on the CPU; `ARK_RENDERER=gpu` refuses to, and the
 window does not open without a device.
 

@@ -18,8 +18,35 @@ use serde_json::json;
 
 uniffi::setup_scaffolding!();
 
+// What crosses, written here from the domain's and the app's types (the
+// domain and the app know nothing of UniFFI: ui/docs/app.md, Layers).
+ark::twins!(
+    harken_domain::{schema::Playlist, types::LibraryEntry},
+    harken_app::routes::Route,
+    ark_app::welcome::{
+        AddDevicePage, AddDeviceMsg, ConfirmPage, IntroPage, OpeningPage, ServerPage, SignInPage, WelcomeMsg, WelcomePage,
+    },
+);
+
+// harken's first run on the pages every Ark app shares (ark_app::welcome),
+// over an `ArkHost` once harken has one (its words harken_app::welcome's).
+// Its phones still draw their own (ios/Harken/OnboardingViews.swift,
+// android/…/OnboardingScreens.kt): moving them onto `WelcomeApp` and the
+// shared app library (ui/swift's ArkApp, ui/kotlin/app) is harken's port.
+ark_ffi::welcome_app!();
+
+mod routes;
+pub use routes::route_from_url;
+
+/// Numbers, days and lengths as every client writes them: in this library,
+/// so its bindings (`uniffi.ark_format`; `formatAmount`, `formatLength` …)
+/// come with the app's, and the phones print what the desktop prints.
+pub use ark_format_ffi;
+
 mod player;
-pub use player::{Loudness, PhoneSound, Player, SoundState};
+mod session;
+pub use player::{Loudness, Player, PlayerShell, JOG_BACK_S, JOG_FORWARD_S};
+pub use session::{Changed, HarkenSession, HarkenView, Holding};
 
 /// harken's peer as a phone is made of it (`harken_player::config::peer`):
 /// the domain for the log and the listening session, saying `device` in its

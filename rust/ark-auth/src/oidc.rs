@@ -13,7 +13,10 @@
 //! this login started with — which is what ties the token to the browser
 //! that asked, and not to a code somebody replayed.
 
-use openidconnect::core::{CoreAuthenticationFlow, CoreClient, CoreJsonWebKeySet, CoreProviderMetadata, CoreUserInfoClaims};
+use openidconnect::core::{
+    CoreAuthenticationFlow, CoreClient, CoreIdToken, CoreIdTokenClaims, CoreIdTokenVerifier, CoreJsonWebKeySet, CoreProviderMetadata,
+    CoreUserInfoClaims,
+};
 use openidconnect::{
     AuthorizationCode, ClientId, ClientSecret, CsrfToken, EndpointMaybeSet, EndpointNotSet, EndpointSet, IssuerUrl, Nonce, OAuth2TokenResponse,
     PkceCodeChallenge, PkceCodeVerifier, RedirectUrl, Scope, TokenResponse,
@@ -29,6 +32,52 @@ pub struct Provider {
     client_id: String,
     client_secret: String,
     scopes: Vec<String>,
+    /// The client ids whose ID tokens this server takes ([`Provider::trusting`]):
+    /// its own, always, and any it was told of.
+    trusted: Vec<String>,
+    /// Who may sign in, by the token's groups claim; none, anyone the
+    /// provider lets in ([`Provider::requiring`]).
+    groups: Option<Groups>,
+}
+
+/// Who may sign in, by an ID token's groups claim: anyone in one of these
+/// groups. A provider that names a group by more than its name — Kanidm's
+/// `money_users@idm.example.com` and the group's uuid — matches on the
+/// name before the `@` as well as the whole.
+///
+/// A rule of its own, over the claims, so that any way an ID token comes to
+/// a server (its own callback today; another client's token later) is
+/// held to the same one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Groups(pub Vec<String>);
+
+impl Groups {
+    /// The claim a provider names groups in.
+    pub const CLAIM: &'static str = "groups";
+
+    /// Whether `claims` (an ID token's, as JSON) admit someone.
+    pub fn admits(&self, claims: &serde_json::Value) -> bool {
+        let Some(held) = claims.get(Self::CLAIM).and_then(|g| g.as_array()) else {
+            return false;
+        };
+        let mut held = held.iter().filter_map(|g| g.as_str());
+        held.any(|g| {
+            let short = g.split_once('@').map_or(g, |(name, _)| name);
+            self.0.iter().any(|want| want == g || want == short)
+        })
+    }
+}
+
+/// The claims of an ID token already verified: its payload, as JSON, for
+/// what the typed claims leave out (the groups claim).
+fn payload(token: &CoreIdToken) -> Result<serde_json::Value, String> {
+    use base64::Engine;
+    let jwt = token.to_string();
+    let body = jwt.split('.').nth(1).ok_or("an ID token with no payload")?;
+    let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(body.trim_end_matches('='))
+        .map_err(|e| format!("the ID token's payload: {e}"))?;
+    serde_json::from_slice(&bytes).map_err(|e| format!("the ID token's payload: {e}"))
 }
 
 impl std::fmt::Debug for Provider {
@@ -131,7 +180,73 @@ impl Provider {
             client_id: client_id.into(),
             client_secret: client_secret.into(),
             scopes: scopes.iter().map(|s| s.to_string()).collect(),
+            trusted: vec![client_id.into()],
+            groups: None,
         })
+    }
+
+    /// Also take ID tokens issued to these clients — another of the
+    /// provider's clients whose token a device brings, later. This
+    /// server's own client id is trusted whatever the list says.
+    pub fn trusting(mut self, clients: impl IntoIterator<Item = impl Into<String>>) -> Self {
+        for c in clients.into_iter().map(Into::into) {
+            if !c.is_empty() && !self.trusted.contains(&c) {
+                self.trusted.push(c);
+            }
+        }
+        self
+    }
+
+    /// Let in only those the groups claim puts in one of `groups`; none,
+    /// anyone the provider lets in. The provider has to send the claim
+    /// (Kanidm: the `groups` scope, mapped to the client).
+    pub fn requiring(mut self, groups: Vec<String>) -> Self {
+        self.groups = (!groups.is_empty()).then_some(Groups(groups));
+        self
+    }
+
+    /// The client ids whose ID tokens are taken, this server's own first.
+    pub fn trusted(&self) -> &[String] {
+        &self.trusted
+    }
+
+    /// `token`'s claims, checked whole: its signature against `keys`, its
+    /// issuer, its expiry, its nonce, and an audience among the trusted
+    /// clients (this server's own with its secret, which an HS256 token
+    /// needs; another's as the provider's public client) — and the groups
+    /// rule, when there is one.
+    fn verified<'t>(
+        &self,
+        client: &Client,
+        keys: &CoreJsonWebKeySet,
+        token: &'t CoreIdToken,
+        nonce: &Nonce,
+    ) -> Result<&'t CoreIdTokenClaims, String> {
+        let trusted = &self.trusted;
+        let algs = self.meta.id_token_signing_alg_values_supported().clone();
+        let mut first = None;
+        for id in trusted {
+            let verifier = match *id == self.client_id {
+                true => client.id_token_verifier(),
+                false => CoreIdTokenVerifier::new_public_client(ClientId::new(id.clone()), self.meta.issuer().clone(), keys.clone())
+                    .set_allowed_algs(algs.clone()),
+            };
+            let verifier = verifier.set_other_audience_verifier_fn(|aud| trusted.iter().any(|t| t == aud.as_str()));
+            match token.claims(&verifier, nonce) {
+                Ok(claims) => {
+                    if let Some(groups) = &self.groups {
+                        if !groups.admits(&payload(token)?) {
+                            return Err("the provider does not put this account in a group allowed here".into());
+                        }
+                    }
+                    return Ok(claims);
+                }
+                Err(e) => {
+                    first.get_or_insert(format!("the ID token: {}", said(&e)));
+                }
+            }
+        }
+        Err(first.unwrap_or_else(|| "no client is trusted".into()))
     }
 
     pub fn issuer(&self) -> &str {
@@ -165,15 +280,14 @@ impl Provider {
     pub fn exchange(&self, code: &str, challenge: &Challenge, callback: &str) -> Result<Account, String> {
         let http = http();
         let keys = CoreJsonWebKeySet::fetch(self.meta.jwks_uri(), &http).map_err(|e| format!("the provider's keys: {}", said(&e)))?;
-        let client = self.client((*self.meta).clone().set_jwks(keys), callback)?;
+        let client = self.client((*self.meta).clone().set_jwks(keys.clone()), callback)?;
         let tokens = (client.exchange_code(AuthorizationCode::new(code.into())))
             .map_err(|e| said(&e))?
             .set_pkce_verifier(PkceCodeVerifier::new(challenge.verifier.clone()))
             .request(&http)
             .map_err(|e| format!("the token endpoint: {}", said(&e)))?;
         let token = tokens.id_token().ok_or("the provider sent no ID token")?;
-        let claims =
-            (token.claims(&client.id_token_verifier(), &Nonce::new(challenge.nonce.clone()))).map_err(|e| format!("the ID token: {}", said(&e)))?;
+        let claims = self.verified(&client, &keys, token, &Nonce::new(challenge.nonce.clone()))?;
         let name = |n: Option<&openidconnect::LocalizedClaim<openidconnect::EndUserName>>, u: Option<&openidconnect::EndUserUsername>| {
             n.and_then(|n| n.get(None))
                 .map(|n| n.to_string())

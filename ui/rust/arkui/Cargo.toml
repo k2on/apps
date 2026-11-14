@@ -1,0 +1,68 @@
+[package]
+name = "arkui"
+workspace = "../../../rust"
+version = "0.1.0"
+description = "The ui every app here shares, on the desktop: iced components, the vim keyboard, theming, the glyph table, routing."
+edition.workspace = true
+license.workspace = true
+
+# Knows nothing about any domain. An app supplies its palette, its routes, its
+# messages and its screens; this supplies the parts of a window that are the
+# same in every one of them.
+
+[dependencies]
+# Numbers, days and lengths as every client writes them (`format.rs`
+# re-exports it).
+ark-format = { path = "../../../rust/ark-format" }
+# How an app's routes are spelled: UI-free, so a domain spells its `Route`
+# enum with it too; `router` is the address bar over it.
+ark-router = { path = "../router" }
+# The glyph table, toolkit-free (`glyphs.rs` re-exports it): the browser draws the same.
+arkui-glyphs = { path = "../glyphs" }
+# A view laid out once in Rust (`view.rs` draws it), and `#[view]`.
+ark-app = { path = "../app", optional = true }
+
+# iced is the desktop's alone: a browser is drawn by Leptos over the DOM
+# (ui/docs/app.md), never by iced in wasm.
+#
+# `smol` gives iced a timer and an executor. `svg` is every glyph and the
+# derived square, `image` a fetched picture, `advanced` the scroll operation
+# that keeps a keyboard cursor on screen. `fira-sans` is the typeface iced
+# embeds, so a system with no fonts still draws text.
+iced = { workspace = true }
+# A screen reader's tree (accesskit): arkui's own widgets pass their
+# content's on, and a cut line says its whole text.
+iced_accessibility = { workspace = true }
+# Decoding a picture on the thread that fetched it, so the renderer is handed
+# pixels at the size they are drawn rather than a megapixel JPEG to decode
+# inside a frame. iced's own `image` feature already puts this crate in the
+# lockfile.
+image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
+# Fetching a picture, blocking, on a thread of its own: there is no async
+# runtime on the desktop and one picture is not a reason to start one.
+ureq = { version = "2", default-features = false, features = ["tls"] }
+# The system's time zone, for the day an instant fell on where the person
+# is (`format::utc_offset_minutes`).
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+
+# A file chosen on Linux: the desktop's chooser through its portal, over the
+# session bus the theme is already read from (mundy's zbus; `files.rs`).
+[target.'cfg(target_os = "linux")'.dependencies]
+zbus = { version = "5", default-features = false, features = ["async-io", "blocking-api"] }
+# Two fingers resting on a trackpad stop a coast (`touchpad.rs`): the
+# Wayland hold gesture, bound on winit's own connection, read from the
+# window's raw display handle. The versions winit already builds; `system`
+# is libwayland's backend, which winit's connection is, and which can take
+# its `wl_display` (`Backend::from_foreign_display`).
+raw-window-handle = "0.6"
+wayland-client = { version = "0.31", features = ["system"] }
+wayland-protocols = { version = "0.32", features = ["client", "unstable"] }
+
+[dev-dependencies]
+# A window driven by hand in a test: a click at a point, and the messages
+# it gave.
+iced_test = { workspace = true }
+
+[features]
+# `view`: a screen laid out once in Rust (ark-app's `#[view]`), drawn by iced.
+app = ["dep:ark-app"]

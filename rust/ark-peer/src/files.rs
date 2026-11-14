@@ -323,6 +323,16 @@ impl Peer {
         self.files.store.path(&f.hash)
     }
 
+    /// Where a screen reads a file it shows while it is here
+    /// (`ark::views::Views::file_url`): its `file:` URL on a disk, its
+    /// bytes as a `data:` URL in memory; none while it is not here.
+    pub fn file_url(&self, f: &FileRef) -> Option<String> {
+        match self.file_path(f) {
+            Some(p) => Some(ark::file::path_url(&p.to_string_lossy())),
+            None => self.file(f).map(|b| ark::file::data_url(&f.media, &b)),
+        }
+    }
+
     /// Whether the server said why it would not give a file.
     pub fn file_absent(&self, f: &FileRef) -> Option<&str> {
         self.files.absent.get(&f.hash).map(String::as_str)

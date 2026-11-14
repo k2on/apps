@@ -1,0 +1,22 @@
+# What an app takes on when its modules.toml lists share (ui/docs/app.md,
+# The Device; README.md says why each is asked). ui/prebuild.py reads it.
+crate = "ark-share"
+
+# Its operations, each with the type of what comes of it (ark_module::Op):
+# ui/prebuild.py checks each is an `impl Op` in the crate with this Output.
+[ops]
+ShareOp = "()"
+
+# How the phone makes its device and hands it to the process (ark-ffi's
+# `devices`): the app's generated entry points register it at launch when
+# app's crate depends on it, so an app writes nothing native for it. `swift` and
+# `kotlin` make the device (Kotlin's with the activity's `view` at hand);
+# a platform with neither has none.
+[phone]
+register = "registerShare"
+swift = "PhoneShare()"
+
+[ios.info]
+
+[android]
+permissions = []

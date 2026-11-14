@@ -1,0 +1,22 @@
+[package]
+name = "ark-share"
+workspace = "../../rust"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+description = "The system's share sheet, as an Ark module: the trait, its call and its fake; the iPhone's and the Mac's implementation beside it (swift/)."
+
+# A device module (ui/docs/app.md, The Device): what it is to an app's
+# projects is its module.toml. An app takes it on by depending on this
+# crate, directly or through another; ui/prebuild.py and nix/ark-app.nix
+# find it so, and no app lists it anywhere else.
+[package.metadata.ark]
+module = "module.toml"
+
+[dependencies]
+ark-module = { path = "../../ui/rust/module" }
+uniffi = { version = "0.32.2", default-features = false, optional = true }
+
+[features]
+# The trait as a UniFFI foreign trait, for the phones.
+ffi = ["dep:uniffi"]

@@ -149,7 +149,7 @@ pub struct Song {
 // One column in two indexes reads to clippy as an attribute said twice.
 #[allow(clippy::duplicated_attributes)]
 #[ark(unique(user_id, name), index(pos), index(user_id, pos))]
-#[cfg_attr(feature = "ffi", ark(ffi_view))]
+#[ark(ffi_view)]
 pub struct Playlist {
     #[ark(key)]
     pub id: Id<Playlist>,
@@ -431,8 +431,8 @@ pub struct Harken {
     pub listening: Listening,
     pub listening_device: ListeningDevice,
     pub listening_scrub: ListeningScrub,
-    pub sign_in: ark_auth::SignIn,
-    pub role: ark_auth::Role,
+    pub sign_in: ark::auth::SignIn,
+    pub role: ark::auth::Role,
     pub look: Look,
     pub show: Show,
     pub episode: Episode,
@@ -444,6 +444,9 @@ pub struct Harken {
     pub cue: Cue,
     pub voice: Voice,
     pub voice_name: VoiceName,
+    /// Where each session's device is woken (`ark::auth::Push`): appended,
+    /// so rows written before it read as they are.
+    pub push: ark::auth::Push,
 }
 
-ark_auth::install!(Harken);
+ark::auth_tables!(Harken);

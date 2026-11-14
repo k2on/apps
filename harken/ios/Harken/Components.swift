@@ -103,7 +103,7 @@ struct TrackRow<Leading: View>: View {
                     }
                     Spacer(minLength: 0)
                     // Its file not on the server yet: how its download goes, in place of its length.
-                    Text(model.download(track.id)?.short ?? Spell.clock(track.durationMs)).font(.caption).foregroundStyle(.quiet).monospacedDigit()
+                    Text(model.download(track.id)?.short ?? formatClock(ms: track.durationMs)).font(.caption).foregroundStyle(.quiet).monospacedDigit()
                 }
                 .frame(minHeight: 64)
                 .contentShape(Rectangle())
@@ -148,7 +148,7 @@ struct EpisodeRow: View {
         let whole = (mine?.durationMs ?? 0) > 0 ? mine!.durationMs : track.durationMs
         let begun = mine.map { !$0.finished && $0.positionMs > 0 && whole > 0 } ?? false
         let said = model.download(track.id)?.short ?? Spell.left(track.durationMs, mine)
-        let day = (detail?.publishedMs ?? 0) > 0 ? Spell.day(detail!.publishedMs) : nil
+        let day = formatPublished(ms: detail?.publishedMs ?? 0, nowMs: nowMs(), offsetMinutes: Int32(TimeZone.current.secondsFromGMT() / 60))
         let over = Spell.facts([show, day])
         VStack(alignment: .leading, spacing: Space.xs) {
             // The words let a touch through to the row's button behind them.
@@ -163,7 +163,7 @@ struct EpisodeRow: View {
             }
             .allowsHitTesting(false)
             if !people.isEmpty {
-                PeopleLine(people: people, words: "with " + PeopleEntry.named(people))
+                PeopleLine(people: people, words: "with " + formatNames(names: people.map(\.name)))
                     .padding(.top, 2)
             }
             HStack(spacing: Space.m) {
@@ -242,14 +242,14 @@ struct PeopleLine: View {
         }
         .contentShape(Rectangle())
         if people.count == 1, let p = people.first {
-            Button { open(.page(.artist(p.name))) } label: { line }
+            Button { open(.artist(name: p.name)) } label: { line }
                 .buttonStyle(.plain)
                 .accessibilityLabel(words)
                 .accessibilityHint("Opens \(p.name)'s page")
         } else {
             Menu {
                 ForEach(people) { p in
-                    Button { open(.page(.artist(p.name))) } label: { Label(p.name, systemImage: "person") }
+                    Button { open(.artist(name: p.name)) } label: { Label(p.name, systemImage: "person") }
                 }
             } label: { line }
             .accessibilityLabel(words)
@@ -273,17 +273,17 @@ struct TrackActions: View {
         Button { model.addToQueue(track) } label: { Label("Add to Queue", systemImage: "text.line.last.and.arrowtriangle.forward") }
         Button { present(.addTo(track)) } label: { Label("Add to Playlist…", systemImage: "text.badge.plus") }
         if let a = model.album(of: track), from != .album(a.id) {
-            Button { open(.page(.album(a.id))) } label: { Label("Go to Album", systemImage: "square.stack") }
+            Button { open(.album(key: a.id, title: a.name)) } label: { Label("Go to Album", systemImage: "square.stack") }
         }
         // An episode goes to its show, whose title is its creator, and to nobody's page.
         if let s = model.show(of: track), from != .show(s.id) {
-            Button { open(.page(.show(s.id))) } label: { Label("Go to Show", systemImage: "mic") }
+            Button { open(.show(key: s.id, title: s.title)) } label: { Label("Go to Show", systemImage: "mic") }
         }
         if track.kind == "song", !track.creator.isEmpty, from != .artist(track.creator) {
-            Button { open(.page(.artist(track.creator))) } label: { Label("Go to Artist", systemImage: "music.microphone") }
+            Button { open(.artist(name: track.creator)) } label: { Label("Go to Artist", systemImage: "music.microphone") }
         }
         if let c = model.detail(track)?.composer, !c.isEmpty, c != track.creator, from != .artist(c) {
-            Button { open(.page(.artist(c))) } label: { Label("Go to Composer", systemImage: "music.quarternote.3") }
+            Button { open(.artist(name: c)) } label: { Label("Go to Composer", systemImage: "music.quarternote.3") }
         }
         if case let .playlist(id)? = from {
             Button(role: .destructive) { model.remove(track, from: id) } label: { Label("Remove from This Playlist", systemImage: "minus.circle") }
@@ -298,7 +298,7 @@ struct TrackActions: View {
             if !chapters.isEmpty, case let .show(show)? = from {
                 Menu {
                     ForEach(chapters, id: \.startMs) { c in
-                        Button("\(Spell.clock(c.startMs))  \(c.title)") {
+                        Button("\(formatClock(ms: c.startMs))  \(c.title)") {
                             let list = model.rows(.show(show)) ?? [track]
                             model.play(list, at: list.firstIndex { $0.id == track.id } ?? 0, from: .show(show), positionMs: c.startMs)
                         }
@@ -403,10 +403,11 @@ struct CoverCard: View {
     }
 }
 
-/// The header of a page that is about something: its cover, what it is, its
-/// name, who it is by (a link, when it goes somewhere), the numbers true of
-/// the whole of it, and Play and Shuffle — Liquid Glass buttons.
-struct PageHeader<Cover: View>: View {
+/// The header of a page that is about something that plays: ArkUI's
+/// `PageHeader` — its cover, what it is, its name, who it is by, the
+/// numbers true of the whole of it — with Play and Shuffle, Liquid Glass
+/// buttons.
+struct PlayHeader<Cover: View>: View {
     let kind: String
     let title: String
     var by: String? = nil
@@ -418,14 +419,7 @@ struct PageHeader<Cover: View>: View {
     @ViewBuilder let cover: () -> Cover
 
     var body: some View {
-        VStack(spacing: Space.xs) {
-            cover().padding(.top, Space.s).padding(.bottom, Space.l)
-            Text(kind).font(.caption.weight(.semibold)).foregroundStyle(.quiet)
-            Text(title).font(.title2.bold()).multilineTextAlignment(.center)
-            if let by = by {
-                Button(by) { onBy?() }.buttonStyle(.borderless).font(.headline).foregroundStyle(Color.accentText).disabled(onBy == nil)
-            }
-            Text(facts).font(.footnote).foregroundStyle(.quiet)
+        PageHeader(kind: kind, title: title, facts: facts, by: by, onBy: onBy, cover: cover) {
             GlassEffectContainer(spacing: Space.m) {
                 HStack(spacing: Space.m) {
                     Button(action: onPlay) { Label("Play", systemImage: "play.fill").frame(maxWidth: .infinity) }
@@ -437,11 +431,7 @@ struct PageHeader<Cover: View>: View {
                 .frame(maxWidth: 320)
             }
             .disabled(!canPlay)
-            .padding(.top, Space.l)
         }
-        .frame(maxWidth: .infinity)
-        .padding(.horizontal, Space.page)
-        .padding(.bottom, Space.m)
     }
 }
 
@@ -451,16 +441,7 @@ struct Offline: View {
     let host: String
 
     var body: some View {
-        HStack(spacing: Space.m) {
-            Image(systemName: "icloud.slash").foregroundStyle(.quiet)
-            Text("Can't reach \(host). What's on this phone still plays, and your changes sync when it's back.")
-                .font(.footnote).foregroundStyle(.quiet)
-        }
-        .padding(Space.m)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .surface(in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .padding(.horizontal, Space.page)
-        .padding(.vertical, Space.s)
+        Banner(symbol: "icloud.slash", text: "Can't reach \(host). What's on this phone still plays, and your changes sync when it's back.")
     }
 }
 
@@ -485,7 +466,7 @@ struct Avatar: View {
         let rgb = set[Art.pick(set.count, name)]
         ZStack {
             Circle().fill(Color(uiColor: UIColor(rgb: rgb)))
-            Text(Spell.initials(name))
+            Text(Pictures.initials(name))
                 .font(.system(size: side * 0.4, weight: .semibold))
                 .foregroundStyle(Avatar.ink(on: rgb))
             if let i = image ?? (picture.isEmpty ? nil : Covers.shared.cached(picture, side: side)) {
@@ -547,7 +528,7 @@ struct AccountButton: View {
     private enum Then { case settings, signOut }
 
     var body: some View {
-        let who = model.login.map(Logins.name) ?? ""
+        let who = model.login.map { loginName(login: $0) } ?? ""
         let picture = model.login.map { Pictures.url(server: model.server, user: $0.user, picture: $0.picture) } ?? ""
         AccountFace(name: who, picture: picture) { showing = true }
             .sheet(isPresented: $showing, onDismiss: after) {

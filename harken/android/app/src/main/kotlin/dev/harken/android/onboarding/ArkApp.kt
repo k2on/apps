@@ -57,6 +57,8 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import dev.arkdb.auth.Event
+import dev.arkdb.auth.Step
 import dev.harken.android.gen.Device
 
 /**
@@ -92,6 +94,8 @@ public fun ArkApp(
     val session by host.session.collectAsStateWithLifecycle()
     val browse by host.browse.collectAsStateWithLifecycle()
     val request by host.request.collectAsStateWithLifecycle()
+    val ask by host.ask.collectAsStateWithLifecycle()
+    val said by host.said.collectAsStateWithLifecycle()
     val context = LocalContext.current
 
     // The redirect: as the launch intent, and as every new intent after it.
@@ -99,26 +103,34 @@ public fun ArkApp(
     DisposableEffect(activity) {
         activity
             ?.intent
-            ?.let { codeOf(it, identity.scheme) }
+            ?.let { eventOf(it, identity.scheme) }
             ?.let {
                 activity.intent = Intent(activity.intent).setData(null)
-                host.send(Event.Code(it))
+                host.send(it)
             }
         val listener =
-            Consumer<Intent> { i -> codeOf(i, identity.scheme)?.let { host.send(Event.Code(it)) } }
+            Consumer<Intent> { i -> eventOf(i, identity.scheme)?.let { host.send(it) } }
         activity?.addOnNewIntentListener(listener)
         onDispose { activity?.removeOnNewIntentListener(listener) }
     }
 
-    // Back from the tab with no code: the person closed it. And back in front at all: the server
-    // dialled now rather than when the link's backoff says, so one that is there is reached
-    // before a screen says it is not.
+    // Back in front after it was away — from the browser tab with no code, or from elsewhere: the
+    // machine decides which (`Event.Foreground`). And back in front at all: the server dialled now
+    // rather than when the link's backoff says, so one that is there is reached before a screen
+    // says it is not.
     val owner = LocalLifecycleOwner.current
     DisposableEffect(owner) {
+        var away = false
         val o = LifecycleEventObserver { _, e ->
-            if (e == Lifecycle.Event.ON_RESUME) {
-                host.send(Event.Returned)
-                host.session.value?.dialNow()
+            when (e) {
+                Lifecycle.Event.ON_STOP -> away = true
+                Lifecycle.Event.ON_START ->
+                    if (away) {
+                        away = false
+                        host.send(Event.Foreground)
+                    }
+                Lifecycle.Event.ON_RESUME -> host.session.value?.dialNow()
+                else -> {}
             }
         }
         owner.lifecycle.addObserver(o)
@@ -131,14 +143,14 @@ public fun ArkApp(
         CustomTabsIntent.Builder().setShowTitle(true).build().launchUrl(context, Uri.parse(url))
     }
 
-    val ask =
+    val asking =
         rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
-            host.send(Event.Answered)
+            host.answered()
         }
     LaunchedEffect(request) {
         val p = request ?: return@LaunchedEffect
         host.requested()
-        if (context is Activity) ask.launch(p.android) else host.send(Event.Answered)
+        if (context is Activity) asking.launch(p.android) else host.answered()
     }
 
     MaterialTheme(
@@ -146,11 +158,16 @@ public fun ArkApp(
         typography = identity.typography) {
             val s = step
             val open = session
+            val permission = ask
             when {
+                // A permission not yet asked, once, on the way to the app: the session opens
+                // beneath it.
+                permission != null && (s is Step.Running || s is Step.Opening) ->
+                    PermissionStep(identity, permission, onAllow = host::allow, onNotNow = host::answered)
                 s is Step.Running && open != null -> app(open)
                 // The session is made with the step, so this is a frame at most; the
                 // splash is over it. Never a page that says it is opening.
-                s is Step.Running ->
+                s is Step.Running || s is Step.Demo ->
                     Surface(
                         color = MaterialTheme.colorScheme.background,
                         modifier = Modifier.fillMaxSize()) {}
@@ -167,14 +184,29 @@ public fun ArkApp(
                         s,
                         onSignIn = { host.send(Event.OpenSignIn) },
                         onChangeServer = { host.send(Event.ChangeServer) })
-                s is Step.Ask ->
-                    PermissionStep(
-                        identity,
-                        s,
-                        onAllow = { host.send(Event.Allow) },
-                        onNotNow = { host.send(Event.Answered) })
+                s is Step.Confirm ->
+                    dev.arkui.ConfirmScreen(
+                        identity.mark,
+                        said.question,
+                        s.error ?: said.status ?: "",
+                        canJoin = s.error == null,
+                        onJoin = { host.send(Event.Accept) },
+                        onCancel = { host.send(Event.Decline) })
             }
         }
+}
+
+/**
+ * What a link the app was opened with means: `<scheme>://auth?code=…` a sign-in coming back,
+ * `<scheme>://join?…` a server (and a code) to join, asked about first; null for any other. The
+ * join is read as the domain's route (`Route.Join`), as every shell reads it.
+ */
+internal fun eventOf(intent: Intent, scheme: String): Event? {
+    val data = intent.data ?: return null
+    if (data.scheme != scheme) return null
+    if (data.host == "auth") return codeOf(intent, scheme)?.let { Event.Code(it) }
+    val join = dev.arkui.Navigator.routeOf(data.toString(), scheme, { dev.harken.ffi.routeFromUrl(it) }) as? dev.harken.ffi.Route.Join
+    return join?.let { Event.Joined(it.server, it.code) }
 }
 
 /** The code in `<scheme>://auth?code=…`, or null for any other intent. */

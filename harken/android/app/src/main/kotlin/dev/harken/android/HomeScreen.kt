@@ -10,7 +10,7 @@
 // offline. Nothing of it is kept on the phone.
 package dev.harken.android
 
-import uniffi.harken_domain.Playlist
+import dev.harken.ffi.Playlist
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -40,7 +40,6 @@ import dev.arkui.FETCHING_DELAY_MS
 import dev.arkui.Fetching
 import dev.arkui.Glyph
 import dev.arkui.Heading
-import dev.arkui.Recompositions
 import dev.arkui.ScrollsToTop
 import dev.arkui.Shelf
 import dev.arkui.Space
@@ -73,10 +72,10 @@ fun lastPlayed(h: Heard, played: Played?, playlists: List<Playlist>, art: (Strin
             else (a.output as? dev.harken.android.gen.Output.Device)?.id?.let { id ->
                 if (id == h.me) "Playing on $here" else "Playing on ${s.devices[id]?.name ?: "another device"}"
             }
-        return LastPlayed(Playing(t.id.hex, t.title, t.creator, t.album, cover(t.album, t.creator)), Page.ofPlace(a.from, playlists), live = true, on = on)
+        return LastPlayed(Playing(t.id.hex, t.title, t.creator, t.album, cover(t.album, t.creator)), Page.of(a.from, playlists), live = true, on = on)
     }
     val p = played ?: return null
-    return LastPlayed(Playing(p.track?.hex ?: "", p.title, p.creator, p.album, cover(p.album, p.creator)), Page.ofPlace(p.from, playlists))
+    return LastPlayed(Playing(p.track?.hex ?: "", p.title, p.creator, p.album, cover(p.album, p.creator)), Page.of(p.from, playlists))
 }
 
 /** What Home draws: a snapshot, its lists copies, so an equal one is the same one to Compose. */
@@ -101,7 +100,6 @@ const val RECENT = 12
 
 @Composable
 fun HomeScreen(data: HomeData, albumOf: (Track) -> Album?, act: Do, placeholderDelayMs: Long = FETCHING_DELAY_MS) {
-    Recompositions.hit("HomeScreen")
     // Derived once per library, not once per composition: the shelf's cards skip only while the
     // list they were given is the same one.
     val recent = remember(data.tracks) { data.tracks.takeLast(RECENT).reversed() }

@@ -1,5 +1,0 @@
-# xcodegen's outputs; `xcodegen generate` writes both.
-Money.xcodeproj/
-Money/Info.plist
-xcuserdata/
-.build/

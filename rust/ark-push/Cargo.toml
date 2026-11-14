@@ -1,0 +1,38 @@
+[package]
+name = "ark-push"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+description = "Push for any Ark app: where a device is reached (an APNs token, a UnifiedPush endpoint), the Web Push encryption a UnifiedPush message is sealed with (RFC 8291, both ends), and — the `send` feature, a server's — the sender to APNs (token-based, HTTP/2) and to UnifiedPush endpoints."
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+base64 = "0.22"
+# The device's port, whose endpoint this carries to the server.
+ark-module = { path = "../../ui/rust/module" }
+# Web Push's key agreement (P-256 ECDH) and APNs' token (ES256 over the .p8
+# key, PKCS #8): the curve crate openidconnect already links.
+p256 = { version = "0.13", features = ["ecdh"] }
+# HKDF and AES-128-GCM: what rustls already links.
+ring = "0.17"
+getrandom = "0.2"
+
+# A server's: APNs speaks HTTP/2 only (h2 over rustls with ring and
+# Mozilla's roots, as the rest of the tree's TLS), a UnifiedPush endpoint
+# plain HTTPS (ureq, as every other fetch here).
+h2 = { version = "0.4", optional = true }
+http = { version = "1", optional = true }
+bytes = { version = "1", optional = true }
+tokio = { version = "1", features = ["rt", "net", "time"], optional = true }
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12", "logging"], optional = true }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"], optional = true }
+webpki-roots = { version = "0.26", optional = true }
+ureq = { version = "2", default-features = false, features = ["tls"], optional = true }
+
+[features]
+# The sender, a server's; a phone links the endpoint and the decryption only.
+send = ["dep:h2", "dep:http", "dep:bytes", "dep:tokio", "dep:tokio-rustls", "dep:rustls", "dep:webpki-roots", "dep:ureq"]
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt", "net", "macros"] }
