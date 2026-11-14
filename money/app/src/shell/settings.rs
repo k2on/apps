@@ -104,8 +104,10 @@ pub struct BankItem {
     pub name: String,
     pub title: String,
     pub status: String,
-    /// Its login ran out or its import failed: marked.
+    /// Its login ran out or its import failed: marked. Its mark is a
+    /// checking account's colour (`slot`).
     pub glyph: String,
+    pub slot: i64,
     /// Its accounts waiting for a choice.
     pub waiting: Option<i64>,
 }
@@ -119,8 +121,9 @@ pub struct FeedItem {
     pub about: String,
     /// `Feeds Chase Sapphire`, `Not imported`, `Waiting for a choice`.
     pub feeds: String,
+    /// Its kind's mark (`accounts::kind_glyph`, `kind_slot`).
     pub glyph: String,
-    pub kind: String,
+    pub slot: i64,
     pub waiting: bool,
 }
 
@@ -129,8 +132,9 @@ pub struct FeedItem {
 pub struct FeedTarget {
     pub id: String,
     pub name: String,
+    /// Its kind's mark (`accounts::kind_glyph`, `kind_slot`).
     pub glyph: String,
-    pub kind: String,
+    pub slot: i64,
 }
 
 /// What one of a bank's accounts is to feed, being chosen.
@@ -463,6 +467,7 @@ pub fn screen(s: &ShellState, data: &Data<'_, MoneyView>) -> SettingsPage {
                     title: b.title(),
                     status: status.words,
                     glyph: if status.alarm { "triangle-alert" } else { "landmark" }.into(),
+                    slot: crate::accounts::kind_slot("checking"),
                     waiting: (b.waiting > 0).then_some(b.waiting),
                 }
             })
@@ -519,7 +524,7 @@ fn bank_page(st: &SettingsState, b: &BankLine, linked: &[LinkedLine], accounts: 
                     _ => format!("Feeds {}", l.account),
                 },
                 glyph: crate::accounts::kind_glyph(&kind).into(),
-                kind,
+                slot: crate::accounts::kind_slot(&kind),
                 waiting: l.waiting,
             }
         })
@@ -545,7 +550,7 @@ fn bank_page(st: &SettingsState, b: &BankLine, linked: &[LinkedLine], accounts: 
                         id: a.id.hex(),
                         name: a.name.clone(),
                         glyph: crate::accounts::kind_glyph(&a.kind).into(),
-                        kind: a.kind.clone(),
+                        slot: crate::accounts::kind_slot(&a.kind),
                     })
                     .collect(),
                 ignored: l.ignored,

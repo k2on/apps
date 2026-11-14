@@ -102,6 +102,15 @@ pub trait HostApp: Send + Sync + 'static {
     /// The peer said something moved, after the host read its link; or a
     /// device module answered ([`Handle::moved`]): what came is taken.
     fn moved(&self) {}
+    /// The session the app's runtimes are over: grows with every session
+    /// opened, so the phone makes its holders again; zero while none is.
+    fn generation(&self) -> u64 {
+        0
+    }
+    /// What only the phone's shell does, asked of it in order, taken.
+    fn natives(&self) -> Vec<ark_app::host::ShellAsk> {
+        vec![]
+    }
     /// A link for the app itself, once it shows: a launch's arguments
     /// (`-screen budget`) or an address (`money:///budget`).
     fn link(&self, args: Option<Vec<String>>, address: String);
@@ -711,6 +720,20 @@ impl ArkHost {
     /// The sentence to say once, taken.
     pub fn take_notice(&self) -> Option<String> {
         self.lock().notice.take()
+    }
+
+    /// The session the app's screens' runtimes are over: grows with every
+    /// session opened, so the phone's shell makes its holders again; zero
+    /// while none is open.
+    pub fn generation(&self) -> u64 {
+        self.app.generation()
+    }
+
+    /// What only the phone's shell does, asked of it in order, taken (the
+    /// app library's shell carries it out: Settings, Add a Device, what it
+    /// shows of its own put away; signing out is the host's own).
+    pub fn natives(&self) -> Vec<crate::ShellAsk> {
+        self.app.natives().into_iter().map(crate::ShellAsk::from).collect()
     }
 
     /// A number that grows whenever anything the shell shows moved.

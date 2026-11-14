@@ -2,51 +2,28 @@
 // each has the name and the inputs its Rust builder declares
 // (`ark_app::view::Part::call`), so the generated views (`ark-ui-gen`) are
 // only calls to these. Everything a part does is here, by hand, where Xcode
-// previews and checks it. Two things an app adds: the face at a tab's
-// title (`\.tabFace`) and the mark a row of its own kind wears
-// (`\.rowMark`), each set once at the app's root.
+// previews and checks it; nothing of an app's own is asked for (a row's mark
+// is its glyph and its chart slot, `MarkTile`).
 #if canImport(SwiftUI)
 import SwiftUI
-
-// MARK: what the app provides
-
-private struct TabFaceKey: EnvironmentKey {
-    static let defaultValue: () -> AnyView = { AnyView(EmptyView()) }
-}
-
-private struct RowMarkKey: EnvironmentKey {
-    static let defaultValue: (String) -> AnyView = { _ in AnyView(EmptyView()) }
-}
-
-private struct ChoiceSymbolKey: EnvironmentKey {
-    static let defaultValue: (String, String) -> String = { _, glyph in ArkGlyphs.sf(glyph) }
-}
-
-extension EnvironmentValues {
-    /// The face at the end of a tab's large title: the account's button.
-    public var tabFace: () -> AnyView {
-        get { self[TabFaceKey.self] }
-        set { self[TabFaceKey.self] = newValue }
-    }
-
-    /// The mark a `ListRow(mark:)` wears, by its kind: an account's.
-    public var rowMark: (String) -> AnyView {
-        get { self[RowMarkKey.self] }
-        set { self[RowMarkKey.self] = newValue }
-    }
-
-    /// The SF Symbol a `PickerChoice` shows, by its tag and its glyph: the app's
-    /// own (an account kind's), or the glyph's.
-    public var choiceSymbol: (String, String) -> String {
-        get { self[ChoiceSymbolKey.self] }
-        set { self[ChoiceSymbolKey.self] = newValue }
-    }
-}
 
 extension ArkGlyphs {
     /// The SF Symbol for Lucide's `name`; a question mark for one not shared yet.
     public static func sf(_ name: String) -> String {
         symbol(name) ?? "questionmark"
+    }
+
+    /// The SF Symbol a mark (`MarkTile`) draws for Lucide's `name`: filled
+    /// where SF Symbols has a filled one, as Settings' tinted rows are.
+    public static func mark(_ name: String) -> String {
+        switch name {
+        case "landmark", "building-2": return "building.columns.fill"
+        case "piggy-bank": return "dollarsign.circle.fill"
+        case "banknote": return "banknote.fill"
+        case "credit-card": return "creditcard.fill"
+        case "house": return "house.fill"
+        default: return sf(name)
+        }
     }
 }
 
@@ -295,7 +272,7 @@ struct MenuActions: View {
     }
 }
 
-/// A row of a thing toward a goal: the app's mark before its title (faded
+/// A row of a thing toward a goal: its mark before its title (faded
 /// while hidden), a slim bar of how far in its tint, words under it in a
 /// tint with quiet ones at their end; on a regular width two figures in
 /// columns; its figure in a status badge at its end, rolling as it
@@ -305,6 +282,7 @@ public struct MeterRow: View {
     let status: String
     let statusTint: Tint
     var mark: String? = nil
+    var markSlot: Int64 = -1
     var faded = false
     var fraction: Double? = nil
     var meterTint: Tint = .positive
@@ -316,7 +294,6 @@ public struct MeterRow: View {
     var said: String? = nil
     var menu: [MenuAction] = []
     var onTap: (() -> Void)? = nil
-    @Environment(\.rowMark) private var rowMark
     @Environment(\.dynamicTypeSize) private var type
     #if os(iOS)
     @Environment(\.horizontalSizeClass) private var size
@@ -325,7 +302,7 @@ public struct MeterRow: View {
     private let regular = true
     #endif
 
-    public init(_ title: String, status: String, statusTint: String, mark: String? = nil, faded: Bool = false,
+    public init(_ title: String, status: String, statusTint: String, mark: String? = nil, markSlot: Int64 = -1, faded: Bool = false,
                 fraction: Double? = nil, meterTint: String = "positive", note: String? = nil, noteTint: String = "neutral",
                 noteEnd: String? = nil, first: Int64? = nil, second: Int64? = nil, said: String? = nil,
                 menu: [MenuAction] = [], onTap: (() -> Void)? = nil) {
@@ -333,6 +310,7 @@ public struct MeterRow: View {
         self.status = status
         self.statusTint = Tint(named: statusTint)
         self.mark = mark
+        self.markSlot = markSlot
         self.faded = faded
         self.fraction = fraction
         self.meterTint = Tint(named: meterTint)
@@ -359,7 +337,7 @@ public struct MeterRow: View {
         HStack(spacing: Space.m) {
             VStack(alignment: .leading, spacing: Space.xs) {
                 HStack(spacing: Space.s) {
-                    if let mark { rowMark(mark) }
+                    if let mark { MarkTile(glyph: mark, slot: markSlot, side: 20) }
                     Text(title).foregroundStyle(faded ? Color.quiet : Color.ink).lineLimit(2)
                 }
                 if let fraction { GoalBar(fraction, tint: meterTint) }
@@ -414,7 +392,7 @@ public struct MenuAction {
     }
 }
 
-/// A row of a list: its picture (a tile, the app's mark, or a bare glyph
+/// A row of a list: its picture (a tile, a thing's mark, or a bare glyph
 /// in the accent), its title and the line under it, a count in a badge, an
 /// amount; tapped, `onTap`; held, its menu. One that `pushes` opens a page
 /// and looks it, as a `NavigationLink`'s row does: the list's own
@@ -427,6 +405,7 @@ public struct ListRow: View {
     var subtitle: String? = nil
     var tile: String? = nil
     var mark: String? = nil
+    var markSlot: Int64 = -1
     var glyph: String? = nil
     var badge: Int64? = nil
     var amount: Int64? = nil
@@ -437,15 +416,15 @@ public struct ListRow: View {
     var said: String? = nil
     var menu: [MenuAction] = []
     var onTap: (() -> Void)? = nil
-    @Environment(\.rowMark) private var rowMark
 
-    public init(_ title: String, subtitle: String? = nil, tile: String? = nil, mark: String? = nil, glyph: String? = nil,
+    public init(_ title: String, subtitle: String? = nil, tile: String? = nil, mark: String? = nil, markSlot: Int64 = -1, glyph: String? = nil,
                 badge: Int64? = nil, amount: Int64? = nil, value: String? = nil, quiet: Bool = false, accent: Bool = false, pushes: Bool = false,
                 said: String? = nil, menu: [MenuAction] = [], onTap: (() -> Void)? = nil) {
         self.title = title
         self.subtitle = subtitle
         self.tile = tile
         self.mark = mark
+        self.markSlot = markSlot
         self.glyph = glyph
         self.badge = badge
         self.amount = amount
@@ -479,7 +458,7 @@ public struct ListRow: View {
     private var line: some View {
         HStack(spacing: Space.m) {
             if let tile { Tile(symbol: ArkGlyphs.sf(tile), color: .quiet) }
-            if let mark { rowMark(mark) }
+            if let mark { MarkTile(glyph: mark, slot: markSlot) }
             if let glyph { Image(systemName: ArkGlyphs.sf(glyph)).foregroundStyle(Color.accent) }
             VStack(alignment: .leading, spacing: 2) {
                 Text(title).lineLimit(1)
@@ -671,13 +650,11 @@ public struct OptionPicker<Content: View>: View {
     }
 }
 
-/// One choice of an `OptionPicker`: its symbol (the app's, by its tag,
-/// through `\.choiceSymbol`) and its title, tagged.
+/// One choice of an `OptionPicker`: its glyph's symbol and its title, tagged.
 public struct PickerChoice: View {
     let title: String
     let glyph: String
     let tag: String
-    @Environment(\.choiceSymbol) private var symbol
 
     public init(_ title: String, glyph: String, tag: String) {
         self.title = title
@@ -686,7 +663,7 @@ public struct PickerChoice: View {
     }
 
     public var body: some View {
-        Label(title, systemImage: symbol(tag, glyph)).tag(tag)
+        Label(title, systemImage: ArkGlyphs.sf(glyph)).tag(tag)
     }
 }
 

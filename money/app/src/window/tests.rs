@@ -11,9 +11,10 @@ use money_core::{AccountLine, MoneyView};
 
 use super::MoneyMsg;
 use crate::host::tests::{open, Test};
-use crate::host::{Money, ShellAsk};
+use crate::host::Money;
 use crate::shell::{account_tag, ShellMsg};
 use crate::MoneyRequest;
+use ark_app::host::ShellAsk;
 
 fn send(h: &mut Hosting<Money>, place: &mut Test, msg: MoneyMsg) {
     h.with(place, |app, cx| app.take(msg, cx));
@@ -28,7 +29,7 @@ fn address(h: &Hosting<Money>, place: &Test) -> String {
 
 /// A fresh window brought to `address`, as a page loaded at it is.
 fn arrive(address: &str) -> (Hosting<Money>, Test) {
-    let (mut h, mut place) = open(false);
+    let (mut h, mut place) = open();
     h.link(Link::Address(address.into()), &mut place);
     for n in h.take_natives() {
         h.with(&mut place, |app, cx| app.native(n, cx));
@@ -77,7 +78,7 @@ fn words<M>(v: &View<M>) -> Vec<String> {
 /// the place, or a query written for nothing.
 #[test]
 fn the_address_says_the_place() {
-    let (mut h, mut place) = open(false);
+    let (mut h, mut place) = open();
     assert_eq!(address(&h, &place), "/budget/");
     send(&mut h, &mut place, MoneyMsg::Shell(ShellMsg::Select { tag: "insights".into() }));
     assert_eq!(address(&h, &place), "/insights/");
@@ -101,7 +102,7 @@ fn the_address_says_the_place() {
 /// month lost on a reload, or an account's register opened on another.
 #[test]
 fn an_address_brings_a_fresh_window_back() {
-    let (mut h, mut place) = open(false);
+    let (mut h, mut place) = open();
     let a = checking(&place);
     h.with(&mut place, |_, cx| cx.request(MoneyRequest::StepMonth { by: -1 }));
     send(
@@ -131,7 +132,7 @@ fn an_address_brings_a_fresh_window_back() {
 /// it. Falsified by the category written while its inspector is put away.
 #[test]
 fn category_details_is_its_route() {
-    let (mut h, mut place) = open(false);
+    let (mut h, mut place) = open();
     h.with(&mut place, |_, cx| cx.request(MoneyRequest::OpenCategory { key: "groceries".into() }));
     let at = address(&h, &place);
     assert!(at.starts_with("/category/") && at.ends_with("?inspector=1"), "{at}");
@@ -145,7 +146,7 @@ fn category_details_is_its_route() {
 /// the window never takes.
 #[test]
 fn settings_is_the_windows_own() {
-    let (mut h, mut place) = open(false);
+    let (mut h, mut place) = open();
     h.with(&mut place, |_, cx| cx.request(MoneyRequest::Settings { pane: "Household".into() }));
     let natives = h.take_natives();
     assert_eq!(natives, vec![ShellAsk::Settings { pane: "Household".into() }]);
@@ -168,7 +169,7 @@ fn settings_is_the_windows_own() {
 /// is using it. Falsified by a name left to "Nothing Selected".
 #[test]
 fn every_hosted_name_is_a_view() {
-    let (h, place) = open(false);
+    let (h, place) = open();
     let now = h.now_ms(&place);
     let mut names = vec![];
     fn hosted<M>(v: &View<M>, out: &mut Vec<&'static str>) {
@@ -202,7 +203,7 @@ fn every_hosted_name_is_a_view() {
 /// Falsified by a press the window drops.
 #[test]
 fn the_month_inspector_presses_reach_the_budget() {
-    let (mut h, mut place) = open(false);
+    let (mut h, mut place) = open();
     let before = h.version();
     send(&mut h, &mut place, MoneyMsg::Budget(crate::budget::BudgetMsg::AutoUnderfunded));
     assert!(h.version() > before);

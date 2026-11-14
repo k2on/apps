@@ -1,7 +1,7 @@
 //! An app drawn in a window its host draws itself (ui/docs/app.md, "The
 //! App's Part of Its Host"): the browser's page (`arkui_web::host`), and the
-//! desktop's window once it is hosted the same way. A phone's shell is its
-//! toolkit's own and hosts the generated screens by name; a window's host
+//! desktop's window once it is hosted the same way. A phone's shell is the
+//! app library's and hosts the generated screens by name; a window's host
 //! has no shell of its own, so the app's part says the whole window, once,
 //! in the views every toolkit draws: its shell's view, what each name it
 //! hosts shows, what goes over it (its sheets, its Settings), its address,
@@ -10,13 +10,13 @@
 //! One message type reaches every screen ([`Windowed::Msg`], the app's own
 //! enum of its screens' messages), and the app takes it ([`Windowed::take`])
 //! inside the host's loop, as a phone's object per screen sends into
-//! `Hosting`. What the toolkit's shell is asked ([`HostedApp::Native`]) a
+//! `Hosting`. What the toolkit's shell is asked ([`ShellAsk`]) a
 //! window's host carries out by asking the app again ([`Windowed::native`]):
 //! Settings shown is the app's state here, not a scene of the toolkit's.
 
 use std::fmt::Debug;
 
-use crate::host::{Cx, HostedApp, Place};
+use crate::host::{Cx, HostedApp, Place, ShellAsk};
 use crate::shell::CommandMenu;
 use crate::view::View;
 
@@ -72,5 +72,5 @@ pub trait Windowed: HostedApp {
     }
     /// What the toolkit's shell was asked, carried out by the app's part in
     /// a window (Settings shown); signing out is the host's own first.
-    fn native(&mut self, _native: Self::Native, _cx: &mut Cx<'_, Self>) {}
+    fn native(&mut self, _native: ShellAsk, _cx: &mut Cx<'_, Self>) {}
 }

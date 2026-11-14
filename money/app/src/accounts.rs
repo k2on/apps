@@ -175,10 +175,10 @@ pub struct AccountItem {
     /// Its bank and last digits, or its kind.
     pub subtitle: String,
     pub kind: AccountKind,
-    /// Its kind's key (`checking`): what the phones' marks are drawn by.
-    pub kind_key: String,
-    /// Its kind's mark, by ArkUI's glyph name.
+    /// Its kind's mark: its glyph, by ArkUI's name, in the chart palette's
+    /// colour of its slot ([`kind_slot`]).
     pub glyph: String,
+    pub slot: i64,
     pub balance: i64,
     /// Transactions waiting for a look, while there are any.
     pub reviews: Option<i64>,
@@ -269,15 +269,32 @@ pub struct AccountsPage {
     pub renaming: Option<RenameForm>,
 }
 
-/// The glyph a kind of account is marked with (ArkUI's names, Lucide's).
+/// The glyph a kind of account is marked with (ArkUI's names, Lucide's),
+/// on every client: each toolkit draws the name as its own glyph set has it
+/// (the iPhone's marks filled, as Settings' tinted rows are).
 pub fn kind_glyph(kind: &str) -> &'static str {
     match kind {
-        "cash" => "dollar-sign",
+        "cash" => "banknote",
         "credit" => "credit-card",
         "loan" => "house",
         "investment" => "trending-up",
-        "savings" => "banknote",
+        "savings" => "piggy-bank",
         _ => "landmark",
+    }
+}
+
+/// Where in the theme's chart palette (ui/theme.toml) a kind of account's
+/// mark is coloured: each kind its own, the same on every client; below
+/// zero, a kind of none, is the quiet colour.
+pub fn kind_slot(kind: &str) -> i64 {
+    match kind {
+        "savings" => 0,
+        "checking" => 1,
+        "loan" => 2,
+        "credit" => 3,
+        "investment" => 4,
+        "cash" => 5,
+        _ => -1,
     }
 }
 
@@ -550,8 +567,8 @@ fn item(a: &AccountLine, style: &NumberStyle) -> AccountItem {
         name: a.name.clone(),
         subtitle: a.subtitle(),
         kind: a.account_kind().unwrap_or_default(),
-        kind_key: a.kind.clone(),
         glyph: kind_glyph(&a.kind).into(),
+        slot: kind_slot(&a.kind),
         balance: a.balance,
         reviews: (a.unapproved > 0).then_some(a.unapproved),
         closed: a.closed,

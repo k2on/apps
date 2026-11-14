@@ -13,7 +13,7 @@
 //             MoneyHost(launch, PhoneSecureStore(this)).also { money = it }.host()
 //     }
 //     class MainActivity : ArkActivity() {
-//         @Composable override fun Content(app: ArkApp) = MoneyRoot(app, (application as MoneyApplication).money)
+//         @Composable override fun Content(app: ArkApp) = ArkAppRoot(app, (application as MoneyApplication).money)
 //     }
 //
 // It replaces each app's own `ViewModel` holding the sign-in machine and a book over its peer

@@ -231,6 +231,18 @@ public fun Badge(count: Int, said: String) {
         }
 }
 
+/**
+ * A thing's mark (an account's kind, `ark_app::view`'s `Picture::Mark`): its glyph ([ArkGlyphs.mark])
+ * in the theme's chart colour of [slot] (none of the palette's: the quiet colour) on a [Tile], as
+ * the iPhone's `MarkTile` draws it. The app works out the glyph and the slot.
+ */
+@Composable
+public fun MarkTile(glyph: String, slot: Long, side: Dp = 32.dp) {
+    val c = chartPalette()
+    val color = if (slot >= 0 && slot < c.size) c[slot.toInt()] else MaterialTheme.colorScheme.onSurfaceVariant
+    Tile(ArkGlyphs.mark(glyph), color, side)
+}
+
 /** A glyph in [color] on a rounded square washed in it, [side] across. */
 @Composable
 public fun Tile(icon: ImageVector, color: Color, side: Dp = GroupRow.LEAD) {

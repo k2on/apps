@@ -229,8 +229,10 @@ pub struct CategoryItem {
     pub id: String,
     /// Its emoji before its name, or its name alone (a card's payment).
     pub title: String,
-    /// `credit` for a card's payment: the app's mark before its name.
+    /// A card's payment: its mark before its name, a card's glyph in the
+    /// credit kind's slot (`accounts::kind_slot`).
     pub mark: Option<String>,
+    pub mark_slot: i64,
     pub faded: bool,
     pub fraction: Option<f64>,
     pub meter_tint: String,
@@ -900,7 +902,8 @@ fn category(l: &BudgetLine, style: &NumberStyle, can_up: bool, can_down: bool) -
             (false, e) if !e.is_empty() => format!("{e} {}", l.name),
             _ => l.name.clone(),
         },
-        mark: card.then(|| "credit".into()),
+        mark: card.then(|| crate::accounts::kind_glyph("credit").into()),
+        mark_slot: crate::accounts::kind_slot("credit"),
         faded: l.hidden,
         fraction,
         meter_tint: meter_tint.into(),

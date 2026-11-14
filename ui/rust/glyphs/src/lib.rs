@@ -152,6 +152,8 @@ pub const VOLUME: &[u8] = br##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="
 
 // money's: what an account is.
 
+/// `piggy-bank`: a jar with its lid, savings' mark (ArkUI's on Android too).
+pub const PIGGY: &[u8] = br##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="butt" stroke-linejoin="miter"><path d="M7 7h10l3 4v8H4v-8z"/><path d="M9 4h6v3H9z"/></svg>"##;
 /// `landmark`
 pub const BANK: &[u8] = br##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="butt" stroke-linejoin="miter"><path d="M3 22h18"/><path d="M6 18v-7"/><path d="M10 18v-7"/><path d="M14 18v-7"/><path d="M18 18v-7"/><path d="M12 2 20 7H4z"/></svg>"##;
 
@@ -399,7 +401,8 @@ pub fn named(name: &str) -> Option<&'static [u8]> {
         "wallet" => WALLET,
         "credit-card" => CARD,
         "trending-up" => GROWTH,
-        "building-2" | "piggy-bank" | "landmark" => BANK,
+        "building-2" | "landmark" => BANK,
+        "piggy-bank" => PIGGY,
         "house" => HOME,
         "panel-right" => PANEL_RIGHT,
         "wand-sparkles" => WAND,

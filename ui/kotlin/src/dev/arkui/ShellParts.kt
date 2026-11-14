@@ -110,8 +110,7 @@ public fun HostedScreen(name: String) {
     LocalHostedScreens.current(name)
 }
 
-private fun shellGlyph(name: String, lookup: (String) -> ImageVector?): ImageVector =
-    lookup(name) ?: ArkGlyphs.named(name) ?: ArkGlyphs.Chevron
+private fun shellGlyph(name: String): ImageVector = ArkGlyphs.named(name) ?: ArkGlyphs.Chevron
 
 // * The size classes
 
@@ -188,7 +187,6 @@ public fun AdaptiveTabs(
     tabs: TabsScope.() -> Unit,
 ) {
     val items = TabsScope().apply(tabs).tabs
-    val lookup = LocalGlyphs.current
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val size = sizeClassOf(maxWidth)
         val drawer = maxWidth >= LayoutTokens.SIDEBAR_MIN_WIDTH.dp
@@ -198,7 +196,7 @@ public fun AdaptiveTabs(
         val sections = items.filter { it.group == null }
         val icon: @Composable (SectionTabItem) -> Unit = { t ->
             BadgedBox(badge = { t.badge?.let { Badge { Text(it.toString()) } } }) {
-                Icon(shellGlyph(t.glyph, lookup), contentDescription = null)
+                Icon(shellGlyph(t.glyph), contentDescription = null)
             }
         }
         CompositionLocalProvider(
@@ -244,7 +242,7 @@ public fun AdaptiveTabs(
                                 NavigationDrawerItem(
                                     // One line, cut short beside a badge rather than broken in two.
                                     label = { Text(t.title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                                    icon = { Icon(shellGlyph(t.glyph, lookup), contentDescription = null) },
+                                    icon = { Icon(shellGlyph(t.glyph), contentDescription = null) },
                                     badge = { t.badge?.let { Text(it.toString()) } },
                                     selected = t.tag == shown.tag,
                                     onClick = { onSelect(t.tag) },
@@ -380,7 +378,6 @@ public val LocalUnderToolbar = compositionLocalOf { false }
 @Composable
 public fun WithToolbar(title: String, items: ToolbarScope.() -> Unit, content: @Composable () -> Unit) {
     val all = ToolbarScope().apply(items).items
-    val lookup = LocalGlyphs.current
     var overflow by remember { mutableStateOf(false) }
     // One bar at a time: a bar inside this one's content (a pushed page's) is
     // the only one up, with a back button, and this one gives way.
@@ -397,7 +394,7 @@ public fun WithToolbar(title: String, items: ToolbarScope.() -> Unit, content: @
     val host = remember { BarHost() }
     val bar = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
     val button: @Composable (BarItem) -> Unit = { b ->
-        IconButton(onClick = b.onTap, enabled = b.enabled) { Icon(shellGlyph(b.glyph, lookup), contentDescription = b.title) }
+        IconButton(onClick = b.onTap, enabled = b.enabled) { Icon(shellGlyph(b.glyph), contentDescription = b.title) }
     }
     val principal = all.filter { it.placement == BarPlacement.Principal }
     Scaffold(modifier = Modifier.nestedScroll(bar.nestedScrollConnection), topBar = {
@@ -607,7 +604,6 @@ private val TAB_GAP = 2.dp
 @Composable
 public fun SettingsPanes(selection: String, onSelect: (String) -> Unit, panes: PanesScope.() -> Unit) {
     val all = PanesScope().apply(panes).panes
-    val lookup = LocalGlyphs.current
     val shown = all.firstOrNull { it.title == selection } ?: all.firstOrNull() ?: return
     // A title is never broken: the tabs share the width when the widest title fits its share on
     // one line (Material's tabs); short of that each is as wide as its title with a tighter inset,
@@ -626,7 +622,7 @@ public fun SettingsPanes(selection: String, onSelect: (String) -> Unit, panes: P
                             selected = p == shown,
                             onClick = { onSelect(p.title) },
                             text = { Text(p.title, maxLines = 1, softWrap = false) },
-                            icon = { Icon(shellGlyph(p.glyph, lookup), contentDescription = null) },
+                            icon = { Icon(shellGlyph(p.glyph), contentDescription = null) },
                         )
                     }
                 }
@@ -639,7 +635,7 @@ public fun SettingsPanes(selection: String, onSelect: (String) -> Unit, panes: P
                                 horizontalAlignment = Alignment.CenterHorizontally,
                                 verticalArrangement = Arrangement.spacedBy(TAB_GAP),
                             ) {
-                                Icon(shellGlyph(p.glyph, lookup), contentDescription = null)
+                                Icon(shellGlyph(p.glyph), contentDescription = null)
                                 Text(p.title, style = style, maxLines = 1, softWrap = false)
                             }
                         }

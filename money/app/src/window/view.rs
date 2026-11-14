@@ -7,7 +7,8 @@ use ark_app::view::*;
 
 use super::MonthInspector;
 use crate::budget::BudgetMsg;
-use crate::shell::{Household, ShellMsg};
+use crate::shell::ShellMsg;
+use ark_app::shell::Household;
 
 /// The budget's inspector with no category chosen: the month's figures,
 /// and Auto-Assign for every category at once.

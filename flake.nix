@@ -777,9 +777,11 @@
           # prebuilt (`arkuiKotlin`, `-ParkuiLib` in `flags`).
           #
           # An Ark app (`ark`, its nix/ark-app.nix packages) builds its
-          # generated project (`<name>/.native/android`) over its own Kotlin
-          # (`<name>/native/android`), its Maven graph that directory's
-          # deps.json.
+          # generated project (`<name>/.native/android`), with its own Kotlin
+          # where it still has some (`<name>/native/android`: revelation's)
+          # and the key its app.toml names; its Maven graph is that
+          # directory's deps.json, else ArkUI's (ui/kotlin/android/deps.json),
+          # which every app on the app library replays.
           #
           # `apk` is the stable channel's, the app's own id; `apkUnstable`
           # the unstable channel's (nix/channels.nix): the same build with
@@ -789,13 +791,18 @@
             let
               appid = "${bundlePrefix}.${name}";
               dir = if ark == null then "${name}/android" else "${name}/.native/android";
-              deps = if ark == null then "${name}/android/deps.json" else "${name}/native/android/deps.json";
+              own = builtins.pathExists (./. + "/${name}/native/android");
+              deps =
+                if ark == null then "${name}/android/deps.json"
+                else if own && builtins.pathExists (./. + "/${name}/native/android/deps.json") then "${name}/native/android/deps.json"
+                else "ui/kotlin/android/deps.json";
+              keystore = lib.optional (ark != null && ark.a.android ? keystore) "${name}/${ark.a.android.keystore}";
               src =
                 if ark == null then only ([ dir ] ++ shared)
                 # Named `source`, as `only` names its trees: unpacked under
                 # that name, which sourceRoot says.
                 else pkgs.runCommand "source" { } ''
-                  cp -r ${only ([ "${name}/native/android" "${name}/app.toml" ] ++ shared)} $out
+                  cp -r ${only ([ "${name}/app.toml" ] ++ lib.optional own "${name}/native/android" ++ keystore ++ shared)} $out
                   chmod -R u+w $out
                   cp -r ${ark.native}/. $out/
                 '';
@@ -866,10 +873,10 @@
           };
           harken-apk = harken.apk;
 
-          # money's phone (money/native/android/README.md): Compose over
-          # `money-android-lib`, the look shared with harken (ui/kotlin), in
-          # the project ui/prebuild.py generates. Its Maven graph is
-          # harken's, replayed (money/native/android/deps.json).
+          # money's phone (money/README.md): Compose over `money-android-lib`
+          # and the app library's shell (ui/kotlin/app), in the project
+          # ui/prebuild.py generates. Its Maven graph is ArkUI's, replayed
+          # (ui/kotlin/android/deps.json).
           money = androidApp {
             name = "money";
             ark = arkOf.money;
@@ -1505,7 +1512,8 @@
           # bundle id is `bundlePrefix`.<name>, every app's; its version
           # project.yml's.
           # An Ark app (`ark`) builds its generated project
-          # (`<name>/.native/ios`) over its own Swift (`<name>/native/ios`).
+          # (`<name>/.native/ios`), with its own Swift where it still has some
+          # (`<name>/native/ios`).
           iosApp = { name, App, ffi, framework, kind, ark ? null, shared ? [ ] }:
             let
               bundle = "${bundlePrefix}.${name}";
@@ -1604,7 +1612,8 @@
               # The app, and its own modules (`modules`): ArkUI and an Ark
               # app's bindings and device modules are linked prebuilt
               # (`linked`), so none of their sources is here.
-              src = only (modules ++ (if ark == null then [ "${name}/ios" ] else [ "${name}/native/ios" "${name}/app.toml" ]));
+              src = only (modules ++ (if ark == null then [ "${name}/ios" ]
+                else [ "${name}/app.toml" ] ++ lib.optional (builtins.pathExists (./. + "/${name}/native/ios")) "${name}/native/ios"));
               nativeBuildInputs = [ xcodegen pkgs.yq-go ];
               # xcodebuild, and nothing else here: see above.
               __noChroot = true;
@@ -1964,7 +1973,7 @@
             harken-apk-deps = harken.deps;
             revelation-apk = revelation.apk;
             revelation-apk-deps = revelation.deps;
-            # money's phone, over money-android-lib (money/native/android/README.md).
+            # money's phone, over money-android-lib (money/README.md).
             inherit money-apk;
             money-apk-deps = money.deps;
             # ArkUI's Kotlin, each library once (`arkuiKotlin`), and
@@ -2249,12 +2258,13 @@
               '';
               installPhase = "touch $out";
             };
-            # The same for money's iOS app (money/native/ios/typecheck.sh): its
-            # budget arithmetic, first run, session and model with the generated
-            # types, UniFFI's Swift for money's library and ArkUICore.
+            # The same for money's (ui/swift/typecheck.sh): what of the app
+            # library and its device modules Linux can read, against UniFFI's
+            # Swift for money's library and ArkUICore. money has no Swift of
+            # its own.
             money-ios-typecheck = pkgs.swiftPackages.stdenv.mkDerivation {
               name = "money-ios-typecheck";
-              src = only [ "money/native/ios" "money/app.toml" "modules" "rust/ark-ffi/swift" "ui/swift" ];
+              src = only [ "money/app.toml" "modules" "rust/ark-ffi/swift" "ui/swift" "ui/prebuild.py" ];
               nativeBuildInputs = [ pkgs.swift ];
               buildInputs = [ pkgs.swiftPackages.Foundation pkgs.swiftPackages.Dispatch ];
               buildPhase = ''
@@ -2266,7 +2276,7 @@
                 sed -i 's/nonisolated(unsafe) //' bindings/*.swift
                 SWIFT_EXEC=$PWD/bin/swiftc-here TYPED=$PWD/rust/ark-ffi/swift/Typed.swift \
                   ARK_MODULES="${lib.concatMapStringsSep " " (m: m.name) (arkApp.modulesOf (arkApp.read "money"))}" \
-                  bash money/native/ios/typecheck.sh bindings
+                  bash ui/swift/typecheck.sh money bindings
               '';
               installPhase = "touch $out";
             };

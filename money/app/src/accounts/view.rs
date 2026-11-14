@@ -91,7 +91,7 @@ pub fn accounts(p: &AccountsPage) -> View<AccountsMsg> {
 pub fn account_row(a: &AccountItem) -> View<AccountsMsg> {
     list_row(a.name)
         .subtitle(a.subtitle)
-        .mark(a.glyph, a.kind_key)
+        .mark(a.glyph, a.slot)
         .badge(a.reviews)
         .amount(a.balance)
         .said(a.said)

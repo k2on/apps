@@ -14,7 +14,7 @@ use money_core::{BudgetLine, MoneyChange, MoneyView, PayeeLine, Summary};
 
 use crate::accounts::AccountsMsg;
 use crate::budget::BudgetMsg;
-use crate::host::{Money, ShellAsk};
+use crate::host::Money;
 use crate::insights::InsightsMsg;
 use crate::register::RegisterMsg;
 use crate::sheets::SheetsMsg;
@@ -22,6 +22,7 @@ use crate::shell::view::{commands, money_settings, money_shell};
 use crate::shell::{tagged_account, Appearance, ShellMsg};
 use crate::transactions::TransactionsMsg;
 use crate::Route;
+use ark_app::host::ShellAsk;
 
 pub mod view;
 
@@ -95,11 +96,7 @@ impl Windowed for Money {
             MoneyMsg::Budget(m) => self.budget.send(m, cx),
             MoneyMsg::Transactions(m) => self.transactions.send(m, cx),
             MoneyMsg::Insights(m) => self.insights.send(m, cx),
-            MoneyMsg::Register(m) => {
-                if let Some(r) = &mut self.register {
-                    r.send(m, cx)
-                }
-            }
+            MoneyMsg::Register(m) => self.register.send(m, cx),
             MoneyMsg::Sheets(m) => self.sheets.send(m, cx),
             MoneyMsg::CloseSettings => self.settings = false,
         }
@@ -114,9 +111,9 @@ impl Windowed for Money {
             "budget" => crate::budget::view::budget::view(&self.budget.page(place, now_ms)).map(MoneyMsg::Budget),
             "budget.inspector" => view::month_inspector::view(&self.month_inspector(place)).map(MoneyMsg::Budget),
             "accounts" => crate::accounts::view::accounts::view(&self.accounts.page(place, now_ms)).map(MoneyMsg::Accounts),
-            "accounts.register" => match (tagged_account(&self.shell.state().section), &self.register) {
-                (Some(_), Some(r)) => crate::register::view::register::view(&r.page(place, now_ms)).map(MoneyMsg::Register),
-                _ => empty_state("landmark", "No Account Selected", "Choose an account to see its transactions."),
+            "accounts.register" => match tagged_account(&self.shell.state().section) {
+                Some(_) => crate::register::view::register::view(&self.register.page(place, now_ms)).map(MoneyMsg::Register),
+                None => empty_state("landmark", "No Account Selected", "Choose an account to see its transactions."),
             },
             "transactions" => crate::transactions::view::transactions::view(&self.transactions.page(place, now_ms)).map(MoneyMsg::Transactions),
             "transactions.inspector" => empty_state("panel-right", "No Transaction Selected", "Select a transaction to see its details here."),
@@ -215,8 +212,8 @@ impl Windowed for Money {
         match native {
             ShellAsk::Settings { .. } => self.settings = true,
             ShellAsk::Reset | ShellAsk::SignOut => self.settings = false,
-            // A window's sections are its places, never a stack.
-            ShellAsk::Open { .. } | ShellAsk::AddDevice => {}
+            // Add a Device's page is a phone's.
+            ShellAsk::AddDevice => {}
         }
     }
 }

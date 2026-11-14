@@ -498,6 +498,35 @@ pub fn command_for<'a, M>(menus: &'a [CommandMenu<M>], key: &str, shift: bool, o
     })
 }
 
+/// Who is using the app and where, as the shell's account face and its
+/// account sheet say it on every phone (the app library's `ArkShell`): the
+/// shell page's `household`, which app.toml's `[shell] account` names. What
+/// wants somebody in Settings is the app's to say (money: a bank that needs
+/// a look); none is a `wanting` of zero.
+#[derive(Clone, Debug, Default, PartialEq, Eq, ark::twin::Twin)]
+pub struct Household {
+    /// Their name ("Alex"); empty while it is not known.
+    pub who: String,
+    /// Where their picture is loaded from; empty for none, and the demo's.
+    pub picture: String,
+    /// Under the name: their email or login, or what the demo is.
+    pub detail: String,
+    /// The server as it is shown (`money.example.com`); none for the demo.
+    pub server: Option<String>,
+    /// The link to it: up, down, or not known yet.
+    pub linked: Option<bool>,
+    pub demo: bool,
+    /// How many things want somebody in Settings.
+    pub wanting: i64,
+    /// The account sheet's row for them ("2 Banks Need a Look"), which
+    /// opens Settings; the face's mark says `wanting_said` ("Banks need a
+    /// look"), and `wanting_where` is the row's line under it on Android
+    /// ("In Settings, under Banks").
+    pub wanting_title: String,
+    pub wanting_said: String,
+    pub wanting_where: String,
+}
+
 /// Where a window opens, as its launch arguments say (every Ark app's, so
 /// a screenshot or a test opens any screen with no steps): `-screen
 /// <place>` (`budget`, `account:checking`, `transaction:receipt`, `settings`

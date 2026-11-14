@@ -10,8 +10,7 @@
 //! [`Screen`]), what it makes of a route or a request one of them asked —
 //! a message for another runtime, its month moved, the bank asked — what
 //! one runtime's page says that another follows, a launch's link, and what
-//! only the toolkit's shell can do ([`HostedApp::Native`], taken by the
-//! host after). [`Hosting`] is the loop between them: a message in, the
+//! only the toolkit's shell can do ([`ShellAsk`], taken by the host after). [`Hosting`] is the loop between them: a message in, the
 //! routes and requests it asked carried out once no runtime is mid-message,
 //! the views every runtime names held, and the idle signal and version
 //! summed.
@@ -92,17 +91,29 @@ pub trait Place<K: ViewKey, C> {
     fn draws_between(&self) -> bool {
         false
     }
-    /// Whether a page opened goes on the section's stack (a phone), rather
-    /// than being one of the window's places (the browser, the desktop).
-    fn stacks(&self) -> bool {
-        false
-    }
     /// Who is signed in where.
     fn session(&self) -> Session;
     /// A sentence for the shell to say once.
     fn notice(&mut self, _said: String) {}
     /// The server dialled now, if the link was resting.
     fn dial(&mut self) {}
+}
+
+/// What only the toolkit's shell does, asked of it in order, the same for
+/// every app: a route is a place of the app's own shell on every host (its
+/// section, an inspector, a Settings pane), so nothing here names one.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ShellAsk {
+    /// Settings put up (its pane is the shell's, chosen already).
+    Settings { pane: String },
+    /// Add a Device's page.
+    AddDevice,
+    /// A link taken: what the shell shows of its own put away (Settings, a
+    /// sheet of its own).
+    Reset,
+    /// Signed out of the server, or out of the demo: every host signs out
+    /// itself.
+    SignOut,
 }
 
 /// What a runtime asked of its host, carried out once none is mid-message.
@@ -119,12 +130,12 @@ pub struct Cx<'a, H: HostedApp> {
     /// The time the call is worked out at ([`HostedApp::now_ms`]).
     pub now_ms: i64,
     jobs: &'a mut VecDeque<Job<H::Route, H::Request>>,
-    natives: &'a mut Vec<H::Native>,
+    natives: &'a mut Vec<ShellAsk>,
 }
 
 impl<H: HostedApp> Cx<'_, H> {
     /// Something only the toolkit's shell does, for it to take after.
-    pub fn native(&mut self, n: H::Native) {
+    pub fn native(&mut self, n: ShellAsk) {
         self.natives.push(n)
     }
 
@@ -370,9 +381,6 @@ pub trait HostedApp: Sized + 'static {
     type Change: Clone + Debug;
     type Route: Clone + Debug;
     type Request: Clone + Debug + PartialEq;
-    /// What only the toolkit's shell can do (a page pushed, Settings put
-    /// up, signed out), taken after each call ([`Hosting::take_natives`]).
-    type Native: Clone + Debug + PartialEq;
 
     /// What it keeps, as a sentence of its first run says it: `your
     /// budget`.
@@ -384,8 +392,6 @@ pub trait HostedApp: Sized + 'static {
     /// A change of its domain's as a peer takes it: its function's name and
     /// its input's bytes.
     fn encode(change: &Self::Change) -> (&'static str, Vec<u8>);
-    /// Whether a native is signing out, which every host does itself.
-    fn signs_out(native: &Self::Native) -> bool;
 
     /// Its runtimes made over a session just opened.
     fn open(session: &Session, cx: &mut Cx<'_, Self>) -> Self;
@@ -426,7 +432,7 @@ pub trait Has<A: App> {
 pub struct Hosting<H: HostedApp> {
     app: H,
     jobs: VecDeque<Job<H::Route, H::Request>>,
-    natives: Vec<H::Native>,
+    natives: Vec<ShellAsk>,
     held: Vec<H::Key>,
     ran: u64,
     /// What [`Hosting::version`] counts from: past every version of the
@@ -591,7 +597,7 @@ impl<H: HostedApp> Hosting<H> {
     }
 
     /// What its toolkit's shell is asked, in order, taken.
-    pub fn take_natives(&mut self) -> Vec<H::Native> {
+    pub fn take_natives(&mut self) -> Vec<ShellAsk> {
         std::mem::take(&mut self.natives)
     }
 

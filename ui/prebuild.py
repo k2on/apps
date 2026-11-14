@@ -394,8 +394,9 @@ def apple_project(root, a, prefix):
     product = a["apple"]["product"]
     bundle = f"{prefix}.{a['id']}"
     framework = f"{product}FFI"
-    native = f"{TO_APP}/native/ios"
-    sources = [{"path": f"{native}/{product}"}, {"path": "Generated"}, {"path": "Resources"},
+    # The app's own Swift, for an app that still has some (`native/ios/<product>`).
+    own = [{"path": f"{TO_APP}/native/ios/{product}"}] if os.path.isdir(os.path.join(root, app, "native", "ios", product)) else []
+    sources = own + [{"path": "Generated"}, {"path": "Resources"},
                # Groups of their own, not laid out in the directories they
                # climb through: laid out in them, XcodeGen put the bindings
                # under the wrong groups, where Xcode then looked for them.
@@ -585,7 +586,9 @@ def android_gradle(root, a, ffi_lib_name):
     # The app library (ui/kotlin/app) for an app on it, the same way: its jar
     # under nix (`arkAppLib`), its sources otherwise.
     app_dirs = [f'"{TO_REPO}/ui/kotlin/app"'] if ark_entry(a) else []
-    kotlin_dirs = [f'"{TO_APP}/native/android/main"'] + (['"generated"', '"$arkLib/kotlin"'] if ark else [])
+    # The app's own Kotlin, for an app that still has some (`native/android/main`).
+    own = [f'"{TO_APP}/native/android/main"'] if os.path.isdir(native_dir(root, a, "main")) else []
+    kotlin_dirs = own + (['"generated"', '"$arkLib/kotlin"'] if ark else [])
     for name, _ in modules_of(root, a):
         if os.path.isdir(os.path.join(root, "modules", name, "kotlin")):
             kotlin_dirs.append(f'"{TO_REPO}/modules/{name}/kotlin"')
@@ -1101,7 +1104,7 @@ struct {product}App: App {{
 {hooks}{swift_devices(root, a)}        _app = StateObject(wrappedValue: ArkApp({host}(launch: .current(scan: QrScanner.available), store: {store})))
     }}
 
-    var body: some Scene {{ {a['apple'].get('scene', product + 'Scenes')}(app: app) }}
+    var body: some Scene {{ {'ArkScenes' if 'shell' in a else a['apple'].get('scene', product + 'Scenes')}(app: app) }}
 }}
 
 extension {host}: ArkAppHost {{}}
@@ -1197,7 +1200,7 @@ def kotlin_activity(root, a):
         r = "r"
         holders.append(f"class {sc['kotlin']}(r: {sc['runtime']}) :\n    ArkScreen<{sc['page']}, {sc['msg']}>({r}::page, {r}::send, {r}::version, {r}::isIdle, {r}::drawn, {r}::awaitsDraw)")
     imports = "\n".join(f"import {ns}.{t}" for t in sorted(set(types)))
-    root_fn = a["android"].get("root", a["name"] + "Root")
+    root_fn = "ArkAppRoot" if "shell" in a else a["android"].get("root", a["name"] + "Root")
     call, fn = kotlin_devices(root, a)
     content = f"{root_fn}(app, (application as {a['name']}Application).library)"
     content = f"{{\n{call}        {content}\n    }}" if call else f"= {content}"
@@ -1218,6 +1221,223 @@ class MainActivity : ArkActivity() {{
 }}
 {fn}
 {chr(10).join(holders)}
+"""
+
+
+# ------------------------------------------------------------- the shell
+
+# An app's shell on the phones is the app library's (ArkApp's and
+# ark-app-android's `ArkShell`; ui/docs/app.md, "The App Library"). What is
+# the app's is only names, from app.toml's `[shell]`: its holders (the
+# shell's, then a slot for each other screen), which name the shell's view
+# hosts as which screen's view, the shell page's fields the shell reads, and
+# the root it is drawn from (the scenes on Apple's, the composable the
+# activity draws on Android).
+
+SHELL_KEYS = ("screen", "settings", "commands", "over", "account", "section", "appearance", "household", "browse", "closed")
+
+
+def camel(name):
+    """`account_title` as Swift and Kotlin name a field: `accountTitle`."""
+    head, *rest = name.split("_")
+    return head + "".join(w[:1].upper() + w[1:] for w in rest)
+
+
+def field(path):
+    """A shell page's field by its path (`settings.plaid`), as both toolkits read it."""
+    return ".".join(camel(p) for p in path.split("."))
+
+
+def shell_screens(a):
+    """The screens the shell holds a slot of, in app.toml's order: every
+    one but the shell's own and those run beside it."""
+    sh = a["shell"]["screen"]
+    return [(n, sc) for n, sc in a.get("screens", {}).items() if n != sh and not sc.get("beside")]
+
+
+def swift_shell(root, a):
+    """`Generated/ArkShell.swift`: the app's holders over the app library's
+    shell, the names it hosts, and the scenes the `@main` draws."""
+    sh = a["shell"]
+    host = library_host(a)
+    shell = a["screens"][sh["screen"]]
+    views = a.get("views", {})
+    lines = [f"    let shell: ArkShell<{host}, {shell['runtime']}>"]
+    lines += [f"    let {n}: ArkSlot<{sc['swift']}>" for n, sc in shell_screens(a)]
+    made = [f"        {n} = shell.slot {{ {sc['swift']}($0.{n}()) }}" for n, sc in shell_screens(a)]
+    cases = [f'        case "{name}": ArkHosted(screens.{screen}) {{ {a["screens"][screen]["swift-view"]}() }}' for name, screen in sh.get("hosted", {}).items()]
+    over = sh["over"]
+    accent = a["accent"]
+    return f"""// {HEADER.format(app=a['dir'])}
+// {a['name']}'s shell on the app library (ArkApp's `ArkShell`), from its app.toml's
+// `[shell]`: its screens' holders, the names its shell hosts and the scenes
+// its `@main` draws. Everything else of the shell is the library's.
+import ArkUI
+import SwiftUI
+
+/// {a['name']}'s screens over the session: the shell's holder for the app's
+/// life, a slot for each other screen made again with each session.
+@MainActor
+final class ArkScreens: ObservableObject {{
+{chr(10).join(lines)}
+
+    init(_ app: ArkApp<{host}>) {{
+        let shell = ArkShell(app, shell: {{ $0.{sh['screen']}() }}, account: {json.dumps(sh['account'])}, page: ArkShellPage<{shell['runtime']}>(
+            section: {{ $0.{field(sh['section'])} }},
+            dark: {{ $0.{field(sh['appearance'])}.map {{ $0 == .dark }} }},
+            household: {{ $0.{field(sh['household'])} }},
+            browse: {{ $0.{field(sh['browse'])} }},
+            closed: {{ .{camel_lower(sh['closed'])}(url: $0) }}))
+        self.shell = shell
+{chr(10).join(made)}
+        shell.host {{ [unowned self] name in AnyView(ArkScreensHosted(screens: self, name: name)) }}
+    }}
+}}
+
+/// A name the shell's view hosts: a screen's generated view over its slot,
+/// else the library's (who is signed in, or nothing chosen).
+struct ArkScreensHosted: View {{
+    let screens: ArkScreens
+    let name: String
+
+    var body: some View {{
+        switch name {{
+{chr(10).join(cases)}
+        default: ArkShellPlace(screens.shell, name: name)
+        }}
+    }}
+}}
+
+/// {a['name']}'s scenes: the first run every Ark app shares until a session
+/// (or the demo) is open, then the shell; the menu bar's commands; Settings.
+struct ArkScenes: Scene {{
+    @ObservedObject var app: ArkApp<{host}>
+    @StateObject private var screens: ArkScreens
+
+    init(app: ArkApp<{host}>) {{
+        self.app = app
+        _screens = StateObject(wrappedValue: ArkScreens(app))
+    }}
+
+    var body: some Scene {{
+        WindowGroup {{
+            ArkRoot(app) {{ WelcomeView() }} content: {{
+                ArkShellView(screens.shell) {{ {shell['swift-view']}() }} over: {{ ArkHosted(screens.{over}) {{ {a['screens'][over]['swift-view']}() }} }} settings: {{ {views[sh['settings']]['swift-view']}() }}
+            }}
+            .arkWindow(squares: .{accent})
+        }}
+        // The size the launch asks for (the Mac's screenshots: 1440×900).
+        .launchWindowSize()
+        // The menu bar's commands: the Mac's menus, the iPad's hardware keyboard.
+        .commands {{ {views[sh['commands']]['swift-view']}(screen: screens.shell.screen) }}
+        // Settings: the Mac's Settings window (⌘,); on the iPhone and the
+        // iPad, a sheet the shell puts up.
+        ArkSettings {{
+            {views[sh['settings']]['swift-view']}()
+                .arkSettings(screens.shell)
+                .tint(Color.accent)
+        }}
+    }}
+}}
+"""
+
+
+def camel_lower(name):
+    """`PageClosed` as Swift names an enum's case: `pageClosed`."""
+    return name[:1].lower() + name[1:]
+
+
+def kotlin_shell(root, a):
+    """`generated/ArkShell.kt`: the app's holders over the app library's
+    shell, the names it hosts, and the root the activity draws."""
+    sh = a["shell"]
+    host = library_host(a)
+    ns = kotlin_namespace(a)
+    shell = a["screens"][sh["screen"]]
+    views = a.get("views", {})
+    slots = [f"    val {n} = shell.slot {{ {sc['kotlin']}(library.{n}()) }}" for n, sc in shell_screens(a)]
+    cases = [f'            "{name}" -> ArkHosted({screen}) {{ {a["screens"][screen]["kotlin-view"]}(it) }}' for name, screen in sh.get("hosted", {}).items()]
+    over = sh["over"]
+    accent = a["accent"][:1].upper() + a["accent"][1:]
+    hh = field(sh["household"])
+    return f"""// {HEADER.format(app=a['dir'])}
+// {a['name']}'s shell on the app library (ark-app-android's `ArkShell`), from its
+// app.toml's `[shell]`: its screens' holders, the names its shell hosts and
+// the root its activity draws. Everything else of the shell is the library's.
+package {a['android']['package']}
+
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import dev.arkui.Accent
+import dev.arkui.app.ArkApp
+import dev.arkui.app.ArkHosted
+import dev.arkui.app.ArkHousehold
+import dev.arkui.app.ArkShell
+import dev.arkui.app.ArkShellPage
+import dev.arkui.app.ArkShellPlace
+import dev.arkui.app.ArkShellRoot
+import {ns}.Appearance
+import {ns}.{host}
+import {ns}.{shell['msg']}
+import {ns}.{shell['page']}
+
+/** {a['name']}'s screens over the session: a slot for each, made again with each session. */
+class ArkScreens(app: ArkApp, library: {host}) {{
+    val shell =
+        ArkShell<{shell['kotlin']}, {shell['page']}, {shell['msg']}>(
+            app,
+            make = {{ {shell['kotlin']}(library.{sh['screen']}()) }},
+            read = {{ library.{sh['screen']}().page() }},
+            account = {json.dumps(sh['account'])},
+            page =
+                ArkShellPage<{shell['page']}, {shell['msg']}>(
+                    section = {{ it.{field(sh['section'])} }},
+                    dark = {{ it.{field(sh['appearance'])}?.let {{ a -> a == Appearance.DARK }} }},
+                    household = {{
+                        it.{hh}.let {{ h ->
+                            ArkHousehold(h.who, h.picture, h.detail, h.server, h.linked, h.demo, h.wanting, h.wantingTitle, h.wantingSaid, h.wantingWhere)
+                        }}
+                    }},
+                    browse = {{ it.{field(sh['browse'])} }},
+                    closed = {{ {shell['msg']}.{sh['closed']}(url = it) }},
+                ),
+        )
+{chr(10).join(slots)}
+
+    /** A name the shell's view hosts: a screen's generated composable over its slot, else the library's. */
+    @Composable
+    fun Hosted(name: String) {{
+        when (name) {{
+{chr(10).join(cases)}
+            else -> ArkShellPlace(shell, name)
+        }}
+    }}
+}}
+
+/** The first run every Ark app shares until a session (or the demo) is open, then the shell: what the activity draws. */
+@Composable
+fun ArkAppRoot(app: ArkApp, library: {host}) {{
+    val screens = remember(library) {{ ArkScreens(app, library) }}
+    // The first run's pages every Ark app shares (generated/WelcomeScreen.kt, from ark_app::welcome).
+    val welcome = remember(library) {{ FirstRunHolder(library.welcome()) }}
+    val moves by app.moves.collectAsStateWithLifecycle()
+    LaunchedEffect(moves) {{ welcome.reload() }}
+    val page by welcome.page.collectAsStateWithLifecycle()
+    ArkShellRoot(
+        screens.shell,
+        Accent.{accent},
+        welcome = page.intro != null,
+        welcomeScreen = {{ WelcomeScreen(welcome) }},
+        main = {{ {shell['kotlin-view']}(it) }},
+        settings = {{ {views[sh['settings']]['kotlin-view']}(it) }},
+        over = {{ ArkHosted(screens.{over}) {{ {a['screens'][over]['kotlin-view']}(it) }} }},
+        hosted = {{ screens.Hosted(it) }},
+        commands = {{ {views[sh['commands']]['kotlin-view']}(it) }},
+    )
+}}
 """
 
 
@@ -1299,8 +1519,10 @@ fn main() {{
 # `phone_host!`). nix/ark-app.nix builds it (`<id>-ffi`), and a cargo build
 # of the phones' (the iPhone's) adds it to the workspace at `<app>/.ffi`.
 
-# The first run's records, every Ark app's (ark_app::welcome).
+# The first run's records, every Ark app's (ark_app::welcome), and who is
+# signed in as the shell's account face says it (ark_app::shell).
 WELCOME_TWINS = "welcome::{AddDeviceMsg, AddDevicePage, ConfirmPage, IntroPage, OpeningPage, ServerPage, SignInPage, WelcomeMsg, WelcomePage}"
+SHELL_TWINS = "shell::Household"
 
 
 def ffi_namespace(a):
@@ -1311,15 +1533,16 @@ def ffi_namespace(a):
 def ffi_twins(a):
     """Every type that crosses, by crate (its lib's name), as `use` names
     them: `[ffi.twins]`, then the app's screens' pages and messages, its
-    route and native, and the first run's records."""
+    route, and the first run's and the shell's records. What only the
+    phone's shell does is ark-ffi's own (`ShellAsk`), every app's."""
     crate = rust_name(a["crate"])
     out = {k: list(v) for k, v in a["ffi"].get("twins", {}).items()}
     mine = out.setdefault(crate, [])
     for sc in a.get("screens", {}).values():
         module = sc["app"].rsplit("::", 1)[0]
         mine.append(f"{module}::{{{sc['page']}, {sc['msg']}}}")
-    mine += [a["ffi"]["route"], a["ffi"]["native"]]
-    out.setdefault("ark_app", []).append(WELCOME_TWINS)
+    mine.append(a["ffi"]["route"])
+    out.setdefault("ark_app", []).extend([WELCOME_TWINS, SHELL_TWINS])
     return out
 
 
@@ -1365,7 +1588,7 @@ def ffi_lib(a):
 uniffi::setup_scaffolding!();
 
 // What crosses: app.toml's `[ffi.twins]`, the screens' pages and messages,
-// the route, the native and the first run's records.
+// the route, and the first run's and the shell's records.
 ark::twins!(
 {twins}
 );
@@ -1396,7 +1619,6 @@ impl ark_ffi::hosted::PhoneApp for Phone {{
 ark_ffi::phone_host!(
     /// What the phone holds: the app host, the first run, every screen.
     {f['host']}, Phone,
-    native: {crate}::{f['native']} => {twin(f['native'])},
     route: {crate}::{f['route']} => {twin(f['route'])},
     screens {{ {hosted} }}
     beside {{ {beside} }}
@@ -1641,6 +1863,8 @@ def write(root, app, views=None, icon_png=None, prefix=BUNDLE_PREFIX, out=None):
         os.makedirs(os.path.join(ios, "Generated"), exist_ok=True)
         if ark_entry(a):
             write_file(os.path.join(ios, "Generated", "ArkApp.swift"), swift_main(REPO, a))
+            if "shell" in a:
+                write_file(os.path.join(ios, "Generated", "ArkShell.swift"), swift_shell(REPO, a))
             if swift_background(REPO, a):
                 write_file(os.path.join(ios, "Generated", "ArkBackground.swift"), swift_background(REPO, a))
         written.append(ios)
@@ -1661,6 +1885,8 @@ def write(root, app, views=None, icon_png=None, prefix=BUNDLE_PREFIX, out=None):
         if ark_entry(a):
             write_file(os.path.join(andr, "generated", "ArkApp.kt"), kotlin_app(REPO, a))
             write_file(os.path.join(andr, "generated", "ArkActivity.kt"), kotlin_activity(REPO, a))
+            if "shell" in a:
+                write_file(os.path.join(andr, "generated", "ArkShell.kt"), kotlin_shell(REPO, a))
         written.append(andr)
     return written
 
@@ -1752,19 +1978,35 @@ def check(root):
                     problems.append(f"{app}/app.toml's view {n} is over no screen of [screens]")
                 if ("view" in v) == ("commands" in v):
                     problems.append(f"{app}/app.toml's view {n} says one of `view` and `commands`")
+        # The shell is the app library's, drawn from `[shell]`'s names
+        # (`swift_shell`, `kotlin_shell`): each must name what is there.
+        if "shell" in a:
+            sh = a["shell"]
+            for k in SHELL_KEYS:
+                if k not in sh:
+                    problems.append(f"{app}/app.toml's [shell] says no `{k}`")
+            for k in ("screen", "over"):
+                if k in sh and sh[k] not in a.get("screens", {}):
+                    problems.append(f"{app}/app.toml's [shell] {k} {sh[k]} is no screen of [screens]")
+            for k in ("settings", "commands"):
+                if k in sh and sh[k] not in a.get("views", {}):
+                    problems.append(f"{app}/app.toml's [shell] {k} {sh[k]} is no view of [views]")
+            for name, screen in sh.get("hosted", {}).items():
+                if screen not in a.get("screens", {}) or a["screens"][screen].get("beside"):
+                    problems.append(f"{app}/app.toml's [shell.hosted] {name} is over {screen}, no screen of [screens] the shell holds")
         # The phones' library is written from `[ffi]` and `[screens]`
         # (`ffi_lib`), its crates named by their libs' names with dashes.
         if a.get("crate") and "ffi" in a:
-            for k in ("host", "app", "route", "native", "domain"):
+            for k in ("host", "app", "route", "domain"):
                 if k not in a["ffi"]:
                     problems.append(f"{app}/app.toml's [ffi] says no `{k}`")
             for n, sc in a.get("screens", {}).items():
                 if "app" not in sc:
                     problems.append(f"{app}/app.toml's screen {n} says no `app`, the type it runs in {a['crate']}")
-            if all(k in a["ffi"] for k in ("route", "native", "domain")) and all("app" in sc for sc in a.get("screens", {}).values()):
+            if all(k in a["ffi"] for k in ("route", "domain")) and all("app" in sc for sc in a.get("screens", {}).values()):
                 # A twin is named as its type in Kotlin and Swift: never as
                 # one UniFFI's Kotlin already imports (JNA's `Native`).
-                for k in ("route", "native"):
+                for k in ("route",):
                     if a["ffi"][k].rsplit("::", 1)[-1] in ("Native", "Pointer", "Structure", "Library"):
                         problems.append(f"{app}/app.toml's [ffi] {k} is named as a JNA class its Kotlin imports")
                 names = {p["name"] for p in cargo_metadata(root)["packages"]}

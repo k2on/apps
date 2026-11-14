@@ -28,17 +28,18 @@ value), then used from there.
 ## An App's Directory
 
 An ark app's committed shape is `app.toml`, `icon.svg`, `core/`, `app/`,
-`server/` and `demo/`. Its `native/` and `iced/` are being removed and
-must not grow; `bridge/`, `views/` and `web/` are gone (the phones'
-library and the browser's page are generated from app.toml by
-ui/prebuild.py and nix/ark-app.nix). A screen goes in `app/` as a
-`#[view]`, what the app's host does with what its screens ask (routing
-between runtimes, its month, its bank, its session's facts) in `app/` as
-its `ark_app::host::HostedApp`, what a window draws of the app's own (a
-name its shell hosts, its Settings, its address) in `app/` as its
-`ark_app::window::Windowed`, a device feature in an `ark-*` module behind
-an `ark-module` port (its browser device in module.toml's `[web]`),
-domain rules in `core/`. An app takes a
-module on by depending on its crate from `app/`; nothing lists modules
-anywhere else. `ui/docs/app.md` ("Generated, Not Committed") says what to
-do in each case.
+`server/` and `demo/`, and the one Android debug key its app.toml names.
+Nothing native of an app is committed: its phones' shell is the app
+library's (ArkApp's and ark-app-android's `ArkShell`), drawn from app.toml's
+`[shell]` names and its Rust views; its theme, glyphs and marks are arkui's.
+Its `bridge/`, `views/`, `native/`, `iced/` and `web/` are being removed
+and must not grow (money has none of them but `iced/`, the desktop's): a
+screen goes in `app/` as a `#[view]`, what the app's host does with what
+its screens ask (routing between runtimes, its month, its bank, its
+session's facts; a route is one of the shell's places on every host) in
+`app/` as its `ark_app::host::HostedApp`, a device feature in an `ark-*`
+module behind an `ark-module` port, domain rules in `core/`, and anything
+of a shell another app could share in ArkApp, ark-app-android or arkui. An
+app takes a module on by depending on its crate from `app/`; nothing lists
+modules anywhere else. `ui/docs/app.md` ("Generated, Not Committed") says
+what to do in each case.

@@ -84,7 +84,7 @@ public object ArkCorner {
 public fun ArkGlyph(name: String, type: ArkType, color: Color, modifier: Modifier = Modifier) {
     val side = with(LocalDensity.current) { type.style.fontSize.toDp() }
     Icon(
-        LocalGlyphs.current(name) ?: ArkGlyphs.named(name) ?: ArkGlyphs.Chevron,
+        ArkGlyphs.named(name) ?: ArkGlyphs.Chevron,
         contentDescription = null,
         tint = color,
         modifier = modifier.size(side),
@@ -94,7 +94,7 @@ public fun ArkGlyph(name: String, type: ArkType, color: Color, modifier: Modifie
 /** A glyph by its Lucide name on a tile of the tint a view names. */
 @Composable
 public fun Tile(glyph: String, tint: String) {
-    Tile(LocalGlyphs.current(glyph) ?: ArkGlyphs.named(glyph) ?: ArkGlyphs.Chevron, tintInk(tintNamed(tint)))
+    Tile(ArkGlyphs.named(glyph) ?: ArkGlyphs.Chevron, tintInk(tintNamed(tint)))
 }
 
 /** A figure in a badge of the tint a view names. */

@@ -2,10 +2,10 @@
 // each has the name and the inputs its Rust builder declares
 // (`ark_app::view::Part::call`), so the generated screens (`ark-ui-gen`)
 // are only calls to these. Everything a part does is here, by hand, where
-// Android Studio previews and checks it. What an app adds, once at its
-// root: the frame a tab's page sits in (`LocalTabFrame`, its top bar and
-// face), the mark a row of its own kind wears (`LocalRowMark`) and its own
-// glyphs by name (`LocalGlyphs`).
+// Android Studio previews and checks it. What the app library's shell adds,
+// once at its root: the frame a tab's page sits in (`LocalTabFrame`: under
+// the shell's top bar, its pull to refresh). Nothing is an app's own: a
+// row's mark is its glyph and its chart slot ([MarkTile]).
 package dev.arkui
 
 import androidx.compose.foundation.background
@@ -75,14 +75,7 @@ public val LocalTabFrame = compositionLocalOf<@Composable (title: String, onRefr
     { _, _, content -> content() }
 }
 
-/** The mark a `ListRow(mark = …)` wears, by its kind: an account's. */
-public val LocalRowMark = compositionLocalOf<@Composable (String) -> Unit> { { } }
-
-/** The app's glyphs by their shared names, before ArkUI's own. */
-public val LocalGlyphs = compositionLocalOf<(String) -> ImageVector?> { { null } }
-
-@Composable
-private fun glyph(name: String): ImageVector = LocalGlyphs.current(name) ?: ArkGlyphs.named(name) ?: ArkGlyphs.Chevron
+private fun glyph(name: String): ImageVector = ArkGlyphs.named(name) ?: ArkGlyphs.Chevron
 
 // * The page
 
@@ -225,7 +218,7 @@ private fun MenuOf(offered: List<MenuAction>, open: Boolean, onDismiss: () -> Un
 }
 
 /**
- * A row of a thing toward a goal: the app's mark before its title (faded while hidden), a slim bar
+ * A row of a thing toward a goal: its mark before its title (faded while hidden), a slim bar
  * of how far in its tint, words under it in a tint with quiet ones at their end; short of compact,
  * two figures in columns; its figure in a status badge at its end. Tapped, [onTap]; held, its menu
  * — lit under the finger either way (`Press.Highlight`).
@@ -236,6 +229,7 @@ public fun MeterRow(
     status: String,
     statusTint: String,
     mark: String? = null,
+    markSlot: Long = -1,
     faded: Boolean = false,
     fraction: Double? = null,
     meterTint: String = "positive",
@@ -264,7 +258,7 @@ public fun MeterRow(
         androidx.compose.foundation.layout.Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Space.xs)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 if (mark != null) {
-                    LocalRowMark.current(mark)
+                    MarkTile(mark, markSlot)
                     Spacer(Modifier.width(Space.s))
                 }
                 Text(
@@ -334,7 +328,7 @@ public class MenuAction(
 )
 
 /**
- * A row of a card: its picture (a tile, the app's mark, or a bare glyph in the accent), its title
+ * A row of a card: its picture (a tile, a thing's mark, or a bare glyph in the accent), its title
  * and the line under it, a count in a badge, an amount, and a chevron when it opens a page
  * (`pushes`); tapped, `onTap`; held, its menu — lit under the finger either way
  * (`Press.Highlight`).
@@ -345,6 +339,7 @@ public fun ListRow(
     subtitle: String? = null,
     tile: String? = null,
     mark: String? = null,
+    markSlot: Long = -1,
     glyph: String? = null,
     badge: Long? = null,
     amount: Long? = null,
@@ -370,7 +365,7 @@ public fun ListRow(
     ) {
         when {
             tile != null -> Tile(glyph(tile), MaterialTheme.colorScheme.onSurfaceVariant)
-            mark != null -> LocalRowMark.current(mark)
+            mark != null -> MarkTile(mark, markSlot)
             glyph != null -> Icon(glyph(glyph), contentDescription = null, tint = MaterialTheme.colorScheme.primary)
         }
         // The words at the card's inset where nothing is before them, as every card's are.

@@ -6,39 +6,54 @@ runs on ArkDB at spec v5, as harken does: one domain in plain Rust, every
 figure a view kept up to date by the rows a change touched.
 
 ```
-app.toml   what money is to every platform: its name, id, accent,
-           platforms, modules and what it asks of each (ui/docs/app.md,
-           "Generated, Not Committed"); every native project is generated
-           from it: `nix run .#money-prebuild` writes them into .native/
-icon.svg   its icon, every platform's
-domain/    the domain, in plain Rust (spec/AUTHORING.md): src/schema.rs,
-           types.rs, dates.rs; accounts.rs, categories.rs, budget.rs,
-           transactions.rs; plaid.rs, the bank import; receipts.rs and
-           stores.rs, the stores' receipts; migrations.rs. The demo's
-           household is beside the app, in seed/
-app/       money as an Ark app: the screens' state, messages, update and
-           #[view]s, drawn by iced and the browser and generated as
-           SwiftUI and Compose (`screens()`)
-bridge/    what the phones' library exports (FFI.md): the bridge with the
-           domain linked in, the UniFFI twins of the core's and the app's
-           records and messages, typed views, the demo, a server in the
-           process
-seed/      the demo's household on a peer and a disk, and `money-seed DATA`
-server/    money-server: the hub, sign-in, a web directory if given one, the
-           bank importer (src/importer.rs, Plaid over src/plaid.rs);
-           nix/module.nix is services.money
-iced/      the desktop client, on arkui and ark-peer: signed
-           in to a server, or (--features demo) a seeded household on a
-           peer that is its own authority
-web/       the browser client, Leptos over arkui-web
-native/    what is not written in Rust yet, each going as it moves into
-           app/: ios/ (SwiftUI, native/ios/README.md) and android/
-           (Compose, native/android/README.md), with their tests
-fdroid/    F-Droid's metadata
-screens/   the screenshots' shots.json and server.sh
+app.toml        what money is to every platform: its name, id, accent,
+                platforms, its phones' shell (`[shell]`) and what it asks of
+                each (ui/docs/app.md, "Generated, Not Committed"); every
+                native project is generated from it and the Rust views:
+                `nix run .#money-prebuild` writes them into .native/
+icon.svg        its icon, every platform's
+core/           the domain, in plain Rust (spec/AUTHORING.md): src/schema.rs,
+                types.rs, dates.rs; accounts.rs, categories.rs, budget.rs,
+                transactions.rs; plaid.rs, the bank import; receipts.rs and
+                stores.rs, the stores' receipts; migrations.rs
+app/            money as an Ark app: the screens' state, messages, update and
+                #[view]s, drawn by iced and the browser and generated as
+                SwiftUI and Compose; its part of every host (src/host.rs)
+server/         money-server: the hub, sign-in, a web directory if given one,
+                the bank importer (src/importer.rs, Plaid over src/plaid.rs);
+                nix/module.nix is services.money
+demo/           the demo's household on a peer and a disk (`money-seed DATA`),
+                the screenshots' shots.json and server.sh
+iced/           the desktop client, on arkui and ark-peer: signed in to a
+                server, or (--features demo) a seeded household on a peer
+                that is its own authority (going: ui/docs/app.md, "The
+                Desktop's Own Pages, Moved")
+debug.keystore  the one key every Android build signs with (below)
 ```
 
-```
+## The phones
+
+Nothing of money's phones is written by hand. Their library is generated
+from app.toml (`[ffi]`), their screens from money-app's views, and their
+shell is the app library's (ArkApp's and ark-app-android's `ArkShell`):
+the sections and their tabs, toolbars, search and inspectors are the
+shell's view (`app/src/shell/view.rs`); which screen is hosted where, what
+goes over every section (the sheets), Settings and the menu bar's commands
+are app.toml's `[shell]`. A route is one of the shell's places on every
+platform: an account is its section (Accounts pushes it on a phone), a
+bank Connected Banks in Settings. The look is arkui's in money's green, an
+account's mark its kind's glyph in its chart slot's colour (`accounts::
+kind_glyph`, `kind_slot`), drawn by ArkUI's `MarkTile`.
+
+**One key, committed, and public on purpose.** `debug.keystore` is the key
+every Android build signs with, debug and release, so one APK installs over
+the last, for the reasons harken's README gives; its certificate's SHA-256
+is `125e43a7…646a6afa`. It is a PKCS#12 file made with openssl, which
+`storeType = "pkcs12"` says. Anyone can sign an APK as this app with it.
+F-Droid offers money from the same repository as harken and Revelation
+(`nix/fdroid.nix`; its metadata is app.toml's `[store]`, written out by
+`ui/prebuild.py fdroid`, and its icon icon.svg). Its Maven graph is ArkUI's
+(ui/kotlin/android/deps.json).
 
 The phones sign in the way the browser does (below).
 

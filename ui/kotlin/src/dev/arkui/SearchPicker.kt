@@ -91,7 +91,7 @@ public class SearchChoices internal constructor() {
     internal val all: MutableList<SearchChoiceValue> = mutableListOf()
 
     /**
-     * One choice: its title, its glyph (a Lucide name, or the app's through `LocalGlyphs`), the tag
+     * One choice: its title, its glyph (a Lucide name), the tag
      * choosing it sends, the group it is listed under, and words at its end in a tint.
      */
     @Suppress("FunctionName")

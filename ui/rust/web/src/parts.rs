@@ -618,8 +618,8 @@ pub fn meter_row<M: Clone + std::fmt::Debug + 'static>(r: MeterRow<M>) -> AnyVie
     let mark = r
         .mark
         .as_ref()
-        .and_then(|m| m.get())
-        .map(|k| tile(if k == "credit" { "credit-card" } else { &k }, "ark-tile ark-tile-small ark-tile-accent"));
+        .and_then(|(m, _)| m.get())
+        .map(|g| tile(&g, "ark-tile ark-tile-small ark-tile-accent"));
     let bar = match (r.fraction.as_ref().and_then(|f| f.get()), &r.meter_tint) {
         (Some(f), Some(t)) => Some(crate::figures::goal_bar(f as f32, crate::figures::Tint::named(&t.get()))),
         _ => None,

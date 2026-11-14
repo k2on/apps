@@ -49,7 +49,7 @@ public fun FirstRunPage(glyph: String, title: String, sentence: String, content:
     val own = if (glyph == "app") context.resources.getIdentifier("mark", "drawable", context.packageName) else 0
     val painter =
         if (own != 0) painterResource(own)
-        else rememberVectorPainter(LocalGlyphs.current(glyph) ?: ArkGlyphs.named(glyph) ?: ArkGlyphs.Chevron)
+        else rememberVectorPainter(ArkGlyphs.named(glyph) ?: ArkGlyphs.Chevron)
     OnboardingPage(painter, title = title, sentence = sentence) {
         Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(Space.m)) { content() }
     }

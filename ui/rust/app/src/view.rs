@@ -1040,8 +1040,9 @@ impl<M> Section<M> {
 #[derive(Clone, Debug)]
 pub struct MeterRow<M> {
     pub title: Val<String>,
-    /// The app's mark of this kind before the title, while there is one.
-    pub mark: Option<Val<Option<String>>>,
+    /// A mark before the title, while there is one: its glyph on a wash of
+    /// the theme's chart colour of its slot (ArkUI's `Tile`).
+    pub mark: Option<(Val<Option<String>>, Val<i64>)>,
     pub faded: Option<Val<bool>>,
     /// How far, 0 to 1, while there is a goal; and the bar's tint.
     pub fraction: Option<Val<Option<f64>>>,
@@ -1080,9 +1081,11 @@ pub fn meter_row<M>(title: impl Into<Val<String>>, status: impl Into<Val<String>
 }
 
 impl<M> MeterRow<M> {
-    /// The app's mark of `kind` before the title, while there is one.
-    pub fn mark(mut self, kind: impl Into<Val<Option<String>>>) -> Self {
-        self.mark = Some(kind.into());
+    /// A mark before the title, while `glyph` is one: the glyph in the
+    /// chart palette's colour of `slot` (none of its: the quiet colour),
+    /// on a wash of it (ArkUI's `Tile`).
+    pub fn mark(mut self, glyph: impl Into<Val<Option<String>>>, slot: impl Into<Val<i64>>) -> Self {
+        self.mark = Some((glyph.into(), slot.into()));
         self
     }
     /// Its title quiet while `b` holds (hidden, not gone).
@@ -1200,12 +1203,12 @@ pub enum Picture {
     None,
     /// A glyph on a rounded tile, in the quiet colour.
     Tile(&'static str),
-    /// The app's mark for a kind of thing (an account's): drawn by its
-    /// glyph on the desktop and in the browser, by the app's own mark of
-    /// `kind` on the phones.
+    /// A thing's mark (an account's kind): its glyph in the chart palette's
+    /// colour of `slot` (none of its, below zero: the quiet colour) on a
+    /// wash of it, a rounded square (ArkUI's `Tile`), worked out by the app.
     Mark {
         glyph: Val<String>,
-        kind: Val<String>,
+        slot: Val<i64>,
     },
     /// A bare glyph in the accent colour: an action row.
     Glyph(&'static str),
@@ -1271,10 +1274,10 @@ impl<M> ListRow<M> {
         self.picture = Picture::Tile(glyph);
         self
     }
-    pub fn mark(mut self, glyph: impl Into<Val<String>>, kind: impl Into<Val<String>>) -> Self {
+    pub fn mark(mut self, glyph: impl Into<Val<String>>, slot: impl Into<Val<i64>>) -> Self {
         self.picture = Picture::Mark {
             glyph: glyph.into(),
-            kind: kind.into(),
+            slot: slot.into(),
         };
         self
     }
@@ -2302,8 +2305,9 @@ impl<M> Part<M> {
             }
             Part::MeterRow(r) => {
                 let mut args = vec![("status", G::Val(lit(&r.status))), ("statusTint", G::Val(lit(&r.status_tint)))];
-                if let Some(m) = &r.mark {
+                if let Some((m, slot)) = &r.mark {
                     args.push(("mark", G::Val(lit(m))));
+                    args.push(("markSlot", G::Val(lit(slot))));
                 }
                 if let Some(f) = &r.faded {
                     args.push(("faded", G::Val(lit(f))));
@@ -2355,7 +2359,10 @@ impl<M> Part<M> {
                 match &r.picture {
                     Picture::None => {}
                     Picture::Tile(g) => args.push(("tile", G::Text(g))),
-                    Picture::Mark { kind, .. } => args.push(("mark", G::Val(lit(kind)))),
+                    Picture::Mark { glyph, slot } => {
+                        args.push(("mark", G::Val(lit(glyph))));
+                        args.push(("markSlot", G::Val(lit(slot))));
+                    }
                     Picture::Glyph(g) => args.push(("glyph", G::Text(g))),
                 }
                 if let Some(b) = &r.badge {

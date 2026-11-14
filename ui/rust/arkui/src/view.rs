@@ -1189,8 +1189,8 @@ fn menu_of<M: Clone + 'static>(menu: Vec<ark_app::view::MenuItem<M>>) -> Vec<con
 fn meter_row<M: Clone + 'static>(r: MeterRow<M>) -> Element<'static, M> {
     let faded = r.faded.as_ref().is_some_and(|f| f.get());
     let mut name = row![].spacing(8).align_y(Alignment::Center);
-    if let Some(kind) = r.mark.as_ref().and_then(|m| m.get()) {
-        let glyph = shape(if kind == "credit" { "credit-card" } else { &kind });
+    if let Some(g) = r.mark.as_ref().and_then(|(m, _)| m.get()) {
+        let glyph = shape(&g);
         name = name.push(parts::tile(glyph, |t| crate::theme::of(t).primary.base.color, 20.0));
     }
     name = name.push(text(r.title.get()).size(14).style(move |t| text::Style {

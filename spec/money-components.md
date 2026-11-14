@@ -10,7 +10,7 @@ card, a section's heading, a pill, a tile, a badge, a pager, a progress bar.
 |---|---|---|---|---|---|
 | HeroCard | caption, cents, tint, note, onClick?, footer | — | `HeroCard` | `HeroFigure` | the budget's ready box (`look::ready`) |
 | HeadingTotal | cents | SectionHeader's trailing | `HeadingTotal` | the section header's total | a group row's totals |
-| KindTile | account kind, side | Tile | `KindTile`, `kindColor` | `AccountMark` | the sidebar's glyph (`view::glyph`) |
+| MarkTile | glyph, chart slot (money-app's `kind_glyph`, `kind_slot`), side | Tile | `MarkTile` | `MarkTile` | the sidebar's glyph (`view::glyph`) |
 | MonthPager | month, stepMonth, showThisMonth | Pager | `MonthPager` | `Pager` in `BudgetView` / `InsightsView` | `parts::pager` in the budget and Reflect |
 | AccountRow | account (name, kind, balance, unapproved) | ListRow-like, KindTile, Badge | `AccountRow` | `AccountRow` | sidebar entry |
 | TxnRow | transaction, showAccount, divided, onClick | — | `TxnRow` | `TxnRow`, `TxnButton` | register table row |

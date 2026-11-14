@@ -322,7 +322,7 @@ impl<W: WebHosted> WebHost<W> {
     pub(crate) fn host<R>(&mut self, f: impl FnOnce(&mut Hosting<App<W>>, &mut WebPlace<'_, W>) -> R) -> R {
         let r = self.with_place(f);
         for n in self.hosting.take_natives() {
-            if App::<W>::signs_out(&n) {
+            if n == ark_app::host::ShellAsk::SignOut {
                 self.sign_out();
             }
             self.with_place(|h, place| h.with(place, |app, cx| app.native(n, cx)));

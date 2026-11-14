@@ -11,7 +11,7 @@ use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, Weak};
 
-use ark_app::host::{Has, HostedApp, Hosting, Link, Place, Screen, Session as Facts, Waker};
+use ark_app::host::{Has, HostedApp, Hosting, Link, Place, Screen, Session as Facts, ShellAsk, Waker};
 use ark_app::{App, ViewKey, Views};
 use ark_auth::onboarding::AppInfo;
 
@@ -24,7 +24,7 @@ use crate::{ArkProcess, Handle, Hold, HostApp, Login, Opened, Peer, Refusal, Ses
 /// part's ([`HostedApp`]).
 pub trait PhoneApp: Send + Sync + 'static {
     /// The app's part of its host (money's `money_app::host::Money`).
-    type App: HostedApp<Route: Send, Request: Send, Native: Send> + Send;
+    type App: HostedApp<Route: Send, Request: Send> + Send;
     /// Its name as a person reads it (`Money`), and the scheme its sign-in
     /// and its links come back on (`money`).
     const NAME: &'static str;
@@ -94,7 +94,6 @@ pub fn today() -> String {
 
 type Key<P> = <<P as PhoneApp>::App as HostedApp>::Key;
 type Change<P> = <<P as PhoneApp>::App as HostedApp>::Change;
-type Native<P> = <<P as PhoneApp>::App as HostedApp>::Native;
 
 /// The phone, as the place an app's part runs over.
 pub struct PhonePlace<P: PhoneApp> {
@@ -160,10 +159,6 @@ impl<P: PhoneApp> Place<Key<P>, Change<P>> for PhonePlace<P> {
     fn draws_between(&self) -> bool {
         true
     }
-    /// A page opened goes on the section's stack.
-    fn stacks(&self) -> bool {
-        true
-    }
     fn session(&self) -> Facts {
         let peer = self.session.peer();
         let st = peer.status();
@@ -211,7 +206,7 @@ pub struct Hosted<P: PhoneApp> {
     open: Mutex<Option<Open<P>>>,
     handle: Mutex<Option<Handle>>,
     /// What only the phone's shell does, taken by it.
-    natives: Mutex<Vec<Native<P>>>,
+    natives: Mutex<Vec<ShellAsk>>,
     generation: AtomicU64,
     /// Its screens' views as a screenshot walk reaches them (`HostApp::
     /// shots`): what [`phone_host!`] hands it, each screen by its name.
@@ -272,7 +267,7 @@ impl<P: PhoneApp> Hosted<P> {
         let handle = lock(&self.handle).clone();
         let mut asked = false;
         for n in natives {
-            if <P::App as HostedApp>::signs_out(&n) {
+            if n == ShellAsk::SignOut {
                 if let Some(h) = &handle {
                     h.sign_out()
                 }
@@ -379,19 +374,6 @@ impl<P: PhoneApp> Hosted<P> {
         lock(&self.open).is_some()
     }
 
-    /// Grows with every session opened; zero while none is.
-    pub fn generation(&self) -> u64 {
-        match self.is_open() {
-            true => self.generation.load(Ordering::Acquire),
-            false => 0,
-        }
-    }
-
-    /// What the phone's shell is asked, in order, taken.
-    pub fn take_natives(&self) -> Vec<Native<P>> {
-        std::mem::take(&mut *lock(&self.natives))
-    }
-
     /// The session's day (`2026-10-26`).
     pub fn today(&self) -> String {
         self.read(|_, p| p.today.clone()).unwrap_or_else(today)
@@ -463,6 +445,17 @@ where
 
     fn moved(&self) {
         self.with(|o| o.hosting.moved(&mut o.place));
+    }
+
+    fn generation(&self) -> u64 {
+        match self.is_open() {
+            true => self.generation.load(Ordering::Acquire),
+            false => 0,
+        }
+    }
+
+    fn natives(&self) -> Vec<ShellAsk> {
+        std::mem::take(&mut *lock(&self.natives))
     }
 
     fn link(&self, args: Option<Vec<String>>, address: String) {
@@ -731,9 +724,10 @@ macro_rules! beside_screen {
 /// app has ([`crate::ArkHost`], `host()`), the first run's pages
 /// (`welcome()`, over the library's `WelcomeApp`), each screen's runtime by
 /// its app.toml `[screens]` name (`$screen()`, reading its blank page while
-/// no session is open), each screen run beside it (`$beside(first)`), the
-/// session's generation, what only the phone's shell does (`natives()`,
-/// the app's `Native` twin `$native`) and the session's day — and its
+/// no session is open), each screen run beside it (`$beside(first)`)
+/// and the session's day (the session's generation and what only the
+/// phone's shell does are the app host's: `ArkHost.generation()`,
+/// `ArkHost.natives()`) — and its
 /// routes read from a link (`route_from_url`, the `Route` twin `$route_ffi`
 /// of `$route`). Written by the app's generated library (ui/prebuild.py's
 /// `ffi`), after its twins.
@@ -743,7 +737,6 @@ macro_rules! beside_screen {
 macro_rules! phone_host {
     (
         $(#[$doc:meta])* $host:ident, $phone:ty,
-        native: $native:ty => $native_ffi:ty,
         route: $route:ty => $route_ffi:ty,
         screens { $($screen:ident: $screen_ty:ident),* $(,)? }
         beside { $($beside:ident: $beside_ty:ident ($beside_msg:ty)),* $(,)? }
@@ -808,18 +801,6 @@ macro_rules! phone_host {
                     Some(b)
                 }
             )*
-
-            /// The session the screens' runtimes are over: grows with every
-            /// session opened, so the phone makes its holders again; none
-            /// open is zero.
-            pub fn generation(&self) -> u64 {
-                self.app.generation()
-            }
-
-            /// What the phone's shell is asked to do, in order, taken.
-            pub fn natives(&self) -> Vec<$native_ffi> {
-                self.app.take_natives().into_iter().map(<$native as $crate::Twin<crate::UniFfiTag>>::ffi).collect()
-            }
 
             /// The session's day (`2026-10-26`): the demo's in the demo.
             pub fn today(&self) -> String {

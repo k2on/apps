@@ -6,8 +6,8 @@
 // paths, stroked two units wide with butt caps and miter joins, so one
 // menu button is one shape on every client. [ArkGlyphs.named] finds one
 // by its Lucide name, as `arkui::glyphs::named` does on the desktop and
-// `ArkGlyphs.symbol` maps the same names to SF Symbols on the iPhone. A
-// glyph only one app means anything by is the app's. Geometry only: each is drawn in a placeholder ink that `Icon`
+// `ArkGlyphs.symbol` maps the same names to SF Symbols on the iPhone; a
+// thing's mark draws its own set (`mark`). Geometry only: each is drawn in a placeholder ink that `Icon`
 // replaces with the content colour.
 package dev.arkui
 
@@ -276,6 +276,12 @@ public object ArkGlyphs {
     /** `circle-help`, Lucide's: a choice still to make. */
     public val Unchosen: ImageVector = glyph("circle-help", "M2 12a10 10 0 1 0 20 0a10 10 0 1 0-20 0", "M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3", "M12 17h.01")
 
+    /** `layers`: an inbox's tray, as the iPhone draws the name (`tray.full`). */
+    public val Layers: ImageVector = glyph("layers", "M22 12h-6l-2 3h-4l-2-3H2", "M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z")
+
+    /** `link`, Lucide's: a link to another thing (a bank). */
+    public val Link: ImageVector = glyph("link", "M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71", "M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71")
+
     /** Every glyph here by its Lucide name, the name the other toolkits know it by. */
     private val byName: Map<String, ImageVector> by lazy {
         listOf(
@@ -283,7 +289,7 @@ public object ArkGlyphs {
             Untick, Down, Offline, Rename, Copy, Archive, Reopen, Reconcile, Add,
             PanelRight, Wand, Sync, Filter, Mail, Chart, Rows, Inbox, Alert, Clock, Dollar, Banknote, Target, Arrows, Users, House,
             Landmark, Card, Trending, Eye, EyeOff, ArrowUp, ArrowDown, Trash, Lock, Receipt, Crosshair, Folder,
-            ScanLine, Picture, Keyboard, CircleMinus, Choose, Unchosen,
+            ScanLine, Picture, Keyboard, CircleMinus, Choose, Unchosen, Layers, Link,
         )
             .associateBy { it.name } + ("ellipsis-vertical" to More)
     }
@@ -293,4 +299,21 @@ public object ArkGlyphs {
      * library has it: the names ui/docs/parts.md lists, the same on every toolkit.
      */
     public fun named(name: String): ImageVector? = byName[name]
+
+    /**
+     * The glyph a thing's mark draws for Lucide's [name] (an account's kind: [MarkTile]): a mark's
+     * own drawing where it has one — a bank's columns, a piggy bank, a note, a card, a line going
+     * up — else the glyph of that name.
+     */
+    public fun mark(name: String): ImageVector = marks[name] ?: named(name) ?: Chevron
+
+    private val marks: Map<String, ImageVector> by lazy {
+        mapOf(
+            "landmark" to glyph("landmark-mark", "M3 9 12 3l9 6z", "M3 21h18", "M5 17h14", "M6 10v7", "M10 10v7", "M14 10v7", "M18 10v7"),
+            "piggy-bank" to glyph("piggy-bank", "M7 7h10l3 4v8H4v-8z", "M9 4h6v3H9z"),
+            "banknote" to glyph("banknote-mark", rect(2f, 6f, 20f, 12f), circle(12f, 12f, 2f), "M6 12h.01M18 12h.01"),
+            "credit-card" to glyph("credit-card-mark", rect(2f, 5f, 20f, 14f), "M2 10h20"),
+            "trending-up" to glyph("trending-up-mark", "m22 7-8.5 8.5-5-5L2 17", "M16 7h6v6"),
+        )
+    }
 }

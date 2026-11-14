@@ -92,6 +92,33 @@ fn who(l: &Login) -> Who {
     }
 }
 
+/// What only the phone's shell does, asked of it in order
+/// (`ark_app::host::ShellAsk`): every app's, so the app library's shell
+/// (ui/swift's ArkApp, ui/kotlin/app) carries it out with nothing of the
+/// app's own.
+#[derive(Clone, Debug, PartialEq, Eq, uniffi::Enum)]
+pub enum ShellAsk {
+    /// Settings put up (its pane is the shell's, chosen already).
+    Settings { pane: String },
+    /// Add a Device's page.
+    AddDevice,
+    /// A link taken: what the shell shows of its own put away.
+    Reset,
+    /// Signed out (the host signs out itself; a shell is never asked).
+    SignOut,
+}
+
+impl From<ark_app::host::ShellAsk> for ShellAsk {
+    fn from(a: ark_app::host::ShellAsk) -> ShellAsk {
+        match a {
+            ark_app::host::ShellAsk::Settings { pane } => ShellAsk::Settings { pane },
+            ark_app::host::ShellAsk::AddDevice => ShellAsk::AddDevice,
+            ark_app::host::ShellAsk::Reset => ShellAsk::Reset,
+            ark_app::host::ShellAsk::SignOut => ShellAsk::SignOut,
+        }
+    }
+}
+
 /// One change to a view's rows, each row its JSON (§1.10).
 #[derive(Clone, Debug, PartialEq, Eq, uniffi::Enum)]
 pub enum Patch {

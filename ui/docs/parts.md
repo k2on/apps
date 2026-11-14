@@ -85,9 +85,15 @@ Material's own, and an app that imports both could not say which.
 `panel-right` (the inspector's toggle), `wand-sparkles`, `refresh-cw`,
 `list-filter`, `mail`, `chart-column`, `list`, `settings`, `inbox`,
 `triangle-alert`, `clock`, `dollar-sign`, `banknote`, `cloud`, `target`,
-`arrow-left-right`, `users`, `house`, `landmark`; for a search picker
-`chevrons-up-down` (its row) and `circle-help` (a choice still to make). Android and the desktop
-draw Lucide's paths; the iPhone draws the SF Symbol each maps to.
+`arrow-left-right`, `users`, `house`, `landmark`, `layers`, `link`; for a
+search picker `chevrons-up-down` (its row) and `circle-help` (a choice still
+to make). Android and the desktop draw Lucide's paths; the iPhone draws the
+SF Symbol each maps to. A thing's mark (`MarkTile`: an account's kind, its
+glyph on a wash of its chart slot's colour) draws its own set: `landmark`,
+`piggy-bank`, `banknote`, `credit-card`, `house`, `trending-up` — filled
+SF Symbols on the iPhone where SF Symbols has them, ArkUI's mark drawings
+on Android (`ArkGlyphs.mark`), the glyphs crate's on the desktop and in the
+browser.
 
 ## A screen laid out in Rust
 
@@ -99,7 +105,7 @@ by the generated views by these names.
 |---|---|---|---|---|
 | TabPage | title, onRefresh, top, content | the app's frame (`LocalTabFrame`) over a scrolling column | `List` (inset grouped) under the large title | a scrolling column under the title |
 | CardSection | title, total, showsTotal, footer, rows | `SectionHeader` + `GroupCard` | `Section` | `section_header` + `group_card` |
-| ListRow | title, subtitle, tile/mark/glyph, badge, amount, value (words at its end), quiet, accent, **pushes**, said, menu, onTap | a `Press.Highlight` row; held, a `DropdownMenu` (lit as it is held); a `Chevron` when it pushes | a button row; held, `.contextMenu`; when it pushes, a `NavigationLink`'s look (the list's highlight, the disclosure chevron) | a bare button; right click, a long press or the menu key, `context_menu` (ArkUI's menu at the pointer, every item); a chevron when it pushes |
+| ListRow | title, subtitle, tile/mark (a glyph and its chart slot, `MarkTile`)/glyph, badge, amount, value (words at its end), quiet, accent, **pushes**, said, menu, onTap | a `Press.Highlight` row; held, a `DropdownMenu` (lit as it is held); a `Chevron` when it pushes | a button row; held, `.contextMenu`; when it pushes, a `NavigationLink`'s look (the list's highlight, the disclosure chevron) | a bare button; right click, a long press or the menu key, `context_menu` (ArkUI's menu at the pointer, every item); a chevron when it pushes |
 | DetailPage | content | a scrolling column of cards | `List` (grouped) | a scrolling column |
 | HeaderCard | title, figure, tint, glyph?, badge, line, caption, actions | laid out once in Rust of the primitives (ui/docs/primitives.md): a `CardSection` whose first row is its centred face, read as one, then its actions | the same, generated | the same, drawn by `arkui::view::layout` |
 | GoalProgress | fraction, tint, note | of the primitives: a `Meter` and a quiet footnote at a row's inset | the same, generated | the same |
@@ -108,7 +114,7 @@ by the generated views by these names.
 | MenuAction | title, glyph, destructive, shown, onTap | `DropdownMenuItem` | `Button(role:)` with a `Label` | `context_menu::Item` |
 | FormSheet | title, onDismiss, confirm, canConfirm, onConfirm, content | `ModalBottomSheet`, the confirm a full-width button under the form | `.sheet` over a `Form`, Cancel ✕ and the confirming ✓ in its bar | a dialog with Cancel and the confirm |
 | FormSection | header, footer, content | a column, its label over and its note under | `Section(header:footer:)` | a column |
-| OptionPicker / PickerChoice | label, selection, onChange; title, glyph, tag | `FilterChip`s in a `FlowRow` | `Picker` (a menu in the form's row), each a tagged `Label` (`\.choiceSymbol` for the app's own symbols) | chips that wrap |
+| OptionPicker / PickerChoice | label, selection, onChange; title, glyph, tag | `FilterChip`s in a `FlowRow` | `Picker` (a menu in the form's row), each a tagged `Label` (its glyph's SF Symbol) | chips that wrap |
 | SearchPicker / SearchChoice | label, selection, unset, prompt, onChange; title, glyph, tag, group, detail, tint | a `ListItem` row (`Press.Highlight`); compact (`compact-width`), a `ModalBottomSheet` under `SheetBar`; wider, a `DropdownMenu` anchored to the row, `dropdown-width` wide, its list at most `dropdown-height`; either a `SearchField` focused on open over the grouped rows (`SearchPicker.kt`) | a form's row; on the iPhone a sheet (`NavigationStack`, `.searchable` focused, `.medium`/`.large`, Cancel); on the iPad a popover anchored to the row holding the same list; on the Mac the same with the search field over it (`SearchPicker.swift`) | `arkui::search_picker`: a dropdown anchored under its field, a typed search line, declared heights; the browser's ARIA combobox (`fields::search_picker`), a sheet from the foot when compact |
 | AmountEntry | label, prompt, text, cents, problem, onType, onCents | `AmountField` (typed) | ArkUI's `AmountEntry` (the figure over the keypad, in cents) | a text field (typed) |
 | SwitchRow | title, note?, isOn, onChange | `ListItem` with a `Switch` | `Toggle` | `checkbox` |

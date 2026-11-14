@@ -11,13 +11,15 @@
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use ark_app::host::ShellAsk;
 use ark_app::welcome::WelcomeMsg;
 use ark_ffi::ark_auth::onboarding::Step;
 use ark_ffi::hall::Hall;
 use ark_ffi::hosted::{Hosted, PhoneApp};
+use ark_ffi::HostApp as _;
 use ark_ffi::{ArkHost, HostShell, Launch, Peer, ShotsTook, Standing, Taken};
 use money_app::budget::Budget;
-use money_app::host::{Money, ShellAsk};
+use money_app::host::Money;
 use money_app::shell::{MoneyShell, ShellMsg};
 use money_core::accounts::AccountKind;
 use money_core::{AccountLine, BudgetLine, MoneyChange, OpenAccount, Summary, TxnLine};
@@ -135,7 +137,7 @@ fn a_demo_launch_runs_every_screen() {
     // A link: the shell on Accounts, the phone asked to reset its pages.
     host.open_url("money:///accounts".into());
     until("the shell on Accounts", || app.page::<MoneyShell>().section == "accounts");
-    assert!(app.take_natives().contains(&ShellAsk::Reset));
+    assert!(app.natives().contains(&ShellAsk::Reset));
 
     // Nothing of a `-demo` launch is remembered.
     assert!(!dir.path().join("money").join("first-run").exists());
@@ -210,14 +212,12 @@ fn a_launch_opens_once_the_window_is_up() {
     let (host, app, _shell) = library(l);
     until("the demo shows", || host.shows_app());
     until("idle", || host.idle());
-    assert!(app.take_natives().is_empty(), "nothing asked before the window is up");
+    assert!(app.natives().is_empty(), "nothing asked before the window is up");
     host.shown();
-    until("Settings asked", || {
-        app.take_natives().iter().any(|n| matches!(n, ShellAsk::Settings { .. }))
-    });
+    until("Settings asked", || app.natives().iter().any(|n| matches!(n, ShellAsk::Settings { .. })));
     host.shown();
     until("idle", || host.idle());
-    assert!(app.take_natives().is_empty(), "the launch opened once");
+    assert!(app.natives().is_empty(), "the launch opened once");
 }
 
 fn change(c: MoneyChange) -> (&'static str, Vec<u8>) {
@@ -441,7 +441,7 @@ fn walk(host: &ArkHost, app: &Hosted<MoneyPhone>) -> Vec<(String, String)> {
             let took = host.shots_step(step.to_string());
             assert_eq!(took, ShotsTook::Done, "{id}: {step}\n{}", host.shots_tree());
             draw(app);
-            app.take_natives();
+            app.natives();
         }
         out.push((id.to_string(), host.shots_tree()));
     }
@@ -469,7 +469,7 @@ fn a_walk_is_reset() {
     let first = walk(&host, &app);
     let version = host.version();
     assert_eq!(host.shots_reset(), ShotsTook::Done);
-    assert!(app.take_natives().contains(&ShellAsk::Reset));
+    assert!(app.natives().contains(&ShellAsk::Reset));
     assert!(host.version() > version, "a reset is a newer screen");
     assert_eq!(app.page::<MoneyShell>().section, "budget");
     assert_eq!(host.shots_tree(), fresh, "the reset is where the walk began");

@@ -197,6 +197,32 @@ public struct Badge: View {
     }
 }
 
+/// A thing's mark (an account's kind, `ark_app::view`'s `Picture::Mark`):
+/// its glyph filled where SF Symbols has a filled one (`ArkGlyphs.mark`), in
+/// the theme's chart colour of `slot` (none of the palette's: the quiet
+/// colour), on a `Tile`. The app works out the glyph and the slot.
+public struct MarkTile: View {
+    let glyph: String
+    let slot: Int64
+    let side: CGFloat
+
+    public init(glyph: String, slot: Int64, side: CGFloat = 32) {
+        self.glyph = glyph
+        self.slot = slot
+        self.side = side
+    }
+
+    public var body: some View {
+        Tile(symbol: ArkGlyphs.mark(glyph), color: MarkTile.color(slot), side: side)
+    }
+
+    /// The chart palette's colour of `slot` (ui/theme.toml), the quiet colour for none.
+    public static func color(_ slot: Int64) -> Color {
+        let c = Color.chart
+        return slot >= 0 && slot < Int64(c.count) ? c[Int(slot)] : .quiet
+    }
+}
+
 /// A glyph (an SF Symbol) in `color` on a rounded square washed in it,
 /// `side` across. It grows with the person's text size, as the words beside
 /// it do, up to half as large again.
@@ -536,7 +562,7 @@ public enum ArkGlyphs {
         case "wallet": return "wallet.bifold"
         case "credit-card": return "creditcard"
         case "trending-up": return "chart.line.uptrend.xyaxis"
-        case "piggy-bank": return "banknote"
+        case "piggy-bank": return "dollarsign.circle"
         default: return nil
         }
     }

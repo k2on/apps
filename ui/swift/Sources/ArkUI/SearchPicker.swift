@@ -45,8 +45,7 @@ extension ContainerValues {
     }
 }
 
-/// One choice of a `SearchPicker`: its title, its glyph (the app's symbol
-/// by its tag through `\.choiceSymbol`, else the glyph's), the tag choosing
+/// One choice of a `SearchPicker`: its title, its glyph's symbol, the tag choosing
 /// it sends, the group it is listed under, and words at its end in a tint.
 /// Drawn by the picker, not by itself.
 public struct SearchChoice: View {
@@ -56,7 +55,6 @@ public struct SearchChoice: View {
     let group: String
     let detail: String
     let tint: String
-    @Environment(\.choiceSymbol) private var symbol
 
     public init(_ title: String, glyph: String, tag: String, group: String = "", detail: String = "", tint: String = "neutral") {
         self.title = title
@@ -71,7 +69,7 @@ public struct SearchChoice: View {
         Color.clear
             .frame(width: 0, height: 0)
             .containerValue(\.searchChoice, SearchChoiceValue(
-                title: title, symbol: symbol(tag, glyph), tag: tag, group: group, detail: detail, tint: tint))
+                title: title, symbol: ArkGlyphs.sf(glyph), tag: tag, group: group, detail: detail, tint: tint))
     }
 }
 

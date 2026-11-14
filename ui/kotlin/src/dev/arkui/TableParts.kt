@@ -141,7 +141,7 @@ private fun Cell(text: String, tint: String, glyph: String, end: Boolean = false
     val color = tintOf(tint)
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.xs)) {
         if (glyph.isNotEmpty()) {
-            Icon(LocalGlyphs.current(glyph) ?: ArkGlyphs.named(glyph) ?: ArkGlyphs.Chevron, contentDescription = null, tint = color, modifier = Modifier.size(14.dp))
+            Icon(ArkGlyphs.named(glyph) ?: ArkGlyphs.Chevron, contentDescription = null, tint = color, modifier = Modifier.size(14.dp))
         }
         if (text.isNotEmpty()) {
             Text(
@@ -228,7 +228,7 @@ public fun DataTableRow(
                 DropdownMenuItem(
                     text = { Text(m.title, color = if (m.destructive) MaterialTheme.colorScheme.error else Color.Unspecified) },
                     leadingIcon = {
-                        Icon(LocalGlyphs.current(m.glyph) ?: ArkGlyphs.named(m.glyph) ?: ArkGlyphs.Chevron, contentDescription = null,
+                        Icon(ArkGlyphs.named(m.glyph) ?: ArkGlyphs.Chevron, contentDescription = null,
                             tint = if (m.destructive) MaterialTheme.colorScheme.error else LocalContentColor.current)
                     },
                     onClick = {

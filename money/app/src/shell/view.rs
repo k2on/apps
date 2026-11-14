@@ -356,7 +356,7 @@ pub fn settings_banks(p: &ShellPage) -> View<ShellMsg> {
                 for b in p.settings.banks {
                     list_row(b.title)
                         .subtitle(b.status)
-                        .mark(b.glyph, "checking")
+                        .mark(b.glyph, b.slot)
                         .badge(b.waiting)
                         .pushes()
                         .on_tap(ShellMsg::OpenBank { name: b.name })
@@ -428,7 +428,7 @@ pub fn bank_page(b: &BankPage) -> View<ShellMsg> {
                 card_section(for f in b.feeds {
                     list_row(f.title)
                         .subtitle(f.about)
-                        .mark(f.glyph, f.kind)
+                        .mark(f.glyph, f.slot)
                         .value(f.feeds)
                         .on_tap(ShellMsg::ChooseFeed { plaid: f.plaid })
                 })
@@ -462,7 +462,7 @@ pub fn bank_page(b: &BankPage) -> View<ShellMsg> {
                                 list_row(c.opens).glyph("circle-plus").accent().on_tap(ShellMsg::FeedNew)
                             },
                             for a in c.accounts {
-                                list_row(a.name).mark(a.glyph, a.kind).on_tap(ShellMsg::FeedAccount { id: a.id })
+                                list_row(a.name).mark(a.glyph, a.slot).on_tap(ShellMsg::FeedAccount { id: a.id })
                             },
                         ))
                         .header(c.title)

@@ -2,31 +2,29 @@
 //! what every platform's host now runs, so what each used to do by hand is
 //! held here once.
 
-use ark_app::host::{Hosting, Link, Place, Session};
+use ark_app::host::{Hosting, Link, Place, Session, ShellAsk};
 use ark_peer::store::Store;
 use ark_peer::Peer;
 use money_core::{MoneyChange, MoneyView, TxnLine};
 
-use super::{Money, ShellAsk};
+use super::Money;
 use crate::shell::{MoneyShell, ShellMsg};
 use crate::testing::NOW;
 use crate::MoneyRequest;
 
-/// A place over the demo's household, as a phone (`stacks`) or a window.
+/// A place over the demo's household: a phone's, a window's, every host's.
 pub(crate) struct Test {
     pub(crate) peer: Peer,
     pub(crate) store: Store<MoneyView>,
-    stacks: bool,
     said: Vec<String>,
     dialled: bool,
 }
 
 impl Test {
-    fn new(stacks: bool) -> Test {
+    fn new() -> Test {
         Test {
             peer: money_seed::open(money_seed::seeded_disk("2026-10-26", NOW)),
             store: Store::new(),
-            stacks,
             said: vec![],
             dialled: false,
         }
@@ -63,9 +61,6 @@ impl Place<MoneyView, MoneyChange> for Test {
     fn release(&mut self, key: &MoneyView) {
         self.store.release(&mut self.peer, key)
     }
-    fn stacks(&self) -> bool {
-        self.stacks
-    }
     fn session(&self) -> Session {
         demo()
     }
@@ -77,8 +72,8 @@ impl Place<MoneyView, MoneyChange> for Test {
     }
 }
 
-pub(crate) fn open(stacks: bool) -> (Hosting<Money>, Test) {
-    let mut place = Test::new(stacks);
+pub(crate) fn open() -> (Hosting<Money>, Test) {
+    let mut place = Test::new();
     let h = Hosting::<Money>::open(&demo(), &mut place);
     (h, place)
 }
@@ -92,7 +87,7 @@ fn ask(h: &mut Hosting<Money>, place: &mut Test, r: MoneyRequest) {
 /// facts never told.
 #[test]
 fn a_session_opens_on_its_month_with_its_facts() {
-    let (h, place) = open(true);
+    let (h, place) = open();
     let m = h.app();
     assert_eq!(m.month(), "2026-10");
     assert_eq!(m.budget.state().month, "2026-10");
@@ -101,14 +96,14 @@ fn a_session_opens_on_its_month_with_its_facts() {
     let facts = &m.shell.state().settings.facts;
     assert_eq!((facts.who.as_str(), facts.demo, facts.version.as_str()), ("Alex", true, "0.1 (1)"));
     assert!(h.idle(&place), "the views every screen names are held");
-    assert!(m.register.is_none(), "a phone pushes its own registers");
+    assert_eq!(m.register.state().account, None, "the register shows no account until the shell does");
 }
 
 /// A month stepped moves every runtime that shows one. Falsified by the
 /// budget alone moving, as a shell that tells one runtime did.
 #[test]
 fn a_month_stepped_moves_every_screen() {
-    let (mut h, mut place) = open(true);
+    let (mut h, mut place) = open();
     let v = h.version();
     ask(&mut h, &mut place, MoneyRequest::StepMonth { by: -1 });
     let m = h.app();
@@ -127,7 +122,7 @@ fn a_month_stepped_moves_every_screen() {
 /// the link dialled. Falsified by the demo's sync importing nothing.
 #[test]
 fn the_demos_bank_imports_and_says_so() {
-    let (mut h, mut place) = open(true);
+    let (mut h, mut place) = open();
     let all = MoneyView::Register { account: None };
     place.hold(all.clone());
     let before = place.store.rows::<TxnLine>(&all).len();
@@ -143,39 +138,40 @@ fn the_demos_bank_imports_and_says_so() {
     );
 }
 
-/// A page opened goes on a phone's stack, and is one of a window's places
-/// there; a category's month is Category Details either way. Falsified by
-/// a window asked to push a page it shows in its sidebar.
+/// A page opened is one of the shell's places on every host, a phone's
+/// too (Accounts pushes an account where it is compact); a bank is
+/// Connected Banks in Settings with that bank open. Falsified by a route
+/// asked of the toolkit's shell, as a phone's stack once was.
 #[test]
-fn a_route_is_pushed_on_a_phone_and_selected_in_a_window() {
-    let (mut h, mut place) = open(true);
+fn a_route_is_a_place_of_the_shell() {
+    let (mut h, mut place) = open();
     let a = place.store.rows::<money_core::AccountLine>(&MoneyView::Accounts)[0].clone();
     let route = crate::Route::Account {
         id: a.id.hex(),
         name: a.name.clone(),
     };
-    h.with(&mut place, |m, cx| m.shell.send(ShellMsg::Select { tag: "accounts".into() }, cx));
     h.take_natives();
-    let r = route.clone();
-    h.with(&mut place, |m, cx| ark_app::host::HostedApp::route(m, r, cx));
-    assert_eq!(h.take_natives(), vec![ShellAsk::Open { route: route.clone() }]);
-
-    let (mut h, mut place) = open(false);
     h.with(&mut place, |m, cx| ark_app::host::HostedApp::route(m, route, cx));
     assert!(h.take_natives().is_empty());
     assert_eq!(h.app().shell.state().section, format!("accounts/{}", a.id.hex()));
+    assert_eq!(h.app().register.state().account, Some(a.id.hex()), "the register follows the shell");
+
+    let bank = crate::Route::Bank { name: "Chase".into() };
+    h.with(&mut place, |m, cx| ark_app::host::HostedApp::route(m, bank, cx));
     assert_eq!(
-        h.app().register.as_ref().map(|r| r.state().account.clone()),
-        Some(Some(a.id.hex())),
-        "the register follows the shell"
+        h.take_natives(),
+        vec![ShellAsk::Settings {
+            pane: "Connected Banks".into()
+        }]
     );
+    assert_eq!(h.app().shell.state().pane, "Connected Banks");
 }
 
 /// A category a launch names is Category Details in the shell's inspector,
 /// on the budget. Falsified by the name matched in no case.
 #[test]
 fn a_category_named_is_inspected() {
-    let (mut h, mut place) = open(true);
+    let (mut h, mut place) = open();
     ask(&mut h, &mut place, MoneyRequest::OpenCategory { key: "Groceries".into() });
     let s = h.app().shell.state();
     assert!(s.inspector);
@@ -187,7 +183,7 @@ fn a_category_named_is_inspected() {
 /// reaching the shell alone.
 #[test]
 fn the_shells_search_is_followed() {
-    let (mut h, mut place) = open(true);
+    let (mut h, mut place) = open();
     h.send::<MoneyShell>(ShellMsg::Search { text: "coffee".into() }, &mut place);
     assert_eq!(h.app().transactions.state().search, "coffee");
 }
@@ -197,7 +193,7 @@ fn the_shells_search_is_followed() {
 /// link that leaves a sheet over the page it opens.
 #[test]
 fn a_link_puts_away_what_shows_and_natives_are_taken_in_order() {
-    let (mut h, mut place) = open(true);
+    let (mut h, mut place) = open();
     h.take_natives();
     h.link(Link::Launch(vec!["-screen".into(), "insights".into()]), &mut place);
     assert_eq!(h.take_natives(), vec![ShellAsk::Reset]);

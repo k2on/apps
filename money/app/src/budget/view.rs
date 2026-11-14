@@ -188,7 +188,7 @@ pub fn group(g: &GroupItem) -> View<BudgetMsg> {
 #[view]
 pub fn category(l: &CategoryItem) -> View<BudgetMsg> {
     meter_row(l.title, l.status, l.status_tint)
-        .mark(l.mark)
+        .mark(l.mark, l.mark_slot)
         .faded(l.faded)
         .meter(l.fraction, l.meter_tint)
         .note(l.note, l.note_tint)

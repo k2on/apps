@@ -1,17 +1,17 @@
 //! money's part of its host (`ark_app::host`), once for every platform:
 //! the phones' (ark-ffi's `ArkHost`), the browser's and the desktop's
 //! drive it. Over a session it runs every screen's runtime — the shell,
-//! Budget, Accounts, Transactions, Insights and the sheets, and where the
-//! shell's sections are the window's places the register the shell shows
-//! — and carries out what each asks of the app ([`MoneyRequest`]): a
+//! Budget, Accounts, Transactions, Insights, the sheets and the register the
+//! shell shows — and carries out what each asks of the app ([`MoneyRequest`]): a
 //! message for another runtime, the budget's month moved, the bank asked
 //! for anything new (the demo's bank here, a server's importer asked), a
 //! category or a transaction named by a launch, the session's facts kept
-//! in the shell's Settings. What only the toolkit's shell does is a
-//! [`ShellAsk`]: a page pushed on a phone's stack, Settings and Add a Device
-//! put up, what shows put away for a link, signed out.
+//! in the shell's Settings. A route is one of the shell's places on every
+//! host, a phone's too (its section, its inspector, a Settings pane); what
+//! only the toolkit's shell does is an `ark_app::host::ShellAsk`: Settings
+//! and Add a Device put up, what shows put away for a link, signed out.
 
-use ark_app::host::{Cx, Has, HostedApp, Link, Running, Screen, Session};
+use ark_app::host::{Cx, Has, HostedApp, Link, Running, Screen, Session, ShellAsk};
 use money_core::demo::Bank;
 use money_core::{dates, AccountLine, BudgetLine, MoneyChange, MoneyView};
 
@@ -25,23 +25,6 @@ use crate::shell::{MoneyShell, ShellMsg};
 use crate::transactions::{Transactions, TransactionsMsg};
 use crate::{MoneyRequest, Route};
 
-/// What only the toolkit's shell does, asked of it in order.
-#[derive(Clone, Debug, PartialEq, ark::twin::Twin)]
-pub enum ShellAsk {
-    /// A page on the section's stack (a phone): an account's register, All
-    /// Accounts, Connected Banks, a bank.
-    Open { route: Route },
-    /// Settings put up (its pane is the shell's, chosen already).
-    Settings { pane: String },
-    /// Add a Device's page.
-    AddDevice,
-    /// A link taken: what the shell shows of its own put away (a section's
-    /// pages, Settings, a sheet of its own).
-    Reset,
-    /// Signed out of the server, or out of the demo.
-    SignOut,
-}
-
 /// money's runtimes over one session.
 pub struct Money {
     pub shell: Screen<MoneyShell>,
@@ -50,9 +33,9 @@ pub struct Money {
     pub transactions: Screen<Transactions>,
     pub insights: Screen<Insights>,
     pub sheets: Screen<Sheets>,
-    /// The register the shell shows, where its sections are the window's
-    /// places (the browser, the desktop); a phone pushes its own.
-    pub register: Option<Screen<Register>>,
+    /// The register the shell shows: the account its section names, under
+    /// its search, its row the one its inspector shows.
+    pub register: Screen<Register>,
     /// Settings shows, in a window its host draws itself
     /// (`ark_app::window`); a phone's shell puts up its own.
     pub settings: bool,
@@ -185,7 +168,7 @@ impl Money {
     /// The register the shell shows follows it: the account its section
     /// names, its search, its transaction.
     fn follow_register(&mut self, cx: &mut Cx<'_, Money>) {
-        let Some(reg) = &mut self.register else { return };
+        let reg = &mut self.register;
         let s = self.shell.state();
         let account = crate::shell::tagged_account(&s.section).map(String::from);
         let (search, selected) = (s.search.clone(), s.transaction.clone());
@@ -206,8 +189,6 @@ impl HostedApp for Money {
     type Change = MoneyChange;
     type Route = Route;
     type Request = MoneyRequest;
-    type Native = ShellAsk;
-
     const KEEPS: &'static str = "your budget";
 
     fn welcome(scan: bool, demo: bool) -> ark_app::welcome::WelcomeCopy {
@@ -216,10 +197,6 @@ impl HostedApp for Money {
 
     fn encode(change: &MoneyChange) -> (&'static str, Vec<u8>) {
         (change.name(), change.input())
-    }
-
-    fn signs_out(native: &ShellAsk) -> bool {
-        matches!(native, ShellAsk::SignOut)
     }
 
     fn open(session: &Session, cx: &mut Cx<'_, Money>) -> Money {
@@ -231,7 +208,7 @@ impl HostedApp for Money {
             transactions: Screen::new(),
             insights: Screen::new(),
             sheets: Screen::new(),
-            register: (!cx.place.stacks()).then(Screen::new),
+            register: Screen::new(),
             settings: false,
             month: String::new(),
             bank: session.demo.then(Bank::default),
@@ -245,59 +222,55 @@ impl HostedApp for Money {
     }
 
     fn screens(&mut self) -> Vec<&mut dyn Running<Money>> {
-        let mut v: Vec<&mut dyn Running<Money>> = vec![
+        vec![
             &mut self.shell,
             &mut self.accounts,
             &mut self.budget,
             &mut self.transactions,
             &mut self.insights,
             &mut self.sheets,
-        ];
-        if let Some(r) = &mut self.register {
-            v.push(r);
-        }
-        v
+            &mut self.register,
+        ]
     }
 
     fn screens_ref(&self) -> Vec<&dyn Running<Money>> {
-        let mut v: Vec<&dyn Running<Money>> = vec![
+        vec![
             &self.shell,
             &self.accounts,
             &self.budget,
             &self.transactions,
             &self.insights,
             &self.sheets,
-        ];
-        if let Some(r) = &self.register {
-            v.push(r);
-        }
-        v
+            &self.register,
+        ]
     }
 
     /// The banks (what wants a look, the account sheet's), the accounts
-    /// (the demo's bank), and the month's budget (a category a launch
-    /// names); in a window, the payees its fields suggest.
+    /// (the demo's bank), the month's budget (a category a launch names)
+    /// and the payees a field suggests.
     fn holds(&self) -> Vec<MoneyView> {
-        let mut v = vec![MoneyView::Banks, MoneyView::Accounts, MoneyView::Budget { month: self.month.clone() }];
-        if self.register.is_some() {
-            v.push(MoneyView::Payees);
-        }
-        v
+        vec![
+            MoneyView::Banks,
+            MoneyView::Accounts,
+            MoneyView::Budget { month: self.month.clone() },
+            MoneyView::Payees,
+        ]
     }
 
     fn now_ms(&self, clock_ms: i64) -> i64 {
         session_now(clock_ms, &self.today)
     }
 
-    /// A route a screen opened: a category's month is Category Details, the
-    /// shell's inspector; any other page a phone pushes on its stack, and a
-    /// window shows as one of its places.
+    /// A route a screen opened, as one of the shell's places on every host:
+    /// a category's month is Category Details, the shell's inspector; an
+    /// account its section (a phone's Accounts pushes it); every account's
+    /// Transactions; a bank Connected Banks in Settings, that bank open.
     fn route(&mut self, r: Route, cx: &mut Cx<'_, Money>) {
         if let Route::Category { id, .. } = r {
             return self.inspect(id, cx);
         }
-        if cx.place.stacks() {
-            return cx.native(ShellAsk::Open { route: r });
+        if let Route::Bank { name } = &r {
+            self.shell.send(ShellMsg::OpenBank { name: name.clone() }, cx);
         }
         let tag = match r {
             Route::Budget => "budget".to_string(),
@@ -442,7 +415,7 @@ macro_rules! has {
     )*};
 }
 
-has!(MoneyShell => shell, Accounts => accounts, Budget => budget, Transactions => transactions, Insights => insights, Sheets => sheets);
+has!(MoneyShell => shell, Accounts => accounts, Budget => budget, Transactions => transactions, Insights => insights, Sheets => sheets, Register => register);
 
 #[cfg(test)]
 pub(crate) mod tests;

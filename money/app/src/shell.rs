@@ -18,7 +18,7 @@
 //! goes to the platform's shell as a typed [`MoneyRequest`].
 
 use crate::routes::Route;
-use ark_app::shell::Launch;
+use ark_app::shell::{Household, Launch};
 use ark_app::{App, Command, Data};
 use money_core::*;
 
@@ -291,27 +291,9 @@ pub struct ShellPage {
     pub address: String,
 }
 
-/// Who is using the budget and where, as the account sheet and a tab's face
-/// say it.
-#[derive(Clone, Debug, Default, PartialEq, Eq, ark::twin::Twin)]
-pub struct Household {
-    /// Their name ("Alex"); empty while it is not known.
-    pub who: String,
-    /// Where their picture is loaded from; empty for none, and the demo's.
-    pub picture: String,
-    /// Under the name: their email or login, or what the demo is.
-    pub detail: String,
-    /// The server as it is shown (`money.example.com`); none for the demo.
-    pub server: Option<String>,
-    /// The link to it: up, down, or not known yet.
-    pub linked: Option<bool>,
-    pub demo: bool,
-    /// The banks that want somebody in Settings.
-    pub banks_wanting: i64,
-}
-
 /// Who is using the budget and where, of the facts the host told the shell.
 fn household(f: &settings::SessionFacts, banks: &[BankLine]) -> Household {
+    let wanting = money_core::words::banks_wanting(banks);
     Household {
         who: if f.demo { "Alex".into() } else { f.who.clone() },
         picture: f.picture.clone(),
@@ -322,7 +304,14 @@ fn household(f: &settings::SessionFacts, banks: &[BankLine]) -> Household {
         server: (!f.demo && !f.server.is_empty()).then(|| f.server.clone()),
         linked: f.linked,
         demo: f.demo,
-        banks_wanting: money_core::words::banks_wanting(banks),
+        wanting,
+        wanting_title: match wanting {
+            0 => String::new(),
+            1 => "A Bank Needs a Look".into(),
+            n => format!("{n} Banks Need a Look"),
+        },
+        wanting_said: if wanting > 0 { "Banks need a look".into() } else { String::new() },
+        wanting_where: if wanting > 0 { "In Settings, under Banks".into() } else { String::new() },
     }
 }
 

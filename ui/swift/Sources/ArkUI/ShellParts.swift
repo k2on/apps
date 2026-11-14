@@ -6,8 +6,9 @@
 // `.inspector`, `.searchable`, `.confirmationDialog`, the Settings scene's
 // tabs, the menu bar's commands — so the iPhone, the iPad and the Mac each
 // get theirs from the size class and the platform, here and nowhere in an
-// app. What a section hosts is the app's (`\.hostedScreens`), set once at
-// its root.
+// app. What a section hosts is the app's generated screens by name
+// (`\.hostedScreens`), set once by the app library's shell (ArkApp's
+// `ArkShell`).
 #if canImport(SwiftUI)
 import SwiftUI
 #if canImport(UIKit)
@@ -18,10 +19,6 @@ import UIKit
 
 private struct HostedScreensKey: EnvironmentKey {
     static let defaultValue: (String) -> AnyView = { _ in AnyView(EmptyView()) }
-}
-
-private struct SectionPathKey: EnvironmentKey {
-    static let defaultValue: (String) -> Binding<NavigationPath>? = { _ in nil }
 }
 
 private struct ShellFooterKey: EnvironmentKey {
@@ -41,18 +38,11 @@ private struct SectionShownKey: EnvironmentKey {
 }
 
 extension EnvironmentValues {
-    /// The screens a shell hosts, by name: the app's own (hand-written, or
-    /// generated apart), until they move into Rust.
+    /// The screens a shell hosts, by name: the app's generated screens,
+    /// each over its own runtime (the app library's `ArkShell` sets it once).
     public var hostedScreens: (String) -> AnyView {
         get { self[HostedScreensKey.self] }
         set { self[HostedScreensKey.self] = newValue }
-    }
-
-    /// Each section's back stack, by its tag: the app's, so a link can push
-    /// onto it and a section switched away from is found as it was left.
-    public var sectionPath: (String) -> Binding<NavigationPath>? {
-        get { self[SectionPathKey.self] }
-        set { self[SectionPathKey.self] = newValue }
     }
 
     /// The sidebar's foot (who is signed in), which a toolbar carries at
@@ -85,16 +75,16 @@ extension EnvironmentValues {
     }
 }
 
-/// A section's navigation stack: the app's back stack for its tag, or one of its own.
+/// A section's navigation stack, its own: what it pushes is its page's
+/// (`pushes`, `split_view`: the app's state), so a section switched away
+/// from is found as it was left.
 struct SectionStack<Content: View>: View {
     let tag: String
     let content: Content
-    @Environment(\.sectionPath) private var paths
     @Environment(\.shownSection) private var shown
-    @State private var own = NavigationPath()
 
     var body: some View {
-        NavigationStack(path: paths(tag) ?? $own) { content }
+        NavigationStack { content }
             .environment(\.sectionShown, shown.map { $0 == tag } ?? true)
     }
 }

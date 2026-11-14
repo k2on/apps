@@ -104,10 +104,13 @@ app's, the same on every platform, and written once in its app crate
   `Session`; `route`, `request`, `back` for what they asked; `follow`
   after every call; `moved` when the store moved or an answer came later
   (what a launch asked before the household arrived is asked again);
-  `link` and `launched` for a launch's arguments or an address; and its
-  `Native`s — what only the toolkit's shell can do (money's: a page pushed,
-  Settings or Add a Device put up, its own pages put away for a link,
-  signed out) — taken by the host after the call.
+  `link` and `launched` for a launch's arguments or an address; and
+  `ShellAsk`s — what only the toolkit's shell can do, the same for every
+  app (Settings or Add a Device put up, its own pages put away for a link,
+  signed out) — taken by the host after the call. A route is one of the
+  shell's places on every host, a phone's too (its section, its inspector,
+  a Settings pane: money's account is its section, which a phone's
+  Accounts pushes where it is compact), so no route is asked of a shell.
 
 `Hosting<H>` is the loop between them, the same everywhere: a message in
 for one screen (`send::<Accounts>(msg, place)`, `Has<Accounts>` saying
@@ -121,7 +124,7 @@ Each platform has one place and drives the one loop:
 
 | Platform | Place | Driven by |
 |---|---|---|
-| iPhone, iPad, Mac, Android | ark-ffi's `PhonePlace` (the session's views over the process's peer, the process's modules, the login, the link) | ark-ffi's `Hosted<P>`, the `HostApp` under `ArkHost`; one UniFFI object per screen (`ark_ffi::hosted_screen!`); a register pushed on a stack runs `beside` it |
+| iPhone, iPad, Mac, Android | ark-ffi's `PhonePlace` (the session's views over the process's peer, the process's modules, the login, the link) | ark-ffi's `Hosted<P>`, the `HostApp` under `ArkHost`; one UniFFI object per screen (`ark_ffi::hosted_screen!`; one the phone runs for as long as it shows it, `beside`) |
 | Browser | arkui-web's `WebPlace` (the page's replica and store; `Seen` to read) | `arkui_web::host::WebHost<W>`, over the app's `Windowed` |
 | Desktop | not yet: the iced window still carries its own requests (`money/iced/src/sections.rs`) | |
 | Tests | `money/app/src/host/tests.rs`'s place over the demo household | `Hosting` |
@@ -131,7 +134,7 @@ On the phones an app names no code of its own: its library is generated
 part (`PhoneApp`) is app.toml's — its name and scheme, the domain its
 replica's log is of, its demo's crate. Its part says the rest
 (`HostedApp`): what it keeps (`KEEPS`), its first run's words
-(`welcome`), how a change is encoded, which native signs out.
+(`welcome`), how a change is encoded.
 
 **A window its host draws itself** (`ark_app::window::Windowed`): the
 browser's page has no shell of its own as a phone does, so the app's part
@@ -143,9 +146,9 @@ sheets (`over`), Settings while it shows (`settings`, a window of its own
 with Done), the menu bar's commands, what a field suggests, a page it opens
 in a tab of its own (`opens`), its appearance and its address (`address`).
 One message type reaches every screen (`Windowed::Msg`, money's
-`MoneyMsg`), taken inside the loop (`take`); a native the toolkit's shell
-would carry out is the part's own in a window (`native`: Settings shown is
-its state there). The desktop's window is to be hosted the same way.
+`MoneyMsg`), taken inside the loop (`take`); a `ShellAsk` the toolkit's
+shell would carry out is the part's own in a window (`native`: Settings
+shown is its state there). The desktop's window is to be hosted the same way.
 
 ### The Phones' Library
 
@@ -158,21 +161,24 @@ It is, in order:
 
 - the twins of what crosses (`ark::twins!`): `[ffi.twins]` by crate, and
   without being listed each screen's page and message (beside its `app`
-  type), the app's route and native (`[ffi] route`, `native`) and the
-  first run's records;
+  type), the app's route (`[ffi] route`), and the first run's records
+  and who is signed in as the shell shows it (`ark_app::shell::Household`);
 - the first run's object (`ark_ffi::welcome_app!`);
 - `Phone`, its `PhoneApp`: `[ffi] app` (the part), `domain` (a function
   giving the domain), `demo` (the demo's crate, whose `seeded_disk(today,
   now_ms)` its `open(disk)` opens), the name and the scheme;
 - one object per `[screens]` entry (`ark_ffi::hosted_screen!`, or
-  `beside_screen!` for one that says `beside`: a register the phone runs
-  for as long as it shows it, made with its first message);
+  `beside_screen!` for one that says `beside`: a screen the phone runs
+  for as long as it shows it, made with its first message; money has
+  none, its register being its host's);
 - the object the phone holds (`ark_ffi::phone_host!`, `[ffi] host`):
   `new(launch, store)`, `host()`, `welcome()`, each screen by its name
   (its blank page while no session is open), each beside screen by its
-  name (`register(first:)`), `generation()`, `natives()` (the app's
-  `Native`s, taken), `today()`; and `routeFromUrl` and the route's
-  `url()`.
+  name (`<name>(first:)`), `today()`; and `routeFromUrl` and the route's
+  `url()`. The session's `generation()` and what only the phone's shell
+  does (`natives()`: ark-ffi's own `ShellAsk`, every app's, taken) are the
+  app host's (`ArkHost`), so the app library's shell reads them with
+  nothing of the app's.
 
 Its Rust is tested without UniFFI by the app's own tests over the same
 pieces (money/app/tests/phone.rs: a demo launch running every screen, the
@@ -411,9 +417,10 @@ every module's crate declares itself, and that ark-ffi has a feature for
 each device a module's `[phone]` registers. The desktop registers its own (the
 `Queued` clipboard in `money/iced/src/overview.rs`).
 
-The iPhone typecheck (`checks.money-ios-typecheck`) compiles the app's
-modules' Swift on Linux against the generated bindings, so every name
-they use is checked.
+The iPhone typecheck (`checks.money-ios-typecheck`, ui/swift/typecheck.sh)
+compiles the app's modules' Swift and what of the app library Linux can
+read on Linux against the generated bindings, so every name they use is
+checked.
 
 **To add a module:** `modules/<name>/` with its crate (trait, its `Op`s
 and their outputs, the functions that make them, a fake, tests),
@@ -732,25 +739,34 @@ shows), and "Add a Device".
 | The generic screen holder | `ArkScreen<Runtime: ArkRuntime>` (`page`, `send`, `reload`, `attach`, the after-draw `drawn()` handshake) | `ArkScreen<P, M>` (the same over function references) |
 | Background, only with `[background]` | `BackgroundHooks` and `ArkAppDelegate` (the task registered before launch finishes, APNs' token, a remote notification) | `BackgroundHooks` (`ArkNotices` told the process's notices; a notice's tap) |
 | Ready signal | one probe: `ArkHost.idle()` at a `version()` that stood still | the same, `Ready.probe("app")` |
+| The shell (`ArkShell`) | `ArkShell<Library, Shell>`: the shell screen's holder for the app's life, an `ArkSlot` per other screen made again with each session (`ArkHost.generation()`), the names hosted (`hostedScreens`, set once), `ArkShellView` (the sheets over it, Settings and Add a Device, Safari's view, `arkAppearance`), `ArkSettings`, the account face and sheet (`ArkShellPlace`), `ArkHost.natives()` carried out | `ArkShell<H, P, M>` and its `ArkSlot`s, `ArkShellRoot` (`ArkAppTheme` in the app's accent, the first run, then the shell: navigation-compose with Settings pushed on `Transitions`, the tab frame `LocalTabFrame`, the sheets, Add a Device, the account sheet, a Custom Tab, the snackbar, `natives()`) |
+| Money in the locale | `ArkNumbers` (`Cents.write` by ark_format) | `LibraryAmounts`, `LocalAmounts` in `ArkAppTheme` |
+| Shots mode's warm-up | `ShotsWarm`: an off-screen alert with a text field, the data detectors and the language identifier, the bundle's images decoded, before the walk is timed | none needed (no system work of the kind landed in Android's shots) |
 
 **What is generated per app is tiny** (ui/prebuild.py, from app.toml):
 Swift's `Generated/ArkApp.swift` — a `@main` holding the app's library
 (`[ffi] host`: `ArkApp(MoneyHost(launch: .current(scan:), store:
-PhoneSecureStore()))`), its accent, the scene it draws (`[apple] scene`),
-and a typealias over `ArkScreen` for each of its screens (`[screens]`) —
+PhoneSecureStore()))`), its accent, the scene it draws (with `[shell]`
+the generated `ArkScenes`, else `[apple] scene`), and a typealias over
+`ArkScreen` for each of its screens (`[screens]`) — and, with `[shell]`,
+`Generated/ArkShell.swift` (`ArkScreens`: the shell over the library, a
+slot per screen, which hosted name is which screen's view; `ArkScenes`:
+the first run, then `ArkShellView`, the commands, `ArkSettings`) —
 and, only for an app that declares `[background]`,
 `Generated/ArkBackground.swift` (`backgroundHooks()`, the modules' parts
 the delegate reaches) with the delegate adaptor in its `@main`; Kotlin's
 `generated/ArkApp.kt` (`class MoneyApplication : ArkApplication()`, its
 library and, with `[background]`, its `BackgroundHooks`) and
 `generated/ArkActivity.kt` (`class MainActivity : ArkActivity()` drawing
-`[android] root`, and the holders); the manifest names the Application.
+`ArkAppRoot` with `[shell]`, else `[android] root`, and the holders) and
+`generated/ArkShell.kt` (`ArkScreens`, `ArkAppRoot` over `ArkShellRoot`);
+the manifest names the Application.
 The app's own part of its host is its app crate's (`money_app::host`,
 "The App's Part of Its Host"), run under `ArkHost` by ark-ffi's
 `Hosted`; its library is generated from app.toml ("The Phones'
-Library"). What is left native is what an app draws
-itself beside its generated screens: money's shell host (Shell.swift,
-MoneyApp.kt), its theme and marks.
+Library"). Nothing native is left an app's own: its shell is
+the library's (`ArkShell`), its theme arkui's in its accent, its marks a
+record's glyph and chart slot drawn by ArkUI's `MarkTile`.
 
 **Background stays off by default.** Nothing of `BackgroundHooks` is
 written, and no delegate adaptor, for an app without `[background]`;
@@ -857,17 +873,21 @@ Nothing native of an app is committed. An app is
 ├── app/          ark-app: its state, messages, update, #[view]s and `commands()`
 ├── server/       when it has one
 ├── demo/         the demo's household (its seed crate), shots.json, server.sh
-└── native/       what is not written in Rust yet (going: see below)
+└── debug.keystore  the one public Android debug key app.toml's `keystore` names
 ```
 
-**`native/` and `iced/` are being removed** (`bridge/` and `web/` are gone).
-The end state is `app.toml`, `icon.svg`, `core/`, `app/`, `server/` and
-`demo/`, nothing else committed: the layout is this convention, held by
-review, and each of the other directories only shrinks until it is gone.
+**`iced/` is being removed** (`bridge/`, `web/` and money's `native/` are
+gone; revelation's `native/` is its own Kotlin, not yet an Ark app's).
+The end state is `app.toml`, `icon.svg`, `core/`, `app/`, `server/`,
+`demo/` and the debug key, nothing else committed: the layout is this
+convention, held by review, and each of the other directories only
+shrinks until it is gone.
 The phones' library is generated from app.toml ("The Phones' Library");
 money's part of its host is money-app's; every money screen is Rust, and
-the phones' `Model.swift`, `Bridge.swift`, `Book.kt` and `Start.kt` are
-gone into the app library and the host ("The App Library"). The
+the phones' `Model.swift`, `Bridge.swift`, `Book.kt` and `Start.kt` and
+then its shell (`Shell.swift`, `MoneyApp.swift`, `MoneyApp.kt`), theme,
+glyphs and marks are gone into the app library, arkui and the host ("The
+App Library"). The
 browser's page is generated from app.toml ("The Browser's Page"), and
 `iced/` becomes a generated entry point the same way. (`views/`
 is gone: the phones' generator's main is written from app.toml's
@@ -876,19 +896,25 @@ is gone: the phones' generator's main is written from app.toml's
 If you are an agent, or anyone, about to add to one of these:
 
 - **A screen, or what a screen shows:** write it in `app/` (state,
-  message, `update`, a `#[view]` from ArkUI's parts), not as SwiftUI or
-  Compose in `native/`, and not as an export of the phones' library for
+  message, `update`, a `#[view]` from ArkUI's parts), never as SwiftUI or
+  Compose of the app's, and not as an export of the phones' library for
   a native screen to read. A part another app could use goes in ArkUI, in
   every toolkit.
+- **Something of the shell** (a section, a tab's glyph, a toolbar, an
+  inspector, what is hosted where, Settings): the shell's `#[view]` in
+  `app/` and app.toml's `[shell]`; what every app's shell does goes in
+  ArkApp and ark-app-android (`ArkShell`), a value in `ui/theme.toml`, a
+  glyph in ArkUI's glyph sets, a mark in the record (its glyph and chart
+  slot, drawn by `MarkTile`).
 - **A device feature** (camera, keychain, player, sharing…): a port in
   `ark-module`, implemented in a module under `modules/ark-*`, asked for
-  with a `Command`; never a call from `native/`.
+  with a `Command`; never a native call of the app's.
 - **Domain rules or data:** `core/`, pure.
 - **Something the phones must call that has no other home** (rare): a
   generic export of ark-ffi's (`phone_host!`) every app's library writes,
   or a key of app.toml's `[ffi]` it reads; never an app's own Rust for
   its library, which has none.
-- **Never** grow `native/`, or
+- **Never** commit a `native/`, or
   copy a screen into `iced/`; and never commit a `web/`: the page is
   generated, and what it draws of the app's own is a view in `app/`.
 
@@ -932,31 +958,47 @@ accounts = { app = "accounts::Accounts", runtime = "AccountsApp", page = "Accoun
 [views]                        # a screen's further views, and its menu bar's commands
 settings = { screen = "shell", view = "shell::view::money_settings", swift-view = "MoneySettingsView", kotlin-view = "MoneySettings" }
 
+[shell]                        # the phones' shell, the app library's ArkShell, from these names
+screen = "shell"               # the [screens] entry whose view is the sections, tabs and glyphs, toolbars, search, inspectors
+settings = "settings"          # the [views] entry that is Settings
+commands = "commands"          # the [views] entry of the menu bar's commands
+over = "sheets"                # the screen drawn over every section (its sheets and dialogs)
+account = "household"          # the hosted name drawn as who is signed in (face and account sheet)
+section = "section"            # the shell page's fields: the section showing (the ready signal's route),
+appearance = "appearance"      #   Light or Dark, who is signed in (ark_app::shell::Household),
+household = "household"        #   a page shown in the system's browser while set,
+browse = "settings.plaid"      #   and the message that says it closed (with its `url`)
+closed = "PageClosed"
+[shell.hosted]                 # each name the shell's view hosts and the screen whose view it is
+budget = "budget"
+"accounts.register" = "register"
+
 [icon]
 svg = "icon.svg"               # its full-canvas rectangle the ground, the rest the mark
 
 [apple]
 product = "Money"              # Money.app, the scheme
+# scene = "…"                  # the scene its @main draws, for an app with no [shell]
 category = "public.app-category.finance"
 deployment = "26.0"
 [apple.info]                   # Info.plist keys of the app's own (usage strings)
 [apple.entitlements]           # the app's own entitlements
 
 [android]
-package = "dev.money.android"  # the Kotlin package of its code and its generated screens
+package = "dev.money.android"  # the Kotlin package of its generated screens and entry points
+# root = "…"                   # the composable its activity draws, for an app with no [shell]
 min-sdk = 26
 target-sdk = 35
-keystore = "native/android/debug.keystore"
+keystore = "debug.keystore"    # the one public debug key every build signs with: committed, the only file not generated
 permissions = ["android.permission.INTERNET"]
 features = [{ name = "android.hardware.camera", required = false }]
 hosts = ["auth", "join"]       # the scheme's hosts
-dependencies = []              # Maven coordinates its own Kotlin needs
+dependencies = []              # Maven coordinates beyond ArkUI's template (its graph is ui/kotlin/android/deps.json)
 
 [ffi]                          # the phones' library, generated ("The Phones' Library")
 host = "MoneyHost"             # the object the phone holds
 app = "host::Money"            # its part of its host, in its crate
-route = "routes::Route"        # its routes, and what only the phone's shell does
-native = "host::ShellAsk"
+route = "routes::Route"        # its routes (what only the phone's shell does is ark-ffi's `ShellAsk`, every app's)
 domain = "money_core::shared"  # the domain its replica's log is of
 demo = "money-seed"            # its demo's crate (`seeded_disk`, `open`); none without one
 android = ["model"]            # ark-ffi's features each phone's library links
@@ -996,14 +1038,16 @@ checkout it also fails when anything is committed where the generated
 projects and library go. `checks.money-native` builds the generator and
 the projects.
 
-**What is still committed native, and why** (`<app>/native/`): the
-shell's host that hosts the generated screens by name (money's
-Shell.swift and MoneyApp.kt: the sections' stacks, a register's own
-runtime, the account sheet), the app's theme, marks and glyphs, each
-going as it moves into the app's crate or into ArkUI; the hand-written
-tests over them;
-the Maven graph Gradle replays offline (`native/android/deps.json`); and
-the debug key. Nothing there is a project file.
+**What is still committed native, and why**: for money, only the debug
+key (`money/debug.keystore`): Android signs every build with it so one
+APK installs over the last on any machine, and a key cannot be generated
+the same twice. Its shell is the app library's (`ArkShell`, drawn from
+`[shell]`), its theme arkui's in its accent, its tab glyphs the shell's
+view's names in ArkUI's glyph sets, its account marks the records' glyph
+and chart slot drawn by ArkUI's `MarkTile`, and its Maven graph ArkUI's
+(`ui/kotlin/android/deps.json`, which every app on the app library
+replays). Revelation, not on the app library, keeps its own Kotlin and
+resources in `revelation/native/android`.
 
 ## Escape Hatches
 
@@ -1012,13 +1056,13 @@ the debug key. Nothing there is a project file.
   message for another of money's runtimes (`Budget { msg }`, `Sheet { msg
   }`). There is no call
   into a shell by name.
-- **App-provided pieces of a part** — a part that wears something of the
-  app's takes it from the environment, set once at the root: the face at
-  a tab's title (`\.tabFace`; Compose's frame, `LocalTabFrame`), the mark
-  of a row of the app's own kind (`\.rowMark`, `LocalRowMark`: money's
-  account marks), the app's own glyphs by name (`LocalGlyphs`).
-- **A hand-written screen beside a generated one** — every other money
-  screen still is, inside the same shells.
+- **What the shell provides a part** — the screens it hosts by name
+  (`\.hostedScreens`, `LocalHostedScreens`) and, on Android, the frame a
+  tab's page sits in (`LocalTabFrame`), set once by the app library's
+  shell. Nothing is an app's own: a row's mark is its glyph and chart slot
+  (`MarkTile`), a glyph is ArkUI's by its Lucide name.
+- **A hand-written screen beside a generated one** — none of money's on
+  the phones; the desktop's window still draws its own pages (money/iced).
 
 ## Rules
 
@@ -1521,21 +1565,24 @@ crate, as the phones' library is generated) with money/iced gone.
 
 ### What Is Left of money's Own Native and Web Code
 
-- **The phones' shell** (money/native: Shell.swift, MoneyApp.swift,
-  MoneyApp.kt): the hosting of the shell's screens by name, the section
-  stacks a native `Open` pushes onto, a beside screen for an account's
-  register, the account sheet over `ShellPage.household`, Settings and
-  Add a Device. Generic in shape, money's only in its names: it becomes
-  the app library's (`ArkShell` in ArkApp, its Compose twin in
-  ark-app-android), driven by app.toml (which `[screens]` entry is the
-  shell, which names it hosts and over which screen, which routes are
-  pushed as which beside screen) and generated holders, keeping the
-  `-shots` hooks and `Ready` where they are. The account marks
-  (`AccountMark`, `KindTile`: a kind's glyph in a chart colour) become
-  the record's (a row's glyph and its chart slot, worked out in
-  money-app) drawn by ArkUI's `Tile`; money's tab glyphs go into ArkUI's
-  glyphs and `ui/theme.toml`. What stays app-committed: the debug key
-  app.toml names, and nothing else.
+- **The phones' shell** — done: money/native is gone. Its shell is the
+  app library's (`ArkShell` in ArkApp, its Compose twin in
+  ark-app-android), driven by app.toml's `[shell]` (which screen is the
+  shell, its Settings and commands, what goes over every section, which
+  names it hosts as which screen's view, the shell page's fields it reads)
+  and generated holders (`ArkScreens`), keeping the `-shots` hooks and
+  `Ready` where they were. No route is pushed by a phone: a route is one
+  of the shell's places on every host (an account its section, which
+  Accounts pushes where it is compact; every account's Transactions; a
+  bank Connected Banks in Settings), so the register is the host's screen
+  like any other and no screen runs beside the host. The account marks are
+  the records' (a kind's glyph and its chart slot, `accounts::kind_glyph`
+  and `kind_slot`) drawn by ArkUI's `MarkTile` (the iPhone's filled SF
+  Symbols, Android's mark glyph set, iced's and the browser's glyphs); the
+  tab glyphs are the shell's view's names in ArkUI's glyph sets (`layers`
+  and `link` moved into Android's); the theme is arkui's in app.toml's
+  accent (`ArkAppTheme`, `arkWindow`); the Maven graph is ArkUI's. What
+  stays app-committed: the debug key app.toml names, and nothing else.
 - **The browser** — done: money/web is gone. Its place and sign-in are
   arkui-web's (`host::WebHost<W>`, `WebPlace`, `live`), for any app over
   its domain and its demo's crate; its address is the shell's

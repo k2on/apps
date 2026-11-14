@@ -85,6 +85,9 @@ public final class ArkApp<Library: ArkAppHost>: ObservableObject {
     private let attached = ArkProcess.shared().attach()
 
     public init(_ library: Library) {
+        // Money written in the device's locale by the app's library, before
+        // the first view draws.
+        ArkNumbers.install()
         self.library = library
         host = library.host()
         welcome = ArkScreen(library.welcome())
