@@ -5,8 +5,9 @@
 // feature flags (about 1.5 s), and the asset catalog's lookups and PNG
 // decoding; each had landed inside a shot, the iPhone's account and the
 // iPad's Accounts waiting 10 to 15 s on one block of the main thread
-// (app-screens 43486700398). Here they are done once, out of sight and out
-// of every picture, and the walk's log says how long it took. A walk's
+// (app-screens 43486700398). Here they are done once, after the first
+// screen is up and before its picture, and the walk's log says how long it
+// took; the screen is waited for again after. A walk's
 // launch alone: nothing of it runs for anybody using the app.
 #if canImport(UIKit)
 import Foundation
@@ -32,33 +33,34 @@ enum ShotsWarm {
         return parts.joined(separator: ", ")
     }
 
-    /// An alert with a text field, presented and put away in a window of its
-    /// own under the app's (never drawn: a picture is taken after it has
-    /// gone, and the window with it): the alert's labels, the field's text
-    /// effects window and the keyboard's machinery made once.
+    /// An alert with a text field, presented over what shows and put away
+    /// again before anything is taken: the alert's labels, the field's text
+    /// effects window and the keyboard's machinery made once. Each wait is a
+    /// guard of two seconds, never a hang.
     private static func alert() async -> String? {
-        guard let scene = UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }).first else { return "no scene" }
-        let window = UIWindow(windowScene: scene)
-        window.windowLevel = UIWindow.Level(rawValue: UIWindow.Level.normal.rawValue - 1)
-        window.rootViewController = UIViewController()
-        window.isHidden = false
-        defer {
-            window.endEditing(true)
-            window.isHidden = true
-            window.rootViewController = nil
-        }
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        guard let window = scenes.flatMap(\.windows).first(where: \.isKeyWindow) ?? scenes.first?.windows.first,
+              var top = window.rootViewController else { return "no window" }
+        while let p = top.presentedViewController { top = p }
         let alert = UIAlertController(title: "Ready", message: "Every dollar given a job, 1 Jan, 555-0100.", preferredStyle: .alert)
         alert.addTextField { $0.placeholder = "Name" }
         alert.addAction(UIAlertAction(title: "OK", style: .default))
-        await withCheckedContinuation { (done: CheckedContinuation<Void, Never>) in
-            window.rootViewController?.present(alert, animated: false) { done.resume() }
+        top.present(alert, animated: false)
+        var waits = 0
+        while alert.viewIfLoaded?.window == nil && waits < 80 {
+            try? await Task.sleep(nanoseconds: 25_000_000)
+            waits += 1
         }
+        let shown = alert.viewIfLoaded?.window != nil
         alert.textFields?.first?.becomeFirstResponder()
-        alert.textFields?.first?.resignFirstResponder()
-        await withCheckedContinuation { (done: CheckedContinuation<Void, Never>) in
-            alert.dismiss(animated: false) { done.resume() }
+        alert.dismiss(animated: false)
+        waits = 0
+        while alert.presentingViewController != nil && waits < 80 {
+            try? await Task.sleep(nanoseconds: 25_000_000)
+            waits += 1
         }
-        return nil
+        window.endEditing(true)
+        return shown ? nil : "not shown"
     }
 
     /// The data detectors a label's text makes, made and run once.

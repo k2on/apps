@@ -158,7 +158,14 @@ for w in ${walks[@]+"${walks[@]}"}; do
     [ -f "$shots/out/done" ] || [ -f "$shots/out/failed" ] && break
     if [ -n "$pid" ] && ! kill -0 "$pid" 2> /dev/null; then
       sleep 1
-      [ -f "$shots/out/done" ] || [ -f "$shots/out/failed" ] || echo "::error::$a $kind: the app ended with its walk unsaid"
+      if ! [ -f "$shots/out/done" ] && ! [ -f "$shots/out/failed" ]; then
+        echo "::error::$a $kind: the app ended with its walk unsaid"
+        # Why, when the system wrote it down: the newest crash report of
+        # the app's process, its exception and where it stopped.
+        sleep 5
+        ips=$(ls -t "$HOME/Library/Logs/DiagnosticReports/"*.ips 2> /dev/null | xargs grep -l "\"$bundle\"" 2> /dev/null | head -1)
+        [ -n "$ips" ] && python3 "$here/crash.py" "$ips" | sed 's/^/  /' || echo "  no crash report found"
+      fi
       break
     fi
     sleep 1

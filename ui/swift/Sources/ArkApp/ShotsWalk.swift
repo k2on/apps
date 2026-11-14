@@ -120,14 +120,15 @@ final class ShotsWalk {
         var ways: [(dark: Bool, landscape: Bool)] = one == nil ? [(false, false), (true, false)] : [(false, false)]
         if turns { ways = one == nil ? [(false, false), (true, false), (true, true), (false, true)] : [(false, false), (false, true)] }
         var at = (dark: false, landscape: false)
+        ShotsWindow.theme(dark: false)
+        try await settled("the first screen")
         // What a cold simulator does once (an alert's labels, a text field,
-        // the asset catalog), done before anything is timed or taken
-        // (ShotsWarm.swift).
+        // the asset catalog), done before any picture or step is taken
+        // (ShotsWarm.swift), the screen waited for again after it.
         let warm = Date()
         let warmed = await ShotsWarm.up()
         say("warm-up: \(Int(Date().timeIntervalSince(warm) * 1000)) ms, before the walk: \(warmed)")
-        ShotsWindow.theme(dark: false)
-        try await settled("the first screen")
+        try await settled("after the warm-up")
         // To another way: the one thing that differs switched, the screen waited for.
         func go(_ to: (dark: Bool, landscape: Bool)) async throws -> String {
             let t = Date()
