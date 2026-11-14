@@ -108,6 +108,7 @@ pub const GLYPHS: &[(&str, &[u8])] = &[
     ("CLOCK", glyphs::CLOCK),
     ("DOLLAR", glyphs::DOLLAR),
     ("BANKNOTE", glyphs::BANKNOTE),
+    ("PIGGY", glyphs::PIGGY),
     ("CLOUD", glyphs::CLOUD),
     ("TARGET", glyphs::TARGET),
     ("ARROWS", glyphs::ARROWS),
