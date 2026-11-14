@@ -23,7 +23,9 @@
 // `shots/out/<theme>/<id>.png` (`out/<portrait|landscape>/<theme>/` when
 // it turns), what a step can name beside it
 // (`<id>.tree.txt`), each shot's times in `shots/out/walk.log`, and
-// `shots/out/done` (or `failed`, why) once it is over.
+// `shots/out/done` (or `failed`, why) once it is over. Before the first
+// screen is timed, what a cold simulator does once is done out of sight
+// (`ShotsWarm`), and its time logged.
 import ArkUI
 import Foundation
 #if canImport(ArkBindings)
@@ -118,6 +120,12 @@ final class ShotsWalk {
         var ways: [(dark: Bool, landscape: Bool)] = one == nil ? [(false, false), (true, false)] : [(false, false)]
         if turns { ways = one == nil ? [(false, false), (true, false), (true, true), (false, true)] : [(false, false), (false, true)] }
         var at = (dark: false, landscape: false)
+        // What a cold simulator does once (an alert's labels, a text field,
+        // the asset catalog), done before anything is timed or taken
+        // (ShotsWarm.swift).
+        let warm = Date()
+        let warmed = await ShotsWarm.up()
+        say("warm-up: \(Int(Date().timeIntervalSince(warm) * 1000)) ms, before the walk: \(warmed)")
         ShotsWindow.theme(dark: false)
         try await settled("the first screen")
         // To another way: the one thing that differs switched, the screen waited for.
