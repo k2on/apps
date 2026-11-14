@@ -4,38 +4,42 @@ workspace = "../../rust"
 version = "0.1.0"
 edition.workspace = true
 license.workspace = true
-description = "harken's desktop and browser client: the library, the table, the menus and the listening session, on arkui, ArkDB v5's client and the domain."
+description = "harken's desktop client: the library, the table, the menus and the listening session, on arkui, ArkDB v5's client and the domain."
 
 [features]
 # A standalone demo: no server, no sign-in, a seeded library, its own
-# authority. What GitHub Pages publishes, and a separate build from the real
-# client on purpose — a flag could be set by accident, a feature has to be
-# asked for at build time.
+# authority. A separate build from the real client on purpose — a flag
+# could be set by accident, a feature has to be asked for at build time.
 demo = ["dep:harken-seed"]
 
 [dependencies]
 ark = { path = "../../rust/ark" }
 harken-domain = { path = "../domain" }
-# The demo's library (`harken/seed`), with the `demo` feature only.
-harken-seed = { path = "../seed", default-features = false, optional = true }
+# Where harken can be: its routes.
+harken-app = { path = "../app" }
+# The demo's library (`harken/demo`), with the `demo` feature only.
+harken-seed = { path = "../demo", default-features = false, optional = true }
 # The one reconciler, the phones' and the speakers', over this window's player.
 harken-player = { path = "../player" }
+# This window's player: the sound card and MPRIS (`player.rs`).
+ark-media-player = { path = "../../modules/ark-media-player", features = ["desktop"] }
+# The login, kept in the desktop's keyring (the Secret Service).
+ark-secure-store = { path = "../../modules/ark-secure-store", features = ["desktop"] }
 ark-peer = { path = "../../rust/ark-peer", default-features = false }
-# Signing in: a loopback listener and the browser on the desktop, the page's
-# own address in a browser; and the logins a device remembers.
+# Signing in: a loopback listener and the system's browser; and the logins
+# a device remembers.
 ark-auth = { path = "../../rust/ark-auth", default-features = false }
-arkui = { path = "../../rust/arkui" }
+arkui = { path = "../../ui/rust/arkui" }
 # The podcast directory's answer, read (`directory.rs`).
 serde = { workspace = true }
 serde_json = { workspace = true }
 
-[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 # `smol` gives iced an executor and the clock that runs while audio plays or a
 # submenu dwells — and only then (`docs/plan-reactive.md`). `svg` is every
 # glyph, `image` a cover, `advanced` the scroll operation that keeps the cursor
 # on screen and the recipes `tests/wake.rs` runs.
 # `fira-sans` is the typeface (the port leaves the vendored Inter behind).
-iced = { version = "0.14", features = ["smol", "svg", "image", "advanced", "fira-sans"] }
+iced = { workspace = true }
 # The sync socket natively: the token first, then frames, and the server's
 # close code read (4401 is a login turned away).
 tungstenite = { version = "0.24", default-features = false, features = ["handshake"] }
@@ -44,22 +48,9 @@ tungstenite = { version = "0.24", default-features = false, features = ["handsha
 ureq = { version = "2", default-features = false, features = ["tls"] }
 # The window photographed for the apps' screenshots, when `ARK_SHOTS` asks
 # (.github/screens/apps.md): this same application, run headless.
-arkui-shots = { path = "../../rust/arkui-shots" }
+arkui-shots = { path = "../../ui/rust/shots" }
 
-[target.'cfg(target_arch = "wasm32")'.dependencies]
-# WebGL rather than WebGPU, for reach: without it wgpu finds no backend and
-# the software fallback cannot have the canvas WebGL already claimed.
-iced = { version = "0.14", features = ["webgl", "svg", "image", "advanced", "fira-sans"] }
-# `HtmlAudioElement` is the now-playing bar: handing a URL to the platform
-# buys streaming, buffering, range requests and seeking.
-# `WebSocket` is the sync socket in a browser. `Storage` is the tab's mark
-# that it went to sign in (`auth::came_back`).
-web-sys = { version = "0.3", features = ["Window", "Location", "Storage", "Document", "Element", "HtmlAudioElement", "HtmlMediaElement", "WebSocket", "MessageEvent", "CloseEvent", "BinaryType", "Event", "DomTokenList"] }
-wasm-bindgen = "0.2"
-js-sys = "0.3"
-
-
-[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+[dev-dependencies]
 # The software renderer iced falls back to, built with no window: what
 # `tests/bench.rs` lays a page out and draws it with.
-iced_tiny_skia = "0.14"
+iced_tiny_skia = { workspace = true }

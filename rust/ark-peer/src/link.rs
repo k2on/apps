@@ -476,7 +476,9 @@ pub fn socket(url: &str, token: &str, wake: Option<Wake>) -> Box<dyn Wire> {
     }
     impl Drop for Socket {
         fn drop(&mut self) {
-            (self.0.set_onopen(None), self.0.set_onmessage(None), self.0.set_onclose(None));
+            self.0.set_onopen(None);
+            self.0.set_onmessage(None);
+            self.0.set_onclose(None);
             let _ = self.0.close();
         }
     }

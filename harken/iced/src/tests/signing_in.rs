@@ -6,7 +6,7 @@ use ark_auth::{Account, Login};
 
 use super::{signed_in, signed_out, song};
 use crate::client::Standing;
-use crate::places::Pane;
+use crate::routes::Pane;
 use crate::{App, Message};
 
 /// A login holding the library's role, as the scanner's account does: the
@@ -58,6 +58,16 @@ fn signing_in_moves_the_same_replica_on() {
     };
     assert_eq!(pending(&app), [""], "authored as nobody");
 
+    // A page back from signing in with a code: traded, and the login it came to.
+    let remembered = ark_auth::onboarding::Remembered {
+        server: Some(app.server.clone()),
+        ..Default::default()
+    };
+    let _ = app.onboard(ark_auth::onboarding::Event::Launched {
+        remembered,
+        code: Some("c".into()),
+        returned: false,
+    });
     let _ = app.update(Message::SignedIn(Ok(login("alice"))));
     assert!(!app.peer.client.lock().is_signed_out());
     assert_eq!(app.login.as_ref().map(|l| l.user.id.as_str()), Some("alice"));

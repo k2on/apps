@@ -1,4 +1,4 @@
-//! harken's colours: the shared neutrals and the gold, arkui/theme.toml's
+//! harken's colours: the shared neutrals and the gold, ui/theme.toml's
 //! `accent.gold`, as the one value [`arkui::theme::install`] takes.
 //! Everything else asks [`arkui::theme::of`] — nothing in this crate writes
 //! a colour down, which is the whole reason dark mode works: iced picks Light

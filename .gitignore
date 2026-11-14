@@ -8,3 +8,7 @@ docs/perf/
 # The same for money (`.#money-ios-xcframework -o money/ffi/ios`).
 /money/ffi/ios
 /money/ffi/android
+__pycache__/
+/target/
+# The prebuild self-test fixture's generated Kotlin (`prebuild.py fixture`).
+/ui/kotlin/android/fixture/generated/

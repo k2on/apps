@@ -104,11 +104,62 @@ struct Issued {
     issued_ms: i64,
 }
 
+/// What a client brings `/auth/exchange` (or a page `/auth/session`) to
+/// be signed in with, as JSON: `{"code": "…"}`. One way today. Another
+/// comes in beside it as a variant, not a route — an ID token issued to
+/// another of the provider's clients, checked against the clients this
+/// server trusts ([`crate::oidc::Provider::trusted`]) and its groups rule
+/// ([`crate::oidc::Groups`]) — and the session it is answered with is
+/// this server's own, as every login's is.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
+#[serde(untagged)]
+pub enum Proof {
+    /// The one-minute, single-use code this server's own callback sent
+    /// back to the client's redirect.
+    Code { code: String },
+}
+
 /// A login has a minute to go from the provider to the exchange, and a
 /// person ten minutes to sign in at the provider.
 const CODE_TTL_MS: i64 = 60 * 1000;
 #[cfg_attr(not(feature = "server"), allow(dead_code))]
 const PENDING_TTL_MS: i64 = 10 * 60 * 1000;
+
+/// How long a device code ([`Auth::device_code`]) lasts: the time to scan
+/// it, or to send the link and open it, on the new device.
+pub const DEVICE_CODE_TTL_MS: i64 = 10 * 60 * 1000;
+
+/// How many device codes one account may have waiting at once: enough for
+/// a household setting up its phones, and no more to guess among.
+pub const DEVICE_CODES_PER_ACCOUNT: usize = 5;
+
+/// What a device code is refused with, as the new device says it.
+pub const CODE_EXPIRED: &str = "This code has expired. Make a new one on a device that's signed in.";
+pub const CODE_USED: &str = "This code has been used already. Make a new one on a device that's signed in.";
+pub const CODE_UNKNOWN: &str = "This code isn't one this server made. Make a new one on a device that's signed in.";
+
+/// A device code waiting, kept by its hash: who it signs in, and when it
+/// was made; or, once redeemed, when.
+#[derive(Debug)]
+enum DeviceCode {
+    Waiting { account: Account, issued_ms: i64 },
+    Used { issued_ms: i64 },
+}
+
+impl DeviceCode {
+    fn issued_ms(&self) -> i64 {
+        match self {
+            DeviceCode::Waiting { issued_ms, .. } | DeviceCode::Used { issued_ms } => *issued_ms,
+        }
+    }
+}
+
+/// A code as it is kept: its SHA-256, so a copy of the server's memory
+/// signs nobody in.
+fn code_hash(code: &str) -> String {
+    use sha2::Digest;
+    ark::hash::hex(&sha2::Sha256::digest(code.as_bytes()))
+}
 
 /// The schema's reads, its type erased: a session live at `ctx.now` with
 /// its granted roles, a sign-in by id, and a person's sign-ins.
@@ -151,6 +202,9 @@ pub struct Auth {
     #[cfg_attr(not(feature = "server"), allow(dead_code))]
     pending: Mutex<HashMap<String, Pending>>,
     codes: Mutex<HashMap<String, Issued>>,
+    /// Device codes by hash ([`Auth::device_code`]), and those redeemed
+    /// until they would have expired, so a second try is told so.
+    device_codes: Mutex<HashMap<String, DeviceCode>>,
     hub: OnceLock<Box<dyn Hub>>,
     reads: Reads,
     /// `docs/plan-auth.md` The roles the configuration grants, by account
@@ -177,6 +231,7 @@ impl Auth {
             ttl_ms: DEFAULT_TTL_MS,
             pending: Mutex::new(HashMap::new()),
             codes: Mutex::new(HashMap::new()),
+            device_codes: Mutex::new(HashMap::new()),
             hub: OnceLock::new(),
             reads: reads::<S>(),
             roles: BTreeMap::new(),
@@ -245,6 +300,11 @@ impl Auth {
         self
     }
 
+    /// Where people reach this server, with no trailing slash.
+    pub fn public_url(&self) -> &str {
+        &self.public_url
+    }
+
     pub fn mode(&self) -> &Mode {
         &self.mode
     }
@@ -269,6 +329,29 @@ impl Auth {
             }
         }
         self.redirects.iter().any(|p| url.starts_with(p))
+    }
+
+    /// The `Set-Cookie` that keeps a browser's session ([`crate::COOKIE`]):
+    /// the token, `HttpOnly` (no script reads it), `SameSite=Strict` (no
+    /// other site's page sends it), the whole origin's (`Path=/`), until
+    /// the session expires; `Secure` when the server is reached over
+    /// https.
+    pub fn session_cookie(&self, login: &Login) -> String {
+        let age = ((login.expires_ms - now_ms()) / 1000).max(0);
+        self.cookie(&login.token, age)
+    }
+
+    /// The `Set-Cookie` that forgets it: signing out.
+    pub fn cleared_cookie(&self) -> String {
+        self.cookie("", 0)
+    }
+
+    fn cookie(&self, value: &str, age: i64) -> String {
+        let secure = match self.public_url.starts_with("https://") {
+            true => "; Secure",
+            false => "",
+        };
+        format!("{}={value}; Path=/; HttpOnly; SameSite=Strict; Max-Age={age}{secure}", crate::COOKIE)
     }
 
     /// The hub every sign-in's row is written to and every token judged
@@ -443,11 +526,74 @@ impl Auth {
         Ok(code)
     }
 
+    /// The login `proof` stands for, once: what `/auth/exchange` and a
+    /// page's `/auth/session` answer.
+    pub fn prove(&self, proof: &Proof) -> Option<Login> {
+        match proof {
+            Proof::Code { code } => self.redeem(code),
+        }
+    }
+
     /// The login a code stands for, once.
     pub fn redeem(&self, code: &str) -> Option<Login> {
         let mut codes = self.codes.lock().unwrap_or_else(|e| e.into_inner());
         let issued = codes.remove(code)?;
         (now_ms() - issued.issued_ms < CODE_TTL_MS).then_some(issued.login)
+    }
+
+    /// A one-time code that signs another device in as whoever `token`'s
+    /// session is — what "Add a Device" shows, in a join link
+    /// (`crate::onboarding::join_link`) — and when it expires. It lasts
+    /// [`DEVICE_CODE_TTL_MS`], is kept only as its hash, and an account has
+    /// at most [`DEVICE_CODES_PER_ACCOUNT`] waiting. Refused for a token
+    /// that is not a live session's.
+    pub fn device_code(&self, token: &str) -> Result<(String, i64), String> {
+        let id = self.verify(token).ok_or("that isn't a session of this server's")?.to_string();
+        let (get, now) = (self.reads.get, now_ms());
+        let row = self.ask(move |store| get(store, &id)).flatten();
+        let row = row.filter(|s| live(s, now)).ok_or("that session has ended; sign in again")?;
+        let account = Account {
+            id: row.user,
+            name: row.name,
+            email: row.email,
+            picture: row.picture,
+            roles: row.roles,
+        };
+        let mut codes = self.device_codes.lock().unwrap_or_else(|e| e.into_inner());
+        codes.retain(|_, c| now - c.issued_ms() < DEVICE_CODE_TTL_MS);
+        let waiting = codes
+            .values()
+            .filter(|c| matches!(c, DeviceCode::Waiting { account: a, .. } if a.id == account.id))
+            .count();
+        if waiting >= DEVICE_CODES_PER_ACCOUNT {
+            return Err("there are already enough codes waiting; use one, or wait ten minutes".into());
+        }
+        let code = random_token();
+        codes.insert(code_hash(&code), DeviceCode::Waiting { account, issued_ms: now });
+        Ok((code, now + DEVICE_CODE_TTL_MS))
+    }
+
+    /// A device code redeemed on `device`, once: a session of its own for
+    /// the account that made it, and its login — the same a browser's
+    /// sign-in gives. The sentence why not, as the new device says it.
+    pub fn redeem_device_code(&self, code: &str, device: &str) -> Result<Login, String> {
+        let now = now_ms();
+        let account = {
+            let mut codes = self.device_codes.lock().unwrap_or_else(|e| e.into_inner());
+            let key = code_hash(code.trim());
+            let issued_ms = codes.get(&key).ok_or(CODE_UNKNOWN)?.issued_ms();
+            if now - issued_ms >= DEVICE_CODE_TTL_MS {
+                codes.remove(&key);
+                return Err(CODE_EXPIRED.into());
+            }
+            // Taken and marked under one lock: two devices racing with the
+            // same code get it once.
+            match codes.insert(key, DeviceCode::Used { issued_ms }) {
+                Some(DeviceCode::Waiting { account, .. }) => account,
+                _ => return Err(CODE_USED.into()),
+            }
+        };
+        self.issue(&account, device)
     }
 }
 

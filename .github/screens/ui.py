@@ -9,7 +9,8 @@ to tap, or the tree itself to read.
 resource id, whole or after its `/`, which a Compose testTag is when the
 app exposes tags as ids). Prints the centre of the best match as `x y`;
 nothing, and exit 1, when there is none. Exact matches come before ones
-that only contain <text>; among them, one of the `role` asked for (`tab`,
+that only contain <text>, and those before ones that contain it in another
+case; among them, one of the `role` asked for (`tab`,
 `button`, `field`, `text`), then one that can be pressed (it, or what holds
 it, is clickable), since a page's heading and its button often say the
 same. A role is a preference, never a filter: a step that names one still
@@ -113,6 +114,9 @@ else:
     lowest = len(sys.argv) > 3 and sys.argv[3] == "bottom"
     exact = [n for n in nodes if want in names(n) and shown(n)]
     found = exact or [n for n in nodes if any(want in s for s in names(n) if s) and shown(n)]
+    # Then in any case: a page's "Server Address" is what a step that says
+    # "Server address" means (the first run's, 0f9011f6 and after).
+    found = found or [n for n in nodes if any(want.casefold() in s.casefold() for s in names(n) if s) and shown(n)]
     found.sort(key=lambda n: (bool(asked) and role(n) != asked, not pressable(n)))
     if lowest:
         found.sort(key=lambda n: -bounds(n)[3])

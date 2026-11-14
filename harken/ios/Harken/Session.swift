@@ -1,6 +1,6 @@
 // The account's listening session as the phone's screens read it, and what
 // they ask of it — nothing of Apple's but Foundation, so every rule here is
-// type-checked on Linux and held by `HarkenTests`. The reconciler that makes
+// type-checked on Linux. The reconciler that makes
 // this phone's player agree with the session, and says what happened to it,
 // is harken's one reconciler, in Rust (`harken/player`, through the FFI's
 // `Player`); what is here is what the screens, the device picker and the lock
@@ -205,8 +205,10 @@ enum Press: Equatable {
     case seek(Int64)
     /// A track of the queue, from its start.
     case jump(Int)
-    /// A track pressed: this queue, from here.
-    case start(queue: [Track], at: Int, positionMs: Int64, from: String)
+    /// A track pressed: this queue, from here. `shuffled`, a list in an
+    /// order of its own (Shuffle pressed): the session has no shuffle, so it
+    /// is the player's alone, which draws Shuffle lit.
+    case start(queue: [Track], at: Int, positionMs: Int64, from: String, shuffled: Bool = false)
     /// Put these after what is playing, the track playing playing on.
     case next([Track])
     /// Put these at the end of the queue.
@@ -241,8 +243,9 @@ enum Press: Equatable {
         case let .skip(by): return tagged("Skip", [field("by", String(by))])
         case let .seek(ms): return tagged("Seek", [field("ms", String(ms))])
         case let .jump(i): return tagged("Jump", [field("index", String(i))])
-        case let .start(q, at, ms, from):
-            return tagged("Start", [field("queue", tracks(q)), field("at", String(at)), field("position_ms", String(ms)), field("from", J.q(from))])
+        case let .start(q, at, ms, from, shuffled):
+            let flag = shuffled ? [field("shuffled", "true")] : []
+            return tagged("Start", [field("queue", tracks(q)), field("at", String(at)), field("position_ms", String(ms)), field("from", J.q(from))] + flag)
         case let .next(ts): return tagged("Next", [field("tracks", tracks(ts))])
         case let .append(ts): return tagged("Append", [field("tracks", tracks(ts))])
         case let .remove(i): return tagged("Remove", [field("index", String(i))])
@@ -348,6 +351,13 @@ struct Heard: Equatable {
     var refused: String? = nil
     /// What plays: the session's, while joined; this phone's own player's, alone.
     var active: Active? = nil
+    /// What only this phone's own player has: filling its buffer, shuffled,
+    /// repeating, and its own volume (its gain).
+    var buffering = false
+    var shuffle = false
+    var repeatMode = Repeat.off
+    var localLevel: Int64 = 100
+    var localMuted = false
 
     /// The sound is on another device, here or not: this phone is a controller of it.
     var elsewhere: Bool { joined && (listening?.active?.output.deviceId).map { $0 != me } == true }
@@ -367,6 +377,19 @@ struct Heard: Equatable {
         h.stats = RemoteStats.of(o["stats"])
         h.refused = o["refused"] as? String
         if let a = o["active"], !(a is NSNull) { h.active = Active(json: a) }
+        if let l = o["local"] as? [String: Any] {
+            h.buffering = l["buffering"] as? Bool ?? false
+            h.shuffle = l["shuffle"] as? Bool ?? false
+            switch l["repeat"] as? String {
+            case "all": h.repeatMode = .all
+            case "one": h.repeatMode = .one
+            default: h.repeatMode = .off
+            }
+            if let v = l["volume"] as? [String: Any] {
+                h.localLevel = v["level"].map { J.int($0) } ?? 100
+                h.localMuted = v["muted"] as? Bool ?? false
+            }
+        }
         return h
     }
 }

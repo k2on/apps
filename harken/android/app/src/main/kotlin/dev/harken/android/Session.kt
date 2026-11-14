@@ -113,8 +113,11 @@ sealed class Press {
     /** A track of the queue, from its start. */
     data class Jump(val index: Int) : Press()
 
-    /** A track pressed: this queue, from here. */
-    data class Start(val queue: List<Queued>, val at: Int, val positionMs: Long, val from: String) : Press()
+    /**
+     * A track pressed: this queue, from here. `shuffled`, a list in an order of its own (Shuffle
+     * pressed): the session has no shuffle, so it is the player's alone, which draws Shuffle lit.
+     */
+    data class Start(val queue: List<Queued>, val at: Int, val positionMs: Long, val from: String, val shuffled: Boolean = false) : Press()
 
     /** Put these after what is playing, the track playing playing on. */
     data class Next(val tracks: List<Queued>) : Press() {
@@ -161,7 +164,8 @@ sealed class Press {
             is Skip -> of("Skip", "by" to by)
             is Seek -> of("Seek", "ms" to ms)
             is Jump -> of("Jump", "index" to index)
-            is Start -> of("Start", "queue" to tracks(queue), "at" to at, "position_ms" to positionMs, "from" to from)
+            is Start ->
+                of("Start", "queue" to tracks(queue), "at" to at, "position_ms" to positionMs, "from" to from, *(if (shuffled) arrayOf<Pair<String, Any?>>("shuffled" to true) else emptyArray()))
             is Next -> of("Next", "tracks" to tracks(tracks))
             is Append -> of("Append", "tracks" to tracks(tracks))
             is Remove -> of("Remove", "index" to index)

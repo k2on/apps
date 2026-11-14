@@ -1,5 +1,6 @@
 // The id of a process's window, for `screencapture -l` (app-mac.sh): its
-// first window on the screen at the normal level, or none (exit 1).
+// frontmost window on the screen at the normal level (the window server
+// lists them front to back), or none (exit 1).
 //
 //   window <pid>
 import CoreGraphics

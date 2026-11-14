@@ -2,6 +2,9 @@
 //! order the log gives them — a claim and a cancel of one pending row,
 //! either first; a lease run out and claimed again; a finish by whoever
 //! did not claim it.
+// A test reads its fixtures and times itself: the kernel's and the core's
+// purity (clippy.toml) is their library's, not their tests'.
+#![allow(clippy::disallowed_methods, clippy::disallowed_types)]
 
 use std::sync::Arc;
 

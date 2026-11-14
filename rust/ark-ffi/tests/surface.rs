@@ -234,6 +234,9 @@ pub mod jobs {
 
     /// Whether `fetch.every` refuses the next time it is made.
     pub static REFUSE: AtomicBool = AtomicBool::new(false);
+    /// Held by every test that makes `fetch.every`: `REFUSE` is the
+    /// process's, and tests run side by side.
+    pub static ONE_AT_A_TIME: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     /// Every job, as a plan that reads the row `id` names, so that a write
     /// to it makes the plan again — which refuses once when asked to.
@@ -280,6 +283,7 @@ fn a_kinds_due_jobs_are_asked_by_name() {
 /// view made again read nothing.
 #[test]
 fn a_view_made_again_after_a_reset_is_made_from_its_input() {
+    let _one = jobs::ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
     let dir = tempfile::tempdir().unwrap();
     let d = Peer::open(Config::of(Arc::new(jobs::domain())), dir.path().to_str().unwrap(), None).unwrap();
     let every = d.view("fetch.every".into(), r#"{"id":"a"}"#.into()).unwrap();
@@ -360,6 +364,7 @@ fn an_apps_mutate_is_the_root_of_its_trace() {
 /// held the row twice (money's budget, a category twice, the app gone).
 #[test]
 fn a_views_rows_are_its_base_and_take_says_what_came_after() {
+    let _one = jobs::ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
     let dir = tempfile::tempdir().unwrap();
     let d = Peer::open(Config::of(Arc::new(jobs::domain())), dir.path().to_str().unwrap(), None).unwrap();
     let every = d.view("fetch.every".into(), r#"{"id":"a"}"#.into()).unwrap();
@@ -373,4 +378,132 @@ fn a_views_rows_are_its_base_and_take_says_what_came_after() {
         panic!("patched")
     };
     assert_eq!(patches.len(), 1, "only what came after: {patches:?}");
+}
+
+/// The process's one runtime: two UIs attached share one peer, opened
+/// once; detaching both leaves it running; a sign-out puts it away and the
+/// next open makes it again. Falsified by opening a peer per attachment, or
+/// closing it when the last UI detaches.
+#[test]
+fn two_attaches_share_one_runtime_and_detaching_leaves_it_running() {
+    let dir = tempfile::tempdir().unwrap();
+    let process = ark_ffi::ArkProcess::apart();
+    let open = || Peer::open(config(), dir.path().to_str().unwrap(), None);
+    let first = process.clone().attach();
+    let a = process.open("one", open).unwrap();
+    let second = process.clone().attach();
+    let b = process.open("one", || panic!("opened twice")).unwrap();
+    assert!(Arc::ptr_eq(&a, &b), "one peer for both");
+    assert_eq!((process.attached(), process.opened()), (2, 1));
+    let part = process.part("player", || 7_u32);
+    assert!(Arc::ptr_eq(&part, &process.part("player", || 8_u32)), "a part made once");
+    first.detach();
+    first.detach();
+    drop(second);
+    assert_eq!(process.attached(), 0);
+    assert!(process.running(), "the runtime outlives its UI");
+    assert!(Arc::ptr_eq(&process.peer().unwrap(), &a));
+    process.sign_out();
+    assert!(!process.running());
+    process.open("one", open).unwrap();
+    assert_eq!(process.opened(), 2, "made again after a sign-out");
+    let other = tempfile::tempdir().unwrap();
+    let c = process
+        .open("two", || Peer::open(config(), other.path().to_str().unwrap(), None))
+        .unwrap();
+    assert_eq!(process.opened(), 3, "another server is another runtime");
+    assert!(Arc::ptr_eq(&process.peer().unwrap(), &c));
+    assert!(
+        Arc::ptr_eq(&ark_ffi::ArkProcess::shared(), &ark_ffi::ArkProcess::shared()),
+        "one a process"
+    );
+}
+
+/// A UI that attaches while the runtime is being opened with none attached
+/// (Android's activity, after its app host opened the session off the main
+/// thread) leaves it online: what is said to the link last is what is
+/// wanted last. Falsified by saying offline after letting go of the lock
+/// unguarded: the attach's online came first, then the open's offline, and
+/// the peer never dialled (app-screens 43175998411).
+#[test]
+fn an_attach_while_opening_leaves_it_online() {
+    use std::sync::Mutex;
+    let dir = tempfile::tempdir().unwrap();
+    let process = ark_ffi::ArkProcess::apart();
+    let said = Arc::new(Mutex::new(Vec::<bool>::new()));
+    let attaching = Arc::new(Mutex::new(None::<std::thread::JoinHandle<Arc<ark_ffi::Attached>>>));
+    let (s, p, a) = (said.clone(), process.clone(), attaching.clone());
+    process.with_link(move |on| {
+        // The first offline: a UI attaches meanwhile, on its own thread,
+        // given the time to; what is said is recorded once it is said.
+        if !on && a.lock().unwrap().is_none() {
+            let p = p.clone();
+            *a.lock().unwrap() = Some(std::thread::spawn(move || p.attach()));
+            std::thread::sleep(std::time::Duration::from_millis(200));
+        }
+        s.lock().unwrap().push(on);
+    });
+    process.open("one", || Peer::open(config(), dir.path().to_str().unwrap(), None)).unwrap();
+    let ui = attaching.lock().unwrap().take().expect("attached while opening").join().unwrap();
+    assert!(process.online());
+    let said = said.lock().unwrap().clone();
+    assert_eq!(said.last(), Some(&true), "said last: online ({said:?})");
+    drop(ui);
+}
+
+/// A wake: the app's runtime hears it, the process is online for it, and
+/// the woken component is told to finish once the runtime is idle — not
+/// before — then the process goes offline again with no UI attached.
+/// Falsified by `woken` not waiting on `idle`: `done` was told while the
+/// runtime still synced.
+#[test]
+fn a_wake_is_work_until_the_runtime_is_idle() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Mutex;
+
+    struct App {
+        heard: Mutex<Vec<ark_app::Woken>>,
+        busy: AtomicBool,
+    }
+    impl ark_ffi::Wakeful for App {
+        fn woken(&self, reason: ark_app::Woken) -> bool {
+            self.heard.lock().unwrap().push(reason);
+            self.busy.store(true, Ordering::SeqCst);
+            true
+        }
+        fn idle(&self) -> bool {
+            !self.busy.load(Ordering::SeqCst)
+        }
+    }
+    struct Done(std::sync::mpsc::Sender<bool>);
+    impl ark_ffi::WakeDone for Done {
+        fn finished(&self, idle: bool) {
+            let _ = self.0.send(idle);
+        }
+    }
+
+    let process = ark_ffi::ArkProcess::apart();
+    let online = Arc::new(Mutex::new(vec![]));
+    let o = online.clone();
+    process.with_link(move |on| o.lock().unwrap().push(on));
+    let app = Arc::new(App {
+        heard: Mutex::new(vec![]),
+        busy: AtomicBool::new(false),
+    });
+    process.set_wakeful(Some(app.clone()));
+    let (tx, rx) = std::sync::mpsc::channel();
+    process.clone().wake(ark_ffi::WakeReason::Sync, 5_000, Arc::new(Done(tx)));
+    assert_eq!(*app.heard.lock().unwrap(), vec![ark_app::Woken::Sync]);
+    assert!(process.online(), "online for the wake");
+    assert!(rx.recv_timeout(std::time::Duration::from_millis(200)).is_err(), "not done while it syncs");
+    app.busy.store(false, Ordering::SeqCst);
+    assert_eq!(rx.recv_timeout(std::time::Duration::from_secs(2)), Ok(true));
+    std::thread::sleep(std::time::Duration::from_millis(20));
+    assert!(!process.online(), "offline again: no UI, no work");
+    assert_eq!(*online.lock().unwrap(), vec![true, false]);
+    // Out of time: told so.
+    app.busy.store(true, Ordering::SeqCst);
+    let (tx, rx) = std::sync::mpsc::channel();
+    process.clone().settle(100, Arc::new(Done(tx)));
+    assert_eq!(rx.recv_timeout(std::time::Duration::from_secs(2)), Ok(false));
 }

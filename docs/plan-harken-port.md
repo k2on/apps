@@ -89,10 +89,10 @@ Every agent owns paths; nobody edits another's paths without asking the
 coordinator (the main session) first.
 
 **Phase 1 (parallel)**
-- **A — `rust/arkui`**: from `harken/iced/src/{vim,style,palette,icon,glyphs,art,covers,route}.rs`
+- **A — `ui/rust/arkui`**: from `harken/iced/src/{vim,style,palette,icon,glyphs,art,covers,route}.rs`
   and the generic parts of `main.rs` (panels, menus, pickers, submenus,
   table rows/cells/headings, card grids, text fitting, overlays/backdrops,
-  focus), made domain-free, with tests (the old ones ported). Owns `rust/arkui/`.
+  focus), made domain-free, with tests (the old ones ported). Owns `ui/rust/arkui/`.
 - **B — the domain**: `harken/domain/` rewritten as all of harken's domain;
   whatever `rust/ark/src/authoring/` needs to express it; its tests (the old
   `read_model.rs`, `converge.rs`, the agreement test). Owns `harken/domain/`,

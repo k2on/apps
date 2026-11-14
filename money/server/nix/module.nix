@@ -55,12 +55,12 @@ in
 
     web = lib.mkOption {
       type = lib.types.nullOr lib.types.package;
-      default = money.money-web-server or null;
-      defaultText = lib.literalExpression "apps.packages.\${system}.money-web-server";
+      default = null;
       description = ''
-        The browser client to serve at `/`: the build that signs in against
-        the server serving it (`money-web-server`, not the demo
-        `money-web`). Null serves the socket alone.
+        The browser client to serve at `/`, a static directory, in the same
+        process as the socket and sign-in. Null serves the build the
+        package carries (money-web, the SPA: ui/docs/app.md, "The
+        Browser's Modes").
       '';
     };
 
@@ -78,7 +78,11 @@ in
         Address to bind. The default is loopback, for a reverse proxy in front
         that terminates TLS: the login sends a browser here and back, and a
         session token crosses on every connect, neither of which belongs on
-        plain HTTP off the machine.
+        plain HTTP off the machine. The proxy passes `Host` through (nginx's
+        `recommendedProxySettings`) and the WebSocket upgrade: the browser
+        client's socket is its session cookie's only when its `Origin` is
+        the `Host` it reached, and `publicUrl` over https makes the cookie
+        `Secure`.
       '';
     };
 

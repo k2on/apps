@@ -1,0 +1,44 @@
+[package]
+name = "arkui-web"
+workspace = "../../../rust"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+description = "ArkUI in the browser: an ark-app View drawn by Leptos over the real DOM — the shell (sidebar, tab bars, toolbar, search, inspector), sheets, dialogs, menus, tables and figures — in the theme's CSS, with the desktop's keyboard."
+
+# Knows nothing about any domain, as arkui: an app hands it its view, its
+# messages and its hosted screens.
+
+[dependencies]
+ark-app = { path = "../app" }
+# Where a page is: its address, the route model every app declares.
+ark-router = { path = "../router" }
+ark-format = { path = "../../../rust/ark-format" }
+arkui-glyphs = { path = "../glyphs" }
+# The DOM. How the page is made is the build's (ui/docs/app.md, "The
+# Browser's Modes"): `csr` draws it in the browser alone (the SPA, the
+# default); `ssr` writes a page's HTML natively (the prerenderer, the
+# server); `hydrate` takes over HTML written so, in the browser. No server
+# functions: the app's own server answers the forms.
+leptos = { version = "0.8", default-features = false }
+wasm-bindgen = "0.2.129"
+web-sys = { version = "0.3", features = ["Window", "Document", "Element", "HtmlElement", "HtmlInputElement", "KeyboardEvent", "MouseEvent", "Event", "EventTarget", "DomRect", "Location", "UrlSearchParams", "MediaQueryList", "CssStyleDeclaration", "Node", "History", "FocusEvent", "PointerEvent", "ScrollIntoViewOptions", "ScrollLogicalPosition", "Navigator", "NodeList", "HtmlDocument"] }
+
+# An Ark app hosted whole (`host`): its replica, signed in and synced, or
+# its demo (ui/docs/app.md, "The App's Part of Its Host").
+ark = { path = "../../../rust/ark", optional = true }
+ark-peer = { path = "../../../rust/ark-peer", default-features = false, optional = true }
+ark-auth = { path = "../../../rust/ark-auth", default-features = false, optional = true }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+# The sign-in's exchange, awaited in the page (`host`).
+wasm-bindgen-futures = { version = "0.4", optional = true }
+
+[features]
+default = ["csr"]
+# An app's page whole: its part of its host over a replica in the page
+# (`host`, `live`), what an app's generated entry point runs.
+host = ["dep:ark", "dep:ark-peer", "dep:ark-auth", "dep:wasm-bindgen-futures", "web-sys/Storage"]
+csr = ["leptos/csr"]
+hydrate = ["leptos/hydrate"]
+ssr = ["leptos/ssr"]

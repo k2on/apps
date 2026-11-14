@@ -6,13 +6,12 @@
 # `HarkenFFI.xcframework` (the Rust kernel with harken's domain linked in, a
 # static library for a phone and the simulator) and `swift/`, the Swift
 # UniFFI writes for it with the bridge's typed half — and the app's own
-# sources, the generated types in `Harken/Gen/` among them; and its tests,
-# the model's rules and the player against an in-process harken server.
+# sources, the generated types in `Harken/Gen/` among them.
 #
 # Swift 5 language mode, not 6: the bridge's typed half (`Typed.swift`,
 # shared with Android's and not this project's) declares `Id.none` a static
 # of a public type that is not `Sendable`, which Swift 6 refuses; and the
-# kernel calls back on its own threads (`Listener`, `PhoneSound`), which the
+# kernel calls back on its own threads (`Listener`, `PlayerShell`), which the
 # app meets with queues rather than actors. The compiler is Xcode 26's.
 name: Harken
 options:
@@ -27,11 +26,11 @@ settings:
     CODE_SIGN_STYLE: Automatic
     SWIFT_VERSION: "5.0"
     SWIFT_STRICT_CONCURRENCY: minimal
-# ArkUI for SwiftUI, any Ark app's (swift/ArkUI): the spacing, the springs,
+# ArkUI for SwiftUI, any Ark app's (ui/swift): the spacing, the springs,
 # the derived square.
 packages:
   ArkUI:
-    path: ../../swift/ArkUI
+    path: ../../ui/swift
 targets:
   Harken:
     type: application
@@ -39,6 +38,11 @@ targets:
     sources:
       - path: Harken
       - path: ../ffi/ios/swift
+      # The media player (modules/ark-media-player): AVPlayer, the audio
+      # session, the lock screen's now playing and its commands.
+      - path: ../../modules/ark-media-player/swift
+      # The secure store (modules/ark-secure-store): the login, in the keychain.
+      - path: ../../modules/ark-secure-store/swift
     dependencies:
       - package: ArkUI
         product: ArkUI
@@ -55,6 +59,9 @@ targets:
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         UILaunchScreen: {}
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+        # The iPad: every orientation, and Split View and Slide Over (no
+        # UIRequiresFullScreen); the parts adapt by size class (ui/docs/design.md).
+        UISupportedInterfaceOrientations~ipad: [UIInterfaceOrientationPortrait, UIInterfaceOrientationPortraitUpsideDown, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
         # The player plays on with the screen locked and the app in the background.
         UIBackgroundModes: [audio]
         # Where the server's sign-in sends its code back to: harken://auth?code=…
@@ -65,6 +72,7 @@ targets:
         ITSAppUsesNonExemptEncryption: false
         # A server on the home network, found by its address.
         NSLocalNetworkUsageDescription: Harken plays from your own music server, which may be on this network.
+        NSCameraUsageDescription: Harken scans the code another of your devices shows, to sign you in here.
         # ProMotion: without it an app's own animation (a spring, a drag's
         # settle) is held to 60 Hz on an iPhone that draws at 120.
         CADisableMinimumFrameDurationOnPhone: true
@@ -75,28 +83,15 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: us.koon.harken
-        TARGETED_DEVICE_FAMILY: "1"
+        # The iPhone and the iPad.
+        TARGETED_DEVICE_FAMILY: "1,2"
         GENERATE_INFOPLIST_FILE: false
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
-  HarkenTests:
-    type: bundle.unit-test
-    platform: iOS
-    sources:
-      - path: HarkenTests
-    dependencies:
-      - target: Harken
-    settings:
-      base:
-        PRODUCT_BUNDLE_IDENTIFIER: us.koon.harken.tests
-        GENERATE_INFOPLIST_FILE: true
 schemes:
   Harken:
     build:
       targets:
         Harken: all
-        HarkenTests: [test]
-    test:
-      targets: [HarkenTests]
     archive:
       config: Release

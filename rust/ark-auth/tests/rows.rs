@@ -375,3 +375,33 @@ fn a_first_sign_in_is_welcomed_once() {
     b.issue(&alice(), "a laptop").unwrap();
     assert!(quiet.1.lock().unwrap().is_empty(), "no welcome named, none run");
 }
+
+fn pushes(hub: &Memory) -> Vec<ark_auth::Push> {
+    ark::db::read::<App, _>(&hub.0.lock().unwrap(), |db| Ok::<_, ark::Refusal>(db.push.scan())).unwrap()
+}
+
+/// A device writes where it is woken as its own session's row, takes it
+/// back, and loses it with its session; an ended session writes none.
+/// Falsified by `revoke` leaving the push row: the revoked phone is still
+/// woken.
+#[test]
+fn a_push_endpoint_is_its_sessions_and_goes_with_it() {
+    let hub = Memory::new();
+    signed_in(&hub, "a1", "alice", 10_000);
+    signed_in(&hub, "a2", "alice", 1_000);
+    let alice = on("alice", "a1", &[], 2_000);
+    let set = |e: &str| ark_auth::SetPush { endpoint: e.into() };
+    run(&hub, &alice, ark::auth::PUSH, &set(r#"{"apns":{"token":"ab","topic":"t"}}"#)).unwrap();
+    let p = pushes(&hub);
+    assert_eq!((p.len(), p[0].session.as_str(), p[0].user.as_str()), (1, "a1", "alice"));
+    run(&hub, &alice, ark::auth::PUSH, &set("")).unwrap();
+    assert!(pushes(&hub).is_empty(), "taken back");
+    let expired = on("alice", "a2", &[], 2_000);
+    assert_eq!(
+        run(&hub, &expired, ark::auth::PUSH, &set("x")),
+        Err("that session has ended; sign in again".into())
+    );
+    run(&hub, &alice, ark::auth::PUSH, &set("x")).unwrap();
+    run(&hub, &alice, "session.revoke", &Revoke { id: "a1".into() }).unwrap();
+    assert!(pushes(&hub).is_empty(), "gone with its session");
+}

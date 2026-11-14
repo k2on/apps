@@ -13,7 +13,7 @@ shift 2
 failed=0
 for a in "$@"; do
   [ -e "$windows/desktop-$a" ] || { echo "$a: no desktop window to take; skipped"; continue; }
-  server=$(jq -r '.server.port // empty | "http://127.0.0.1:\(.)"' "$a/screens/shots.json")
+  server=$(jq -r '.server.port // empty | "http://127.0.0.1:\(.)"' "$a/demo/shots.json")
   bash "$(dirname "$0")/app-desktop.sh" "$out/$a/desktop" "$windows/desktop-$a" "$a" "$server" ||
     { echo "::error::$a's desktop screenshots failed"; failed=1; }
 done

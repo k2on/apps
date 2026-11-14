@@ -71,8 +71,11 @@ final class Covers: ObservableObject {
             return Covers.decode(data, px: px)
         }
         loading[k as String] = task
+        // A screenshot waits for the cover (ArkUI's `Ready`).
+        Ready.shared.begin("cover \(url)")
         let image = await task.value
         loading[k as String] = nil
+        Ready.shared.end("cover \(url)")
         if let i = image {
             memory.setObject(i, forKey: k, cost: Int(i.size.width * i.size.height * i.scale * i.scale * 4))
         } else {

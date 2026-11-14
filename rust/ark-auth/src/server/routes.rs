@@ -16,13 +16,20 @@ use crate::util::with_code;
 
 /// The routes, with state applied, ready to `merge` into an app's router.
 ///
-/// Permissive CORS on all of them: the token is a bearer, never a cookie, so
-/// another origin reading these answers learns only what it already sent.
+/// Permissive CORS on all of them: a native client's token is a bearer,
+/// and a page's cookie (`/auth/session`) is `SameSite=Strict` and set only
+/// on its own origin's answer — CORS that allows any origin allows no
+/// credentials — so another origin reading these answers learns only what
+/// it already sent.
 pub fn router(auth: Arc<Auth>) -> Router {
     Router::new()
         .route("/auth/login", get(login))
         .route("/auth/callback", get(callback))
         .route("/auth/exchange", post(exchange))
+        .route("/auth/session", post(session))
+        .route("/auth/logout", post(logout))
+        .route("/auth/device-code", post(device_code))
+        .route("/auth/redeem", post(redeem))
         .route("/auth/picture", get(picture))
         .layer(CorsLayer::new().allow_origin(Any).allow_methods(Any).allow_headers(Any))
         .with_state(auth)
@@ -75,11 +82,16 @@ async fn login(State(auth): State<Arc<Auth>>, headers: HeaderMap, Query(q): Quer
             // ([`dev_account`]), which the announcement says.
             let mut account = dev_account(user.trim());
             // The dev server's own user wears the picture it was given
-            // (`ARK_DEV_PICTURE`, a file on this machine): the demo's and
-            // the screenshots' person has a face, not only initials.
+            // (`ARK_DEV_PICTURE`, a file on this machine) and goes by the
+            // name it was given (`ARK_DEV_NAME`: `Alex` for the id `alex`):
+            // the demo's and the screenshots' person has a face, not only
+            // initials, and a name, not only an id.
             if dev_user().is_some_and(|d| dev_account(d.trim()).id == account.id) {
                 if let Some(p) = dev_picture() {
                     account.picture = p;
+                }
+                if let Some(n) = dev_name() {
+                    account.name = n;
                 }
             }
             finished(auth.clone(), account, device(&headers), q.redirect).await
@@ -147,16 +159,64 @@ async fn callback(State(auth): State<Arc<Auth>>, Query(q): Query<CallbackQuery>)
     }
 }
 
+/// Another device's code, at `/auth/redeem`.
 #[derive(Debug, Deserialize)]
-struct Exchange {
+struct Redeem {
     code: String,
 }
 
-/// The code, for the login it stands for. Once.
-async fn exchange(State(auth): State<Arc<Auth>>, Json(body): Json<Exchange>) -> Response {
-    match auth.redeem(&body.code) {
+/// The proof (the code), for the login it stands for. Once.
+async fn exchange(State(auth): State<Arc<Auth>>, Json(proof): Json<Proof>) -> Response {
+    match auth.prove(&proof) {
         Some(login) => Json(login).into_response(),
         None => (StatusCode::BAD_REQUEST, "that code has been used, or has expired").into_response(),
+    }
+}
+
+/// The code, for a browser's session: the token kept in the session
+/// cookie ([`Auth::session_cookie`]), where no script reads it, and the
+/// login answered without it. Once, as `/auth/exchange`.
+async fn session(State(auth): State<Arc<Auth>>, Json(proof): Json<Proof>) -> Response {
+    match auth.prove(&proof) {
+        Some(login) => {
+            let cookie = auth.session_cookie(&login);
+            let login = Login {
+                token: String::new(),
+                ..login
+            };
+            ([(header::SET_COOKIE, cookie)], Json(login)).into_response()
+        }
+        None => (StatusCode::BAD_REQUEST, "that code has been used, or has expired").into_response(),
+    }
+}
+
+/// A browser's session cookie forgotten. Its row is the session's own to
+/// end, over the socket (`session.revoke`), before it is asked this.
+async fn logout(State(auth): State<Arc<Auth>>) -> Response {
+    ([(header::SET_COOKIE, auth.cleared_cookie())], StatusCode::NO_CONTENT).into_response()
+}
+
+/// A one-time code for another device, made by a signed-in one: its
+/// session's token as the bearer.
+async fn device_code(State(auth): State<Arc<Auth>>, headers: HeaderMap) -> Response {
+    let bearer = headers.get(header::AUTHORIZATION).and_then(|v| v.to_str().ok());
+    let Some(token) = bearer.and_then(|b| b.strip_prefix("Bearer ")).map(str::to_string) else {
+        return (StatusCode::UNAUTHORIZED, "sign in first").into_response();
+    };
+    match tokio::task::spawn_blocking(move || auth.device_code(&token)).await {
+        Ok(Ok((code, expires_ms))) => Json(serde_json::json!({ "code": code, "expires_ms": expires_ms })).into_response(),
+        Ok(Err(e)) => (StatusCode::FORBIDDEN, e).into_response(),
+        Err(e) => failed(e.to_string()),
+    }
+}
+
+/// A device code, for a login of the new device's own. Once.
+async fn redeem(State(auth): State<Arc<Auth>>, headers: HeaderMap, Json(body): Json<Redeem>) -> Response {
+    let device = device(&headers);
+    match tokio::task::spawn_blocking(move || auth.redeem_device_code(&body.code, &device)).await {
+        Ok(Ok(login)) => Json(login).into_response(),
+        Ok(Err(e)) => (StatusCode::BAD_REQUEST, e).into_response(),
+        Err(e) => failed(e.to_string()),
     }
 }
 
@@ -198,6 +258,12 @@ fn failed(why: String) -> Response {
 /// A dev server's own name for a login that names nobody (`ARK_DEV_USER`).
 fn dev_user() -> Option<String> {
     std::env::var("ARK_DEV_USER").ok().filter(|u| !u.trim().is_empty())
+}
+
+/// The dev server's own user's display name (`ARK_DEV_NAME`); their id,
+/// `ARK_DEV_USER`, when none is given.
+fn dev_name() -> Option<String> {
+    std::env::var("ARK_DEV_NAME").ok().map(|n| n.trim().to_string()).filter(|n| !n.is_empty())
 }
 
 /// The dev server's own user's picture (`ARK_DEV_PICTURE`): an image file

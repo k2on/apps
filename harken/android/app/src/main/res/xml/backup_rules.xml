@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Before Android 12: the secure store's file out of any backup
+     (modules/ark-secure-store/module.toml). -->
+<full-backup-content>
+    <exclude domain="sharedpref" path="ark-secure-store.xml" />
+</full-backup-content>

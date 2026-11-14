@@ -28,7 +28,7 @@ pub struct Entry {
 
 impl Entry {
     pub fn source(&self) -> String {
-        format!("rust/arkui/src/{}.rs", self.module)
+        format!("ui/rust/arkui/src/{}.rs", self.module)
     }
 }
 
@@ -95,8 +95,8 @@ pub const ENTRIES: &[Entry] = &[
     Entry {
         module: "format",
         name: "Format",
-        summary: "Words for numbers: a clock, a count spelt out, a plural, a span of time, a day.",
-        api: &["clock(secs)", "spell(ms)", "plural(n, word)", "span(born, died)", "day(ms, now)"],
+        summary: "Words for numbers: a clock, a length, a plural, a span of time, a day.",
+        api: &["clock(ms)", "clock_secs(secs)", "length(ms)", "plural(n, word)", "span(born, died)", "published(ms, now, offset)"],
         rules: &["A length past an hour is h:mm:ss."],
     },
     Entry {
@@ -107,11 +107,11 @@ pub const ENTRIES: &[Entry] = &[
         rules: &["A name loses its middle, a heading its end."],
     },
     Entry {
-        module: "clipboard",
-        name: "Clipboard",
-        summary: "Copy, cut and paste in every text box, in a browser too: the window's view handed the browser's clipboard, and a paste put in where the keys are once the browser hands it over.",
-        api: &["view(view): the whole window's, once", "pastes() -> Subscription<()>"],
-        rules: &["A paste is asked for and arrives later; it goes into whichever box has the keys, at its cursor, as typed text does.", "On the desktop it is iced's own clipboard, untouched."],
+        module: "writing",
+        name: "Writing",
+        summary: "Long-form writing drawn in iced (`ark_app::writing`'s blocks): rich text with emphasis, code and links, Fira Mono code coloured by the theme's roles, callouts on the palette's tints, tables and rules, in a column of a reader's measure. arkui-web draws the same blocks as HTML (`arkui_web::writing`).",
+        api: &["markdown(md), markdown_with(md, on_link)", "blocks(&[Block], on_link), block(b, on_link), code(lang, text)", "MEASURE (680), BODY (15)", "ark_app::writing: parse(md), inline(s), highlight(lang, code), writing(md) (Part::Writing)"],
+        rules: &["Every colour is the theme's, asked for as it is drawn: the same writing is right in light and dark.", "Nothing in it moves.", "SwiftUI and Compose have no Writing part yet: the phones' emitters write the call, the part is what is left."],
     },
     Entry {
         module: "url",
@@ -172,7 +172,7 @@ pub const ENTRIES: &[Entry] = &[
         name: "Hero",
         summary: "The wide banner a page can open with, the bold face, section headings, and a listing of entries in columns with a \"more\" after them.",
         api: &["banner(picture, kind, name, width)", "height(width), ASPECT, TALLEST", "heading(title)", "Entry { over, title, under, count, open }", "listing(entries, columns, cursor, on_hover)", "grid(entries, columns)", "entry(picture, e, on_cursor, hover)", "more(label, lit)", "columns(room), COLUMN", "BOLD, FIRA_SANS_BOLD"],
-        rules: &["Fira Sans Bold is embedded: a browser has no system fonts, and with none bold is not bold."],
+        rules: &["Fira Sans Bold is embedded: a system with no fonts still draws bold."],
     },
     Entry {
         module: "art",
@@ -282,11 +282,11 @@ pub const ENTRIES: &[Entry] = &[
         rules: &["`step` returns None only at that edge, which means \"not mine\": the app says what lies past it."],
     },
     Entry {
-        module: "route",
-        name: "Route",
-        summary: "Places as URL fragments, and the address bar kept in step: reconciled, not pushed, and a scrub one history entry. Each page here has one.",
-        api: &["trait Route { fragment(), parse() }", "join(kind, name), split(fragment)", "Router::new(), sync(&place), replace_next(), poll(ready), go(by), can_go(by)", "AddressBar, Browser, Nav"],
-        rules: &["`parse` never fails: an unknown fragment is home.", "Call `sync` after every update."],
+        module: "router",
+        name: "Router",
+        summary: "An app's routes as URLs, the browser's and the desktop's alike (`/album/water-music/`), and the address bar kept in step: reconciled, not pushed, and a scrub one history entry. Each page here has one.",
+        api: &["trait Routable { address(), from_address(), url(), from_url(), key(), home() } (ark-router; #[derive(Routes)] writes it)", "Address { path, query }: of_url(url, base), url(), url_under(base), with(key, value), get(key)", "parse(url)", "Router::new(), sync(&route), replace_next(), poll(ready), go(by), can_go(by)", "AddressBar, Memory, Nav"],
+        rules: &["`parse` never fails: a URL that names nothing is home.", "Call `sync` after every update.", "A query key no route names is the UI's, passed over."],
     },
     Entry {
         module: "scroll",
@@ -298,7 +298,7 @@ pub const ENTRIES: &[Entry] = &[
     Entry {
         module: "history",
         name: "History",
-        summary: "Back and forward every way an app is asked: the browser's buttons, ^O and ^I, and two fingers sideways. The router and the swipe, wired once.",
+        summary: "Back and forward every way an app is asked: ^O and ^I, and two fingers sideways. The router and the swipe, wired once.",
         api: &["History::new(), go(by), can_go(by), wheel(delta, now), tick(now), active(), sync(&place), replace_next(), poll(ready), view(page, now)", "scrolled(&place, y), arrive(&place) -> y: back and forward land where a page was left", "wheel() -> Subscription<ScrollDelta>"],
         rules: &["A jump and a swipe both move the bar; the app arrives by its next poll, the road the back button takes.", "The arrow shows only where there is somewhere to go."],
     },
@@ -307,19 +307,19 @@ pub const ENTRIES: &[Entry] = &[
         name: "Swipe",
         summary: "Two fingers sideways as back and forward, with the arrow drawn over the page as they go.",
         api: &["Swipe::feed, tick, allow, active, offset, arrow", "band(…)", "view(page, swipe, now)", "FAR, LET_GO, QUIET, BACK, STRETCH"],
-        rules: &["It goes when the fingers lift, and only where there is somewhere to go.", "In a browser the browser's own back does this instead."],
+        rules: &["It goes when the fingers lift, and only where there is somewhere to go."],
     },
     Entry {
         module: "wake",
         name: "Wake",
-        summary: "What wakes a window that runs no loop: a bell anything can ring, one timer at a deadline, and the browser's address bar moving.",
-        api: &["Bell::new(), ring(), rung(), subscription()", "at(key, delay)", "page_changes(f)"],
+        summary: "What wakes a window that runs no loop: a bell anything can ring, and one timer at a deadline.",
+        api: &["Bell::new(), ring(), rung(), subscription()", "at(key, delay)"],
         rules: &["With nothing playing, dwelling or arriving, a window runs no timer."],
     },
     Entry {
         module: "images",
         name: "Images",
-        summary: "A picture cache: fetched off the render thread, decoded and bounded, kept on disk natively and in the Cache API in a browser. A failure is remembered.",
+        summary: "A picture cache: fetched off the render thread, decoded and bounded, kept on disk. A failure is remembered.",
         api: &["Images::new(name)", "want(url) -> Option<Task<Loaded>>", "loaded(l), handle(url), bounded(url)", "Loaded, Rgba", "BOUND (384), WIDE (2400)"],
         rules: &["The renderer is handed pixels at the size they are drawn, not a megapixel JPEG to decode inside a frame."],
     },

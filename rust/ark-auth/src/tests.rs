@@ -133,3 +133,13 @@ fn a_dev_picture_is_read_from_its_file() {
     assert!(local_picture(&dir.join("none.jpg")).is_err());
     std::fs::remove_dir_all(&dir).unwrap();
 }
+
+/// A page's session cookie is read out of a `Cookie` header among others,
+/// and only by its name.
+#[test]
+fn a_page_s_session_cookie_is_found_by_its_name() {
+    assert_eq!(cookie_token("theme=dark; ark-session=s1.ab12; x=1"), Some("s1.ab12"));
+    assert_eq!(cookie_token("ark-session=\"s1.ab12\""), Some("s1.ab12"));
+    assert_eq!(cookie_token("not-ark-session=s1; ark-sessions=s2"), None);
+    assert_eq!(cookie_token("ark-session="), None);
+}

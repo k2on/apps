@@ -4,17 +4,17 @@
 //! menu, a factor typed as "10%", "0.1" or "1.5x"), with what it would
 //! give the month on screen as it is typed, and each term's filter opened
 //! as a register limited to the month. Saved, it holds from the month on
-//! screen on (`money_domain::formulas`).
+//! screen on (`money_core::formulas`).
 
-use arkui::{glyphs, icon, menu};
-use iced::widget::{button, column, container, row, text, text_input};
+use arkui::text::{self, text};
+use arkui::text_input::text_input;
+use arkui::{format, glyphs, icon, menu};
+use iced::widget::{button, column, container, row};
 use iced::{Alignment, Element, Length, Task};
-use money_domain::dates::month_name;
-use money_domain::formulas::{parse_share, percent};
-use money_domain::*;
+use money_core::formulas::{parse_share, percent};
+use money_core::*;
 
 use crate::amount::money;
-use crate::look;
 use crate::peer::Ledger;
 use crate::view::{action, bold, dim, fill, link, quiet};
 use crate::{App, Message};
@@ -93,7 +93,7 @@ impl App {
                 self.preview_formula();
             }
             Msg::Add => {
-                if self.formula.terms.len() < money_domain::formulas::TERMS {
+                if self.formula.terms.len() < money_core::formulas::TERMS {
                     self.formula.terms.push(TermForm::default());
                 }
                 self.preview_formula();
@@ -123,7 +123,7 @@ impl App {
                         from: Some(self.peer.month.clone()),
                     };
                     if self.author("remove the formula", "clear_formula", &r) {
-                        self.note = format!("assigned by hand from {}", month_name(&self.peer.month));
+                        self.note = format!("assigned by hand from {}", format::month(&self.peer.month));
                         self.load_formula();
                     }
                 }
@@ -134,15 +134,14 @@ impl App {
 
     /// The saved filters, for a term to sum, in a menu at the pointer.
     fn pick_filter(&mut self, i: usize) {
-        if self.peer.filters.rows.is_empty() {
+        if self.peer.filters().is_empty() {
             self.note = "no filters yet: open a register, set its conditions, and Save as filter\u{2026}".into();
             return;
         }
         let chosen = self.formula.terms.get(i).and_then(|t| t.filter);
         let entries = self
             .peer
-            .filters
-            .rows
+            .filters()
             .iter()
             .map(|f| {
                 let glyph = if chosen == Some(f.id) { glyphs::TICKED } else { glyphs::SEARCH };
@@ -207,7 +206,7 @@ impl App {
             terms,
         };
         if self.author("save the formula", "set_formula", &f) {
-            self.note = format!("assigned by formula from {}", month_name(&self.peer.month));
+            self.note = format!("assigned by formula from {}", format::month(&self.peer.month));
             self.load_formula();
         }
     }
@@ -216,7 +215,7 @@ impl App {
     /// factor, what it summed this month, Open — then what the formula
     /// would give the month on screen, Save and Remove.
     pub fn inspect_formula<'a>(&'a self, l: &'a BudgetLine) -> Element<'a, Message> {
-        let month = month_name(&self.peer.month);
+        let month = format::month(&self.peer.month);
         let mut c = column![row![
             bold("Assign by formula", 14),
             fill(),
@@ -225,10 +224,10 @@ impl App {
         .align_y(Alignment::Center)]
         .spacing(8);
         c = c.push(match self.peer.formula(l.category_id) {
-            Some(f) => dim(format!("{} \u{2014} since {}.", f.text, month_name(&f.from)), 11),
+            Some(f) => dim(format!("{} \u{2014} since {}.", f.text, format::month(&f.from)), 11),
             None => dim("Each month, what saved filters add up to, times a factor: like a spreadsheet's cell.", 11),
         });
-        let preview = self.peer.preview.as_ref().and_then(|p| p.rows.first());
+        let preview = self.peer.preview();
         for (i, t) in self.formula.terms.iter().enumerate() {
             let name = t
                 .filter
@@ -244,14 +243,14 @@ impl App {
             .on_press(Message::Formula(Msg::Pick(i)))
             .padding([4, 6])
             .width(Length::Fill)
-            .style(look::choice(t.filter.is_some()));
+            .style(arkui::style::chip(t.filter.is_some()));
             let factor = text_input("10%", &t.factor)
                 .on_input(move |s| Message::Formula(Msg::Factor(i, s)))
                 .on_submit(Message::Formula(Msg::Save))
                 .size(12)
                 .padding([4, 6])
                 .width(Length::Fixed(58.0))
-                .style(look::input);
+                .style(arkui::style::field);
             let remove = button(icon::faint(glyphs::CLOSE, false).width(12.0).height(12.0))
                 .on_press(Message::Formula(Msg::Remove(i)))
                 .padding(3)
@@ -268,7 +267,7 @@ impl App {
             }
             c = c.push(column![line, under].spacing(2));
         }
-        if self.formula.terms.len() < money_domain::formulas::TERMS {
+        if self.formula.terms.len() < money_core::formulas::TERMS {
             c = c.push(link("+ Add a term", Message::Formula(Msg::Add)));
         }
         c = c.push(match preview {
@@ -281,6 +280,6 @@ impl App {
         }
         c = c.push(dim(format!("Saved, it assigns from {month} on; months before keep theirs."), 11));
         c = c.push(buttons);
-        container(c).padding(14).style(look::card).into()
+        container(c).padding(14).style(arkui::style::card).into()
     }
 }

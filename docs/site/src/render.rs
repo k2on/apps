@@ -18,6 +18,12 @@ pub struct Painter {
     renderer: iced::Renderer,
 }
 
+impl Default for Painter {
+    fn default() -> Self {
+        Painter::new()
+    }
+}
+
 impl Painter {
     pub fn new() -> Painter {
         let fonts = iced::advanced::graphics::text::font_system();
@@ -50,7 +56,9 @@ impl Painter {
             &mut self.renderer,
             theme,
             &renderer::Style {
+                icon_color: arkui::theme::of(theme).background.base.text,
                 text_color: arkui::theme::of(theme).background.base.text,
+                scale_factor: f64::from(SCALE),
             },
             mouse::Cursor::Unavailable,
         );

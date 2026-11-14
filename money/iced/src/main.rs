@@ -3,7 +3,7 @@
 //! Two builds of one window. Without features it is the household's
 //! client: it signs in to a money server and dials it (`live.rs`), and
 //! "Sync" asks the server's importer to ask the banks now. With `demo` it
-//! is the demo: no server and no sign-in, a seeded household (`money_seed`)
+//! is the demo: no server and no sign-in, a seeded household (`money_core::demo`)
 //! on a peer that is its own authority, and the card's bank standing in
 //! for Plaid behind "Sync" — what GitHub Pages publishes, and a separate
 //! build on purpose, as harken's is: a flag could be set by accident, a
@@ -15,7 +15,7 @@
 //! selected category's story on the right.
 //!
 //! None of the budget's arithmetic is here. Every figure on screen is a
-//! view of the domain (`money/domain`), kept up to date by the rows a
+//! view of the domain (`money/core`), kept up to date by the rows a
 //! change touched; every button is a mutation by name, and a refusal is
 //! the domain's own sentence, said for a moment over the page.
 //!
@@ -32,9 +32,11 @@ mod filter;
 mod formula;
 mod live;
 mod look;
+mod overview;
 mod palette;
 mod peer;
 mod receipt;
+mod sections;
 mod settings;
 mod stores;
 mod view;
@@ -42,72 +44,34 @@ mod view;
 #[cfg(test)]
 mod tests;
 
+use ark_auth::onboarding::{Effect, Event};
 use arkui::outline::{self, Grab, Shift};
 use arkui::{glyphs, menu, vim};
-use iced::keyboard::{key::Named, Key, Modifiers};
+use iced::keyboard::{Key, Modifiers};
 use iced::{Point, Size, Subscription, Task};
-use money_domain::dates::{add_months, day_of_ms, month_of};
-use money_domain::*;
+use money_core::dates::{add_months, day_of_ms, month_of};
+use money_core::*;
 #[cfg(any(feature = "demo", test))]
 use money_seed as seed;
 
 use peer::{Ledger, Peer};
 
-/// Which pane has the keys.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Pane {
-    Sidebar,
-    Page,
-}
+/// Which pane has the keys: ArkUI's panes (`arkui::shell`), every app's.
+pub use arkui::shell::Pane;
 
-/// A page as the address bar spells it: names, not ids (`arkui::route`).
-#[derive(Debug, Clone, PartialEq)]
-pub enum Place {
-    Budget,
-    Reflect,
-    Accounts,
-    Settings,
-    Inbox,
-    Account(String),
-    /// A saved filter's register, by its name.
-    Filter(String),
-    /// A register for conditions not saved.
-    Filtered,
-}
-
-impl arkui::route::Route for Place {
-    fn fragment(&self) -> String {
-        match self {
-            Place::Budget => arkui::route::join("budget", None),
-            Place::Reflect => arkui::route::join("reflect", None),
-            Place::Accounts => arkui::route::join("accounts", None),
-            Place::Settings => arkui::route::join("settings", None),
-            Place::Inbox => arkui::route::join("inbox", None),
-            Place::Account(name) => arkui::route::join("account", Some(name)),
-            Place::Filter(name) => arkui::route::join("filter", Some(name)),
-            Place::Filtered => arkui::route::join("filtered", None),
-        }
-    }
-
-    fn parse(fragment: &str) -> Self {
-        match arkui::route::split(fragment) {
-            ("reflect", _) => Place::Reflect,
-            ("accounts", _) => Place::Accounts,
-            ("settings", _) => Place::Settings,
-            ("inbox", _) => Place::Inbox,
-            ("account", Some(name)) => Place::Account(name),
-            ("filter", Some(name)) => Place::Filter(name),
-            ("filtered", _) => Place::Filtered,
-            _ => Place::Budget,
-        }
-    }
-}
+use money_app::shell::ShellMsg;
+/// Where the window is: money's routes (`money_app::routes`), which the
+/// address bar spells by their paths (`arkui::router`).
+pub use money_app::Route;
 
 /// What fills the page beside the sidebar.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Page {
     Budget,
-    Reflect,
+    /// Every account and what the household is worth: the page money_app
+    /// lays out once for every platform.
+    Accounts,
+    Insights,
     Settings,
     Ledger(Ledger),
 }
@@ -233,6 +197,16 @@ pub enum Modal {
 #[derive(Debug, Clone)]
 pub enum Message {
     Go(Page),
+    /// The Accounts page's own messages (`money_app::accounts`).
+    Accounts(money_app::accounts::AccountsMsg),
+    /// The Budget page's own messages (`money_app::budget`).
+    Budget(money_app::budget::BudgetMsg),
+    /// Insights' (`money_app::insights`).
+    Insights(money_app::insights::InsightsMsg),
+    /// A press on the first run's pages (`ark_app::welcome`).
+    Welcome(ark_app::welcome::WelcomeMsg),
+    /// A message of the shell's: a section, the inspector, the search, a command.
+    Shell(ShellMsg),
     /// A month earlier or later; zero is this one.
     Month(i64),
     ThisMonth,
@@ -279,10 +253,20 @@ pub enum Message {
     Sync,
     /// Settings' Banks section: connecting, and what each account feeds.
     Banks(banks::Msg),
-    /// The account button at the top right: its menu, whose entries open
-    /// Settings and sign out.
+    /// Who is signed in, at the sidebar's foot: its menu, whose entries
+    /// open Settings and sign out.
     AccountMenu,
+    /// The toolbar's Filter: the register's bar of conditions shown or put away.
+    ShowFilter(bool),
+    /// The toolbar's Auto-Assign: its menu, under the wand.
+    AutoMenu,
     SignOut,
+    /// "Add a Device": a one-time code for another device, asked of the
+    /// server as this login; and what it answered.
+    AddDevice,
+    DeviceCode(Result<String, String>),
+    /// The join link shown, copied.
+    CopyLink(String),
     AddAccount,
     AccountName(String),
     AccountKind(&'static str),
@@ -316,9 +300,9 @@ pub enum Message {
     RegisterScrolled(f32),
     /// The budget scrolled; and a page opened scrolled to where it was left.
     PageScrolled(f32),
-    /// Reflect or Settings was scrolled to this far down.
+    /// Insights or Settings was scrolled to this far down.
     TopScrolled(f32),
-    /// The small header pressed: Reflect or Settings back to its top.
+    /// The small header pressed: Insights or Settings back to its top.
     PageTop,
     ScrollPage(f32),
     /// The category dropdown: typed into, the pointer on a row, its list
@@ -342,10 +326,11 @@ pub enum Message {
     Swallow,
     /// The socket said something, or the peer's deadline came: pump it.
     Wake,
+    /// A sign-in's code came back from the browser, or why not.
+    Coded(Result<String, String>),
     /// A sign-in came back.
     SignedIn(Result<ark_auth::Login, String>),
     /// The replica [`App::boot`] read on a thread.
-    #[cfg(not(target_arch = "wasm32"))]
     Opened(arkui::later::Slot<Result<client::Replica, String>>),
     /// The account's picture, fetched.
     Picture(arkui::images::Loaded),
@@ -371,11 +356,20 @@ pub enum Message {
     ChoosePayer(PaidFor),
     /// The open transaction's receipt.
     Receipt(receipt::Msg),
+    /// A receipt's page (scanned, as money_app's receipts asks) kept for
+    /// the transaction of this hex id, or none.
+    KeepPhoto(Vec<u8>, Option<String>),
 }
 
 pub struct App {
     pub peer: Peer,
     pub page: Page,
+    /// The Accounts page, running.
+    pub accounts: ark_app::Runtime<money_app::accounts::Accounts>,
+    /// The Budget page, run in Rust (`money_app::budget`), on the window's month.
+    pub budget: ark_app::Runtime<money_app::budget::Budget>,
+    /// Insights, run in Rust (`money_app::insights`), on the window's month.
+    pub insights: ark_app::Runtime<money_app::insights::Insights>,
     pub today: String,
     /// The category the inspector is about; none is the month's summary.
     pub selected: Option<Id<Category>>,
@@ -387,6 +381,9 @@ pub struct App {
     pub formula: formula::Form,
     pub collapsed: Vec<Id<Group>>,
     pub show_hidden: bool,
+    /// The register's bar of conditions, shown by the toolbar's Filter
+    /// (and always while the register is one no built-in names).
+    pub show_filter: bool,
     pub new_group: Option<String>,
     pub new_category: Option<(Id<Group>, String)>,
     pub form: Option<TxnForm>,
@@ -396,8 +393,10 @@ pub struct App {
     pub bank: seed::Bank,
     /// The server this window is on; none for the demo, its own authority.
     pub server: Option<live::Server>,
-    /// The grammar, with money's sequences bound (`cc`, `cg`, `rc`, `rg`).
-    pub keys: vim::Keys,
+    /// The keyboard every Ark app gets (`arkui::shell::Keyboard`): the
+    /// grammar, with money's sequences bound (`cc`, `cg`, `rc`, `rg`), the
+    /// which-key panel, and which pane has the keys.
+    pub keyboard: arkui::shell::Keyboard,
     /// The other end of a visual selection from `selected`: where `v` was.
     pub anchor: Option<Id<Category>>,
     /// The last `/` search, for `n` and `N`.
@@ -409,11 +408,17 @@ pub struct App {
     /// A row's or a heading's menu.
     pub ctx: arkui::context::Context<Message, ()>,
     pub renaming: Option<(Naming, String)>,
-    /// Which pane has the keys: the sidebar or the page beside it.
-    pub pane: Pane,
+    /// The shell (money/app/src/shell): the sections, their toolbars,
+    /// search and inspector, the commands, in Rust as on the phones.
+    pub shell: ark_app::Runtime<money_app::shell::MoneyShell>,
+    /// How the window was launched, for the shell once the accounts have
+    /// arrived: the link it was opened with, as an address
+    /// (`ShellMsg::Address`), else its launch arguments (`-screen budget`,
+    /// …: `ark_app::shell::Launch`).
+    pub launch: Option<ShellMsg>,
     /// Where the window has been: the address bar, and back and forward by
     /// `^O`/`^I` and a swipe (`arkui::history`).
-    pub history: arkui::history::History<Place>,
+    pub history: arkui::history::History<Route>,
     /// The register's cursor, and the other end of its visual selection.
     pub txn_at: Option<Id<Txn>>,
     pub txn_anchor: Option<Id<Txn>>,
@@ -430,7 +435,7 @@ pub struct App {
     pub note: String,
     /// A Plaid page asked for here, and when: opened as soon as the
     /// server answers with its address.
-    pub awaiting: Option<i64>,
+    pub awaiting: Option<Option<Id<BankAsk>>>,
     /// Every page this window opened, in order.
     pub opened: Vec<String>,
     /// The ask whose answer was put away.
@@ -446,12 +451,9 @@ pub struct App {
     /// The signed-in person's picture, for the account button: fetched
     /// once, kept on disk as harken's covers are (`arkui::images`).
     pub pictures: arkui::images::Images,
-    /// The which-key panel: what can follow a prefix half typed, or with
-    /// `?` every key (`arkui::which`), read from [`KEYS`] and the grammar's.
-    pub which: arkui::which::Which,
     /// The note, said for a moment over the page's foot (`arkui::toast`).
     pub toast: arkui::toast::Toast,
-    /// How far down Reflect or Settings is scrolled, as it last said.
+    /// How far down Insights or Settings is scrolled, as it last said.
     pub top_y: f32,
     /// Their small header, in the band once the page's title has scrolled
     /// away (`arkui::compact`), and the page it is for.
@@ -464,6 +466,9 @@ impl App {
         let mut app = App {
             peer: Peer::open(client, &month_of(today)),
             page: Page::Budget,
+            accounts: ark_app::Runtime::new(),
+            budget: ark_app::Runtime::new(),
+            insights: ark_app::Runtime::new(),
             today: today.into(),
             selected: None,
             assigning: None,
@@ -471,6 +476,7 @@ impl App {
             formula: formula::Form::default(),
             collapsed: Vec::new(),
             show_hidden: false,
+            show_filter: false,
             new_group: None,
             new_category: None,
             form: None,
@@ -482,7 +488,11 @@ impl App {
             // demo, who it is signed in as) is not news, and the toast is
             // for news (`arkui::toast`).
             note: String::new(),
-            keys: money_keys(),
+            keyboard: arkui::shell::Keyboard {
+                keys: money_keys(),
+                which: arkui::which::Which::new(),
+                focus: Pane::Content,
+            },
             anchor: None,
             search: String::new(),
             drag: None,
@@ -491,7 +501,8 @@ impl App {
             window: Size::new(1200.0, 760.0),
             ctx: arkui::context::Context::new(),
             renaming: None,
-            pane: Pane::Page,
+            shell: ark_app::Runtime::new(),
+            launch: None,
             history: arkui::history::History::new(),
             txn_at: None,
             txn_anchor: None,
@@ -507,7 +518,6 @@ impl App {
             paper: None,
             photo: None,
             pictures: arkui::images::Images::new("money/pictures"),
-            which: arkui::which::Which::new(),
             toast: arkui::toast::Toast::new(),
             top_y: 0.0,
             compact: arkui::compact::Compact::new(iced::time::Instant::now()),
@@ -515,17 +525,32 @@ impl App {
         };
         // A link the window was opened with, read before anything is drawn;
         // then where it is, as the history's first place.
-        if let Some(page) = app.history.poll(true).and_then(|p| app.page_of(&p)) {
-            let _ = app.step(Message::Go(page));
+        if let Some(linked) = app.history.poll(true) {
+            if let Some(page) = app.page_of(&linked) {
+                let _ = app.step(Message::Go(page));
+            }
+            app.landed(&linked);
         }
-        app.history.sync(&app.place());
+        app.history.sync(&app.route());
         app
+    }
+
+    /// The bar said `linked` and the app landed somewhere it spells
+    /// otherwise — an older link's name, now the account's id; a stale one's
+    /// fallback — so where it is is written over the link, not after it: the
+    /// back button would go to the link, land here again, and never get past.
+    fn landed(&mut self, linked: &Route) {
+        if self.route() != *linked {
+            self.history.replace_next();
+        }
     }
 
     #[cfg(feature = "demo")]
     fn boot() -> (App, Task<Message>) {
         let today = day_of_ms(ark_peer::now_ms());
-        (App::with_peer(seed::seeded(), &today), Task::none())
+        let mut app = App::with_peer(seed::seeded(), &today);
+        app.launch = Some(launched());
+        (app, Task::none())
     }
 
     /// The window, open on nothing and saying so while its server's replica
@@ -540,11 +565,6 @@ impl App {
     fn boot() -> (App, Task<Message>) {
         let (url, _) = live::config();
         let login = live::logins().recall(&url);
-        #[cfg(target_arch = "wasm32")]
-        {
-            App::opened(live::open(&url, login.as_ref()))
-        }
-        #[cfg(not(target_arch = "wasm32"))]
         {
             let today = day_of_ms(ark_peer::now_ms());
             let mut app = App::with_peer(client::open(Box::new(ark_peer::Memory::default())), &today);
@@ -576,20 +596,33 @@ impl App {
             }
         };
         let mut app = App::on_server(client, &today, url, login);
+        app.launch = Some(launched());
         if let Some(s) = &mut app.server {
             (s.logins, s.user) = (Some(logins), user);
         }
-        // Who is signed in is the account button's to show, all the time;
-        // a note says only what is news.
-        app.note = match (&app.server.as_ref().and_then(|s| s.login.as_ref()), note.is_empty()) {
-            (_, false) => note,
-            (Some(_), true) => String::new(),
-            (None, true) => "signing in\u{2026}".into(),
+        // The sign-in machine, told where this launch starts: signed in
+        // already, or on its way to sign in (once a load), or — a page that
+        // came back from signing in — trading the code it came with. Who is
+        // signed in is the account button's to show, all the time; a note
+        // says only what is news.
+        let (code, returned) = (None, false);
+        let remembered = ark_auth::onboarding::Remembered {
+            server: app.server.as_ref().map(|s| s.url.clone()),
+            login: app.server.as_ref().and_then(|s| s.login.clone()).map(Into::into),
+            demo: false,
         };
-        let task = match app.server.as_ref().is_some_and(|s| s.login.is_none()) {
-            true => app.sign_in(),
-            false => Task::none(),
-        };
+        let task = app.onboard(Event::Launched { remembered, code, returned });
+        // money's pages from the first, as on every platform, until this
+        // desktop has seen them (its app data); not on a launch that goes
+        // straight somewhere: a screenshot's, a link's, launch arguments'.
+        // A link to them, money://welcome/, shows them (`main`).
+        let straight = arkui_shots::asked().is_some() || arkui::navigator::link_arg("money").is_some() || std::env::args().any(|a| a == "-screen");
+        if let Some(s) = &mut app.server {
+            s.first_run.launch(live::intro_seen(), straight);
+        }
+        if !note.is_empty() {
+            app.note = note;
+        }
         (app, task)
     }
 
@@ -604,37 +637,83 @@ impl App {
             login,
             logins: None,
             user: None,
-            tried: false,
+            // The window's server is its configuration's: no other is offered here.
+            first_run: ark_auth::first_run::FirstRun::new(live::app(), money_app::welcome::copy(false, false)),
             bell,
+            device: None,
         });
         app
     }
 
-    /// Go to sign in, once a load: in a browser the page goes to the
-    /// server's sign-in and comes back with a code (traded here when it
-    /// has one); the desktop hands the browser the same page and listens on
-    /// loopback for the code.
-    pub fn sign_in(&mut self) -> Task<Message> {
+    /// A press on the first run's pages (money's pages of what it is, over
+    /// the window), the machine's effects carried out; walked or skipped,
+    /// remembered in the desktop's app data.
+    pub fn welcome(&mut self, msg: ark_app::welcome::WelcomeMsg) -> Task<Message> {
         let Some(s) = &mut self.server else { return Task::none() };
-        #[cfg(target_arch = "wasm32")]
-        if let Some(code) = ark_auth::web::take_code() {
-            s.tried = true;
-            let url = s.url.clone();
-            return Task::perform(async move { ark_auth::web::exchange(&url, &code).await }, Message::SignedIn);
+        let asked = s.first_run.send(msg);
+        if asked.seen {
+            live::remember_intro();
         }
-        if std::mem::replace(&mut s.tried, true) {
-            return Task::none();
+        Task::batch(asked.effects.into_iter().map(|e| self.effect(e)).collect::<Vec<_>>())
+    }
+
+    /// money's pages over the window, while they show.
+    pub fn intro(&self) -> Option<ark_app::welcome::WelcomePage> {
+        let p = self.server.as_ref()?.first_run.page();
+        p.intro.is_some().then_some(p)
+    }
+
+    /// An event for the sign-in machine (`ark_auth::onboarding`), and its
+    /// effects carried out: what it says said in the note.
+    pub fn onboard(&mut self, event: Event) -> Task<Message> {
+        let Some(s) = &mut self.server else { return Task::none() };
+        let effects = s.first_run.event(event);
+        let said = s.first_run.machine().said();
+        if let Some(t) = said.error.or(said.status) {
+            self.note = t;
         }
-        #[cfg(target_arch = "wasm32")]
-        {
-            ark_auth::web::go_sign_in(&s.url, s.user.as_deref());
-            Task::none()
-        }
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            self.note = "signing in \u{2014} look for a browser tab if one opened".into();
-            let (url, user) = (s.url.clone(), s.user.clone());
-            off_thread(move || ark_auth::client::login(&url, user.as_deref(), ark_auth::client::open_browser))
+        Task::batch(effects.into_iter().map(|e| self.effect(e)).collect::<Vec<_>>())
+    }
+
+    /// One of the machine's effects: the browser opened (the page goes to
+    /// the server's sign-in and comes back with a code; the desktop hands
+    /// the browser the same page and listens on loopback for it), the code
+    /// traded, the login remembered or forgotten, the replica signed in.
+    fn effect(&mut self, effect: Effect) -> Task<Message> {
+        let Some(s) = &mut self.server else { return Task::none() };
+        match effect {
+            Effect::Remember { remembered } => {
+                if let Some(logins) = &s.logins {
+                    match remembered.login {
+                        Some(l) => logins.remember(&s.url, &l.into()),
+                        None => logins.forget(&s.url),
+                    }
+                }
+                Task::none()
+            }
+            Effect::Browse { server, .. } => {
+                let user = s.user.clone();
+                off_thread(
+                    move || ark_auth::client::code(&server, user.as_deref(), ark_auth::client::open_browser),
+                    Message::Coded,
+                )
+            }
+            Effect::Exchange { server, code } => off_thread(move || ark_auth::client::exchange(&server, &code), Message::SignedIn),
+            Effect::Redeem { server, code } => off_thread(move || ark_auth::client::redeem(&server, &code), Message::SignedIn),
+            Effect::OpenSession { login, .. } => {
+                let login: ark_auth::Login = login.into();
+                if s.login.as_ref() != Some(&login) {
+                    self.signed_in(login);
+                }
+                self.note.clear();
+                // The replica is the window's from the start: nothing to wait for.
+                self.onboard(Event::Synced)
+            }
+            Effect::CloseSession => {
+                s.login = None;
+                Task::none()
+            }
+            Effect::FindServer { .. } | Effect::OpenDemo => Task::none(),
         }
     }
 
@@ -642,9 +721,6 @@ impl App {
     /// signed out becomes theirs and is pushed — and the link dials.
     pub fn signed_in(&mut self, login: ark_auth::Login) {
         let Some(s) = &mut self.server else { return };
-        if let Some(logins) = &s.logins {
-            logins.remember(&s.url, &login);
-        }
         self.peer.client.login(ark_peer::who(&login), login.token.clone());
         // The account button now shows who; the "signing in" said while
         // it was on its way is over.
@@ -664,15 +740,8 @@ impl App {
         self.peer.refresh();
         self.follow_ask();
         self.stores_answered();
-        let Some(why) = p.denied else { return Task::none() };
-        if let Some(s) = &mut self.server {
-            if let Some(logins) = &s.logins {
-                logins.forget(&s.url);
-            }
-            s.login = None;
-        }
-        self.note = format!("the server turned the sign-in away ({why})");
-        self.sign_in()
+        let Some(reason) = p.denied else { return Task::none() };
+        self.onboard(Event::Denied { reason })
     }
 
     fn title(&self) -> String {
@@ -682,7 +751,17 @@ impl App {
     /// Author a change by the function's name: whether it was taken. A
     /// refusal is the domain's sentence, said as it is.
     pub fn author(&mut self, what: &str, name: &str, input: &impl ark::format::Encode) -> bool {
-        let taken = match self.peer.client.mutate(name, input) {
+        self.taken(what, |c| c.mutate(name, input))
+    }
+
+    /// Author one of money's changes ([`MoneyChange`]): whether it was
+    /// taken, as [`App::author`].
+    pub fn change(&mut self, what: &str, change: &money_core::MoneyChange) -> bool {
+        self.taken(what, |c| c.mutate_bytes(change.name(), change.input()))
+    }
+
+    fn taken(&mut self, what: &str, f: impl FnOnce(&mut ark_peer::Peer) -> Result<ark::log::EntryId, String>) -> bool {
+        let taken = match f(&mut self.peer.client) {
             Ok(_) => true,
             Err(e) => {
                 self.note = format!("could not {what}: {e}");
@@ -701,6 +780,11 @@ impl App {
     /// is written to it.
     pub fn update(&mut self, message: Message) -> Task<Message> {
         let task = self.step(message);
+        // The Budget page's month is the window's.
+        let task = Task::batch([task, self.budget_month()]);
+        self.insights_month();
+        // The shell's section is the page's.
+        self.sync_shell();
         // The account's picture is asked for once somebody is signed in,
         // whichever message signed them in.
         let task = Task::batch([task, self.want_picture()]);
@@ -708,20 +792,45 @@ impl App {
         // one in the form, else the cursor's); a receipt typed goes with the
         // transaction it was for.
         let open = self.receipt_txn();
-        if open != self.peer.txn.as_ref().map(|(t, _)| *t) {
+        if open != self.peer.txn() {
             self.paper = None;
         }
         self.peer.set_txn(open);
         self.load_photo();
         // An account is named in the bar, so a link to one waits for the
         // accounts to have arrived.
-        let ready = !self.peer.accounts.rows.is_empty();
-        if let Some(page) = self.history.poll(ready).and_then(|p| self.page_of(&p)) {
-            if page != self.page {
-                let _ = self.step(Message::Go(page));
+        let ready = !self.peer.accounts().is_empty();
+        if let Some(linked) = self.history.poll(ready) {
+            if let Some(page) = self.page_of(&linked) {
+                if page != self.page {
+                    let _ = self.step(Message::Go(page));
+                }
             }
+            self.landed(&linked);
         }
-        self.history.sync(&self.place());
+        self.history.sync(&self.route());
+        let task = match self.launch.take_if(|_| ready) {
+            Some(msg) => Task::batch([task, self.update(Message::Shell(msg))]),
+            None => task,
+        };
+        // Who is signed in where, for Settings; Plaid's page in the
+        // system's browser once the server has answered an ask with it,
+        // which this window cannot follow, so it is taken as closed.
+        let facts = self.facts();
+        let task = match self.shell.state().settings.facts != facts {
+            true => Task::batch([task, self.update(Message::Shell(ShellMsg::Session { facts }))]),
+            false => task,
+        };
+        let task = match self.shell_page().settings.plaid {
+            Some(url) => {
+                self.note = match browser::open(&url) {
+                    true => "Plaid's page is open in your browser".into(),
+                    false => "open Plaid's page from Settings".into(),
+                };
+                Task::batch([task, self.update(Message::Shell(ShellMsg::PageClosed { url }))])
+            }
+            None => task,
+        };
         // Whatever the message came to is said for a moment over the page
         // (`arkui::toast`), heard here once rather than wherever a note is
         // written.
@@ -749,37 +858,70 @@ impl App {
         }
     }
 
-    /// Where the window is, as the bar spells it.
-    pub fn place(&self) -> Place {
+    /// Where the window is, as the bar spells it. An account or a saved
+    /// filter that is gone is its route's fallback, All Accounts.
+    pub fn route(&self) -> Route {
+        let named = |route: Option<Route>, of: Route| route.unwrap_or_else(|| of.fallback());
         match self.page {
-            Page::Budget => Place::Budget,
-            Page::Reflect => Place::Reflect,
-            Page::Ledger(Ledger::All) => Place::Accounts,
-            Page::Settings => Place::Settings,
-            Page::Ledger(Ledger::Inbox) => Place::Inbox,
-            Page::Ledger(Ledger::Account(id)) => self.peer.account(id).map_or(Place::Accounts, |a| Place::Account(a.name.clone())),
-            Page::Ledger(Ledger::Saved(id)) => self.peer.saved(id).map_or(Place::Accounts, |f| Place::Filter(f.name.clone())),
-            Page::Ledger(Ledger::Adhoc) => Place::Filtered,
+            Page::Budget => Route::Budget,
+            Page::Insights => Route::Insights,
+            // The overview has no path of its own yet: the bar says All Accounts.
+            Page::Accounts => Route::Accounts,
+            Page::Ledger(Ledger::All) => Route::Accounts,
+            Page::Settings => Route::Settings,
+            Page::Ledger(Ledger::Inbox) => Route::Inbox,
+            Page::Ledger(Ledger::Account(id)) => named(
+                self.peer.account(id).map(|a| Route::Account {
+                    id: id.hex(),
+                    name: a.name.clone(),
+                }),
+                Route::Account {
+                    id: id.hex(),
+                    name: String::new(),
+                },
+            ),
+            Page::Ledger(Ledger::Saved(id)) => named(
+                self.peer.saved(id).map(|f| Route::Filter {
+                    id: id.hex(),
+                    name: f.name.clone(),
+                }),
+                Route::Filter {
+                    id: id.hex(),
+                    name: String::new(),
+                },
+            ),
+            Page::Ledger(Ledger::Adhoc) => Route::Filtered,
         }
     }
 
-    /// The page a place is, if it is one here: an account or a saved filter
-    /// by its name; conditions not saved, the last ones this window had.
-    fn page_of(&self, place: &Place) -> Option<Page> {
-        Some(match place {
-            Place::Budget => Page::Budget,
-            Place::Reflect => Page::Reflect,
-            Place::Accounts => Page::Ledger(Ledger::All),
-            Place::Settings => Page::Settings,
-            Place::Inbox => Page::Ledger(Ledger::Inbox),
-            Place::Account(name) => Page::Ledger(Ledger::Account(self.peer.accounts.rows.iter().find(|a| &a.name == name)?.id)),
-            Place::Filter(name) => Page::Ledger(Ledger::Saved(self.peer.filters.rows.iter().find(|f| &f.name == name)?.id)),
-            Place::Filtered => Page::Ledger(Ledger::Adhoc),
+    /// The page a route is, if it is one here: an account or a saved filter
+    /// by its id (an older link's by its name, `Route::names`); conditions
+    /// not saved, the last ones this window had. The banks are Settings'
+    /// here, and a category is the budget's.
+    pub(crate) fn page_of(&self, route: &Route) -> Option<Page> {
+        Some(match route {
+            Route::Budget | Route::Category { .. } => Page::Budget,
+            Route::Insights => Page::Insights,
+            Route::Accounts => Page::Ledger(Ledger::All),
+            Route::Settings | Route::Banks | Route::Bank { .. } => Page::Settings,
+            Route::Inbox => Page::Ledger(Ledger::Inbox),
+            Route::Account { .. } => Page::Ledger(Ledger::Account(
+                self.peer.accounts().iter().find(|a| route.names(&a.id.hex(), &a.name))?.id,
+            )),
+            Route::Filter { .. } => Page::Ledger(Ledger::Saved(self.peer.filters().iter().find(|f| route.names(&f.id.hex(), &f.name))?.id)),
+            Route::Filtered => Page::Ledger(Ledger::Adhoc),
+            // A sign-in link is the onboarding's, not a page.
+            Route::Join { .. } | Route::Welcome => return None,
         })
     }
 
     fn step(&mut self, message: Message) -> Task<Message> {
         match message {
+            Message::Accounts(m) => return self.accounts_step(m),
+            Message::Budget(m) => return self.budget_step(m),
+            Message::Insights(m) => return self.insights_step(m),
+            Message::Welcome(m) => return self.welcome(m),
+            Message::Shell(m) => return self.shell_step(m),
             Message::Go(page) => {
                 self.page = page;
                 self.form = None;
@@ -797,9 +939,9 @@ impl App {
                     self.txn_anchor = None;
                 }
                 // A new visit opens at the top; back and forward where it was.
-                self.scroll_due = Some(self.history.arrive(&self.place()));
+                self.scroll_due = Some(self.history.arrive(&self.route()));
             }
-            Message::PageScrolled(y) => self.history.scrolled(&self.place(), y),
+            Message::PageScrolled(y) => self.history.scrolled(&self.route(), y),
             Message::TopScrolled(y) => self.top_y = y,
             Message::PageTop => {
                 self.top_y = 0.0;
@@ -943,7 +1085,7 @@ impl App {
                 // The register's account, when it is one account's.
                 let account = self
                     .register_account()
-                    .or_else(|| self.peer.accounts.rows.iter().find(|a| a.on_budget && !a.closed).map(|a| a.id));
+                    .or_else(|| self.peer.accounts().iter().find(|a| a.on_budget && !a.closed).map(|a| a.id));
                 self.form = Some(TxnForm {
                     account,
                     date: self.today.clone(),
@@ -955,29 +1097,25 @@ impl App {
                 if self.form.as_ref().is_some_and(|f| f.editing == Some(id)) {
                     return Task::none();
                 }
-                if let Some(t) = self.peer.register.rows.iter().find(|t| t.id == id) {
-                    let transfer_to = match t.transfer {
-                        true => self.transfer_of(t.id),
-                        false => None,
-                    };
+                if let Some(t) = self.peer.register().iter().find(|t| t.id == id) {
                     self.form = Some(TxnForm {
                         editing: Some(id),
                         account: Some(t.account_id),
                         date: t.date.clone(),
                         payee: if t.transfer { String::new() } else { t.payee.clone() },
                         category: t.category_id,
-                        transfer_to,
+                        transfer_to: t.transfer_account_id,
                         memo: t.memo.clone(),
                         outflow: if t.amount < 0 { amount::editable(-t.amount) } else { String::new() },
                         inflow: if t.amount > 0 { amount::editable(t.amount) } else { String::new() },
                         cleared: t.cleared != Cleared::Uncleared,
                         by: t.user_id.clone(),
-                        bank: bank_said(t),
+                        bank: t.bank_said().unwrap_or_default(),
                         split: None,
                     });
                     // A split one opens on its lines.
                     self.peer.set_splits(Some(id));
-                    let lines = self.peer.splits.as_ref().map(|(_, w)| w.rows.clone()).unwrap_or_default();
+                    let lines = self.peer.splits().map(<[_]>::to_vec).unwrap_or_default();
                     if let (Some(f), false) = (&mut self.form, lines.is_empty()) {
                         f.split = Some(
                             lines
@@ -1055,7 +1193,7 @@ impl App {
                 return self.open_dropdown(Choosing::Txns(ids), at);
             }
             Message::TxnClick(id) => {
-                self.pane = Pane::Page;
+                self.keyboard.focus = Pane::Content;
                 self.txn_anchor = None;
                 if self.txn_at == Some(id) {
                     return self.update(Message::EditTxn(id));
@@ -1064,7 +1202,7 @@ impl App {
             }
             Message::RegisterScrolled(y) => {
                 self.register_scroll = y;
-                self.history.scrolled(&self.place(), y);
+                self.history.scrolled(&self.route(), y);
             }
             Message::DropTyped(q) => {
                 if let Some(d) = &mut self.dropdown {
@@ -1104,11 +1242,19 @@ impl App {
             Message::Banks(m) => return self.banks(m),
             Message::AccountMenu => {
                 if let Some(account) = self.account() {
-                    let right = self.window.width - view::PAD;
-                    self.ctx.open_menu(account.menu(right, view::PAD + arkui::account::HEIGHT, self.window));
+                    // Over the sidebar's foot, where it was pressed.
+                    let rows = account.entries.len() as f32 + 1.0;
+                    let up = self.window.height - 44.0 - rows * 30.0;
+                    let right = arkui::layout_tokens::SIDEBAR_WIDTH.min(self.window.width) - 10.0;
+                    self.ctx.open_menu(account.menu(right, up.max(0.0), self.window));
                 }
             }
+            Message::ShowFilter(on) => self.show_filter = on,
+            Message::AutoMenu => self.auto_menu(),
             Message::SignOut => self.sign_out(),
+            Message::AddDevice => return self.add_device(),
+            Message::DeviceCode(made) => self.device_coded(made),
+            Message::CopyLink(link) => return iced::clipboard::write(link),
             Message::AddAccount => {
                 self.modal = Some(Modal::AddAccount {
                     name: String::new(),
@@ -1149,10 +1295,11 @@ impl App {
                         self.note = format!("{balance:?} is not an amount");
                         return Task::none();
                     };
-                    let owed = matches!(kind, "credit" | "loan");
+                    let kind = money_core::accounts::AccountKind::of(kind).unwrap_or_default();
+                    let owed = kind.owes();
                     let open = OpenAccount {
                         name,
-                        kind: kind.into(),
+                        kind,
                         on_budget,
                         balance: if owed { -cents.abs() } else { cents },
                         date: self.today.clone(),
@@ -1256,7 +1403,7 @@ impl App {
             Message::Rename(named) => {
                 let name = match named {
                     Naming::Category(c) => self.peer.line(c).map(|l| l.name.clone()),
-                    Naming::Group(g) => self.peer.groups.rows.iter().find(|r| r.id == g).map(|r| r.name.clone()),
+                    Naming::Group(g) => self.peer.groups().iter().find(|r| r.id == g).map(|r| r.name.clone()),
                     Naming::Account(a) => self.peer.account(a).map(|a| a.name.clone()),
                     Naming::Filter(f) => self.peer.saved(f).map(|f| f.name.clone()),
                 };
@@ -1340,17 +1487,19 @@ impl App {
             }
             Message::Stores(m) => self.stores(m),
             Message::Receipt(m) => return self.receipt(m),
+            Message::KeepPhoto(jpeg, txn) => self.keep_photo(&jpeg, txn.as_deref().and_then(money_app::id_of)),
             Message::ChoosePayer(of) => {
                 self.peer.set_candidates(Some(of.clone()));
                 return self.open_dropdown(Choosing::Payer(of), (self.pointer, false));
             }
             Message::Swallow => {}
             Message::Wake => return self.wake(),
-            Message::SignedIn(Ok(login)) => self.signed_in(login),
+            Message::Coded(Ok(code)) => return self.onboard(Event::Code { code }),
+            Message::Coded(Err(why)) => return self.onboard(Event::CameBack { why: Some(why) }),
+            Message::SignedIn(Ok(login)) => return self.onboard(Event::SignedIn { login: login.into() }),
             // Said once, and not tried again until a reload: going straight
             // back would be a loop the person cannot stop.
-            Message::SignedIn(Err(e)) => self.note = format!("could not sign in: {e} \u{2014} reload to try again"),
-            #[cfg(not(target_arch = "wasm32"))]
+            Message::SignedIn(Err(why)) => return self.onboard(Event::SignInFailed { why }),
             Message::Opened(opened) => {
                 #[cfg(not(feature = "demo"))]
                 if let Some(opened) = opened.take() {
@@ -1363,7 +1512,7 @@ impl App {
                 let _ = opened;
             }
             Message::Picture(done) => self.pictures.loaded(done),
-            Message::WhichDue(key) => self.which.due(key),
+            Message::WhichDue(key) => self.keyboard.which.due(key),
             Message::ToastDue(key) => self.toast.due(key),
         }
         Task::none()
@@ -1385,9 +1534,7 @@ impl App {
 
     #[cfg(any(feature = "demo", test))]
     fn demo_sync(&mut self) {
-        let owed = (self.peer.accounts.rows.iter())
-            .find(|a| a.bank == seed::BANK_NAME)
-            .map_or(0, |a| a.cleared);
+        let owed = (self.peer.accounts().iter()).find(|a| a.bank == seed::BANK_NAME).map_or(0, |a| a.cleared);
         let import = self.bank.next(&self.today, owed);
         let (n, u) = (import.upserts.len(), import.removed.len());
         if self.author("sync the bank", "import", &import) {
@@ -1409,15 +1556,13 @@ impl App {
     /// and the rows the cursor can be on: none when folded.
     pub fn shown(&self) -> Vec<Shown<'_>> {
         self.peer
-            .groups
-            .rows
+            .groups()
             .iter()
             .filter(|g| self.show_hidden || !g.hidden)
             .map(|g| {
                 let lines: Vec<&BudgetLine> = self
                     .peer
-                    .lines
-                    .rows
+                    .lines()
                     .iter()
                     .filter(|l| l.group_id == g.id && (self.show_hidden || !l.hidden))
                     .collect();
@@ -1471,96 +1616,64 @@ impl App {
 
     /// Whether the budget has the keyboard.
     pub fn budget_keys(&self) -> bool {
-        self.page == Page::Budget && self.pane == Pane::Page && self.keys_free()
+        self.page == Page::Budget && self.keyboard.focus == Pane::Content && self.keys_free()
     }
 
     fn key(&mut self, key: Key, mods: Modifiers) -> Task<Message> {
-        if key == Key::Named(Named::Escape) {
-            self.keys.press(&key, mods);
-            self.which.dismiss();
-            return self.update(Message::Escape);
+        // A command's shortcut, the menu bar's on a Mac: ⌘ there, Ctrl here.
+        if let Some(run) = self.shortcut(&key, mods) {
+            return self.update(Message::Shell(run));
         }
+        let free = self.keys_free();
+        let before = self.keyboard.focus;
+        let panes = self.panes();
+        let section = self.sidebar_at();
         // The budget binds its sequences; the register none, so its `c`
         // categorizes at once rather than waiting for a second key.
-        self.keys.set_bindings(match (self.pane, self.page) {
-            (Pane::Page, Page::Budget) => &MONEY_KEYS,
+        let bindings: &[&'static str] = match self.page {
+            Page::Budget => &MONEY_KEYS,
             _ => &[],
-        });
-        let action = self.keys.press(&key, mods);
-        // The which-key panel follows what is half typed; a search is
-        // typed, not a prefix.
-        let prefix = match self.keys.mode() {
-            vim::Mode::Normal => self.keys.pending(),
-            vim::Mode::Search(_) => String::new(),
         };
-        self.which.typed(&prefix);
-        let Some(action) = action else {
-            return Task::none();
-        };
-        if action == vim::Action::Key('?') {
-            self.which.ask();
-            return Task::none();
+        let places = self.places().len();
+        let routed = self.keyboard.press(&key, mods, &panes, section, places, bindings);
+        // Nothing moves between panes while something is over the window.
+        if !free {
+            self.keyboard.focus = before;
         }
-        // A menu that is up has the keys.
-        if self.ctx.is_open() {
-            return match action {
+        use arkui::shell::Routed;
+        match routed {
+            Routed::Done => Task::none(),
+            Routed::Escape => self.update(Message::Escape),
+            // Back and forward, the way the browser's buttons go: the bar
+            // moves, and the next update arrives where it went.
+            Routed::Jump(by) => {
+                self.history.go(by);
+                Task::none()
+            }
+            Routed::Section(i) if free => {
+                // A cursor walking is a scrub: one history entry, not one a place.
+                self.history.replace_next();
+                let tag = self.place_tag(i);
+                self.update(Message::Shell(ShellMsg::Select { tag }))
+            }
+            Routed::Scroll(place) if free => self.scroll_cursor(place),
+            Routed::Pane(_, action) if self.ctx.is_open() => match action {
+                // A menu that is up has the keys.
                 vim::Action::Move(m) => match self.ctx.travel(m) {
                     Some(msg) => self.update(msg),
                     None => Task::none(),
                 },
                 vim::Action::Activate => self.update(Message::MenuActivate),
                 _ => Task::none(),
-            };
+            },
+            Routed::Pane(pane, action) if free => match (pane, self.page) {
+                (Pane::Sidebar, _) => Task::none(),
+                (_, Page::Budget) => self.act(action),
+                (_, Page::Ledger(_)) => self.register_act(action),
+                _ => Task::none(),
+            },
+            _ => Task::none(),
         }
-        // Back and forward, the way the browser's buttons go: the bar moves,
-        // and the next update arrives where it went.
-        if let vim::Action::Jump(by) = action {
-            self.history.go(by);
-            return Task::none();
-        }
-        if !self.keys_free() {
-            return Task::none();
-        }
-        if action == vim::Action::Cycle {
-            self.pane = match self.pane {
-                Pane::Sidebar => Pane::Page,
-                Pane::Page => Pane::Sidebar,
-            };
-            return Task::none();
-        }
-        if let vim::Action::Scroll(place) = action {
-            return self.scroll_cursor(place);
-        }
-        match (self.pane, self.page) {
-            (Pane::Sidebar, _) => self.sidebar_act(action),
-            (Pane::Page, Page::Budget) => self.act(action),
-            (Pane::Page, Page::Ledger(_)) => self.register_act(action),
-            (Pane::Page, Page::Reflect | Page::Settings) => {
-                if let vim::Action::Move(vim::Motion::Left(_)) = action {
-                    self.pane = Pane::Sidebar;
-                }
-                Task::none()
-            }
-        }
-    }
-
-    /// A command with the sidebar's keys: `j` and `k` walk the places, the
-    /// page following, and `l` or `<Enter>` give the keys to the page.
-    fn sidebar_act(&mut self, action: vim::Action) -> Task<Message> {
-        let places = self.places();
-        match action {
-            vim::Action::Move(vim::Motion::Right(_)) | vim::Action::Activate => self.pane = Pane::Page,
-            vim::Action::Move(m) => {
-                if let Some(i) = vim::Grid::column(places.len()).step(self.sidebar_at(), m) {
-                    // A cursor walking is a scrub: one history entry, not one
-                    // a place.
-                    self.history.replace_next();
-                    return self.update(Message::Go(places[i].3));
-                }
-            }
-            _ => {}
-        }
-        Task::none()
     }
 
     /// One command of the grammar, on the budget.
@@ -1570,7 +1683,7 @@ impl App {
         let n = ids.len();
         match action {
             // The budget is one column: `h` is the sidebar, beside it.
-            vim::Action::Move(vim::Motion::Left(_)) => self.pane = Pane::Sidebar,
+            vim::Action::Move(vim::Motion::Left(_)) => self.keyboard.focus = Pane::Sidebar,
             vim::Action::Move(m) => {
                 let grid = vim::Grid::column(n);
                 let to = match self.at() {
@@ -1803,14 +1916,14 @@ impl App {
     /// The register's cursor's row.
     fn txn_cursor(&self) -> Option<usize> {
         let at = self.txn_at?;
-        self.peer.register.rows.iter().position(|t| t.id == at)
+        self.peer.register().iter().position(|t| t.id == at)
     }
 
     /// The register's rows under the cursor, first to last: one, or from the
     /// visual selection's anchor to the cursor.
     pub fn txn_lit(&self) -> Option<(usize, usize)> {
         let at = self.txn_cursor()?;
-        let rows = &self.peer.register.rows;
+        let rows = self.peer.register();
         let from = self.txn_anchor.and_then(|a| rows.iter().position(|t| t.id == a)).unwrap_or(at);
         Some((from.min(at), from.max(at)))
     }
@@ -1818,7 +1931,7 @@ impl App {
     /// The transactions under the cursor.
     pub fn txn_selected(&self) -> Vec<Id<Txn>> {
         match self.txn_lit() {
-            Some((a, b)) => self.peer.register.rows[a..=b].iter().map(|t| t.id).collect(),
+            Some((a, b)) => self.peer.register()[a..=b].iter().map(|t| t.id).collect(),
             None => Vec::new(),
         }
     }
@@ -1830,14 +1943,13 @@ impl App {
     pub fn register_act(&mut self, action: vim::Action) -> Task<Message> {
         let rows: Vec<(Id<Txn>, bool, Cleared, String)> = self
             .peer
-            .register
-            .rows
+            .register()
             .iter()
             .map(|t| (t.id, t.approved, t.cleared, t.payee.clone()))
             .collect();
         let n = rows.len();
         match action {
-            vim::Action::Move(vim::Motion::Left(_)) => self.pane = Pane::Sidebar,
+            vim::Action::Move(vim::Motion::Left(_)) => self.keyboard.focus = Pane::Sidebar,
             vim::Action::Move(m) => {
                 let grid = vim::Grid::column(n);
                 let to = match self.txn_cursor() {
@@ -1902,10 +2014,10 @@ impl App {
 
     /// `/` and `n`/`N` in the register: the next payee with the search in it.
     fn find_txn(&mut self, delta: isize) -> Task<Message> {
-        let payees: Vec<String> = self.peer.register.rows.iter().map(|t| t.payee.clone()).collect();
+        let payees: Vec<String> = self.peer.register().iter().map(|t| t.payee.clone()).collect();
         match vim::find(&payees, &self.search, self.txn_cursor().unwrap_or(0), delta) {
             Some(i) => {
-                self.txn_at = Some(self.peer.register.rows[i].id);
+                self.txn_at = Some(self.peer.register()[i].id);
                 self.reveal_txn(i)
             }
             None => {
@@ -1917,7 +2029,7 @@ impl App {
 
     /// How tall the register's list is on screen.
     fn register_view(&self) -> f32 {
-        (self.window.height - view::PAD - self.ledger_top() - view::LEDGER_GAP - view::LEDGER_HEAD - 1.0).max(view::TXN_ROW)
+        (self.window.height - self.page_origin().y - self.ledger_top() - view::LEDGER_HEAD - 1.0).max(view::TXN_ROW)
     }
 
     /// Scroll the register just far enough that row `i` is in sight.
@@ -1932,7 +2044,7 @@ impl App {
         // The last row is followed by the page's padding, inside what
         // scrolls (`view::page_pad`): scrolled to it, the list goes to its
         // end, so the row stands clear of the window's foot.
-        let last = i + 1 >= self.peer.register.rows.len();
+        let last = i + 1 >= self.peer.register().len();
         let foot = if last { view::PAD } else { 0.0 };
         let seen = self.register_view();
         let y = if top < self.register_scroll {
@@ -1943,7 +2055,7 @@ impl App {
             return Task::none();
         };
         self.register_scroll = y;
-        self.history.scrolled(&self.place(), y);
+        self.history.scrolled(&self.route(), y);
         iced::widget::operation::scroll_to(look::REGISTER, iced::widget::scrollable::AbsoluteOffset { x: 0.0, y })
     }
 
@@ -1951,7 +2063,7 @@ impl App {
     /// dropdown's corner, under it. The register's columns are the ones
     /// `view_ledger` lays out, worked out for this window's width.
     fn category_at(&self, id: Id<Txn>) -> (Point, bool) {
-        let i = self.peer.register.rows.iter().position(|t| t.id == id).unwrap_or(0);
+        let i = self.peer.register().iter().position(|t| t.id == id).unwrap_or(0);
         let above = if self.form.as_ref().is_some_and(|f| f.editing.is_none()) {
             view::TXN_ROW
         } else {
@@ -1963,7 +2075,7 @@ impl App {
     /// Where the form's category box is on screen: its list hangs under it.
     fn form_category_at(&self) -> (Point, bool) {
         let i = match self.form.as_ref().and_then(|f| f.editing) {
-            Some(id) => self.peer.register.rows.iter().position(|t| t.id == id).unwrap_or(0),
+            Some(id) => self.peer.register().iter().position(|t| t.id == id).unwrap_or(0),
             None => 0,
         };
         self.under(i as f32 * view::TXN_ROW + FORM_LINE)
@@ -1973,12 +2085,19 @@ impl App {
     /// a dropdown's corner: above, if there is no room under it.
     fn under(&self, y: f32) -> (Point, bool) {
         let all = self.register_account().is_none();
-        let left = view::SIDEBAR + 1.0 + view::PAD + arkui::table::ROW_PADDING[1];
-        let fixed = if all { 130.0 } else { 0.0 } + 96.0 + 100.0 + 100.0 + 116.0;
-        let width = self.window.width - view::SIDEBAR - 1.0 - receipt::SIDE - view::PAD * 2.0 - arkui::table::ROW_PADDING[1] * 2.0;
-        let payee = (width - fixed).max(0.0) * 3.0 / 8.0;
-        let x = left + if all { 130.0 } else { 0.0 } + 96.0 + payee;
-        let top = view::PAD + self.ledger_top() + view::LEDGER_GAP + view::LEDGER_HEAD + 1.0;
+        let origin = self.page_origin();
+        let inset = view::PAD - 6.0 + arkui::table::ROW_PADDING[1];
+        let left = origin.x + 1.0 + inset;
+        let inspector = match self.shell_page().inspector {
+            true => arkui::layout_tokens::INSPECTOR_WIDTH + 1.0,
+            false => 0.0,
+        };
+        let width = self.window.width - origin.x - 1.0 - inspector - inset * 2.0;
+        let fixed = view::DATE_COL + view::AMOUNT_COL + view::CLEARED_COL;
+        let portions = if all { 10.0 } else { 8.0 };
+        let payee = (width - fixed).max(0.0) * 3.0 / portions;
+        let x = left + view::DATE_COL + payee;
+        let top = origin.y + self.ledger_top() + view::LEDGER_HEAD + 1.0 + 4.0;
         let y = top + y - self.register_scroll;
         let above = y + arkui::command::LIST_HEIGHT > self.window.height;
         // Above: its bottom on the cell's top.
@@ -2011,7 +2130,7 @@ impl App {
         let query = d.search.query.to_lowercase();
         let has = |name: &str| query.is_empty() || name.to_lowercase().contains(&query);
         if let Choosing::Payer(_) = &d.choosing {
-            let rows = self.peer.candidates.as_ref().map(|(_, w)| w.rows.clone()).unwrap_or_default();
+            let rows = self.peer.candidates().map(<[_]>::to_vec).unwrap_or_default();
             let txns = rows
                 .iter()
                 .map(|c| (format!("{} \u{2014} {}", c.payee, c.date), c))
@@ -2057,7 +2176,7 @@ impl App {
                 Choice::AnyCategory => glyphs::CLOSE,
                 Choice::Transfer(_) => glyphs::SEND,
                 Choice::Paid(_) => glyphs::CARD,
-                Choice::Category(Some(c)) if c == money_domain::budget::ready_to_assign() => glyphs::GROWTH,
+                Choice::Category(Some(c)) if c == money_core::budget::ready_to_assign() => glyphs::GROWTH,
                 Choice::Category(Some(_)) => view::category_glyph(&label),
                 Choice::Category(None) => glyphs::CLOSE,
             },
@@ -2075,8 +2194,7 @@ impl App {
         if let (Choosing::Form, Some(f)) = (&d.choosing, &self.form) {
             let transfers = self
                 .peer
-                .accounts
-                .rows
+                .accounts()
                 .iter()
                 .filter(|a| !a.closed && Some(a.id) != f.account && has(&a.name))
                 .map(|a| item(format!("Transfer : {}", a.name), None, Choice::Transfer(a.id)))
@@ -2093,25 +2211,23 @@ impl App {
                 items: vec![item(
                     "Ready to Assign".into(),
                     Some(amount::money(rta)),
-                    Choice::Category(Some(money_domain::budget::ready_to_assign())),
+                    Choice::Category(Some(money_core::budget::ready_to_assign())),
                 )],
             });
         }
         let moving = matches!(d.choosing, Choosing::Move { .. });
-        let cards = money_domain::cards::card_group();
-        for g in self.peer.groups.rows.iter().filter(|g| !g.hidden && (moving || g.id != cards)) {
+        let cards = money_core::cards::card_group();
+        for g in self.peer.groups().iter().filter(|g| !g.hidden && (moving || g.id != cards)) {
             let items = self
                 .peer
-                .lines
-                .rows
+                .lines()
                 .iter()
                 .filter(|l| l.group_id == g.id && !l.hidden)
                 .flat_map(|l| {
                     // The envelope, then its kinds, each named from it.
                     let kinds = self
                         .peer
-                        .tree
-                        .rows
+                        .tree()
                         .iter()
                         .filter(move |n| n.depth >= 2 && !n.hidden && n.path.starts_with(&format!("{} \u{203a} {} \u{203a} ", g.name, l.name)))
                         .filter_map(|n| self.peer.category_name(n.id).map(|name| (name, n.id)))
@@ -2134,11 +2250,11 @@ impl App {
         // else, as its starting balance is.
         if let Some(l) = self
             .own_card(&d.choosing)
-            .and_then(|c| self.peer.line(money_domain::cards::payment_category(c)))
+            .and_then(|c| self.peer.line(money_core::cards::payment_category(c)))
         {
             if !moving && has(&l.name) {
                 groups.push(arkui::command::Group {
-                    heading: money_domain::cards::CARD_GROUP.into(),
+                    heading: money_core::cards::CARD_GROUP.into(),
                     items: vec![item(
                         l.name.clone(),
                         Some(amount::money(l.available)),
@@ -2169,7 +2285,7 @@ impl App {
             Choosing::Txns(ids) => {
                 let mut on = ids
                     .iter()
-                    .map(|id| self.peer.register.rows.iter().find(|t| t.id == *id).map(|t| t.account_id));
+                    .map(|id| self.peer.register().iter().find(|t| t.id == *id).map(|t| t.account_id));
                 let first = on.next()??;
                 if !on.all(|a| a == Some(first)) {
                     return None;
@@ -2190,27 +2306,27 @@ impl App {
     /// `zz`, `zt` and `zb`: the page's list scrolled so its cursor's row is
     /// in the middle, at the top or at the foot, the cursor where it was.
     fn scroll_cursor(&mut self, place: arkui::scroll::Place) -> Task<Message> {
-        match (self.pane, self.page) {
-            (Pane::Page, Page::Budget) => match self.at() {
+        match (self.keyboard.focus, self.page) {
+            (Pane::Content, Page::Budget) => match self.at() {
                 Some(n) => {
                     let (line, lines) = outline::line_of(&self.sizes(), n);
                     arkui::scroll::follow(look::BUDGET, line, lines, place)
                 }
                 None => Task::none(),
             },
-            (Pane::Page, Page::Ledger(_)) => {
-                let Some(i) = self.txn_at.and_then(|id| self.peer.register.rows.iter().position(|t| t.id == id)) else {
+            (Pane::Content, Page::Ledger(_)) => {
+                let Some(i) = self.txn_at.and_then(|id| self.peer.register().iter().position(|t| t.id == id)) else {
                     return Task::none();
                 };
                 // The register's rows are one height, and a new
                 // transaction's form one more above them.
                 let above = usize::from(self.form.as_ref().is_some_and(|f| f.editing.is_none()));
-                let rows = self.peer.register.rows.len() + above;
+                let rows = self.peer.register().len() + above;
                 let content = rows as f32 * view::TXN_ROW;
                 match arkui::scroll::offset_for(i + above, rows, self.register_view(), content, self.register_scroll, place) {
                     Some(y) => {
                         self.register_scroll = y;
-                        self.history.scrolled(&self.place(), y);
+                        self.history.scrolled(&self.route(), y);
                         iced::widget::operation::scroll_to(look::REGISTER, iced::widget::scrollable::AbsoluteOffset { x: 0.0, y })
                     }
                     None => Task::none(),
@@ -2240,16 +2356,9 @@ impl App {
     fn follows(&mut self, c: Id<Category>) -> bool {
         let ruled = self.peer.line(c).is_some_and(|l| l.ruled);
         if ruled {
-            self.note = format!("could not assign: {}", money_domain::formulas::FOLLOWS);
+            self.note = format!("could not assign: {}", money_core::formulas::FOLLOWS);
         }
         ruled
-    }
-
-    /// The other account of a transfer.
-    fn transfer_of(&self, id: Id<Txn>) -> Option<Id<Account>> {
-        let t = self.peer.register.rows.iter().find(|t| t.id == id)?;
-        let name = t.payee.strip_prefix("Transfer : ")?;
-        self.peer.accounts.rows.iter().find(|a| a.name == name).map(|a| a.id)
     }
 
     fn reconcile(&mut self, account: Id<Account>, balance: i64) {
@@ -2374,46 +2483,42 @@ impl App {
             return self.save_split(id, &f, splits, amount);
         }
         let taken = match f.editing {
-            Some(id) => {
-                let e = EditTransaction {
-                    id,
-                    date: f.date,
-                    payee: f.payee,
-                    category_id: f.category,
-                    memo: f.memo,
-                    amount,
-                    transfer_to: f.transfer_to,
-                };
-                self.author("save the transaction", "edit_transaction", &e)
-            }
-            None => {
+            None if f.split.is_some() && splits.len() > 1 => {
                 let Some(account) = f.account else {
-                    self.note = "which account?".into();
+                    self.note = "Choose an account.".into();
                     return;
                 };
-                if f.split.is_some() && splits.len() > 1 {
-                    let t = AddSplit {
-                        account_id: account,
-                        date: f.date,
-                        payee: f.payee,
-                        memo: f.memo,
-                        amount,
-                        cleared: f.cleared,
-                        lines: splits,
-                    };
-                    self.author("add the transaction", "add_split", &t)
-                } else {
-                    let t = AddTransaction {
-                        account_id: account,
-                        date: f.date,
-                        payee: f.payee,
-                        category_id: splits.first().map_or(f.category, |l| l.category_id),
-                        memo: f.memo,
-                        amount,
-                        cleared: f.cleared,
-                        transfer_to: f.transfer_to,
-                    };
-                    self.author("add the transaction", "add_transaction", &t)
+                let t = AddSplit {
+                    account_id: account,
+                    date: f.date,
+                    payee: f.payee,
+                    memo: f.memo,
+                    amount,
+                    cleared: f.cleared,
+                    lines: splits,
+                };
+                self.author("add the transaction", "add_split", &t)
+            }
+            _ => {
+                // The one form every client has (`transactions::Draft`):
+                // its rules, and the change it is.
+                let d = money_core::transactions::Draft {
+                    editing: f.editing,
+                    account: f.account,
+                    date: f.date,
+                    payee: f.payee,
+                    category: splits.first().map_or(f.category, |l| l.category_id),
+                    transfer_to: f.transfer_to,
+                    memo: f.memo,
+                    amount,
+                    cleared: f.cleared,
+                };
+                match d.to_change() {
+                    Some(c) => self.change("save the transaction", &c),
+                    None => {
+                        self.note = d.problem().unwrap_or_default();
+                        return;
+                    }
                 }
             }
         };
@@ -2426,8 +2531,8 @@ impl App {
     /// form says. A split whose amount moves is unsplit first, as the
     /// domain keeps a split's amount to its lines.
     fn save_split(&mut self, id: Id<Txn>, f: &TxnForm, lines: Vec<SplitPart>, whole: i64) {
-        let was = self.peer.register.rows.iter().find(|t| t.id == id).map(|t| t.amount);
-        if was != Some(whole) && self.peer.splits.as_ref().is_some_and(|(_, w)| !w.rows.is_empty()) {
+        let was = self.peer.register().iter().find(|t| t.id == id).map(|t| t.amount);
+        if was != Some(whole) && self.peer.splits().is_some_and(|w| !w.is_empty()) {
             self.author("unsplit it", "split", &SplitTxn { id, lines: vec![] });
         }
         let e = EditTransaction {
@@ -2475,7 +2580,7 @@ impl App {
         }
         // A prefix half typed: the which-key panel after its delay. Keyed
         // from the top of the range, clear of the deadlines' milliseconds.
-        if let Some(key) = self.which.waiting() {
+        if let Some(key) = self.keyboard.which.waiting() {
             subs.push(
                 arkui::wake::at(u64::MAX - key, arkui::which::DELAY)
                     .with(key)
@@ -2520,41 +2625,74 @@ pub fn split_lines(rows: &[SplitRow], whole: i64) -> Result<Vec<SplitPart>, Stri
     Ok(lines)
 }
 
-/// A desktop sign-in, which waits on a loopback listener for the browser,
-/// on a thread of its own.
-#[cfg(not(target_arch = "wasm32"))]
-fn off_thread(work: impl FnOnce() -> Result<ark_auth::Login, String> + Send + 'static) -> Task<Message> {
+/// A desktop sign-in's step, which waits on a loopback listener for the
+/// browser or on the server, on a thread of its own.
+/// How this window was launched, for the shell: the link it was opened
+/// with as an address, else its launch arguments.
+fn launched() -> ShellMsg {
+    match arkui::navigator::link_arg("money") {
+        Some(address) => ShellMsg::Address { address },
+        None => ShellMsg::Launch {
+            args: std::env::args().collect(),
+        },
+    }
+}
+
+fn off_thread<T: Send + 'static>(work: impl FnOnce() -> Result<T, String> + Send + 'static, done: fn(Result<T, String>) -> Message) -> Task<Message> {
     let (tx, rx) = iced::futures::channel::oneshot::channel();
     std::thread::spawn(move || {
         let _ = tx.send(work());
     });
     Task::perform(
         async move { rx.await.unwrap_or_else(|_| Err("the sign-in thread went away".into())) },
-        Message::SignedIn,
+        done,
     )
 }
 
-#[cfg(target_arch = "wasm32")]
-fn panic_to_console() {
-    std::panic::set_hook(Box::new(|info| {
-        web_sys::console::error_1(&info.to_string().into());
-    }));
-}
-
 pub fn main() -> iced::Result {
-    #[cfg(target_arch = "wasm32")]
-    panic_to_console();
     // Which renderer draws the window, decided before iced starts and said
     // on stderr (`arkui::renderer`): iced would fall back to the CPU silently.
     arkui::renderer::choose();
     arkui::theme::install(palette::MONEY);
+    // money's mark, from its icon: what its first run's pages show.
+    arkui::glyphs::set_app(include_str!("../../icon.svg"));
     // Whether to move, asked of the system now rather than in a frame.
     arkui::motion::reduced();
     // The app's boot, and what every arkui window starts with (a trackpad's
     // resting fingers heard, on Wayland).
     let boot = || {
-        let (app, task) = App::boot();
-        (app, Task::batch([task, arkui::window::boot()]))
+        let (mut app, task) = App::boot();
+        // The link the desktop was opened with (`money://account/<id>/checking`)
+        // is the shell's launch, by its address ([`launched`]): what it names
+        // selected, not pushed. A sign-in link (`money://join?server=…`) is
+        // not a page: it goes to the sign-in machine as `Event::Joined`, which
+        // asks first.
+        let mut joined = Task::none();
+        if let Some(link) = arkui::navigator::link_arg("money") {
+            use arkui::navigator::Navigator;
+            let mut join = None;
+            app.history.handle(&link, "money", &mut |r| match r {
+                Route::Join { server, code } => {
+                    join = Some(Event::Joined {
+                        server: server.clone(),
+                        code: code.clone(),
+                    });
+                    true
+                }
+                // money's pages, by their route, over the window.
+                Route::Welcome => {
+                    if let Some(s) = &mut app.server {
+                        s.first_run.show_intro();
+                    }
+                    true
+                }
+                _ => true,
+            });
+            if let Some(event) = join {
+                joined = app.onboard(event);
+            }
+        }
+        (app, Task::batch([task, joined, arkui::window::boot()]))
     };
     let app = iced::application(boot, App::update, App::view)
         .subscription(App::subscription)
@@ -2565,9 +2703,10 @@ pub fn main() -> iced::Result {
         .font(arkui::fonts::FIRA_MONO);
     // The screenshots' run (.github/screens/apps.md): this application, its
     // shots taken headless, and no window. Only when `ARK_SHOTS` asks.
-    #[cfg(not(target_arch = "wasm32"))]
+    // Each shot taken once the window's runtimes are idle at one version
+    // (`App::is_idle`, `App::version`): its ready signal.
     if let Some(shots) = arkui_shots::asked() {
-        shots.run(app);
+        shots.run_ready(app, |app: &App| app.is_idle().then(|| app.version()));
     }
     app.run()
 }
@@ -2655,13 +2794,5 @@ pub const DROP_WIDTH: f32 = 340.0;
 /// What the bank called an imported transaction, where it says something the
 /// payee does not: `CHIPOTLE 1234 SAN FRANCISCO CA` beside `Chipotle`. Blank
 /// for one typed in, or one the bank and the payee name alike.
-pub fn bank_said(t: &TxnLine) -> String {
-    let said = t.imported_payee.trim();
-    match t.imported && !said.is_empty() && !said.eq_ignore_ascii_case(t.payee.trim()) {
-        true => said.to_string(),
-        false => String::new(),
-    }
-}
-
 /// How far down the register's form its category box ends.
 const FORM_LINE: f32 = 40.0;

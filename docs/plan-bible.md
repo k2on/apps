@@ -288,8 +288,7 @@ Each piece lands with its tests and is reviewable on its own.
 7. **The build.** `bible/android` as a gradle project on the SDK and
    `aapt2` the flake already assembles (`nix/android-sdk.nix`,
    `nix/aapt2.nix`), its own recorded Maven graph (`deps.json`), and
-   three outputs beside harken's: `bible-apk`, `bible-apk-deps`,
-   `bible-android-screens`. `bible/README.md` says how to build and
+   two outputs beside harken's: `bible-apk` and `bible-apk-deps`. `bible/README.md` says how to build and
    what has and has not been seen on a phone.
 
 Later, and not in this plan's scope: accessibility — TalkBack cannot
@@ -303,16 +302,9 @@ harken's iOS mirrors its Android.
 
 ## Proving it without a phone
 
-As harken's: no phone or emulator runs here, so what can be proved on
-the JVM is, and what only a phone can show is named.
+As harken's: no phone or emulator runs here, so what only a phone can
+show is named.
 
-- **On the JVM.** The layout, the camera, the levels' thresholds, the
-  fly-to path, the gesture state machine and the search are pure code
-  with unit tests. The surface renders through Paparazzi at six camera
-  states — reading, glyphs at the small end, greeked, chapters, books,
-  the line — in both themes, as PNGs under `bible-android-screens`:
-  what the owner looks at, and what a change to the drawing is reviewed
-  by.
 - **Only a phone.** Frame times during a fling and during a pinch over
   reading text (`FrameMetrics`, Perfetto), the feel of the fling against
   `ScrollView`'s, the stretch effect, and whether the fly-to reads as
@@ -371,10 +363,8 @@ the surface with the platform's scroller and edge effects (3), the
 levels down to the one-pixel line with their fades and labels (4), the
 fly-to, the header, the picker and search (5), the theme and the
 saved place (6, without the font-size setting), and the build (7):
-`revelation-apk`, `revelation-apk-deps` and `revelation-android-screens`
-beside harken's, and one F-Droid repository for both apps (`fdroid-repo`,
-`apps-fdroid`, `nix/fdroid.nix`). Forty-seven JVM tests and eleven
-screenshot pairs; the whole text lays out in about a hundred
+`revelation-apk` and `revelation-apk-deps` beside harken's, and one F-Droid repository for both apps (`fdroid-repo`,
+`apps-fdroid`, `nix/fdroid.nix`). The whole text lays out in about a hundred
 milliseconds with the fake measurer, as 99,563 lines and 2,761,398 dp at
 a Pixel 5's width, from 34,883 distinct tokens.
 
@@ -383,8 +373,7 @@ from a point a quarter of the way down the screen below the header, not
 its centre, since a fly-to lands a chapter just under the header and a
 short psalm can end before the centre; the header shows a range once
 more than two books are on screen; and `BibleView` keeps the last
-layout for the process, which is what makes the screenshots take under
-a minute under layoutlib.
+layout for the process.
 
 Not yet, and still as planned: reflow by pinch and the font size
 setting, a bundled serif (`Typeface.SERIF` for now), accessibility,

@@ -34,17 +34,20 @@ pub fn search(_: &Ctx, _: &Db<Harken>, input: Search) -> Result<Plan<LibraryEntr
 }
 
 /// Every album some song is on, by name, with whoever made its first track
-/// (in the song table's order), who played most of it, and how many tracks
-/// it has.
+/// and who played most of it (a tie to whoever plays first), each in the
+/// order the album plays (disc, then track, an untagged track after the
+/// rest: `album`'s), and how many tracks it has. Not the song table's
+/// order, which is the order a scan happened to add them in: an album of
+/// three soloists, three tracks each, was credited to a different one each
+/// time the library was scanned afresh.
 #[view("library.albums")]
 pub fn albums(_: &Ctx, _: &Db<Harken>, _: ()) -> Result<Plan<AlbumsEntry>, Refusal> {
     Ok(scan::<Harken, Album>()
         .map_with(|db, a| {
-            let tracks: Vec<(String, String)> = db
-                .song
-                .scan()
+            let mut songs: Vec<Song> = db.song.scan().into_iter().filter(|s| s.album_id.as_ref() == Some(&a.id)).collect();
+            songs.sort_by_key(|s| (s.disc, s.track == 0, s.track, s.recording_id.clone()));
+            let tracks: Vec<(String, String)> = songs
                 .into_iter()
-                .filter(|s| s.album_id.as_ref() == Some(&a.id))
                 .map(|s| {
                     let creator = db.media.get(s.media_id).map(|m| m.creator).unwrap_or_default();
                     (creator, performers(&credits_of(db, &s.recording_id), &s.recording_id))

@@ -169,7 +169,7 @@ struct FullPlayer: View {
             // the desktop's bar and Android's player do; opening one closes
             // the player (`Shell`).
             VStack(alignment: .leading, spacing: 2) {
-                Button { if let n = s.now, let a = model.album(playing: n) { open(.page(.album(a.id))) } } label: {
+                Button { if let n = s.now, let a = model.album(playing: n) { open(.album(key: a.id, title: a.name)) } } label: {
                     Text(s.now?.title ?? "Nothing playing").font(.title2.bold()).lineLimit(2).multilineTextAlignment(.leading)
                 }
                 .buttonStyle(.plain)
@@ -177,14 +177,14 @@ struct FullPlayer: View {
                 Button {
                     guard let a = s.now?.artist, !a.isEmpty else { return }
                     let show = model.shows.first { $0.title == a }
-                    open(.page(show != nil && model.artist(named: a) == nil ? .show(show!.id) : .artist(a)))
+                    open(show != nil && model.artist(named: a) == nil ? .show(key: show!.id, title: show!.title) : .artist(name: a))
                 } label: {
                     Text(s.now?.artist ?? "").font(.title3).foregroundStyle(Color.accentText).lineLimit(1)
                 }
                 .buttonStyle(.plain)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            Scrubber()
+            PlayerScrubber()
                 .padding(.top, Space.l)
             Transport()
             if let v = s.volume {
@@ -230,7 +230,7 @@ struct FullPlayer: View {
                 CoverView(seed: now.seed, url: now.art, side: 64, corner: 0)
                     .aspectRatio(1, contentMode: .fill)
                     .blur(radius: 80)
-                    // The theme's wash (arkui/theme.toml): faint enough that the
+                    // The theme's wash (ui/theme.toml): faint enough that the
                     // title, the album and the gold read over a pale cover.
                     .opacity(Tokens.washOpacity(dark: scheme == .dark))
                     .ignoresSafeArea()
@@ -287,9 +287,10 @@ private struct PullToClose: ViewModifier {
 }
 
 /// A scrubber that follows the finger while it is dragged, another device's
-/// while one is dragging it, and the player otherwise. Dragged, it says where
-/// to the session's other devices, and seeks on release.
-struct Scrubber: View {
+/// while one is dragging it, and the player otherwise — ArkUI's `Scrubber`,
+/// under the chapter it is in. Dragged, it says where to the session's
+/// other devices, and seeks on release.
+struct PlayerScrubber: View {
     @EnvironmentObject private var model: Model
     @State private var dragging: Double? = nil
 
@@ -304,24 +305,17 @@ struct Scrubber: View {
                 if let c = ChaptersEntry.at(chapters, Int64(at * total)), !c.title.isEmpty {
                     Text(c.title).font(.subheadline).foregroundStyle(.quiet).lineLimit(1)
                 }
-                // No handle (ArkUI's `Bar`), as Android's.
-                Bar(value: at, fill: Color.accent, enabled: s.durationMs > 0, onValue: { v in
-                    dragging = v
-                    model.scrub(Int64(v * total))
-                }, onDone: {
-                    if let d = dragging {
-                        model.seek(Int64(d * total))
-                        dragging = nil
-                    }
-                })
-                .accessibilityLabel("Position")
-                HStack {
-                    Text(Spell.clock(Int64(at * total)))
-                    Spacer()
-                    Text("-" + Spell.clock(max(s.durationMs - Int64(at * total), 0)))
-                }
-                .font(.caption.monospacedDigit())
-                .foregroundStyle(.quiet)
+                Scrubber(value: at, enabled: s.durationMs > 0, label: "Position",
+                         left: { formatClock(ms: Int64($0 * total)) },
+                         right: { "-" + formatClock(ms: max(s.durationMs - Int64($0 * total), 0)) },
+                         onValue: { v in
+                             dragging = v
+                             model.scrub(Int64(v * total))
+                         },
+                         onDone: { d in
+                             model.seek(Int64(d * total))
+                             dragging = nil
+                         })
             }
         }
         .task(id: s.now?.id) { if let n = s.now { model.loadChapters([Id(n.id)]) } }
@@ -385,41 +379,6 @@ struct Transport: View {
             }
             .foregroundStyle(.ink)
         }
-    }
-}
-
-/// A volume: its mute, then its slider. Under the finger it is where the
-/// finger is; anywhere else it is where the level it is handed says, and a
-/// level that arrives from elsewhere is sprung to (`Springs.move`) rather than
-/// jumped to.
-struct VolumeSlider: View {
-    let level: Int
-    let muted: Bool
-    let about: String
-    let onLevel: (Int) -> Void
-    let onDone: () -> Void
-    let onMute: () -> Void
-    @State private var shown: Double = 0
-    @State private var dragging = false
-    @Environment(\.reducesMotion) private var still
-
-    var body: some View {
-        HStack(spacing: Space.s) {
-            Button(action: onMute) { Image(systemName: muted ? "speaker.slash.fill" : "speaker.wave.2.fill").frame(width: 28) }
-                .foregroundStyle(muted ? Color.quiet : Color.ink)
-                .accessibilityLabel(muted ? "Unmute \(about)" : "Mute \(about)")
-            Bar(value: shown, fill: muted ? Color.quiet : Color.accent, onValue: { v in
-                dragging = true
-                shown = v
-                onLevel(Int((v * 100).rounded()))
-            }, onDone: {
-                dragging = false
-                onDone()
-            })
-            .accessibilityLabel("Volume of \(about)")
-        }
-        .onAppear { shown = Double(level) / 100 }
-        .onChange(of: level) { _, l in if !dragging { withAnimation(Springs.move.reduced(still)) { shown = Double(l) / 100 } } }
     }
 }
 

@@ -1,0 +1,201 @@
+# ArkUI's generic parts
+
+The small pieces a page is laid out of that any Ark app can use unchanged.
+Each has **one name and the same inputs in every toolkit**: Compose
+(`ui/kotlin`, package `dev.arkui`), SwiftUI (`ui/swift`) and iced
+(`ui/rust/arkui`, functions in snake case). A future client (the web) builds
+the same list.
+
+The rule for what goes here: a part goes in ArkUI only if another app could
+use it as it is — no money word, no media word, no domain type in its
+inputs. What an app is about (a transaction's row, a track's row, the
+player) stays in the app and is listed in `spec/<app>-components.md`; where
+such a component has a generic piece in it, it is made of the ArkUI part.
+
+Every colour is the theme's (`ui/theme.toml`), every move one of the
+shared springs (`ui/docs/motion.md`), every press `pressable` / `.press` /
+`.pressRow`. Every gap and inset on a phone and a tablet is one of `ui/theme.toml`'s
+`[layout]` steps (`space-xs` … `space-xxl`, `page-margin`, `card-corner`,
+`row-height`, `large-title-height`, `title-below`, `section-gap`,
+`wide-button-height`, `sheet-bar-height`), generated into `LayoutTokens`
+and read through `Space`, so the iPhone and Android lay a page out alike:
+a tab's large title under its row of buttons, its first card `title-below`
+under it, a `section-gap` between one part and the next (a section — its
+heading, its card, its note — is one part, and no part keeps a margin of
+its own), rows' words at the card's inset whether or not a picture is
+before them, and a sheet's bar the iPhone's (✕, the title centred, ✓).
+The desktop keeps the desktop's measures — a pointer is
+precise and a window wide — so a card is rounded by 8 there and by 20 on a
+phone: what is the same is the part and what it is handed.
+
+| Part | Inputs | Compose | SwiftUI | iced |
+|---|---|---|---|---|
+| Tint | neutral, positive, caution, negative, accent | `Tint`, `tintColors`, `tintInk` | `Tint` | `parts::Tint` |
+| PageHeader | kind, title, facts, by?, onBy?, cover, actions | `PageHeader` | `PageHeader` | `parts::page_header` |
+| SectionHeader | title, trailing | `SectionHeader` | `SectionHeader` | `parts::section_header` |
+| GroupCard | rows (content) | `GroupCard` (a `ListRow` in it is a grouped row) | `GroupCard` | `parts::group_card` (`style::card`) |
+| RowDivider | inset | `RowDivider` | `RowDivider` | `parts::row_divider` |
+| Banner | glyph, text | `Banner(icon, text)` | `Banner(symbol:text:)` | `parts::banner` |
+| Pill | tint, content | `Pill` | `Pill` | `parts::pill` (`style::pill`) |
+| Chip | label, selected, action | `Chip` | `Chip` | `parts::chip` (`style::chip`) |
+| Badge | count, said | `Badge` | `Badge` | `parts::badge` |
+| Tile | glyph, colour, side | `Tile` | `Tile` | `parts::tile` |
+| ProgressBar | fraction, colour or tint, thickness | `ProgressBar` | `ProgressBar` | `parts::progress_bar` (`style::progress`) |
+| Bars | parts (label, value, colour), description, value writer | `Bars` | `Bars` | `parts::bars` |
+| Donut | parts, description, thickness, centre | `Donut` | `Donut` | — (iced's canvas is not built) |
+| SearchField | query, onQuery, placeholder, onSearch | `SearchField` | `SearchField` | `parts::search_field` (`style::field`) |
+| NameField | name, onName, problem, hint, label | `NameField` | `NameField` | `parts::name_field` (`style::field`) |
+| Pager | title, back, forward, home?, homeLabel | `Pager` | `Pager` | `parts::pager` |
+| Scrubber | value, onValue, onDone, left, right, enabled, label | `Scrubber` | `Scrubber` | `parts::scrubber` |
+| Bar (the slider) | value, onValue, onDone | `Bar` | `Bar` | `parts::bar` |
+| VolumeSlider | level, muted, about, onLevel, onDone, onMute | `VolumeSlider` | `VolumeSlider` | — (the desktop's mute and bar are two controls) |
+| Glyphs | a Lucide name | `ArkGlyphs.named` | `ArkGlyphs.symbol` (an SF Symbol) | `glyphs::named` |
+
+## Figures
+
+A page of figures — a budget, a register's balances, a report — is laid
+out of these (`arkui::figures`, `FigureParts.swift`, `FigureParts.kt`).
+Charts are Swift Charts on Apple's platforms, a Canvas on Android, plain
+shapes and an SVG line on the desktop, in the theme's `[chart]` palette.
+
+| Part | Inputs | Compose | SwiftUI | iced |
+|---|---|---|---|---|
+| StatusBadge | figure, tint (negative filled with a warning, caution a clock) | `StatusBadge` | `StatusBadge` | `figures::status_badge` |
+| GoalBar | fraction, tint (`progress-width` wide beside columns) | `GoalBar` | `GoalBar` (`ProgressView`) | `figures::goal_bar` |
+| Headline | label, figure, tint, caption, trailing | `Headline` | `Headline` (large, bold, rounded) | `figures::headline` |
+| CapsuleButton | title, glyph?, prominent, action | `CapsuleButton` | `CapsuleButton` (bordered / prominent) | `figures::capsule_button` |
+| NoticeBar | glyph, text, actions | `NoticeBar` | `NoticeBar` (on `.bar`) | `figures::notice_bar` |
+| FigureStrip | (label, figure, tint)… | `FigureStrip` | `FigureStrip` | `figures::figure_strip` |
+| StatTile | label, figure, caption? (its line kept, so tiles are one height) | `StatTile` | `StatTile` | `figures::stat_tile` |
+| ChartCard | title, chart | `ChartCard` | `ChartCard` | `figures::chart_card` |
+| LabelledBars | (label, value, said)… | `LabelledBars` | `LabelledBars` | `figures::labelled_bars` |
+| ColumnChart | series, groups (label, values) | `ColumnChart` | `ColumnChart` | `figures::column_chart` |
+| LineChart, Sparkline | points (oldest first); the area runs to the foot | `LineChart`, `Sparkline` | `LineChart`, `Sparkline` | `figures::line_chart`, `sparkline` |
+| SummaryCard | label, cents, first/second (owned, owed), trend | `SummaryCard` | `SummaryCard` | the view's `Part::Summary` |
+| Grid | items, columns, gap | a `Row` of weights | `LazyVGrid` | `figures::grid` |
+
+The slider is called `Bar`, not `Slider`: `Slider` is SwiftUI's and
+Material's own, and an app that imports both could not say which.
+
+**Glyphs.** The shared names are Lucide's: `chevron-left`,
+`chevron-right`, `chevron-down`, `ellipsis-vertical`, `x`, `plus`, `minus`,
+`check`, `circle-check`, `circle`, `search`, `wifi-off`, `volume-2`,
+`volume-x`, `log-out`, and for a row's menu `pencil`, `copy`, `archive`,
+`undo-2`, `badge-check`, `circle-plus`, `trash`, `folder`, `lock`, `receipt`; for the shell and the figures
+`panel-right` (the inspector's toggle), `wand-sparkles`, `refresh-cw`,
+`list-filter`, `mail`, `chart-column`, `list`, `settings`, `inbox`,
+`triangle-alert`, `clock`, `dollar-sign`, `banknote`, `cloud`, `target`,
+`arrow-left-right`, `users`, `house`, `landmark`, `layers`, `link`; for a
+search picker `chevrons-up-down` (its row) and `circle-help` (a choice still
+to make). Android and the desktop draw Lucide's paths; the iPhone draws the
+SF Symbol each maps to. A thing's mark (`MarkTile`: an account's kind, its
+glyph on a wash of its chart slot's colour) draws its own set: `landmark`,
+`piggy-bank`, `banknote`, `credit-card`, `house`, `trending-up` — filled
+SF Symbols on the iPhone where SF Symbols has them, ArkUI's mark drawings
+on Android (`ArkGlyphs.mark`), the glyphs crate's on the desktop and in the
+browser.
+
+## A screen laid out in Rust
+
+The parts `ark_app::view` composes (ui/docs/app.md): hand-written in
+`ScreenParts.swift`, `ScreenParts.kt` and `ui/rust/arkui/src/view.rs`, called
+by the generated views by these names.
+
+| Part | Inputs | Compose | SwiftUI | iced |
+|---|---|---|---|---|
+| TabPage | title, onRefresh, top, content | the app's frame (`LocalTabFrame`) over a scrolling column | `List` (inset grouped) under the large title | a scrolling column under the title |
+| CardSection | title, total, showsTotal, footer, rows | `SectionHeader` + `GroupCard` | `Section` | `section_header` + `group_card` |
+| ListRow | title, subtitle, tile/mark (a glyph and its chart slot, `MarkTile`)/glyph, badge, amount, value (words at its end), quiet, accent, **pushes**, said, menu, onTap | a `Press.Highlight` row; held, a `DropdownMenu` (lit as it is held); a `Chevron` when it pushes | a button row; held, `.contextMenu`; when it pushes, a `NavigationLink`'s look (the list's highlight, the disclosure chevron) | a bare button; right click, a long press or the menu key, `context_menu` (ArkUI's menu at the pointer, every item); a chevron when it pushes |
+| DetailPage | content | a scrolling column of cards | `List` (grouped) | a scrolling column |
+| HeaderCard | title, figure, tint, glyph?, badge, line, caption, actions | laid out once in Rust of the primitives (ui/docs/primitives.md): a `CardSection` whose first row is its centred face, read as one, then its actions | the same, generated | the same, drawn by `arkui::view::layout` |
+| GoalProgress | fraction, tint, note | of the primitives: a `Meter` and a quiet footnote at a row's inset | the same, generated | the same |
+| Tile, StatusBadge, MeterBar | glyph/figure/fraction, tint (by name) | `Tile`, `StatusBadge`, `MeterBar` (`Primitives.kt`) | the same (`Primitives.swift`) | `parts::tile`, `figures::status_badge`, `parts::progress_bar` |
+| EmptyState, TitleStack | glyph, title, sentence; over, title, under, caption | of the primitives (`empty_state`, `title_stack`) | the same | the same |
+| MenuAction | title, glyph, destructive, shown, onTap | `DropdownMenuItem` | `Button(role:)` with a `Label` | `context_menu::Item` |
+| FormSheet | title, onDismiss, confirm, canConfirm, onConfirm, content | `ModalBottomSheet`, the confirm a full-width button under the form | `.sheet` over a `Form`, Cancel ✕ and the confirming ✓ in its bar | a dialog with Cancel and the confirm |
+| FormSection | header, footer, content | a column, its label over and its note under | `Section(header:footer:)` | a column |
+| OptionPicker / PickerChoice | label, selection, onChange; title, glyph, tag | `FilterChip`s in a `FlowRow` | `Picker` (a menu in the form's row), each a tagged `Label` (its glyph's SF Symbol) | chips that wrap |
+| SearchPicker / SearchChoice | label, selection, unset, prompt, onChange; title, glyph, tag, group, detail, tint | a `ListItem` row (`Press.Highlight`); compact (`compact-width`), a `ModalBottomSheet` under `SheetBar`; wider, a `DropdownMenu` anchored to the row, `dropdown-width` wide, its list at most `dropdown-height`; either a `SearchField` focused on open over the grouped rows (`SearchPicker.kt`) | a form's row; on the iPhone a sheet (`NavigationStack`, `.searchable` focused, `.medium`/`.large`, Cancel); on the iPad a popover anchored to the row holding the same list; on the Mac the same with the search field over it (`SearchPicker.swift`) | `arkui::search_picker`: a dropdown anchored under its field, a typed search line, declared heights; the browser's ARIA combobox (`fields::search_picker`), a sheet from the foot when compact |
+| AmountEntry | label, prompt, text, cents, problem, onType, onCents | `AmountField` (typed) | ArkUI's `AmountEntry` (the figure over the keypad, in cents) | a text field (typed) |
+| SwitchRow | title, note?, isOn, onChange | `ListItem` with a `Switch` | `Toggle` | `checkbox` |
+| Prompt, NameField, AmountField, ChipRow, Chip, FormButton, HeroFigure | as they read | | | |
+| FirstRunPage | glyph, title, sentence, content | `OnboardingPage` (the mark in the primary, centred, scrolling over the keyboard) | `WelcomePage` (the mark on glass in the accent) | a centred column under the mark's tile; the browser's `.ark-welcome` card |
+| AddressField | label, prompt, text, note, problem, enabled, onChange, onSubmit | `OutlinedTextField` (the URI keyboard, Go) | a `TextField` on glass (`.URL`, no capitals or corrections, Go) | a `text_input`, Enter submits; the browser's `<input type=url>` |
+| WideButton | title, prominent, enabled, busy, onTap | `Button` / `OutlinedButton`, a spinner while busy | `.glassProminent` in the accent / `.glass`, a `ProgressView` while busy | `style::action` / `style::quiet`; the browser's `.ark-push` (`.ark-default`) |
+| StatusLine | text?, busy, problem? | a polite / assertive live region | the footnote quiet, the problem in `Color.error` | dim words, the problem in the danger colour; `role=status` / `alert` |
+| CodeImage | size, dark | `QrCode` | `QrCode` | `arkui::qr::qr_code`; the browser's inline SVG |
+| Photo (`photo`, `zoom_photo`) | url (`file:`, `data:`, `https:`; empty while fetched), label, zoom | `Image` decoded off the main thread (upright by its EXIF, at most 2400 a side); zoomed, `transformable` and a double tap, rubber-banded past 1 and `zoom-max` (`Springs.band`), settling on `Springs.move` (`Springs.fade` when reduced) | `Image` from the URL's bytes (`AsyncImage` for `https:`); zoomed, `MagnifyGesture`, a pan while larger, a double tap to `zoom-tap`, banded by `Momentum.band`, settling on `Springs.move` | `arkui::images::local`, fitted; zoomed, the room it is given (a window zooms by its size); the browser's `<img>` |
+| Paper | heading, date, names, figures, notes, total | white, monospace, the light side's ink in either theme; its shadow and `corner` | the same, `.environment(\.colorScheme, .light)` | the light tokens on `SURFACE`, Fira Mono; the browser's `.ark-paper` |
+
+**A search picker** (`search_picker`, ark_app::view::search) chooses one
+of many by typing. What it finds is said once: folded (case and Latin
+accents off), every word of what is typed in a choice's title or its
+group's name, in the app's order under the groups, "No Matches" when
+nothing is. The chosen one is lit as it opens, the first found after each
+change; ↑/↓ move, Return chooses, Esc closes. While nothing is chosen the
+row says `unset` after `circle-help` in the caution tint. A choice ticks
+(`.selection` / `Feedback.Selection`). Nothing in it moves of its own: the
+sheet and the popover are the platform's, and the desktop's and the
+browser's are there at once.
+
+## Layout Primitives
+
+Under these parts are the primitives a purely visual part is laid out of
+once, in Rust — stacks, a spacer, a scroll, text, a glyph, an image, and
+their token-only modifiers — which the generator writes as each toolkit's
+own layout: ui/docs/primitives.md.
+
+## Tables
+
+A table of rows (a register, a list of transactions) is laid out once
+(`data_table`, `table_column`, `table_row`, `table_heading` in
+`ark_app::view`): its columns, each a heading, a width (points, or a share
+of what is left), an alignment and where its cell goes when compact; its
+rows, each its cells' words with their tints and glyphs beside them (three
+lists of strings, `ark_app::view::Cells`), a dot while `marked`, lit while
+`selected`, its tap and its menu; headings among them (a day). From a
+regular width it is rows of cells under the headings; compact, each row is
+a list's two lines — the title and the words under it at the leading end,
+the figure and the words under it at the trailing end, by the columns'
+slots, the rest left out. The parts decide which, never the app.
+
+| Part | Inputs | Compose | SwiftUI | iced | Browser |
+|---|---|---|---|---|---|
+| DataTable | columns (`DataColumn`: heading, width, share, align, slot), rows | a `GroupCard`, its headings a row, compact below `COMPACT_WIDTH` (`TableParts.kt`) | a list's `Section` with the headings as its header, compact by the size class (`TableParts.swift`) | `arkui::table`'s headings and rows | `arkui_web::table` (`.ark-table`, `.ark-listed` when compact) |
+| DataTableRow | cells, tints, glyphs, marked, selected, said, menu, onTap | a `Press.Highlight` row, a `DropdownMenu` held | a button row, `.contextMenu` | a full-width row, its menu at the pointer | a grid row, its menu on right click |
+| DataTableHeading | title | a quiet label | a footnote header row | `table::section` | a heading row |
+| DateField | label, day (`2026-11-11`), onChange | a row, Material's `DatePickerDialog` | `DatePicker(.date)` | a text field | `fields::date_field` |
+
+## A page about somebody
+
+`ui/rust/arkui/src/hero.rs`'s catalogue page has its twins on the phones:
+
+| Part | Inputs | Compose | SwiftUI | iced |
+|---|---|---|---|---|
+| HeroBanner | picture, kind, name | `HeroBanner(seed, art, kind, name)`, `HeroBanner.height` | `HeroBanner(image:kind:name:)`, `HeroBanner.height` | `hero::banner` |
+| HeroHeading | title | `HeroHeading` | `HeroHeading` | `hero::heading` |
+| HeroEntry | over, title, under, count, open, picture | `HeroEntry` | `HeroEntry` | `hero::entry` / `hero::listing` |
+| HeroMore | label, open | `HeroMore` | `HeroMore` | `hero::more` |
+
+## Ids
+
+Every element a person can act on in a view has an id, derived from what
+it does and not from what it says (`ark_app::shots::id_of`): a section's
+tab by its tag (`tab:budget`), a row by its title (`row:checking`; rows of
+one title by their place, `row:target~2`), anything else by its message's
+variant in kebab case (`auto-assign`, `dismiss`; with its words when the
+message carries a value, `toggle:bills`), under its screen's name
+(`budget.auto-assign`). A view writes none: a part's builder needs no
+`.id`, and a copy change, a count in a row's words or another language
+leaves it as it was. The screenshot walk names elements by them
+(ui/docs/shots.md, "In the App"), and each toolkit writes them as the
+element's identifier, never said aloud: the phones' generated screens
+(ui/rust/gen, from `shots::recorded`, which is `id_of` over the recording,
+a title held at a path made a slug as it is drawn: `ArkId.slug`,
+`arkSlug`) as SwiftUI's `.accessibilityIdentifier` and Compose's `testTag`
+(`ArkId`, read as the resource id under the activity's
+`testTagsAsResourceId`), and the browser as `data-ark-id`. The parts a
+person acts on alone carry one: rows, meters' rows, chips, form buttons,
+wide buttons, switches and fields; the walk's `~2` for a second row of one
+title is its own count, and every such row carries the plain id. iced
+writes none yet: its widgets take no identifier a test can read.

@@ -9,7 +9,7 @@
 mod common;
 
 use common::*;
-use money_domain::*;
+use money_core::*;
 use money_server::importer::Outcome;
 
 /// The asker's asks, as their device reads them.
@@ -50,7 +50,7 @@ fn a_bank_is_connected_from_the_app() {
     let mut alice = caught_up(&server, "alice");
     let kept = OpenAccount {
         name: "Checking".into(),
-        kind: "checking".into(),
+        kind: money_core::accounts::AccountKind::Checking,
         on_budget: true,
         balance: 50_000,
         date: "2026-09-01".into(),
@@ -316,7 +316,11 @@ fn a_connection_written_by_hand_imports_only_what_is_new() {
     let asked_before = mock.cursors().len();
     let server = importing(&rt, data.path(), &mock, secrets.path());
     runs(&server, 1);
-    assert_eq!(mock.cursors()[asked_before..], [Some("w2".to_string())]);
+    // Every ask from the cursor: the importer may have asked again by the
+    // time this looks (its start and its connection's each run it; build
+    // 43422453977 saw two), and an ask from the start would be `None`.
+    let asked = mock.cursors()[asked_before..].to_vec();
+    assert!(!asked.is_empty() && asked.iter().all(|c| c.as_deref() == Some("w2")), "{asked:?}");
     assert_eq!(hub_rows::<Txn>(&server, "txn").len(), before + 1);
     rt.block_on(server.stop());
 }

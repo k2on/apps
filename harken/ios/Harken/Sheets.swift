@@ -47,27 +47,18 @@ struct AddToPlaylistSheet: View {
     }
 }
 
-/// Naming a new playlist: the field, and the domain's sentence when the name will not do.
+/// Naming a new playlist: ArkUI's `NameField`, and the domain's sentence when the name will not do.
 struct NewPlaylist: View {
     let then: LibraryEntry?
     @EnvironmentObject private var model: Model
     @Environment(\.dismiss) private var dismiss
     @State private var name = ""
     @State private var problem: String? = nil
-    @FocusState private var focused: Bool
 
     var body: some View {
         NavigationStack {
             Form {
-                Section {
-                    TextField("Name", text: $name).focused($focused).submitLabel(.done).onSubmit(make)
-                } footer: {
-                    if let p = problem, !name.isEmpty {
-                        Text(p.prefix(1).uppercased() + p.dropFirst()).foregroundStyle(.error)
-                    } else {
-                        Text("A name you already use gets a number after it.")
-                    }
-                }
+                NameField(name: $name, problem: problem, hint: "A name you already use gets a number after it.", onSubmit: make)
             }
             .navigationTitle("New Playlist")
             .navigationBarTitleDisplayMode(.inline)
@@ -79,7 +70,6 @@ struct NewPlaylist: View {
                 }
             }
         }
-        .onAppear { focused = true }
         .onChange(of: name) { _, n in model.nameProblem(n) { p in if n == name { problem = p } } }
     }
 

@@ -1,0 +1,116 @@
+# TEMPORARY (removed before the branch is done): the app prototype's Swift
+# compiled on a Mac, fast. The kernels by nix (the cache's when unmoved),
+# then each destination's xcodebuild here, its errors alone said.
+name: mac-compile
+
+on:
+  # By hand only: the account's Macs are few and shared.
+  workflow_dispatch:
+
+concurrency:
+  group: mac-compile-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # By hand only (workflow_dispatch), so a branch of this repository's and
+  # never a fork's: the cache's token is used only where this says so.
+  SAME_REPO: ${{ github.event_name == 'workflow_dispatch' }}
+  NIX_CONFIG: |
+    sandbox = relaxed
+    extra-substituters = https://k2on.cachix.org
+    extra-trusted-public-keys = k2on.cachix.org-1:oI4Db0uW5ER+s4Te/MrXSmjWUWkOc9rmKdzsgUDxQP8=
+
+jobs:
+  # What of the Mac's builds is Linux's (each kernel, money's generated
+  # project: ../apple-ahead.sh), built here first, so the Mac only fetches
+  # it: a Mac cannot build a Linux derivation. By hand only, so this
+  # repository's own code.
+  kernels:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@main
+        with:
+          extra-conf: |
+            extra-substituters = https://k2on.cachix.org
+            extra-trusted-public-keys = k2on.cachix.org-1:oI4Db0uW5ER+s4Te/MrXSmjWUWkOc9rmKdzsgUDxQP8=
+      - if: env.SAME_REPO == 'true' && vars.CACHIX_NAME != ''
+        uses: cachix/cachix-action@v15
+        with:
+          name: ${{ vars.CACHIX_NAME }}
+          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
+          pushFilter: "macOS-SDK"
+      # And what of the Mac's servers is Linux's (money's browser client):
+      # each <app>/demo/server.sh's packages, as `compile` builds them.
+      - run: |
+          servers=$(cat */demo/server.sh | grep -o '\.#[A-Za-z0-9_-]*' | cut -c3- | sort -u)
+          bash .github/apple-ahead.sh . "$RUNNER_TEMP/kernels.txt" money-ios-simulator money-macos money-ios-archive harken-ios-simulator ark-app-fixture-ios $servers
+
+  compile:
+    needs: kernels
+    runs-on: macos-15
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - run: bash .github/xcode-pinned.sh .
+      - uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            ${{ env.NIX_CONFIG }}
+            ${{ env.XCODE_NIX_CONF }}
+      # Xcode itself never goes to the cache, nor the macOS SDK.
+      - if: env.SAME_REPO == 'true' && vars.CACHIX_NAME != ''
+        uses: cachix/cachix-action@v15
+        with:
+          name: ${{ vars.CACHIX_NAME }}
+          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
+          pushFilter: "[Xx]code([^Gg]|$)|macOS-SDK"
+      # The Mac's servers (each <app>/demo/server.sh's packages: the very
+      # `nix build` app-screens' ios job runs for its servers), built under
+      # the kernels and the Xcode builds and pushed, so that app-screens
+      # fetches them rather than compile them (13.6 minutes in app-screens
+      # 43258586746, when a branch moved the shared crates). In the
+      # background: a background process outlives its step.
+      - name: Start building the servers
+        run: |
+          refs=$(cat */demo/server.sh | grep -o '\.#[A-Za-z0-9_-]*' | sort -u | tr '\n' ' ')
+          echo "$refs"
+          nohup bash -c 'start=$(date +%s); nix build --no-link --keep-going -L $0 > "$RUNNER_TEMP/servers.log" 2>&1; r=$?; echo "the servers built or fetched in $(( $(date +%s) - start ))s" >> "$RUNNER_TEMP/servers.log"; echo $r > "$RUNNER_TEMP/servers.status"' "$refs" < /dev/null > /dev/null 2>&1 &
+      - name: Kernels
+        run: |
+          # Both of money's slices and the Mac's (the iPhone's simulator and the Mac's).
+          nix build --no-link --print-out-paths -L "git+file://$PWD#packages.aarch64-darwin.money-ios-kernel-simulator" > "$RUNNER_TEMP/k-sim"
+          drv=$(nix eval --raw "git+file://$PWD#packages.aarch64-darwin.money-macos.drvPath")
+          mac=$(nix-store -q --references "$drv" | grep -- '-ios-\(xcframework\|kernel\).*\.drv$' || true)
+          echo "$mac"
+          for d in $mac; do nix build --no-link --print-out-paths -L "$d^out" >> "$RUNNER_TEMP/k-mac" || true; done
+          cat "$RUNNER_TEMP/k-sim" "$RUNNER_TEMP/k-mac"
+          xg=$(nix build --no-link --print-out-paths "git+file://$PWD#xcodegen")/bin/xcodegen
+          echo "XG=$xg" >> "$GITHUB_ENV"
+      - name: Compile
+        run: |
+          # The very derivations app-screens builds (nix-xcode.sh), each one's
+          # log kept and its errors said.
+          set +e
+          status=0
+          for a in money-ios-simulator money-macos money-ios-archive harken-ios-simulator ark-app-fixture-ios; do
+            bash .github/nix-xcode.sh . "$XCODE" "$a" > "$RUNNER_TEMP/$a.out" 2> "$RUNNER_TEMP/$a.log"
+            r=$?
+            echo "== $a: exit $r"
+            grep -E ' error: |\*\* BUILD' "$RUNNER_TEMP/$a.log" | sed 's|/nix/var/nix/builds/[^/]*/source/||' | sort -u | head -80
+            [ $r = 0 ] || status=1
+          done
+          exit $status
+      # Whatever came of the Xcode builds: the servers are pushed only once
+      # built.
+      - if: ${{ !cancelled() }}
+        name: The servers
+        run: |
+          until [ -f "$RUNNER_TEMP/servers.status" ]; do sleep 5; done
+          grep -E 'will be (built|fetched)|built or fetched|error:' "$RUNNER_TEMP/servers.log" || true
+          exit "$(cat "$RUNNER_TEMP/servers.status")"
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: logs
+          path: ${{ runner.temp }}/*.log

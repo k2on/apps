@@ -10,7 +10,7 @@
     rust-overlay.inputs.nixpkgs.follows = "nixpkgs";
 
     # The classical catalogue (github.com/k2on/classical): what the demo's
-    # library is made of (harken/seed/catalogue.json, the copy
+    # library is made of (harken/demo/catalogue.json, the copy
     # `nix run .#update-catalogue` writes and checks.catalogue holds to
     # this). Over git for the reason above; plain files, built by its
     # catalogue.nix.
@@ -73,12 +73,18 @@
       # source of every Rust build.
       # The kernel's tests read `spec/vectors`, so a build that runs them
       # adds it.
-      rustDirs = [ "rust" "harken/domain" "harken/player" "harken/server" "harken/iced" "harken/ffi" "money/domain" "money/iced" "money/ffi" "money/server" "harken/seed" "money/seed" ];
-      # The typed Kotlin and Swift `arkdb gen` writes, which harken/ffi's and
-      # money/ffi's tests hold to their domains (`tests/gen.rs`).
+      # The Ark apps that are generated (nix/ark-app.nix, ui/docs/app.md:
+      # "Generated, Not Committed"): each its directory with an app.toml.
+      arkApp = import ./nix/ark-app.nix { inherit lib self; };
+      # The release channels, stable and unstable, every app's alike.
+      channelsOf = pkgs: import ./nix/channels.nix { inherit lib pkgs self; };
+      arkApps = [ "money" "revelation" ];
+
+      rustDirs = [ "rust" "ui/rust" "modules" "harken/domain" "harken/app" "harken/player" "harken/server" "harken/iced" "harken/ffi" "money/core" "money/demo" "money/app" "money/iced" "money/server" "harken/demo" ];
+      # The typed Kotlin and Swift `arkdb gen` writes, which harken/ffi's
+      # tests hold to its domain (`tests/gen.rs`).
       genDirs = [
         "harken/android/app/src/main/kotlin/dev/harken/android/gen" "harken/ios/Harken/Gen"
-        "money/android/app/src/main/kotlin/dev/money/android/gen" "money/ios/Money/Gen"
       ];
 
       # The wasm-bindgen CLI must be the exact version of the `wasm-bindgen`
@@ -100,7 +106,7 @@
       perSystem = pkgs:
         let
           rust = pkgs.rust-bin.stable.latest.default;
-          # Only for the wasm-bindgen CLI below, which nixpkgs builds itself.
+          # For the tools nixpkgs builds with cargo itself (UniFFI's bindgen).
           rustPlatform = pkgs.makeRustPlatform { cargo = rust; rustc = rust; };
 
           # Every Rust build is a derivation per crate (nix/rust.nix):
@@ -112,17 +118,35 @@
           # compiled once and substituted from the cache after, whatever
           # else moves: an edit to a manifest compiles the crates whose
           # inputs it moved and what depends on them, an edit to harken the
-          # crates of harken. Each target (the host, wasm32, each Android
+          # crates of harken. Each target (the host, each Android
           # ABI) is nixpkgs for that platform (`importPkgs`'s `crossSystem`)
           # and the toolchain with the target added.
+          cargoNix = import ./rust/Cargo.nix { inherit pkgs; };
           rustCrates = import ./nix/rust.nix {
-            inherit lib;
-            cargoNix = import ./rust/Cargo.nix { inherit pkgs; };
+            inherit lib cargoNix;
+            # A cross build's build scripts and proc macros by the plain
+            # toolchain, whichever target's it is (nix/rust.nix): one
+            # derivation each for every Android ABI, Apple slice and wasm.
+            buildRust = rust;
+            # Each Ark app's generated crates (its generator's main), and
+            # its entry points built from the app's directory, beside the
+            # icon they draw (nix/ark-app.nix's `entrySources`).
+            extraCrates = lib.foldl' (acc: dir: acc // arkApp.crates pkgs cargoMetadata dir // arkApp.entrySources cargoNix.internal.crates dir) { } arkApps;
           };
           # The root crate `packageId` of the workspace, for the host unless
           # `pkgs` and `rust` say another target; its binaries under `bin/`,
           # its library under its `lib` output.
-          crate = args: rustCrates.build ({ inherit pkgs rust; } // args);
+          crate = args: rustCrates.build ({ inherit pkgs rust; overrides = desktopOverrides; } // args);
+          # COSMIC's iced (rust/Cargo.toml) links libxkbcommon rather than
+          # opening it at run time: smithay-client-toolkit's build script
+          # asks pkg-config for it, and every crate that links a window
+          # (the xkbcommon bindings, the apps, their tests, the docs) is
+          # given it to link against. The window still takes the host's
+          # first on NixOS (nix/gpu-env.sh).
+          desktopOverrides = lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux (
+            let xkb = _: { nativeBuildInputs = [ pkgs.pkg-config ]; buildInputs = [ pkgs.libxkbcommon ]; }; in
+            lib.genAttrs [ "smithay-client-toolkit" "xkbcommon" "arkui" "arkui-shots" "money-iced" "harken-iced" "money-app" "docs" ] (_: xkb)
+          );
           crossPkgs = crossSystem: importPkgs {
             localSystem = pkgs.stdenv.buildPlatform.system;
             inherit crossSystem;
@@ -168,7 +192,9 @@
                 build {
                   inherit packageId features unified;
                   tests = true;
-                  root = { src = only [ member ]; workspace_member = member; };
+                  # An app's entry point with the app's icon and app.toml
+                  # beside it, as `entrySources` builds it.
+                  root = { src = only ([ member ] ++ arkApp.entryFiles arkApps member); workspace_member = member; };
                   # rustdoc compiles and runs the doctests against the
                   # library and its dependencies as the build has them.
                   rootAttrs = old: rootAttrs old // lib.optionalAttrs doctests {
@@ -195,7 +221,7 @@
             in
             pkgs.runCommand "test-${name}" ({
               inherit nativeBuildInputs;
-              # The crates' test builds, whose dependencies `checks-crates`
+              # The crates' test builds, whose dependencies `ci-crates`
               # builds ahead (`rootsOf`).
               passthru.roots = map built crates;
             } // env) ''
@@ -214,67 +240,6 @@
               ${out}
             '';
 
-          # The browser peer: `harken/iced` compiled to wasm32 and bound by
-          # wasm-bindgen, beside its page — one static directory. The same
-          # crate as the desktop; `demo` is the seeded library with no
-          # server that Pages publishes, and without it the page signs in
-          # against the server it is served from. The toolchain is the
-          # workspace's with the wasm target added, and the CLI is built from
-          # the crate at the version the lockfile names.
-          wasmRust = rust.override { targets = [ "wasm32-unknown-unknown" ]; };
-          # nixpkgs for wasm32: its compiler is rustc's own linker, and
-          # nixpkgs has no C toolchain for `wasm32-unknown-none`, which no
-          # crate here asks for.
-          wasmPkgs = importPkgs {
-            localSystem = pkgs.stdenv.buildPlatform.system;
-            crossSystem = { config = "wasm32-unknown-none"; rust.rustcTarget = "wasm32-unknown-unknown"; };
-            config = { allowUnfree = true; allowUnsupportedSystem = true; };
-          };
-          wasm-bindgen-cli = pkgs.wasm-bindgen-cli.override ({
-            inherit rustPlatform;
-            version = wasmBindgenVersion;
-          } // (wasmBindgenHashes.${wasmBindgenVersion}
-            or (throw "flake.nix: no hashes for wasm-bindgen ${wasmBindgenVersion}; add them to wasmBindgenHashes")));
-          # One wasm page: a binary of the workspace compiled to wasm32 and
-          # bound by wasm-bindgen, beside the static files it is loaded from —
-          # the browser peer, with and without its demo.
-          wasmPage = { pname, crate, bin ? crate, features ? [ "default" ], files }:
-            let
-              wasm = rustCrates.build { pkgs = wasmPkgs; rust = wasmRust; packageId = crate; inherit features; };
-            in
-            pkgs.runCommand pname { nativeBuildInputs = [ wasm-bindgen-cli pkgs.binaryen ]; } ''
-              wasm-bindgen --target web --no-typescript --out-dir pkg ${wasm}/bin/${bin}.wasm
-              wasm-opt -Oz --enable-bulk-memory --enable-nontrapping-float-to-int \
-                --enable-sign-ext --enable-mutable-globals --enable-reference-types \
-                -o pkg/${bin}_bg.wasm pkg/${bin}_bg.wasm
-              # The page names the module and the wasm with `?v=dev`; this
-              # output's own hash replaces it, so a browser holding an older
-              # build is sent URLs its cache has never seen (harken/iced/web).
-              mkdir -p $out
-              cp -r pkg $out/
-              ${lib.concatMapStrings (f: "cp ${f} $out/${baseNameOf f}\n") files}
-              chmod u+w $out/index.html
-              substituteInPlace $out/index.html --replace-fail "v=dev" "v=$(basename $out | cut -c1-32)"
-            '';
-          icedWeb = { pname, crate ? "harken-iced", demo, files ? [ ./harken/iced/web/index.html ./harken/iced/web/favicon.svg ] }: wasmPage {
-            inherit pname crate files;
-            features = [ "default" ] ++ lib.optional demo "demo";
-          };
-          # What GitHub Pages publishes.
-          harken-web = icedWeb { pname = "harken-web"; demo = true; };
-          # What harken-server serves as its web directory.
-          harken-web-server = icedWeb { pname = "harken-web-server"; demo = false; };
-          # money's demo in a browser: a seeded household, its own authority,
-          # nothing to sign in to (money/README.md); and what money-server
-          # serves as its web directory, the same page signing in against
-          # the server it is served from.
-          moneyWeb = { pname, demo }: icedWeb {
-            inherit pname demo;
-            crate = "money-iced";
-            files = [ ./money/iced/web/index.html ./money/iced/web/favicon.svg ];
-          };
-          money-web = moneyWeb { pname = "money-web"; demo = true; };
-          money-web-server = moneyWeb { pname = "money-web-server"; demo = false; };
           # The docs (docs/site): a Cargo workspace of its own, with a
           # lockfile and a docs/site/Cargo.nix of its own, from a source
           # that is only the docs and the crates they name by path: arkui.
@@ -285,12 +250,32 @@
           docsCrates = import ./nix/rust.nix {
             inherit lib;
             cargoNix = import ./docs/site/Cargo.nix { inherit pkgs; };
+            buildRust = rust;
           };
-          docsCrate = args: docsCrates.build ({ inherit pkgs rust; packageId = "docs"; } // args);
-          # The site: plain HTML, CSS and a few lines of script, and each
-          # desktop component's pictures drawn by iced's own renderer on the
-          # CPU (tiny-skia: no window, no GPU), which the sandbox allows.
-          docs = pkgs.runCommand "docs" { } "${docsCrate { }}/bin/docs $out";
+          docsCrate = args: docsCrates.build ({ inherit pkgs rust; packageId = "docs"; overrides = desktopOverrides; } // args);
+          # The site, an ArkUI app written as static HTML (ui/docs/app.md,
+          # "The Browser's Modes"): every page drawn by arkui-web natively,
+          # each desktop component's pictures drawn by iced's own renderer
+          # on the CPU (tiny-skia: no window, no GPU), which the sandbox
+          # allows, and beside them the module that takes a page over
+          # (`docs-web`, the same crate for wasm32 under `hydrate`).
+          docs-web =
+            let
+              wasm = docsCrates.build { pkgs = wasmPkgs; rust = wasmRust; packageId = "docs"; features = [ "hydrate" ]; overrides = wasmOverrides; };
+            in
+            pkgs.runCommand "docs-web" { nativeBuildInputs = [ wasm-bindgen-cli pkgs.binaryen ]; passthru = { inherit wasm; }; } ''
+              wasm-bindgen --target web --no-typescript --out-dir $out/pkg ${wasm}/bin/docs-web.wasm
+              wasm-opt -Oz --enable-bulk-memory --enable-nontrapping-float-to-int \
+                --enable-sign-ext --enable-mutable-globals --enable-reference-types \
+                -o $out/pkg/docs-web_bg.wasm $out/pkg/docs-web_bg.wasm
+            '';
+          # Served at https://k2on.github.io/apps/docs/; the module's URLs
+          # named by its build's hash, so a browser holding an older one is
+          # sent URLs its cache has never seen.
+          docs = pkgs.runCommand "docs" { } ''
+            ${docsCrate { }}/bin/docs $out --base /apps/docs/ --site https://k2on.github.io --version $(basename ${docs-web} | cut -c1-32)
+            cp -r ${docs-web}/pkg $out/
+          '';
 
           # Python with Pillow, which draws the README's heroes from the
           # published screenshots (.github/screens/hero.py).
@@ -303,25 +288,86 @@
           # The server (harken/server: the server and harken-peer): its
           # crate and what it reaches, under the features it asks for, and
           # none of the GUI the workspace's other members link.
-          harken-server = crate { packageId = "harken-server"; };
+          # The servers and their seeds resolved as one cargo invocation over
+          # them all resolves them (`unify`): a crate any two of them reach is
+          # one build, with the union of what they ask of it, rather than a
+          # build per server (ark-auth, ark-peer and ark-app were four builds
+          # each, and syn's features alone made every crate over a proc macro
+          # one per server). The seeds and arkdb so link what the servers
+          # ask of the crates they share (ark-peer's and ark-auth's `server`,
+          # and ark-auth's `ffi`, which harken-peer's ark-ffi turns on): no
+          # crate more is compiled, as the servers compile those anyway. Only
+          # the servers' group: no app is resolved with them, so nothing
+          # here turns a feature on in a phone's or a window's crates.
+          serverRoots = [
+            { packageId = "harken-server"; }
+            { packageId = "money-server"; }
+            { packageId = "harken-seed"; }
+            { packageId = "money-seed"; features = [ "cli" ]; }
+            { packageId = "arkdb"; }
+          ];
+          serversUnified = rustCrates.unify { inherit pkgs; roots = serverRoots; };
+          serverCrate = packageId: crate { inherit packageId; unified = serversUnified; };
+          harken-server = serverCrate "harken-server";
           # `arkdb` for a server to read its system's events with
           # (docs/plan-observe.md): no GUI stack.
-          arkdb = crate { packageId = "arkdb"; };
+          arkdb = serverCrate "arkdb";
           # money's server (money/server: the hub and the bank importer), the
           # same way: no GUI stack under a server.
-          money-server = crate { packageId = "money-server"; };
-          # Each app's demo data, its `seed/` beside the app (docs/seed.md): `<app>-seed
-          # DATA` writes what that app's server boots seeded from.
-          money-seed = crate { packageId = "money-seed"; };
-          harken-seed = crate { packageId = "harken-seed"; };
-          # The catalogue's covers, kept in the repository (harken/seed/covers,
+          # money's server is one process for everything the household
+          # reaches: the sync socket, sign-in, the importer and the browser
+          # client, whose build it carries (MONEY_WEB, unless the
+          # environment names another).
+          money-server-bin = serverCrate "money-server";
+          # Its browser client is static files, the same from any machine:
+          # on a Mac, Linux's (built ahead there and fetched), rather than
+          # the Mac compiling the client's wasm itself.
+          money-server = pkgs.runCommand "money-server-${money-server-bin.version or "0"}" { nativeBuildInputs = [ pkgs.makeWrapper ]; } ''
+            mkdir -p $out/bin
+            makeWrapper ${money-server-bin}/bin/money-server $out/bin/money-server --set-default MONEY_WEB ${if pkgs.stdenv.hostPlatform.isDarwin then outputs.x86_64-linux.packages.money-web else money-web}
+          '';
+          # Each app's demo data (docs/seed.md): `<app>-seed DATA` writes what
+          # that app's server boots seeded from; money's is money/demo.
+          money-seed = serverCrate "money-seed";
+          # Each Ark app's generated pieces (nix/ark-app.nix): its
+          # generator, the SwiftUI and Compose of its #[view]s (`<app>-ui`),
+          # its native projects (`<app>-native`) and its prebuild.
+          channels = channelsOf pkgs;
+          # The apps with a browser page (app.toml's `platforms`), and each
+          # page per channel it is in: built from `<app>-web`.
+          webApps = lib.filter (n: lib.elem "web" ((arkApp.read n).platforms or [ ])) arkApps;
+          webPages = lib.concatMap
+            (n:
+              let
+                a = arkApp.read n;
+                page = self.packages.${pkgs.system}."${n}-web";
+                one = channel: path: package: title: {
+                  inherit n channel path package title;
+                  about = "${a.store.summary or a.name}: the demo in the browser, ${channel}.";
+                  drv = channels.webPage { name = package; inherit page path channel; };
+                };
+              in
+              lib.optional (channels.enabled n "stable") (one "stable" n "${n}-page" a.name)
+              ++ lib.optional (channels.enabled n "unstable") (one "unstable" "unstable/${n}" "${n}-unstable-page" "${a.name}${channels.label}"))
+            webApps;
+          arkOf = lib.genAttrs arkApps (arkApp.packages { inherit pkgs only bundlePrefix cargoMetadata; build = crate; });
+          # The workspace's `cargo metadata --no-deps`, run once: what
+          # ui/prebuild.py finds an app's device modules in (its crate's
+          # dependencies, `ARK_CARGO_METADATA`).
+          cargoMetadata = pkgs.runCommand "cargo-metadata.json" { nativeBuildInputs = [ rust ]; } ''
+            cd ${only rustDirs}/rust
+            export CARGO_HOME=$TMPDIR/cargo
+            cargo metadata --no-deps --offline --format-version 1 > $out
+          '';
+          harken-seed = serverCrate "harken-seed";
+          # The catalogue's covers, kept in the repository (harken/demo/covers,
           # each 600 pixels at most, named as harken-seed's `media::key` names
           # them: the first sixteen hex digits of the address's SHA-256), so
           # seeding fetches nothing (`harken-seed --covers`) and every run has
           # the same bytes: a host's thumbnails are not the same bytes from
           # one fetch to the next, which a hash pinned against them failed on.
-          harken-covers = builtins.path { path = ./harken/seed/covers; name = "harken-covers"; };
-          # `nix run .#update-covers`: harken/seed/covers from the catalogue,
+          harken-covers = builtins.path { path = ./harken/demo/covers; name = "harken-covers"; };
+          # `nix run .#update-covers`: harken/demo/covers from the catalogue,
           # each fetched and made small, after the catalogue moves.
           update-covers = pkgs.writeShellApplication {
             name = "update-covers";
@@ -354,7 +400,7 @@
           # of it on LD_LIBRARY_PATH kept every Mesa driver from loading, so
           # iced drew on the CPU without a word (the script says why, in
           # full). The window then says which renderer it got, on stderr
-          # (rust/arkui/src/renderer.rs). money's demo window is the same.
+          # (ui/rust/arkui/src/renderer.rs). money's demo window is the same.
           icedLibs = lib.makeLibraryPath (with pkgs; [
             wayland libxkbcommon vulkan-loader libGL xorg.libX11 xorg.libXcursor xorg.libXi xorg.libXrandr
           ]);
@@ -367,7 +413,7 @@
           icedApp = packageId:
             let built = crate { inherit packageId; }; in
             if pkgs.stdenv.hostPlatform.isLinux then
-              pkgs.runCommand (lib.removePrefix "rust_" built.name) { } ''
+              pkgs.runCommand (lib.removePrefix "rust_" built.name) { passthru.crate = built; } ''
                 mkdir -p $out/bin
                 cat > $out/bin/${packageId} <<'EOF'
                 #!${pkgs.runtimeShell}
@@ -380,6 +426,63 @@
           harken-iced = icedApp "harken-iced";
           money-iced = icedApp "money-iced";
 
+          # The browser (ui/docs/app.md, "The Layers"): an app's Leptos
+          # client (`<app>/web`, on arkui-web) compiled to wasm32 and bound by
+          # wasm-bindgen, beside its page — one static directory, no trunk.
+          # The toolchain is the workspace's with the wasm target added, and
+          # the CLI is built from the crate at the version the lockfile names.
+          wasmRust = rust.override { targets = [ "wasm32-unknown-unknown" ]; };
+          # nixpkgs for wasm32: its compiler is rustc's own linker, and
+          # nixpkgs has no C toolchain for `wasm32-unknown-none`, which no
+          # crate here asks for.
+          wasmPkgs = importPkgs {
+            localSystem = pkgs.stdenv.buildPlatform.system;
+            crossSystem = { config = "wasm32-unknown-none"; rust.rustcTarget = "wasm32-unknown-unknown"; };
+            config = { allowUnfree = true; allowUnsupportedSystem = true; };
+          };
+          wasm-bindgen-cli = pkgs.wasm-bindgen-cli.override ({
+            inherit rustPlatform;
+            version = wasmBindgenVersion;
+          } // (wasmBindgenHashes.${wasmBindgenVersion}
+            or (throw "flake.nix: no hashes for wasm-bindgen ${wasmBindgenVersion}; add them to wasmBindgenHashes")));
+          # Leptos's code splitting (wasm_split_helpers) names its markers
+          # by the crate's manifest's path, which cargo says in
+          # CARGO_MANIFEST_PATH and buildRustCrate does not: any path will
+          # do, as long as it is the same every build.
+          wasmOverrides = {
+            wasm_split_helpers = _: { CARGO_MANIFEST_PATH = "wasm_split_helpers/Cargo.toml"; };
+          };
+          # One wasm page: a binary of the workspace compiled to wasm32 and
+          # bound by wasm-bindgen, beside the static files it is loaded from.
+          wasmPage = { pname, crate, bin ? crate, features ? [ "default" ], files }:
+            let
+              wasm = rustCrates.build { pkgs = wasmPkgs; rust = wasmRust; packageId = crate; inherit features; overrides = wasmOverrides; };
+            in
+            # `passthru.wasm`: the module before it is bound, to build alone.
+            pkgs.runCommand pname { nativeBuildInputs = [ wasm-bindgen-cli pkgs.binaryen ]; passthru = { inherit wasm; }; } ''
+              wasm-bindgen --target web --no-typescript --out-dir pkg ${wasm}/bin/${bin}.wasm
+              wasm-opt -Oz --enable-bulk-memory --enable-nontrapping-float-to-int \
+                --enable-sign-ext --enable-mutable-globals --enable-reference-types \
+                -o pkg/${bin}_bg.wasm pkg/${bin}_bg.wasm
+              # The page names the module and the wasm with `?v=dev`; this
+              # output's own hash replaces it, so a browser holding an older
+              # build is sent URLs its cache has never seen.
+              mkdir -p $out
+              cp -r pkg $out/
+              ${lib.concatMapStrings (f: "cp ${f} $out/${baseNameOf f}\n") files}
+              if [ -f $out/index.html ]; then
+                chmod u+w $out/index.html
+                substituteInPlace $out/index.html --replace-fail "v=dev" "v=$(basename $out | cut -c1-32)"
+              fi
+            '';
+          # money's page: its part of its host run by arkui-web's `WebHost`,
+          # on its server or its demo, the crate and index.html generated
+          # from money/app.toml (nix/ark-app.nix's `webSrc`).
+          money-web = wasmPage {
+            pname = "money-web";
+            crate = "money-web";
+            files = let page = arkApp.webSrc pkgs cargoMetadata (arkApp.read "money"); in [ "${page}/index.html" "${page}/favicon.svg" ];
+          };
           # The specification is `rust/ark` (spec/README.md), and the tools
           # over it are `rust/arkdb`, whose binary is `arkdb` (`gen`, `fuzz`,
           # and reading a system's events: `tail`, `trace`, `peer`): `ark` is
@@ -437,17 +540,17 @@
           # for the host (`uniffi-bindgen generate <library>`), and beside
           # them goes the bridge's typed half (rust/ark-ffi/{kotlin,swift}).
           # The bindgen reads each crate's uniffi.toml from the directory
-          # `[crate-roots]` names for it: those three files and nothing else of
+          # `[crate-roots]` names for it: those four files and nothing else of
           # the workspace, so the bindings (and an APK over them) move only
           # when the library or one of them does. A crate with none takes
           # UniFFI's defaults.
           ffiBindings = { lib, language, out ? "$TMPDIR/bindings" }:
             let
-              roots = only [ "rust/ark-ffi/uniffi.toml" "money/ffi/uniffi.toml" "harken/ffi/uniffi.toml" ];
+              roots = only [ "rust/ark-ffi/uniffi.toml" "rust/ark-auth/uniffi.toml" "harken/ffi/uniffi.toml" ];
               config = pkgs.writeText "uniffi-roots.toml" ''
                 [crate-roots]
                 ark_ffi = "${roots}/rust/ark-ffi"
-                money_ffi = "${roots}/money/ffi"
+                ark_auth = "${roots}/rust/ark-auth"
                 harken_ffi = "${roots}/harken/ffi"
               '';
             in
@@ -468,13 +571,15 @@
             doCheck = false;
           };
           # An app's library for the host (`crate` its ffi crate, `so` the
-          # library's name), which UniFFI reads the bindings from and the
-          # app's JVM tests load; with the crate's `features`, which are the
+          # library's name), which UniFFI reads the bindings from; with the crate's `features`, which are the
           # phone's (none for an iPhone: money's `page` is Android's).
           ffiHostLib = { crate, so, features ? [ "default" ], ... }:
-            "${(rustCrates.build { inherit pkgs rust features; packageId = crate; }).lib}/lib/lib${so}${pkgs.stdenv.hostPlatform.extensions.sharedLibrary}";
+            "${(ffiHostCrate { inherit crate features; }).lib}/lib/lib${so}${pkgs.stdenv.hostPlatform.extensions.sharedLibrary}";
+          ffiHostCrate = { crate, features ? [ "default" ] }: rustCrates.build { inherit pkgs rust features; packageId = crate; };
           harkenFfi = { name = "harken"; crate = "harken-ffi"; so = "harken_ffi"; };
-          moneyFfi = { name = "money"; crate = "money-ffi"; so = "money_ffi"; };
+          # An Ark app's library is the shim nix/ark-app.nix generates over
+          # its crate (`ark`: its app.toml), no crate of the app's own.
+          moneyFfi = { name = "money"; crate = "money-ffi"; so = "money_ffi"; ark = arkApp.read "money"; };
           # The ABIs the APK carries — a phone, an old phone, an emulator —
           # each nixpkgs for that Android against API 26 (the app's minSdk),
           # with the NDK's prebuilt clang, which links each and compiles
@@ -492,49 +597,62 @@
               };
             };
           };
-          # An app's library for its phones (`harken/ffi`, `money/ffi`) as the
+          androidPkgs = lib.mapAttrs (_: a: crossPkgs (a.platform // { androidSdkVersion = "26"; })) androidTargets;
+          # Every app's phone library resolved together for each ABI, as one
+          # `cargo build -p harken-ffi -p money-ffi` would: a crate both reach
+          # is one build with the union of what they ask of it (memchr's
+          # `default`, rand's `small_rng`, …, nothing either app does
+          # differently by), not one for each app with everything over it.
+          androidUnified = lib.mapAttrs (t: _: rustCrates.unify {
+            pkgs = androidPkgs.${t};
+            roots = map (f: { packageId = f.crate; }) [ harkenFfi moneyFfi ];
+          }) androidTargets;
+          # An app's library for its phones (`harken/ffi`; money's the
+          # generated shim over money/app) as the
           # APK carries it: `name` the app, `crate` its ffi crate, `so` the
           # library's name (`harken_ffi`).
-          androidPhone = { name, crate, so }:
+          androidPhone = { name, crate, so, ark ? null }:
             let
               hostLib = ffiHostLib { inherit crate so; };
+              # The crate for one Android ABI.
+              androidCrate = t: rustCrates.build {
+                pkgs = androidPkgs.${t};
+                rust = rust.override { targets = [ t ]; };
+                packageId = crate;
+                unified = androidUnified.${t};
+              };
               # `so` for one Android ABI, stripped, as `jniLibs/<abi>/lib<so>.so`.
               androidLib = t: a:
-                let
-                  built = rustCrates.build {
-                    pkgs = crossPkgs (a.platform // { androidSdkVersion = "26"; });
-                    rust = rust.override { targets = [ t ]; };
-                    packageId = crate;
-                  };
-                in
+                let built = androidCrate t; in
                 pkgs.runCommand "${name}-android-${a.abi}" { } ''
                   mkdir -p $out/jniLibs/${a.abi}
                   ${pkgs.llvmPackages.bintools-unwrapped}/bin/llvm-strip \
                     -o $out/jniLibs/${a.abi}/lib${so}.so ${built.lib}/lib/lib${so}.so
                 '';
               # The Kotlin the app compiles with the library, UniFFI's
-              # bindings and the typed half, under `kotlin/`; and the library
-              # built for this machine as `host/lib<so>.so`, which the app's
-              # JVM tests load.
+              # bindings and the typed half, under `kotlin/`, written from the
+              # library built for this machine.
               androidHost = pkgs.runCommand "${name}-android-host" { } ''
                 ${ffiBindings { lib = hostLib; language = "kotlin"; }}
                 mkdir -p $out/kotlin/dev/arkdb/ffi
                 cp -r $TMPDIR/bindings/kotlin/. $out/kotlin/
-                install -Dm755 ${hostLib} $out/host/lib${so}.so
                 cp ${./rust/ark-ffi/kotlin/Typed.kt} $out/kotlin/dev/arkdb/ffi/Typed.kt
               '';
             in
             # Each ABI's library and the host's part, one directory: what the
-            # app's APK builds over.
-            pkgs.runCommand "${name}-android-lib-0.1.0" { } ''
+            # app's APK builds over. `passthru.crates`: the crates it is
+            # built from, for `ciCrates`.
+            pkgs.runCommand "${name}-android-lib-0.1.0" {
+              passthru.crates = map androidCrate (lib.attrNames androidTargets) ++ [ (ffiHostCrate { inherit crate; }) ];
+            } ''
               mkdir -p $out
               for part in ${lib.concatStringsSep " " (lib.mapAttrsToList androidLib androidTargets)} ${androidHost}; do
                 cp -r --no-preserve=mode $part/. $out/
               done
-              chmod 755 $out/host/lib${so}.so
             '';
           harken-android-lib = androidPhone harkenFfi;
-          # money's (`money/ffi`): what its APK builds over.
+          # money's (the generated `money-ffi` over money/app): what its APK
+          # builds over.
           money-android-lib = androidPhone moneyFfi;
 
           # The Android SDK the APK is built with. Google ships one for
@@ -552,11 +670,98 @@
               buildToolsVersions = [ "35.0.0" ];
             }).androidsdk}/libexec/android-sdk";
 
+          # What every gradle build here is run with: the store's JDK and
+          # the SDK's tools, nothing fetched.
+          androidGradleFlags = [
+            "-Dorg.gradle.java.home=${pkgs.jdk21.home}"
+            "-Porg.gradle.java.installations.auto-detect=false"
+            "-Porg.gradle.java.installations.auto-download=false"
+            "-Porg.gradle.java.installations.paths=${pkgs.jdk21.home}"
+            # AGP would fetch its own aapt2 from Maven, an unpatched binary
+            # that cannot run here; the SDK's is patched and can.
+            "-Pandroid.aapt2FromMavenOverride=${sdkRoot}/build-tools/35.0.0/aapt2"
+            # Whatever the SDK lacks is an error, not a download: an
+            # install reads Google's repository indexes, which change
+            # under any hash recorded of them (nix/android-sdk.nix).
+            "-Pandroid.builder.sdkDownload=false"
+          ];
+
+          # **ArkUI's Kotlin, compiled once** (ui/kotlin/android): each of
+          # its two libraries a derivation of its own, its classes as a jar
+          # (`<module>.jar`), which every app links (`-ParkuiLib`, a
+          # directory of jars; app/build.gradle.kts) instead of compiling
+          # ui/kotlin in each app's build. `shots` is ui/kotlin/shots alone
+          # (every app's screenshot mode; revelation links only it);
+          # `arkui` is ui/kotlin/src, compiled against shots' jar, and
+          # carries that jar beside its own. Each one's source is its own
+          # directory and the gradle project, so an edit to the look moves
+          # `arkui` and the apps that link it, and not revelation. Release
+          # classes: the library has no BuildConfig and no resources, so
+          # the debug builds link the same. Its Maven graph is
+          # ui/kotlin/android/deps.json (`nix run .#arkui-kotlin-deps`).
+          arkuiKotlin = { module, dir, shots ? null, pname ? "arkui-kotlin-${module}", extraSrc ? [ ], flags ? [ ], carryShots ? true, extraTasks ? [ ], preGradle ? "" }:
+            pkgs.stdenv.mkDerivation (final: {
+              inherit pname;
+              version = "0.1.0";
+              src = only ([ "ui/kotlin/android" dir ] ++ extraSrc);
+              sourceRoot = "source/ui/kotlin/android";
+              postUnpack = "chmod -R u+w source";
+              nativeBuildInputs = [ pkgs.gradle pkgs.jdk21 ] ++ lib.optional (preGradle != "") pkgs.python3;
+              mitmCache = pkgs.gradle.fetchDeps {
+                pkg = final.finalPackage;
+                data = ./ui/kotlin/android/deps.json;
+              };
+              __darwinAllowLocalNetworking = true;
+              ANDROID_HOME = sdkRoot;
+              ANDROID_SDK_ROOT = sdkRoot;
+              gradleFlags = androidGradleFlags ++ lib.optional (shots != null) "-PshotsLib=${shots}" ++ flags;
+              preBuild = ''
+                export HOME="$TMPDIR/home" ANDROID_USER_HOME="$TMPDIR/home/.android"
+                mkdir -p "$ANDROID_USER_HOME"
+              '' + lib.optionalString (preGradle != "") ''
+                ${preGradle}
+              '';
+              # The library's classes as its consumers' compiler and D8 read
+              # them: no AAR (whose bundling runs lint's annotation
+              # extraction, which the recorded graph does not hold).
+              gradleBuildTask = lib.concatStringsSep " " ([ ":${module}:bundleLibRuntimeToJarRelease" ] ++ extraTasks);
+              gradleUpdateTask = ":shots:bundleLibRuntimeToJarRelease :arkui:bundleLibRuntimeToJarRelease";
+              doCheck = false;
+              installPhase = ''
+                jar=$(find ${module}/build/intermediates/runtime_library_classes_jar/release -name classes.jar | head -1)
+                install -Dm644 "$jar" $out/${module}.jar
+                ${lib.optionalString (shots != null && carryShots) "cp ${shots}/*.jar $out/"}
+              '';
+            });
+          arkui-kotlin-shots = arkuiKotlin { module = "shots"; dir = "ui/kotlin/shots"; };
+          arkui-kotlin = arkuiKotlin { module = "arkui"; dir = "ui/kotlin/src"; shots = arkui-kotlin-shots; };
+          # **The shared app library, compiled once** (ui/kotlin/app, the
+          # gradle project's `:app`): what every Ark app is underneath its
+          # screens (ui/docs/app.md, "The App Library"), its classes
+          # `app.jar`, which every Ark app links (`-ParkAppLib`) beside
+          # ArkUI's. Compiled against ArkUI's jars and against the kernel's
+          # Kotlin as the ffi check writes it for an app's library
+          # (`:bindings`, never carried: each app has its own). With it, the
+          # prebuild self-test's fixture that declares `[background]`: its
+          # generated hookup compiled against the library (`:fixture`), so
+          # what only that writes is held to compile.
+          ark-app-android = arkuiKotlin {
+            module = "app";
+            pname = "ark-app-android";
+            dir = "ui/kotlin/app";
+            shots = arkui-kotlin-shots;
+            carryShots = false;
+            extraSrc = [ "rust/ark-ffi/kotlin" "modules" "ui/prebuild.py" "ui/theme.py" "ui/theme.toml" "money/app.toml" "money/icon.svg" ];
+            flags = [ "-ParkuiLib=${arkui-kotlin}" "-ParkBindings=${self.checks.${system}.ffi}/money/kotlin" ];
+            # The fixture's generated Kotlin, written where `:fixture` compiles it.
+            preGradle = "ARK_CARGO_METADATA=${cargoMetadata} python3 ../../prebuild.py fixture --kotlin fixture/generated";
+            extraTasks = [ ":fixture:compileReleaseKotlin" ];
+          };
+
           # An Android app of this tree (`<name>/android`, a gradle project
           # with one `:app`): gradle over the SDK, assembled offline from a
           # recorded Maven graph (`<name>/android/deps.json`; `nix run
-          # .#<name>-apk-deps` re-records it). The app's JVM tests run first,
-          # so an APK is not built over a screen or a rule that fails them.
+          # .#<name>-apk-deps` re-records it).
           #
           # The release build, `<name>.apk`: not debuggable, so ART compiles
           # it as it would any app, with the baseline profiles Compose's
@@ -566,165 +771,172 @@
           # build installs over the last; and a version code that rises with
           # each commit, the flake's own source time in minutes.
           #
-          # `screens` is the same build recording its Paparazzi screenshots
-          # (every screen and state, light and dark, rendered on the JVM
-          # through layoutlib) and an index.html laying them out light beside
-          # dark (nix/screens-index.py). `flags` are the app's own gradle
-          # properties; `title` and `note` head that page. `shared` are the
-          # directories of this tree the app compiles beside its own:
-          # `kotlin/arkui`, the look every Ark app on Android shares.
-          androidApp = { name, appid, flags ? [ ], shared ? [ ], title, note }:
+          # `flags` are the app's own gradle properties. `shared` are the
+          # directories of this tree the app compiles beside its own (money's
+          # device modules); ArkUI's Kotlin is not one: it is linked
+          # prebuilt (`arkuiKotlin`, `-ParkuiLib` in `flags`).
+          #
+          # An Ark app (`ark`, its nix/ark-app.nix packages) builds its
+          # generated project (`<name>/.native/android`), with its own Kotlin
+          # where it still has some (`<name>/native/android`: revelation's)
+          # and the key its app.toml names; its Maven graph is that
+          # directory's deps.json, else ArkUI's (ui/kotlin/android/deps.json),
+          # which every app on the app library replays.
+          #
+          # `apk` is the stable channel's, the app's own id; `apkUnstable`
+          # the unstable channel's (nix/channels.nix): the same build with
+          # its id, label, launcher icon and providers made `.unstable`'s, a
+          # second app beside the first.
+          androidApp = { name, flags ? [ ], shared ? [ ], ark ? null }:
             let
-              dir = "${name}/android";
+              appid = "${bundlePrefix}.${name}";
+              dir = if ark == null then "${name}/android" else "${name}/.native/android";
+              own = builtins.pathExists (./. + "/${name}/native/android");
+              deps =
+                if ark == null then "${name}/android/deps.json"
+                else if own && builtins.pathExists (./. + "/${name}/native/android/deps.json") then "${name}/native/android/deps.json"
+                else "ui/kotlin/android/deps.json";
+              keystore = lib.optional (ark != null && ark.a.android ? keystore) "${name}/${ark.a.android.keystore}";
+              src =
+                if ark == null then only ([ dir ] ++ shared)
+                # Named `source`, as `only` names its trees: unpacked under
+                # that name, which sourceRoot says.
+                else pkgs.runCommand "source" { } ''
+                  cp -r ${only ([ "${name}/app.toml" ] ++ lib.optional own "${name}/native/android" ++ keystore ++ shared)} $out
+                  chmod -R u+w $out
+                  cp -r ${ark.native}/. $out/
+                '';
               apk = pkgs.stdenv.mkDerivation (final: {
                 pname = "${name}-apk";
                 version = "0.1.0";
-                src = only ([ dir ] ++ shared);
+                inherit src;
                 sourceRoot = "source/${dir}";
                 postUnpack = "chmod -R u+w source";
                 nativeBuildInputs = [ pkgs.gradle pkgs.jdk21 ];
                 mitmCache = pkgs.gradle.fetchDeps {
                   pkg = final.finalPackage;
-                  data = ./. + "/${dir}/deps.json";
+                  data = ./. + "/${deps}";
                 };
                 __darwinAllowLocalNetworking = true;
                 ANDROID_HOME = sdkRoot;
                 ANDROID_SDK_ROOT = sdkRoot;
-                gradleFlags = [
-                  "-Dorg.gradle.java.home=${pkgs.jdk21.home}"
-                  "-Porg.gradle.java.installations.auto-detect=false"
-                  "-Porg.gradle.java.installations.auto-download=false"
-                  "-Porg.gradle.java.installations.paths=${pkgs.jdk21.home}"
-                  # AGP would fetch its own aapt2 from Maven, an unpatched binary
-                  # that cannot run here; the SDK's is patched and can.
-                  "-Pandroid.aapt2FromMavenOverride=${sdkRoot}/build-tools/35.0.0/aapt2"
-                  # Whatever the SDK lacks is an error, not a download: an
-                  # install reads Google's repository indexes, which change
-                  # under any hash recorded of them (nix/android-sdk.nix).
-                  "-Pandroid.builder.sdkDownload=false"
-                  # Its id: every app's is `bundlePrefix` and its name.
-                  "-PapplicationId=${bundlePrefix}.${name}"
-                ] ++ flags ++ final.versionFlags;
+                gradleFlags = androidGradleFlags ++ final.idFlags ++ flags ++ final.versionFlags;
+                # Its id: every app's is `bundlePrefix` and its name.
+                idFlags = [ "-PapplicationId=${appid}" ];
                 # Read by app/build.gradle.kts; a local build falls back to 1.
+                # The code is the commit's time in minutes, a release's too, so
+                # what comes later is always the higher. The name is CI's
+                # (build.yaml, `apk`; .github/channels.sh): a `v*` tag's
+                # version (`v1.2` is 1.2), and otherwise
+                # `<last tag>-unstable+<commit>` (docs/releasing.md). Only an impure
+                # build (`--impure`, APPS_VERSION_NAME set) sees it; a pure one
+                # names the commit's date as before.
                 versionFlags = [
                   "-PversionCode=${toString (self.lastModified / 60)}"
-                  "-PversionName=0.1.${self.lastModifiedDate}"
+                  "-PversionName=${
+                    let v = builtins.getEnv "APPS_VERSION_NAME";
+                    in if v != "" then v else "0.1.${self.lastModifiedDate}"
+                  }"
                 ];
                 # AGP keeps its state under ~/.android, and the builder has no home.
                 preBuild = ''
                   export HOME="$TMPDIR/home" ANDROID_USER_HOME="$TMPDIR/home/.android"
                   mkdir -p "$ANDROID_USER_HOME"
                 '';
-                # The APK alone: its tests are a build of their own (`tests`,
-                # below), so the APK is there for its screenshots while they
-                # run, and the F-Droid deploy waits for both.
                 gradleBuildTask = ":app:assembleRelease";
-                # The recording runs the same tasks, and the screenshots' and a
-                # laptop's debug build, so that one recording serves all three.
-                gradleUpdateTask = ":app:testDebugUnitTest :app:recordPaparazziDebug :app:assembleDebug :app:assembleRelease";
+                # The recording runs the release build and a laptop's debug
+                # one, so that one recording serves both.
+                gradleUpdateTask = ":app:assembleDebug :app:assembleRelease";
                 doCheck = false;
                 installPhase = ''
                   mkdir -p $out
                   cp app/build/outputs/apk/release/app-release.apk $out/${name}.apk
                 '';
               });
-              # The app's unit tests, as a build: what the APK used to run
-              # before it was made. Their results are its output.
-              tests = apk.overrideAttrs (old: {
-                pname = "${name}-android-tests";
-                gradleBuildTask = ":app:testDebugUnitTest";
-                versionFlags = [ ];
-                installPhase = ''
-                  mkdir -p $out
-                  if [ -d app/build/test-results ]; then cp -r app/build/test-results $out/; fi
-                '';
-              });
-              screens = apk.overrideAttrs (old: {
-                pname = "${name}-android-screens";
-                gradleBuildTask = ":app:recordPaparazziDebug";
-                versionFlags = [ ];
-                installPhase = ''
-                  mkdir -p $out
-                  shots=app/src/test/snapshots/images
-                  for f in $shots/*.png; do
-                    b=$(basename "$f" .png)
-                    cp "$f" "$out/''${b#${appid}_Screens_}.png"
-                  done
-                  ${pkgs.python3}/bin/python3 ${./nix/screens-index.py} $out ${lib.escapeShellArg title} ${lib.escapeShellArg note} > $out/index.html
-                '';
+              apkUnstable = apk.overrideAttrs (old: {
+                pname = "${name}-unstable-apk";
+                idFlags = [ "-PapplicationId=${appid}${channels.suffix}" ];
+                postPatch = (old.postPatch or "") + channels.androidPatch appid;
               });
             in
-            { inherit apk tests screens; deps = apk.mitmCache.updateScript; };
+            { inherit apk apkUnstable appid; deps = apk.mitmCache.updateScript; };
 
           # The phone (harken/android/README.md): the app — its onboarding
           # and its look are its own code — over `harken-android-lib` (the
-          # kernel per ABI, and the Kotlin over it). Its screens are rendered
-          # from a fixed library (harken/android/app/src/test).
+          # kernel per ABI, and the Kotlin over it).
           harken = androidApp {
             name = "harken";
-            appid = "dev.harken.android";
-            flags = [ "-PharkenLib=${harken-android-lib}" ];
-            shared = [ "kotlin/arkui" ];
-            title = "Harken";
-            note = "Rendered on the JVM by Paparazzi from a fixed library, at a Pixel 5's size; light beside dark. Covers are the derived squares: nothing here talks to a server.";
+            # ArkUI's Kotlin linked prebuilt (`arkui-kotlin`), not compiled.
+            flags = [ "-PharkenLib=${harken-android-lib}" "-ParkuiLib=${arkui-kotlin}" ];
+            # The media player's and the secure store's Kotlin (modules/), compiled with the app.
+            shared = [ "modules/ark-media-player/kotlin" "modules/ark-secure-store/kotlin" ];
           };
           harken-apk = harken.apk;
-          harken-android-tests = harken.tests;
-          harken-android-screens = harken.screens;
 
-          # money's phone (money/android/README.md): Compose over
-          # `money-android-lib`, the look shared with harken (kotlin/arkui).
-          # Its Maven graph is harken's, replayed (money/android/deps.json).
-          # `appid` here is the package the screenshots are named by; the
-          # installed app is us.koon.money.
+          # money's phone (money/README.md): Compose over `money-android-lib`
+          # and the app library's shell (ui/kotlin/app), in the project
+          # ui/prebuild.py generates. Its Maven graph is ArkUI's, replayed
+          # (ui/kotlin/android/deps.json).
           money = androidApp {
             name = "money";
-            appid = "dev.money.android";
-            flags = [ "-PmoneyLib=${money-android-lib}" ];
-            shared = [ "kotlin/arkui" ];
-            title = "money";
-            note = "Rendered on the JVM by Paparazzi from the demo's household on 2026-10-26, at a Pixel 5's size, in money's own scheme (a screenshot has no wallpaper); light beside dark.";
+            ark = arkOf.money;
+            flags = [ "-ParkLib=${money-android-lib}" "-ParkuiLib=${arkui-kotlin}" "-ParkAppLib=${ark-app-android}" ];
+            # The device modules money lists (money/app.toml), whose kotlin/
+            # its generated build.gradle.kts compiles in: each implements an
+            # interface UniFFI writes into money's own bindings. ArkUI is
+            # linked prebuilt (`arkui-kotlin`).
+            shared = [ "modules" ];
           };
           money-apk = money.apk;
-          money-android-tests = money.tests;
-          money-android-screens = money.screens;
+          # Every Android app by its name, each with both channels' APKs.
+          androidApps = { inherit harken money revelation; };
 
           # The Bible as one scroll, zoomed like a map (revelation/README.md,
           # docs/plan-bible.md): plain Kotlin, no native library and none of
           # ArkDB, so it is the SDK and gradle alone.
           revelation = androidApp {
             name = "revelation";
-            appid = "dev.revelation.android";
-            title = "Revelation";
-            note = "Rendered on the JVM by Paparazzi through layoutlib; light beside dark.";
+            ark = arkOf.revelation;
+            # ArkUI's screenshot mode and ready signal alone (ui/kotlin/shots),
+            # linked prebuilt.
+            flags = [ "-ParkuiLib=${arkui-kotlin-shots}" ];
           };
 
-          # Every app as one F-Droid repository (nix/fdroid.nix): each app is
-          # its id, its APK, its metadata and its icon.
+          # An Ark app's F-Droid metadata, written from its app.toml's
+          # [store] by ui/prebuild.py (nothing of F-Droid's is committed).
+          storeYml = dir: pkgs.runCommand "${dir}-fdroid.yml" { nativeBuildInputs = [ pkgs.python3 ]; } ''
+            cd ${only [ "ui/prebuild.py" "ui/theme.py" "ui/theme.toml" "modules" "${dir}/app.toml" ]}
+            python3 ui/prebuild.py fdroid ${dir} --root . --out $out
+          '';
+
+          # Every app as F-Droid repositories, one per channel
+          # (nix/fdroid.nix, nix/channels.nix): each app is its id, its
+          # APKs, its metadata and its icon, the unstable app's made from
+          # them.
           fdroid = import ./nix/fdroid.nix {
-            inherit lib pkgs;
-            apps = [
+            inherit lib pkgs channels;
+            apps = map (a: a // {
+              inherit (androidApps.${a.name}) appid apkUnstable;
+              apk = androidApps.${a.name}.apk;
+              apkName = "${a.name}.apk";
+              stable = channels.enabled a.name "stable";
+              unstable = channels.enabled a.name "unstable";
+            }) [
               {
-                appid = "${bundlePrefix}.harken";
-                apk = harken-apk;
-                apkName = "harken.apk";
+                name = "harken";
                 metadata = ./harken/android/fdroid/metadata/us.koon.harken.yml;
-                # The trumpet the browser's tab draws.
-                icon = ./harken/iced/web/favicon.svg;
+                # The trumpet the desktop window and the docs draw.
+                icon = ./harken/iced/icon.svg;
               }
               {
-                appid = "${bundlePrefix}.revelation";
-                apk = revelation.apk;
-                apkName = "revelation.apk";
-                metadata = ./revelation/android/fdroid/metadata/us.koon.revelation.yml;
-                icon = ./revelation/android/fdroid/icon.svg;
+                name = "revelation";
+                metadata = storeYml "revelation";
+                icon = ./revelation/icon.svg;
               }
               {
-                appid = "${bundlePrefix}.money";
-                apk = money-apk;
-                apkName = "money.apk";
-                metadata = ./money/android/fdroid/metadata/us.koon.money.yml;
-                icon = ./money/android/fdroid/icon.svg;
+                name = "money";
+                metadata = storeYml "money";
+                icon = ./money/icon.svg;
               }
             ];
           };
@@ -763,7 +975,9 @@
           # workspace (`--locked --offline`), and a desktop window's or a
           # server's change is no phone's.
           iosTargets = [ "aarch64-apple-ios" "aarch64-apple-ios-sim" ];
-          iosRust = rust.override { targets = iosTargets; };
+          # The Mac's slice, for the same app's macOS destination (one
+          # multiplatform target: ui/prebuild.py's project.yml).
+          iosRust = rust.override { targets = iosTargets ++ [ "aarch64-apple-darwin" ]; };
           # Each target's slice of the xcframework: its directory and its
           # platform variant.
           iosSlice = {
@@ -808,8 +1022,10 @@
               echo ${if f == "src/lib.rs" then "" else "'fn main() {}'"} > ${dir}/${f}
             '') (lib.filter has [ "src/lib.rs" "src/main.rs" "build.rs" ] ++ bins)) dirs;
           # A source of the workspace's manifests and lockfile, the crates in
-          # `real` as they are, every other one a stand-in.
-          rustSource = real: {
+          # `real` as they are, every other one a stand-in; and an Ark app's
+          # phones' library (`ark`, its app.toml), the crate ui/prebuild.py
+          # writes (nix/ark-app.nix's `ffiSrc`), made a member at `<app>/.ffi`.
+          rustSource = { real, ark ? null }: {
             src = only ([ "rust/Cargo.toml" "rust/Cargo.lock" ] ++ real ++ map (d: "${d}/Cargo.toml") rustMembers);
             sourceRoot = "source/rust";
             # Unpacked read-only but for the source root: the stand-ins are
@@ -817,16 +1033,36 @@
             postUnpack = ''
               chmod -R u+w source
               (cd source && ${stubs (lib.subtractLists real rustMembers)})
+            '' + lib.optionalString (ark != null) ''
+              mkdir -p source/${ark.dir}/.ffi
+              cp ${arkApp.ffiSrc pkgs cargoMetadata ark}/{Cargo.toml,lib.rs} source/${ark.dir}/.ffi/
+              sed -i 's|^members = \[|members = ["../${ark.dir}/.ffi", |' source/rust/Cargo.toml
             '';
           };
+          # The crates a phone's library is built from: those its generated
+          # library names and ark-ffi's for an Ark app, or the library
+          # crate's own.
+          phoneSource = { crate, ark ? null }:
+            rustSource {
+              real = lib.unique (lib.concatMap phoneCrates (if ark == null then [ crate ] else arkApp.ffiCrates ark ++ [ "ark-ffi" ]));
+              inherit ark;
+            };
           # The environment each iOS cargo build is in, and its cargo build of
           # `crate` for each of `targets`.
-          iosCargo = { crate, targets, xcode }:
+          # An Ark app's shim is no member of the lockfile, which cargo then
+          # adds it to (`locked` false): offline, over the vendored crates.
+          iosCargo = { crate, targets, xcode, locked ? true }:
             let tc = if xcode == null then "/usr/bin" else "$DEVELOPER_DIR/Toolchains/XcodeDefault.xctoolchain/usr/bin";
             in {
               inherit tc;
-              cargoDeps = pkgs.rustPlatform.importCargoLock { lockFile = ./rust/Cargo.lock; };
-              nativeBuildInputs = [ iosRust pkgs.rustPlatform.cargoSetupHook ];
+              # COSMIC's iced and its dependencies from GitHub are in the
+              # lockfile (rust/Cargo.toml); the phones link none of them, but
+              # the lockfile is vendored whole, each one fetched at the
+              # revision it pins. By the workspace's own toolchain's cargo
+              # (`rustPlatform`): their manifests are edition 2024, which
+              # nixpkgs' cargo (1.82) cannot read.
+              cargoDeps = rustPlatform.importCargoLock { lockFile = ./rust/Cargo.lock; allowBuiltinFetchGit = true; };
+              nativeBuildInputs = [ iosRust rustPlatform.cargoSetupHook ];
               # xcodebuild and the iPhoneOS and simulator SDKs: the builder's
               # Xcode, outside the store. Pinned, only its directory is read,
               # from inside the sandbox (`__impureHostDeps`, which the builder's
@@ -839,8 +1075,9 @@
               # iPhoneOS platform, so `xcrun --sdk iphoneos` (cc-rs asks it)
               # fails under them: both are taken back for these targets.
               build = ''
-                # The apps' own deployment target: what ios.yaml's cargo had.
-                export IPHONEOS_DEPLOYMENT_TARGET=17.0
+                # The apps' own deployment target: what ios.yaml's cargo had;
+                # the Mac's, the app's macOS destination's.
+                export IPHONEOS_DEPLOYMENT_TARGET=17.0 MACOSX_DEPLOYMENT_TARGET=15.0
                 ${if xcode == null then ''
                   export PATH=/usr/bin:$PATH
                   export DEVELOPER_DIR="$(/usr/bin/xcode-select -p)"
@@ -855,14 +1092,14 @@
                 ${lib.concatMapStrings (t: let u = lib.toUpper (lib.replaceStrings [ "-" ] [ "_" ] t); l = lib.replaceStrings [ "-" ] [ "_" ] t; in ''
                   export CC_${l}=${tc}/clang CXX_${l}=${tc}/clang++ AR_${l}=${tc}/ar
                   export CARGO_TARGET_${u}_LINKER=${tc}/clang
-                  cargo build --release --offline --locked -p ${crate} --lib --no-default-features --target ${t}
+                  cargo build --release --offline ${lib.optionalString locked "--locked"} -p ${crate} --lib --no-default-features --target ${t}
                 '') targets}
               '';
             };
           # The lockfile's crates, compiled for `targets` as `crate` links
           # them: its `target/`, which a kernel starts from.
-          iosDeps = { name, crate, targets, xcode ? null }:
-            let c = iosCargo { inherit crate targets xcode; };
+          iosDeps = { name, crate, targets, xcode ? null, ark ? null }:
+            let c = iosCargo { inherit crate targets xcode; locked = ark == null; };
             in pkgs.stdenv.mkDerivation ({
               pname = "${name}-ios-deps";
               version = "0.1.0";
@@ -875,7 +1112,7 @@
               installPhase = "mkdir -p $out && cp -r target $out/";
               dontFixup = true;
               meta.platforms = [ "aarch64-darwin" "x86_64-darwin" ];
-            } // rustSource [ ]);
+            } // rustSource { real = [ ]; inherit ark; });
           # One app's: `name`, `crate` and `so` as `androidPhone`'s, the
           # framework's name, and its `targets`. With `xcode`, the pinned
           # Xcode (`xcode` below), it is built from the runner's installed
@@ -883,10 +1120,10 @@
           # in; without, from whatever Xcode the builder has selected,
           # unsandboxed. The Swift is UniFFI's from the library built for
           # this Mac.
-          iosPhone = { name, crate, so, framework, xcode ? null, targets ? iosTargets }:
+          iosPhone = { name, crate, so, framework, xcode ? null, targets ? iosTargets, ark ? null }:
             let
-              c = iosCargo { inherit crate targets xcode; };
-              deps = iosDeps { inherit name crate targets xcode; };
+              c = iosCargo { inherit crate targets xcode; locked = ark == null; };
+              deps = iosDeps { inherit name crate targets xcode ark; };
             in
             pkgs.stdenv.mkDerivation ({
               pname = "${name}-ios-xcframework${lib.optionalString (targets != iosTargets) "-${lib.concatMapStringsSep "-" (t: iosSlice.${t}.id) targets}"}";
@@ -928,7 +1165,7 @@
                   slice() {
                     echo "<dict><key>BinaryPath</key><string>lib${so}.a</string><key>HeadersPath</key><string>Headers</string>"
                     echo "<key>LibraryIdentifier</key><string>$1</string><key>LibraryPath</key><string>lib${so}.a</string>"
-                    echo "<key>SupportedArchitectures</key><array><string>arm64</string></array><key>SupportedPlatform</key><string>ios</string>"
+                    echo "<key>SupportedArchitectures</key><array><string>arm64</string></array><key>SupportedPlatform</key><string>$3</string>"
                     [ -z "$2" ] || echo "<key>SupportedPlatformVariant</key><string>$2</string>"
                     echo "</dict>"
                   }
@@ -937,7 +1174,7 @@
                     echo '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">'
                     echo '<plist version="1.0"><dict><key>AvailableLibraries</key><array>'
                     ${lib.concatMapStrings (t: ''
-                      slice ${iosSlice.${t}.id} "${iosSlice.${t}.variant}"
+                      slice ${iosSlice.${t}.id} "${iosSlice.${t}.variant}" ${iosSlice.${t}.platform}
                     '') targets}
                     echo '</array><key>CFBundlePackageType</key><string>XFWK</string>'
                     echo '<key>XCFrameworkFormatVersion</key><string>1.0</string></dict></plist>'
@@ -951,7 +1188,7 @@
                 cp $TMPDIR/bindings/swift/*.swift ark-ffi/swift/Typed.swift $out/swift/
               '';
               meta.platforms = [ "aarch64-darwin" "x86_64-darwin" ];
-            } // rustSource (phoneCrates crate));
+            } // phoneSource { inherit crate ark; });
           harken-ios-xcframework = iosPhone (harkenFfi // { framework = "HarkenFFI"; });
           money-ios-xcframework = iosPhone (moneyFfi // { framework = "MoneyFFI"; });
 
@@ -1028,9 +1265,18 @@
           # (laid out by hand, as xcodebuild lays one out, which is only
           # files) and UniFFI's Swift, read from the library built for this
           # machine.
-          appleKernel = { name, crate, so, framework, targets }:
+          appleKernel = { name, crate, so, framework, targets, ... }:
             let llvm = pkgs.llvmPackages.bintools-unwrapped; in
-            pkgs.runCommand "${name}-ios-kernel-${lib.concatMapStringsSep "-" (t: iosSlice.${t}.id) targets}" { } ''
+            # The static libraries carry the paths of the SDK and the clang
+            # they were compiled against (debug info, a C file's name), only
+            # as text: taken out, so a Mac that fetches the kernel is not
+            # made to fetch Linux's clang and nixpkgs' macOS SDK with it
+            # (3.1 GB unpacked, four and a half minutes of each run's Mac in
+            # app-screens 42949637068). Held to by disallowedReferences.
+            pkgs.runCommand "${name}-ios-kernel-${lib.concatMapStringsSep "-" (t: iosSlice.${t}.id) targets}" {
+              nativeBuildInputs = [ pkgs.removeReferencesTo ];
+              disallowedReferences = [ appleSdk pkgs.llvmPackages.clang ];
+            } ''
               ${ffiBindings { lib = ffiHostLib { inherit crate so; features = [ ]; }; language = "swift"; }}
               mkdir -p headers
               cp $TMPDIR/bindings/swift/*.h headers/
@@ -1077,6 +1323,7 @@
               mkdir -p $out/swift
               cp $TMPDIR/bindings/swift/*.swift $out/swift/
               cp ${./rust/ark-ffi/swift/Typed.swift} $out/swift/Typed.swift
+              find $out -name '*.a' -exec remove-references-to -t ${appleSdk} -t ${pkgs.llvmPackages.clang} {} +
             '';
 
           # **The iPhone apps, built by nix** (what app-screens.yaml takes
@@ -1146,23 +1393,187 @@
           # the app. It needs no Xcode, and a new Xcode builds no kernel.
           iosKernel = { ffi, framework, targets ? iosTargets }:
             outputs.x86_64-linux.appleKernel (ffi // { inherit framework targets; });
+          # **Swift compiled once a module** per Apple platform (`kind`, as
+          # `iosApp`'s): one Swift module, its static library and its binary
+          # .swiftmodule (`lib/lib<module>.a`, `modules/<module>.swiftmodule`),
+          # by the pinned Xcode's swiftc, over the modules it imports
+          # (`deps`, each one of these). Its `src` is its own sources alone,
+          # so an edit to one module rebuilds it and what imports it, and
+          # nothing else. Whole-module and -O, as Release builds it; Swift
+          # 5's mode, as the package's tools version (5.9) and the apps'
+          # projects give it. A binary module is read only by the compiler
+          # that wrote it, which the pin (`xcode`) holds every build to.
+          # `headers` are C modules it imports (a kernel's UniFFI headers).
+          #
+          # This repository's own code, compiled by the pinned Xcode: pushed
+          # to the cache like the apps (the push filter keeps only Xcode
+          # itself and the macOS SDK off it), so a run whose sources have not
+          # moved fetches it. Named for the Xcode build (`xcode.build`), not
+          # "xcode", which the filter would take for Xcode. Each app copies
+          # what it links into its own build directory first, so no app's
+          # output refers to it. `__noChroot` as the app's own build, for
+          # xcrun and the SDKs.
+          #
+          # `aliases`: also `aliases.swift`, a typealias for each of the
+          # module's top-level public types (`typealias Found =
+          # ArkBindings.Found`), for an app that compiled these sources as its
+          # own: its own declarations shadowed any imported module's of the
+          # same name (ArkUICore's `Found`, SwiftUI's), and the aliases, its
+          # own again (public, as the types were: an app may say one in a public
+          # member), keep every such name meaning what it did.
+          swiftModule = { name, module, kind, src, sources, deps ? [ ], headers ? null, aliases ? false }:
+            let
+              p = {
+                simulator = { sdk = "iphonesimulator"; triple = "arm64-apple-ios26.0-simulator"; };
+                archive = { sdk = "iphoneos"; triple = "arm64-apple-ios26.0"; };
+                macos = { sdk = "macosx"; triple = "arm64-apple-macos26.0"; };
+              }.${kind};
+            in
+            pkgs.stdenv.mkDerivation {
+              name = "${name}-${kind}-${xcode.build}";
+              inherit src;
+              __noChroot = true;
+              dontConfigure = true;
+              buildPhase = ''
+                runHook preBuild
+                export DEVELOPER_DIR=${xcode.developer}
+                ${xcode.check}
+                export HOME=$TMPDIR/home CFFIXED_USER_HOME=$TMPDIR/home
+                mkdir -p "$HOME"
+                unset SDKROOT MACOSX_DEPLOYMENT_TARGET CC CXX LD AR AS RANLIB STRIP NM
+                for v in $(env | sed -n 's/^\(NIX_[A-Za-z0-9_]*\)=.*/\1/p'); do
+                  case $v in NIX_BUILD_TOP|NIX_BUILD_CORES|NIX_STORE) ;; *) unset "$v" ;; esac
+                done
+                sdk=$(/usr/bin/xcrun --sdk ${p.sdk} --show-sdk-path)
+                mkdir -p out/lib out/modules
+                start=$(date +%s)
+                /usr/bin/xcrun --sdk ${p.sdk} swiftc \
+                  -target ${p.triple} -sdk "$sdk" -swift-version 5 \
+                  -O -whole-module-optimization -num-threads "''${NIX_BUILD_CORES:-1}" \
+                  -parse-as-library -Xfrontend -no-serialize-debugging-options \
+                  -module-cache-path "$TMPDIR/module-cache" \
+                  -module-name ${module} \
+                  ${lib.concatMapStrings (d: "-I ${d}/modules ") deps}${lib.optionalString (headers != null) "-I ${headers} "}\
+                  -emit-module -emit-module-path out/modules/${module}.swiftmodule \
+                  -emit-library -static -o out/lib/lib${module}.a \
+                  ${sources}
+                echo "${module} (${kind}): compiled in $(( $(date +%s) - start ))s"
+                ${lib.optionalString aliases ''
+                  # `Name` or `Name<A, B>`, at the start of a line: the
+                  # top-level types. One with a constrained parameter is said
+                  # and left out.
+                  sed -nE 's/^(public|open) +(final +)?(struct|enum|class|protocol|actor|typealias) +([A-Za-z_][A-Za-z0-9_]*)(<[^>]*>)?.*/\4\5/p' ${sources} | sort -u |
+                  while read -r t; do
+                    case $t in
+                      *:*) echo "warning: ${module}: no alias for $t" >&2 ;;
+                      *) echo "public typealias $t = ${module}.$t" ;;
+                    esac
+                  done > out/aliases.swift
+                  echo "${module}: $(wc -l < out/aliases.swift) aliases"
+                ''}
+                runHook postBuild
+              '';
+              installPhase = "cp -R out $out";
+              dontStrip = true;
+              dontFixup = true;
+              passthru = { inherit module deps; };
+              meta.platforms = [ "aarch64-darwin" ];
+            };
+          # **ArkUI for SwiftUI** (ui/swift): its two modules, each a
+          # derivation of its own per platform: ArkUICore (Foundation alone),
+          # then ArkUI over it. Every app of that platform links both
+          # (`iosApp`) rather than compiling the package in its own
+          # xcodebuild, so each is compiled once a run, not once an app; an
+          # edit to ArkUI's views leaves ArkUICore as it was, and an edit to
+          # an app rebuilds that app alone.
+          arkuiSwiftCore = kind: swiftModule {
+            name = "arkui-swift-core"; module = "ArkUICore"; inherit kind;
+            src = only [ "ui/swift/Sources/ArkUICore" ];
+            sources = "ui/swift/Sources/ArkUICore/*.swift";
+          };
+          arkuiSwiftUi = kind: swiftModule {
+            name = "arkui-swift-ui"; module = "ArkUI"; inherit kind;
+            src = only [ "ui/swift/Sources/ArkUI" ];
+            sources = "ui/swift/Sources/ArkUI/*.swift";
+            deps = [ (arkuiSwiftCore kind) ];
+          };
+          # Both: what every app of the platform links.
+          arkuiSwift = kind: [ (arkuiSwiftCore kind) (arkuiSwiftUi kind) ];
+          arkui-swift-simulator = arkuiSwiftUi "simulator";
+          arkui-swift-archive = arkuiSwiftUi "archive";
+          arkui-swift-macos = arkuiSwiftUi "macos";
           # One app, as Release: `name` its directory (<name>/ios, its
           # XcodeGen project), `App` its scheme and product, `ffi` and
           # `framework` its kernel's; `kind` "simulator" (the .app, for its
-          # screenshots) or "archive" (the unsigned .xcarchive ios.yaml signs
-          # and sends to TestFlight, giving it its build number there). Its
+          # screenshots), "archive" (the unsigned .xcarchive ios.yaml signs
+          # and sends to TestFlight, giving it its build number there) or
+          # "macos" (the same target's Mac destination, the .app, for the
+          # Mac's screenshots: `<name>-macos`). Its
           # bundle id is `bundlePrefix`.<name>, every app's; its version
           # project.yml's.
-          iosApp = { name, App, ffi, framework, kind }:
+          # An Ark app (`ark`) builds its generated project
+          # (`<name>/.native/ios`), with its own Swift where it still has some
+          # (`<name>/native/ios`).
+          iosApp = { name, App, ffi, framework, kind, ark ? null, shared ? [ ] }:
             let
               bundle = "${bundlePrefix}.${name}";
               # Only the slice it links: the simulator's for the screenshots'
               # app, the phone's for the archive.
+              target = { simulator = "aarch64-apple-ios-sim"; archive = "aarch64-apple-ios"; macos = "aarch64-apple-darwin"; }.${kind};
               kernel = iosKernel {
                 inherit ffi framework;
-                targets = { simulator = [ "aarch64-apple-ios-sim" ]; archive = [ "aarch64-apple-ios" ]; }.${kind};
+                targets = [ target ];
               };
               dev = xcode.developer;
+              # An Ark app's own bindings, compiled once as a module of their
+              # own (`ArkBindings`): the Swift UniFFI writes for its kernel and
+              # the bridge's typed half (the kernel's swift/), over the
+              # kernel's C headers. Then each device module it takes on (its
+              # crate's dependencies, `modulesOf`; each its swift/ alone) over them, a
+              # module each (`ArkHaptics`, …): each implements a protocol of
+              # those bindings, so it is built per app, but no longer inside
+              # the app's xcodebuild, and an edit to the app compiles neither
+              # again. The app's own modules (<name>/modules) are still
+              # compiled into it.
+              headers = "${kernel}/${framework}.xcframework/${iosSlice.${target}.id}/Headers";
+              bindings = swiftModule {
+                name = "${name}-ios-bindings"; module = "ArkBindings"; inherit kind headers;
+                aliases = true;
+                src = "${kernel}/swift";
+                sources = "*.swift";
+              };
+              # Whether any Swift file in `dir` imports ArkUI (or ArkUICore).
+              swiftImportsArkUI = dir:
+                lib.any (f: lib.hasSuffix ".swift" f && builtins.match "(.*\n)?import ArkUI.*" (builtins.readFile (./. + "/${dir}/${f}")) != null)
+                  (builtins.attrNames (builtins.readDir (./. + "/${dir}")));
+              deviceModules = lib.optionals (ark != null) (map (m: swiftModule {
+                name = "${name}-ios-${m}"; inherit kind headers;
+                module = "Ark" + lib.concatMapStrings (w: lib.toUpper (lib.substring 0 1 w) + lib.substring 1 (-1) w) (lib.splitString "-" (lib.removePrefix "ark-" m));
+                src = only [ "modules/${m}/swift" ];
+                sources = "modules/${m}/swift/*.swift";
+                # ArkUI too where the module imports it: one with a page of
+                # its own (ark-camera's) draws it in ArkUI's parts and
+                # springs. Only there, so an edit to ArkUI rebuilds no module
+                # that does not draw with it.
+                deps = [ bindings ] ++ lib.optionals (swiftImportsArkUI "modules/${m}/swift") (arkuiSwift kind);
+              }) (lib.filter (m: builtins.pathExists (./modules + "/${m}/swift")) (map (m: m.name) (arkApp.modulesOf ark.a))));
+              # The app library (ui/swift's ArkApp: ui/docs/app.md, "The App
+              # Library"), over the app's own bindings and ArkUI, so a module
+              # of its own per app, as a device module is.
+              arkAppModule = lib.optionals (ark != null) [
+                (swiftModule {
+                  name = "${name}-ios-ark-app"; module = "ArkApp"; inherit kind headers;
+                  src = only [ "ui/swift/Sources/ArkApp" ];
+                  sources = "ui/swift/Sources/ArkApp/*.swift";
+                  deps = [ bindings ] ++ arkuiSwift kind;
+                })
+              ];
+              # What the app links prebuilt: ArkUI (`arkuiSwift`), and an Ark
+              # app's bindings, modules and the app library.
+              linked = arkuiSwift kind ++ lib.optionals (ark != null) ([ bindings ] ++ deviceModules ++ arkAppModule);
+              # `shared`: the repository's directories a non-Ark app
+              # compiles into itself (harken's media player's Swift).
+              modules = lib.optionals (ark != null) [ "${name}/modules" ] ++ shared;
               common = ''
                 -project ${App}.xcodeproj -scheme ${App} -configuration Release \
                 -derivedDataPath $TMPDIR/derived \
@@ -1183,17 +1594,27 @@
                     -destination 'generic/platform=iOS' \
                     -archivePath $TMPDIR/${App}.xcarchive
                 '';
+                macos = ''
+                  xcodebuild build ${common} \
+                    -destination 'generic/platform=macOS' \
+                    ARCHS=arm64 ONLY_ACTIVE_ARCH=YES
+                '';
               }.${kind};
               install = {
                 simulator = "cp -R $TMPDIR/derived/Build/Products/Release-iphonesimulator/${App}.app $out/";
                 archive = "cp -R $TMPDIR/${App}.xcarchive $out/";
+                macos = "cp -R $TMPDIR/derived/Build/Products/Release/${App}.app $out/";
               }.${kind};
             in
             pkgs.stdenv.mkDerivation {
-              pname = "${name}-ios-${kind}";
+              pname = if kind == "macos" then "${name}-macos" else "${name}-ios-${kind}";
               version = "0.1.0";
-              src = only [ "${name}/ios" "swift/ArkUI" ];
-              nativeBuildInputs = [ xcodegen ];
+              # The app, and its own modules (`modules`): ArkUI and an Ark
+              # app's bindings and device modules are linked prebuilt
+              # (`linked`), so none of their sources is here.
+              src = only (modules ++ (if ark == null then [ "${name}/ios" ]
+                else [ "${name}/app.toml" ] ++ lib.optional (builtins.pathExists (./. + "/${name}/native/ios")) "${name}/native/ios"));
+              nativeBuildInputs = [ xcodegen pkgs.yq-go ];
               # xcodebuild, and nothing else here: see above.
               __noChroot = true;
               buildPhase = ''
@@ -1210,10 +1631,50 @@
                 for v in $(env | sed -n 's/^\(NIX_[A-Za-z0-9_]*\)=.*/\1/p'); do
                   case $v in NIX_BUILD_TOP|NIX_BUILD_CORES|NIX_STORE) ;; *) unset "$v" ;; esac
                 done
-                mkdir -p ${name}/ffi/ios
-                cp -r ${kernel}/${framework}.xcframework ${kernel}/swift ${name}/ffi/ios/
-                chmod -R u+w ${name}/ffi/ios
-                cd ${name}/ios
+                ${if ark == null then ''
+                  mkdir -p ${name}/ffi/ios
+                  cp -r ${kernel}/${framework}.xcframework ${kernel}/swift ${name}/ffi/ios/
+                  chmod -R u+w ${name}/ffi/ios
+                  cd ${name}/ios
+                '' else ''
+                  # The generated project, and the kernel where it looks (../ffi/ios).
+                  mkdir -p ${name}/.native/ffi/ios
+                  cp -r ${ark.native}/${name}/.native/. ${name}/.native/
+                  cp -r ${kernel}/${framework}.xcframework ${kernel}/swift ${name}/.native/ffi/ios/
+                  chmod -R u+w ${name}/.native
+                  cd ${name}/.native/ios
+                ''}
+                # ArkUI linked as built for this platform, and an Ark app's
+                # bindings and device modules as built for it (`linked`), not
+                # compiled again: ArkUI's package and its product taken out of
+                # the project, the bindings and modules' sources out of its
+                # target, and the libraries and their modules given to each
+                # target that had ArkUI. Copied here first, so the app refers
+                # to nothing of them in the store.
+                mkdir -p $TMPDIR/arkui/lib $TMPDIR/arkui/modules
+                for d in ${lib.concatStringsSep " " linked}; do
+                  cp -R $d/lib/. $TMPDIR/arkui/lib/
+                  cp -R $d/modules/. $TMPDIR/arkui/modules/
+                done
+                chmod -R u+w $TMPDIR/arkui
+                ARKUI=$TMPDIR/arkui yq -i '
+                  del(.packages.ArkUI)
+                  | (.targets[] | select((.dependencies // []) | any_c(.package == "ArkUI"))) |= (
+                      .dependencies |= map(select(.package != "ArkUI"))
+                      ${lib.optionalString (ark != null) "| .sources |= map(select((.path // .) as $p | ($p == \"../ffi/ios/swift\" or ($p | test(\"^(\\\\.\\\\./)+(modules/[^/]+/swift|ui/swift/Sources/ArkApp)$\"))) | not))"}
+                      | .settings.base.SWIFT_INCLUDE_PATHS = "$(inherited) " + strenv(ARKUI) + "/modules"
+                      | .settings.base.LIBRARY_SEARCH_PATHS = "$(inherited) " + strenv(ARKUI) + "/lib"
+                      | .settings.base.OTHER_LDFLAGS = "$(inherited) ${lib.concatMapStringsSep " " (d: "-l${d.module}") (lib.reverseList linked)}")' project.yml
+                ${lib.optionalString (ark != null) ''
+                  # The bindings and modules, imported once for every file of
+                  # the app as when they were its own sources.
+                  # And the bindings' types by their names in the app's own
+                # module, as when they were its sources (`aliases`).
+                {
+                  printf '@_exported import %s\n' ${lib.concatMapStringsSep " " (d: d.module) ([ bindings ] ++ deviceModules ++ arkAppModule)}
+                  cat ${bindings}/aliases.swift
+                } > Generated/ArkLinked.swift
+                ''}
                 xcodegen generate
                 # SwiftPM sandboxes the manifests and plugins it builds, which
                 # cannot be done inside nix's: told not to.
@@ -1226,21 +1687,61 @@
               '';
               dontStrip = true;
               dontFixup = true;
-              passthru = { inherit bundle; };
+              passthru = { inherit bundle linked bindings headers arkAppModule; };
               meta.platforms = [ "aarch64-darwin" ];
             };
-          moneyIos = { name = "money"; App = "Money"; ffi = moneyFfi; framework = "MoneyFFI"; };
-          harkenIos = { name = "harken"; App = "Harken"; ffi = harkenFfi; framework = "HarkenFFI"; };
+          # The prebuild self-test's fixture that declares `[background]`
+          # (ui/prebuild.py `selftest`: money's app.toml with every key), its
+          # generated background hookup compiled for the simulator against
+          # the app library, money's bindings and the two modules only such
+          # an app lists (ark-background's, ark-notifications'): what only
+          # `[background]` writes, held to compile. mac-compile builds it.
+          ark-app-fixture-ios =
+            let
+              app = money-ios-simulator;
+              kind = "simulator";
+              module = m: swiftModule {
+                name = "ark-app-fixture-${m}"; inherit kind; inherit (app) headers;
+                module = "Ark" + lib.concatMapStrings (w: lib.toUpper (lib.substring 0 1 w) + lib.substring 1 (-1) w) (lib.splitString "-" (lib.removePrefix "ark-" m));
+                src = only [ "modules/${m}/swift" ];
+                sources = "modules/${m}/swift/*.swift";
+                deps = [ app.bindings ];
+              };
+              written = pkgs.runCommand "ark-app-fixture-swift" { nativeBuildInputs = [ pkgs.python3 ]; } ''
+                cd ${only [ "ui/prebuild.py" "ui/theme.py" "ui/theme.toml" "modules" "money/app.toml" "money/icon.svg" ]}
+                ARK_CARGO_METADATA=${cargoMetadata} python3 ui/prebuild.py fixture --swift $out
+              '';
+            in
+            swiftModule {
+              name = "ark-app-fixture"; module = "ArkAppFixture"; inherit kind; inherit (app) headers;
+              src = written;
+              sources = "*.swift";
+              deps = [ app.bindings ] ++ app.arkAppModule ++ arkuiSwift kind ++ [ (module "ark-background") (module "ark-notifications") ];
+            };
+          # money's generated project is Linux's (`arkOf` there): what the
+          # generator writes is text, the same on any machine, and a Mac
+          # would otherwise compile the generator's Rust (money-gen and
+          # its crates) itself, which nothing builds ahead on Linux.
+          moneyIos = { name = "money"; App = "Money"; ffi = moneyFfi; framework = "MoneyFFI"; ark = outputs.x86_64-linux.arkOf.money; };
+          harkenIos = { name = "harken"; App = "Harken"; ffi = harkenFfi; framework = "HarkenFFI"; shared = [ "modules/ark-media-player/swift" "modules/ark-secure-store/swift" ]; };
           # Both slices; and the simulator's alone, which the tests link
           # (ios.yaml) and the screenshots' app is built over: the same
           # derivation, so built once.
           money-ios-kernel = iosKernel { inherit (moneyIos) ffi framework; };
+          # `nix run .#money-prebuild`: money's projects into money/.native,
+          # with its Android library linked beside them (and on a Mac its
+          # kernel for the simulator and the Mac), for Xcode and Android Studio.
+          money-prebuild = arkOf.money.prebuild ({ android = money-android-lib; }
+            // lib.optionalAttrs pkgs.stdenv.hostPlatform.isDarwin { ios = iosKernel { inherit (moneyIos) ffi framework; targets = [ "aarch64-apple-ios-sim" "aarch64-apple-darwin" ]; }; });
           harken-ios-kernel = iosKernel { inherit (harkenIos) ffi framework; };
           money-ios-kernel-simulator = iosKernel { inherit (moneyIos) ffi framework; targets = [ "aarch64-apple-ios-sim" ]; };
           harken-ios-kernel-simulator = iosKernel { inherit (harkenIos) ffi framework; targets = [ "aarch64-apple-ios-sim" ]; };
           money-ios-simulator = iosApp (moneyIos // { kind = "simulator"; });
           harken-ios-simulator = iosApp (harkenIos // { kind = "simulator"; });
           money-ios-archive = iosApp (moneyIos // { kind = "archive"; });
+          # The same target's Mac destination, built by nix for the Mac's
+          # screenshots (the shell's sidebar, toolbar, inspector, Settings).
+          money-macos = iosApp (moneyIos // { kind = "macos"; });
           harken-ios-archive = iosApp (harkenIos // { kind = "archive"; });
 
           # harken's domain (harken/domain: plain Rust, §1.16) built, and
@@ -1338,16 +1839,40 @@
           # The crate builds a check is made of at its top (each test build,
           # each lint-clean build), whose dependencies are what checks share.
           rootsOf = d: d.roots or (if d ? completeDeps then [ d ] else [ ]);
-          # Every crate the named checks' top builds depend on, once: what
-          # build.yaml's `crates` job builds and pushes before the checks
-          # fan out, so that two checks never compile the same crate at once.
-          checksCrates = names:
+          # Every crate derivation `roots` are built from, themselves too:
+          # each one's dependencies and build dependencies, all the way down.
+          crateClosure = roots:
+            let item = d: { key = builtins.unsafeDiscardStringContext d.drvPath; inherit d; }; in
+            lib.listToAttrs (map (x: lib.nameValuePair x.key x.d) (builtins.genericClosure {
+              startSet = map item roots;
+              operator = x: map item (x.d.completeDeps ++ x.d.completeBuildDeps);
+            }));
+          # What build.yaml's `crates` job builds and pushes before anything
+          # else of the run starts: every crate the checks' test and lint
+          # builds depend on, so that two checks never compile the same
+          # crate at once; every crate of what they run (harken-server's binaries
+          # for its tests, both apps' host libraries for the bindings' test,
+          # arkdb for the fuzzer's and the traces', money's server, seed and
+          # page for money-web-sync, its generator for money-native), the
+          # crates of `all` (what two jobs build whole), and every crate two
+          # of the run's other jobs both reach, so that no crate is compiled
+          # by two jobs at once. Each `groups` entry is a job's crate roots;
+          # what one job alone reaches it builds itself.
+          ciCrates = { checks, all ? [ ], groups, tools ? [ ] }:
             let
-              roots = lib.concatMap (n: rootsOf self.checks.${system}.${n}) names;
-              deps = lib.concatMap (r: r.completeDeps ++ r.completeBuildDeps) roots;
-              key = d: builtins.unsafeDiscardStringContext (baseNameOf d.drvPath);
+              # A check's own test and lint builds are its job's: what they
+              # are built from is here.
+              first = crateClosure (lib.concatMap (r: r.completeDeps ++ r.completeBuildDeps) (lib.concatMap (n: rootsOf self.checks.${system}.${n}) checks)
+                ++ [ harken-server money-server-bin money-web.wasm money-seed arkdb arkOf.money.gen ]
+                ++ map (f: ffiHostCrate { inherit (f) crate; }) [ harkenFfi moneyFfi ]
+                ++ all);
             in
-            allOf "checks-crates" (lib.attrValues (lib.listToAttrs (map (d: lib.nameValuePair (key d) d) deps)));
+            allOf "ci-crates" (lib.attrValues (first // sharedCrates groups) ++ tools);
+          # Of `groups` (each a job's crate roots), every crate two or more
+          # of them reach, by derivation.
+          sharedCrates = groups:
+            let each = map crateClosure (lib.attrValues groups); in
+            lib.filterAttrs (k: _: lib.count (g: g ? ${k}) each > 1) (lib.foldl' (a: b: a // b) { } each);
 
           # The pinned previous revisions (nix/versions.nix), each its
           # `harken-server` package as that revision's own flake builds it:
@@ -1391,70 +1916,114 @@
             '';
           };
           # `nix run .#update-theme`, from the repository's root: the colours
-          # every app is drawn in, written from arkui/theme.toml into the
-          # Kotlin, Swift and Rust each platform's arkui reads (arkui/README.md).
+          # every app is drawn in, written from ui/theme.toml into the
+          # Kotlin, Swift and Rust each platform's arkui reads (ui/README.md).
           update-theme = pkgs.writeShellScriptBin "update-theme" ''
-            ${pkgs.python3}/bin/python3 arkui/theme.py write
+            ${pkgs.python3}/bin/python3 ui/theme.py write
           '';
           # The catalogue as its repository builds it, and the copy the demo
           # embeds made from it.
           classical = pkgs.writeText "catalogue.json" (import "${inputs.classical}/catalogue.nix");
           update-catalogue = pkgs.writeShellScriptBin "update-catalogue" ''
-            cp ${classical} harken/seed/catalogue.json
-            chmod 644 harken/seed/catalogue.json
-            echo "harken/seed/catalogue.json is the catalogue at ${inputs.classical.shortRev or "?"}"
+            cp ${classical} harken/demo/catalogue.json
+            chmod 644 harken/demo/catalogue.json
+            echo "harken/demo/catalogue.json is the catalogue at ${inputs.classical.shortRev or "?"}"
           '';
         in
         {
-          # For the Mac's apps (`iosKernel`): every Apple kernel is Linux's.
-          inherit appleKernel;
+          # For the Mac's apps (`iosKernel`): every Apple kernel is Linux's;
+          # and so is every Ark app's generated project (`moneyIos`).
+          inherit appleKernel arkOf;
           packages = {
             inherit ark vectors fuzz harken-domain trace-corpus harken-android-lib harken-ios-xcframework;
             # The iPhone apps from the pinned Xcode: for the simulator (the
             # screenshots), as the archive TestFlight is sent, and the kernel.
-            inherit money-ios-simulator harken-ios-simulator money-ios-archive harken-ios-archive;
+            inherit money-ios-simulator harken-ios-simulator money-ios-archive harken-ios-archive money-macos ark-app-fixture-ios;
             inherit money-ios-kernel harken-ios-kernel money-ios-kernel-simulator harken-ios-kernel-simulator;
+            # ArkUI for SwiftUI, compiled once per platform for every app.
+            inherit arkui-swift-simulator arkui-swift-archive arkui-swift-macos;
             inherit harken-server arkdb;
             # `nix run .#update-catalogue`, from the repository's root: the
             # demo's copy of the catalogue made from the `classical` input.
             inherit classical update-catalogue update-cargo-nix update-covers;
             # `nix run .#update-theme`: the theme's generated files, from
-            # arkui/theme.toml.
+            # ui/theme.toml.
             inherit update-theme;
+            # An Ark app's generated pieces (nix/ark-app.nix): its
+            # #[view]s as SwiftUI and Compose (`<app>-ui`), its native
+            # projects (`<app>-native`), and `nix run .#<app>-prebuild`.
+            money-ui = arkOf.money.ui;
+            money-native = arkOf.money.native;
+            inherit money-prebuild;
+            # revelation's: Kotlin alone, its Android project generated.
+            revelation-native = arkOf.revelation.native;
+            revelation-prebuild = arkOf.revelation.prebuild { };
             # `nix run .#harken-serve [ADDR]`: the dev server, anyone is
             # whoever they say.
             harken-serve = pkgs.callPackage ./harken/server/nix/serve.nix { inherit harken-server; };
-            inherit harken-web harken-web-server harken-iced docs screens-ffmpeg screens-python xcodegen;
-            inherit money-iced money-web money-web-server money-server;
+            inherit harken-iced docs docs-web screens-ffmpeg screens-python xcodegen;
+            inherit money-iced money-web money-server;
             inherit money-seed harken-seed harken-covers money-demo harken-demo;
-            # money's library for its phones (money/ffi), as harken's.
+          } // {
+            # money's library for its phones (the generated shim over
+            # money/app), as harken's.
             inherit money-android-lib money-ios-xcframework;
             default = ark;
-            inherit harken-apk harken-android-tests harken-android-screens;
+            inherit harken-apk;
             harken-apk-deps = harken.deps;
             revelation-apk = revelation.apk;
-            revelation-android-tests = revelation.tests;
-            revelation-android-screens = revelation.screens;
             revelation-apk-deps = revelation.deps;
-            # money's phone, over money-android-lib (money/android/README.md).
-            inherit money-apk money-android-tests money-android-screens;
+            # money's phone, over money-android-lib (money/README.md).
+            inherit money-apk;
             money-apk-deps = money.deps;
+            # ArkUI's Kotlin, each library once (`arkuiKotlin`), and
+            # `nix run .#arkui-kotlin-deps` re-recording its Maven graph.
+            inherit arkui-kotlin arkui-kotlin-shots ark-app-android;
+            arkui-kotlin-deps = arkui-kotlin.mitmCache.updateScript;
             # The workflow builds these first and keeps them as gc roots.
             inherit aapt2;
             android-sdk = androidSdk;
-            # The APKs' F-Droid repository, one for both apps, and a key for
-            # it (nix/fdroid.nix). `harken-fdroid` is the tool's old name,
+            # The APKs' F-Droid repositories, one per channel for every app,
+            # and a key for them (nix/fdroid.nix). `harken-fdroid` is the tool's old name,
             # kept while a workflow on main still calls it.
             inherit (fdroid) fdroid-repo apps-fdroid fdroid-keygen;
             harken-fdroid = fdroid.apps-fdroid;
-          } // lib.listToAttrs (map (v: lib.nameValuePair "harken-server-${v.name}" v.server) versions)
-          // lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
-            # The crates build.yaml's checks share, built once before they
-            # fan out (`checksCrates`): of every check its `checks` jobs run.
-            checks-crates = checksCrates [
-              "fmt" "clippy" "rust" "ffi" "traces" "vectors" "fuzz-smoke" "versions"
-              "harken-domain" "harken-module" "docs" "theme" "theme-contrast"
-            ];
+          }
+          # Each Android app's unstable channel (nix/channels.nix):
+          # `<app>-unstable-apk`, the `.unstable` app beside it.
+          // lib.mapAttrs' (n: a: lib.nameValuePair "${n}-unstable-apk" a.apkUnstable) androidApps // lib.listToAttrs (map (v: lib.nameValuePair "harken-server-${v.name}" v.server) versions)
+          // lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux (
+            # Each browser app's page as the site serves it, one per
+            # channel (nix/channels.nix): `<app>-page` at /apps/<app>/,
+            # `<app>-unstable-page` at /apps/unstable/<app>/.
+            lib.listToAttrs (map (p: lib.nameValuePair p.package p.drv) webPages)
+          ) // lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
+            # build.yaml's `crates` job (`ciCrates`): the checks' crates, and
+            # those its `server`, `docs-site`/`page` and `apk`/`tests` jobs
+            # share. UniFFI's and wasm-bindgen's CLIs, cargo builds of their
+            # own, are each a job's input beside the checks'.
+            ci-crates = ciCrates {
+              checks = [
+                "fmt" "clippy" "rust" "ffi" "traces" "vectors" "fuzz-smoke" "versions"
+                "harken-domain" "harken-module" "docs" "theme" "theme-contrast"
+                "prebuild" "money-native" "revelation-native" "money-web-sync"
+              ];
+              # The docs, which on main `page` and `docs-site` both build.
+              all = [ (docsCrate { }) docs-web.wasm ];
+              groups = {
+                server = [ harken-server arkdb money-server-bin harken-seed money-seed money-web.wasm ];
+                harken-apk = harken-android-lib.crates;
+                money-apk = money-android-lib.crates;
+              };
+              tools = [ uniffiBindgen wasm-bindgen-cli ];
+            };
+            # app-screens.yaml's `servers` job builds it beside the servers,
+            # before the desktop jobs fan out: the crates both windows link
+            # (iced, wgpu, arkui, …), which each desktop job compiled at once.
+            screens-crates = allOf "screens-crates" (lib.attrValues (sharedCrates {
+              harken = [ harken-iced.crate ];
+              money = [ money-iced.crate ];
+            }));
             # The fleet on three NixOS machines (docs/plan-fleet.md §3): an
             # interface down, the service restarted, the server crashed, the
             # scanner over a bound directory. A package and not a check: it
@@ -1472,34 +2041,85 @@
           };
 
           checks = {
+            # money's web client builds for wasm32 and is bound
+            # (`.github/screens/app-web.sh` photographs it).
+            inherit money-web;
+            # And is a real client: signed in through money-server, synced
+            # with another device over its socket, offline and back
+            # (money/server/nix/web-sync.nix, in Playwright's Chromium).
+            money-web-sync = pkgs.callPackage ./money/server/nix/web-sync.nix {
+              inherit money-web money-seed;
+              money-server = money-server-bin;
+            };
             # The demo's copy of the catalogue is the `classical` input's:
             # `nix flake update classical` then `nix run .#update-catalogue`.
             catalogue = pkgs.runCommand "catalogue-current" { } ''
-              cmp ${classical} ${./harken/seed/catalogue.json} || {
-                echo "harken/seed/catalogue.json is not the classical input's: nix run .#update-catalogue" >&2
+              cmp ${classical} ${./harken/demo/catalogue.json} || {
+                echo "harken/demo/catalogue.json is not the classical input's: nix run .#update-catalogue" >&2
                 exit 1
               }
               touch $out
             '';
-            # What is generated from arkui/theme.toml is what is committed:
+            # The release channels are every app's alike (nix/channels.nix):
+            # no app's directory, id or name is written in their code, so an
+            # app joining `publish` has both channels and nothing there
+            # changes.
+            channels = channels.check {
+              names = lib.unique (lib.concatMap
+                (n: [ n "${bundlePrefix}.${n}" ] ++ lib.optional (lib.elem n arkApps) (arkApp.read n).name)
+                (map (a: a.name) self.publish.${pkgs.system}.apks ++ map (a: a.name) self.publish.${pkgs.system}.ios ++ arkApps)
+                ++ map (a: a.App) self.publish.${pkgs.system}.ios);
+              files = [ ./nix/channel.py ./nix/channels.nix ./.github/channels.sh ./.github/ios-archive.sh ];
+            };
+            # What is generated from ui/theme.toml is what is committed:
             # edit the tokens, then `nix run .#update-theme`.
             theme = pkgs.runCommand "theme-current" { nativeBuildInputs = [ pkgs.python3 ]; } ''
-              python3 ${./arkui}/theme.py write generated > /dev/null
+              python3 ${./ui}/theme.py write generated > /dev/null
               status=0
-              for f in $(python3 ${./arkui}/theme.py files); do
+              for f in $(python3 ${./ui}/theme.py files); do
                 cmp "generated/$f" "${self}/$f" || {
-                  echo "$f is not what arkui/theme.toml makes: nix run .#update-theme" >&2
+                  echo "$f is not what ui/theme.toml makes: nix run .#update-theme" >&2
                   status=1
                 }
               done
               if [ $status != 0 ]; then exit 1; fi
               touch $out
             '';
+            # Each Ark app's native projects are generated: its generator
+            # builds and runs over its views, and ui/prebuild.py writes its
+            # projects (nix/ark-app.nix). The emitters' own snapshots are
+            # ark-ui-gen's tests (checks.rust).
+            money-native = arkOf.money.native;
+            revelation-native = arkOf.revelation.native;
             # Every text colour the tokens define is legible on every ground
             # it is drawn on, at WCAG's 4.5:1 (3:1 for large text, icons and
             # a control's edge), the player's wash among them.
+            # What an app opts into is what it builds with (ui/docs/app.md,
+            # The Device): its app.toml says what it must, its modules are its
+            # crate's dependencies (the workspace's `cargo metadata`), each a
+            # module that declares itself, and ark-ffi registers each device.
+            prebuild = pkgs.runCommand "prebuild-check" { nativeBuildInputs = [ pkgs.python3 ]; } ''
+              # The modules, their ports (ark-module's src), each app's
+              # app.toml, and ark-ffi's, which registers the phones' devices.
+              cd ${only ([ "ui/prebuild.py" "ui/theme.py" "ui/theme.toml" "modules" "ui/rust/module/src" "rust/ark-ffi/Cargo.toml" ]
+                ++ lib.filter (p: builtins.pathExists (./. + "/${p}"))
+                  (lib.concatMap (d: [ "${d}/app.toml" "${d}/icon.svg" ]) arkApps))}
+              export ARK_CARGO_METADATA=${cargoMetadata}
+              python3 ui/prebuild.py check
+              touch $out
+            '';
+            # The layers held (layers.toml, ui/docs/app.md "Layers"): every
+            # workspace member in one layer, and no dependency a layer may
+            # not use but those layers.toml's [allow] lists until fixed —
+            # read from `cargo metadata`, so it holds whatever builds them.
+            layers = pkgs.runCommand "layers" { nativeBuildInputs = [ rust pkgs.python3 ]; } ''
+              cd ${only (rustDirs ++ [ "layers.toml" "tools/layers.py" ])}/rust
+              export CARGO_HOME=$TMPDIR/cargo
+              cargo metadata --no-deps --offline --format-version 1 | python3 ../tools/layers.py ../layers.toml
+              touch $out
+            '';
             theme-contrast = pkgs.runCommand "theme-contrast" { nativeBuildInputs = [ pkgs.python3 ]; } ''
-              python3 ${./arkui}/theme.py contrast
+              python3 ${./ui}/theme.py contrast
               touch $out
             '';
             # The fleet run mixed (docs/plan-db.md D1): every pinned
@@ -1560,20 +2180,21 @@
                 build = docsCrate;
                 unified = null;
                 crates = [ { packageId = "docs"; member = "docs/site"; } ];
-                dirs = [ "docs/site" "rust/arkui" "rust/Cargo.toml" ];
+                dirs = [ "docs/site" "ui/rust/arkui" "ui/rust/glyphs" "ui/rust/web" "rust/Cargo.toml" ];
               })
             ] ++ memberClippy (args: docsCrate (removeAttrs args [ "unified" ])) { packageId = "docs"; });
             # The workspace formatted as each crate's rustfmt.toml says.
-            fmt = rustfmtCheck "arkdb" (only rustDirs);
+            fmt = rustfmtCheck "arkdb" (only (rustDirs ++ [ "ui/rustfmt.toml" ]));
             # harken's domain crate builds, and its schema's hash is the one
             # pinned (harken/domain/tests/port.rs).
             inherit harken-domain;
-            # The bridge (§1.16, N3): ark-ffi, harken/ffi and money/ffi build
-            # natively, their tests drive the whole surface in the process (a
-            # server in it, a mutate and its refusal, a view's patches, the
-            # live space, alone and joining, a hall of devices, money's demo)
-            # and hold the generated Kotlin and Swift to the domains; and
-            # UniFFI writes the Kotlin and the Swift for both libraries.
+            # The bridge (§1.16, N3): ark-ffi and harken/ffi build natively,
+            # their tests drive the whole surface in the process (a server in
+            # it, a mutate and its refusal, a view's patches, the live space,
+            # alone and joining, a hall of devices) and hold the generated
+            # Kotlin and Swift to the domains; and UniFFI writes the Kotlin and
+            # the Swift for harken's library and money's generated one (whose
+            # Rust money-app's tests/phone.rs drives).
             ffi =
               let
                 bindings = app: out: ''
@@ -1587,7 +2208,8 @@
                 crates = [
                   { packageId = "ark-ffi"; member = "rust/ark-ffi"; }
                   { packageId = "harken-ffi"; member = "harken/ffi"; }
-                  { packageId = "money-ffi"; member = "money/ffi"; }
+                  # The scanner's corner model (modules/ark-scanner/tests/model.rs).
+                  { packageId = "ark-scanner"; member = "modules/ark-scanner"; features = [ "default" "model" ]; }
                 ];
                 dirs = rustDirs ++ genDirs;
                 postCheck = ''
@@ -1596,9 +2218,14 @@
                   grep -q "class Peer" "$TMPDIR/bindings/kotlin/dev/arkdb/ffi/ark_ffi.kt"
                   grep -q "func harkenOpen" "$TMPDIR/bindings/swift/harken_ffi.swift"
                   ${bindings moneyFfi "$TMPDIR/money"}
-                  grep -q 'fun `moneyOpen`' "$TMPDIR/money/kotlin/dev/money/ffi/money_ffi.kt"
-                  grep -q "class TxnLineView" "$TMPDIR/money/kotlin/uniffi/money_domain/money_domain.kt"
-                  grep -q "func moneyDemo" "$TMPDIR/money/swift/money_ffi.swift"
+                  # money's generated library (nix/ark-app.nix): its host, its twins, its route.
+                  grep -q "class MoneyHost" "$TMPDIR/money/kotlin/uniffi/money_ffi/money_ffi.kt"
+                  grep -q "class MoneyChange" "$TMPDIR/money/kotlin/uniffi/money_ffi/money_ffi.kt"
+                  grep -q "func routeFromUrl" "$TMPDIR/money/swift/money_ffi.swift"
+                  # Every client's formatting, linked into each library.
+                  grep -q "func formatAmount" "$TMPDIR/money/swift/ark_format.swift"
+                  grep -q "func formatLength" "$TMPDIR/bindings/swift/ark_format.swift"
+                  grep -q 'fun `formatLength`' "$TMPDIR/bindings/kotlin/uniffi/ark_format/ark_format.kt"
                 '';
                 # The bindings it wrote: harken's, which the iOS type-check
                 # reads, and money's under `money/`, which money's reads.
@@ -1612,7 +2239,7 @@
             # SwiftUI. The views are SwiftUI's and are not checked here.
             harken-ios-typecheck = pkgs.swiftPackages.stdenv.mkDerivation {
               name = "harken-ios-typecheck";
-              src = only [ "harken/ios" "rust/ark-ffi/swift" "swift/ArkUI" ];
+              src = only [ "harken/ios" "rust/ark-ffi/swift" "ui/swift" ];
               nativeBuildInputs = [ pkgs.swift ];
               buildInputs = [ pkgs.swiftPackages.Foundation pkgs.swiftPackages.Dispatch ];
               # nixpkgs' Swift 5.8 on Linux reports x86_64-pc-linux-gnu where
@@ -1631,12 +2258,13 @@
               '';
               installPhase = "touch $out";
             };
-            # The same for money's iOS app (money/ios/tools/typecheck.sh): its
-            # budget arithmetic, first run, session and model with the generated
-            # types, UniFFI's Swift for money's library and ArkUICore.
+            # The same for money's (ui/swift/typecheck.sh): what of the app
+            # library and its device modules Linux can read, against UniFFI's
+            # Swift for money's library and ArkUICore. money has no Swift of
+            # its own.
             money-ios-typecheck = pkgs.swiftPackages.stdenv.mkDerivation {
               name = "money-ios-typecheck";
-              src = only [ "money/ios" "rust/ark-ffi/swift" "swift/ArkUI" ];
+              src = only [ "money/app.toml" "modules" "rust/ark-ffi/swift" "ui/swift" "ui/prebuild.py" ];
               nativeBuildInputs = [ pkgs.swift ];
               buildInputs = [ pkgs.swiftPackages.Foundation pkgs.swiftPackages.Dispatch ];
               buildPhase = ''
@@ -1647,7 +2275,8 @@
                 chmod u+w bindings/*
                 sed -i 's/nonisolated(unsafe) //' bindings/*.swift
                 SWIFT_EXEC=$PWD/bin/swiftc-here TYPED=$PWD/rust/ark-ffi/swift/Typed.swift \
-                  bash money/ios/tools/typecheck.sh bindings
+                  ARK_MODULES="${lib.concatMapStringsSep " " (m: m.name) (arkApp.modulesOf (arkApp.read "money"))}" \
+                  bash ui/swift/typecheck.sh money bindings
               '';
               installPhase = "touch $out";
             };
@@ -1664,10 +2293,11 @@
           };
 
           # Everything the workflows publish, as data, and the one list of
-          # the apps: a page goes up at k2on.github.io/apps/<name>/, an APK
-          # into the F-Droid repository (and onto a tag's release), an
-          # iPhone app to TestFlight (ios.yaml); and each app with
-          # <name>/screens/shots.json is photographed on the phones and the
+          # the apps, each in two release channels (docs/releasing.md,
+          # nix/channels.nix): a page goes up at k2on.github.io/apps/<path>/,
+          # an APK into the channel's F-Droid repository (and a tag's onto
+          # its release), an iPhone app to TestFlight from a tag (ios.yaml); and each app with
+          # <name>/demo/shots.json is photographed on the phones and the
           # desktop it is listed for (app-screens.yaml). Adding one is adding it here; the
           # workflow builds each in a job of its own.
           #
@@ -1681,23 +2311,43 @@
           publish =
             let
               key = drv: builtins.substring 0 32 (baseNameOf (builtins.unsafeDiscardStringContext drv.drvPath));
-              page = name: package: title: about: { inherit name package title about; key = key self.packages.${pkgs.system}.${package}; };
+              # A page's channel is the deploy that publishes it
+              # (.github/channels.sh): main's (unstable) or a tag's
+              # (stable); `path` is where under the site, and `demo` says
+              # the site links it with `?demo`.
+              page = name: package: title: about: { channel ? "unstable", path ? name, demo ? false }: {
+                inherit name package title about channel path demo;
+                key = key self.packages.${pkgs.system}.${package};
+              };
+              # An APK and its unstable twin (nix/channels.nix): build.yaml
+              # builds the stable one on a tag and a pull request, the
+              # unstable one on main (.github/channels.sh `plan`).
               apk = name: app: { first ? [ ] }: {
                 inherit name first;
                 package = "${name}-apk";
-                tests = "${name}-android-tests";
                 file = "${name}.apk";
                 key = key (app.apk.overrideAttrs (_: { versionFlags = [ ]; }));
+                stable = channels.enabled name "stable";
+                unstable = lib.optionalAttrs (channels.enabled name "unstable") {
+                  package = "${name}-unstable-apk";
+                  key = key (app.apkUnstable.overrideAttrs (_: { versionFlags = [ ]; }));
+                };
               };
               # An iPhone app (ios.yaml builds and sends each; app-screens.yaml
               # photographs each): `App` its scheme and product; whether it goes
-              # to TestFlight (its App Store Connect record must exist), and
-              # whether its tests run. Its key is its archive's: the archive
+              # to TestFlight from a tag (its App Store Connect record must
+              # exist). Its key is its archive's: the archive
               # has no build number in it (ios.yaml gives it one), so it moves
               # only with what the app is built from.
-              iphone = name: App: { testflight ? true, test ? false }:
+              #
+              # `unstable` is the hook for a second TestFlight app,
+              # `<bundle>.unstable`, which main would send (ios.yaml): its
+              # app.toml's `[channels] ios-unstable`, off for every app until
+              # its App Store Connect record exists.
+              iphone = name: App: { testflight ? true }:
                 let archive = self.packages.aarch64-darwin."${name}-ios-archive"; in {
-                  inherit name App testflight test;
+                  inherit name App testflight;
+                  unstable = channels.enabled name "ios-unstable";
                   inherit (archive) bundle;
                   package = "${name}-ios-archive";
                   key = key archive;
@@ -1705,9 +2355,8 @@
             in
             {
               pages = [
-                (page "harken" "harken-web" "harken" "the browser peer: the same engine compiled to wasm. Open it alone to run it entirely in the tab, or point it at a harken server.")
-                (page "docs" "docs" "docs" "the components every app here shares (arkui), a page each, pictured by arkui itself, and catalogue.json beside it.")
-              ];
+                (page "docs" "docs" "docs" "the components every app here shares (arkui), a page each in an ArkUI app written as static HTML, with live arkui-web parts, pictures drawn by arkui itself, and catalogue.json beside it." { })
+              ] ++ map (p: page (lib.replaceStrings [ "/" ] [ "-" ] p.path) p.package p.title p.about { inherit (p) channel path; demo = true; }) webPages;
               apks = [
                 # The kernel for every ABI first, so its failure reads on its own.
                 (apk "harken" harken { first = [ "harken-android-lib" ]; })
@@ -1717,7 +2366,7 @@
               ];
               ios = [
                 (iphone "harken" "Harken" { })
-                (iphone "money" "Money" { test = true; })
+                (iphone "money" "Money" { })
               ];
               # The desktop windows (`<name>-iced`), published nowhere yet but
               # photographed beside the phones (app-screens.yaml), each built
@@ -1741,12 +2390,6 @@
             rust = pkgs.mkShell ({
               packages = [ (rust.override { extensions = [ "rust-src" "rust-analyzer" ]; }) pkgs.pkg-config ];
             } // cargoJobs);
-            # What `nix build .#harken-web` builds with, for doing it by hand
-            # (harken/iced/README.md); pages.yml also keeps it as a gc root so
-            # the cached store holds the wasm-bindgen CLI it compiled.
-            harken-web = pkgs.mkShell {
-              packages = [ wasmRust wasm-bindgen-cli pkgs.binaryen ];
-            };
             default = pkgs.mkShell ({
               packages = [ rust pkgs.pkg-config ];
             } // cargoJobs);

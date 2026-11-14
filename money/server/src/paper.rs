@@ -920,15 +920,15 @@ fn scopeguard(file: &std::path::Path) -> Gone {
 
 impl Paper {
     /// As the app is told it.
-    pub fn told(&self) -> money_domain::setup::PaperReceipt {
-        let line = |l: &Line| money_domain::setup::PaperLine {
+    pub fn told(&self) -> money_core::setup::PaperReceipt {
+        let line = |l: &Line| money_core::setup::PaperLine {
             name: l.name.clone(),
             sku: l.sku.clone(),
             cents: l.cents,
             qty: l.qty,
             detail: l.detail.clone(),
         };
-        money_domain::setup::PaperReceipt {
+        money_core::setup::PaperReceipt {
             store: self.store.clone(),
             date: self.date.clone(),
             items: self.items.iter().map(line).collect(),

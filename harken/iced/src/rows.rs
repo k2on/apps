@@ -83,6 +83,19 @@ impl Playlist {
     pub fn from_bytes(b: &[u8]) -> Playlist {
         crate::domain::Playlist::from_bytes(b).map_or_else(|_| Playlist::default(), Playlist::from)
     }
+
+    /// Its id as a route carries it (`Id::hex`).
+    pub fn hex(&self) -> String {
+        crate::peer::key::<crate::domain::Playlist>(self.id).hex()
+    }
+
+    /// Its page: by its id, its name to read and to draw.
+    pub fn route(&self) -> crate::routes::Route {
+        crate::routes::Route::Playlist {
+            id: self.hex(),
+            name: self.name.clone(),
+        }
+    }
 }
 
 /// A record, as the albums page lists it (`albums`).

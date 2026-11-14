@@ -6,23 +6,54 @@ runs on ArkDB at spec v5, as harken does: one domain in plain Rust, every
 figure a view kept up to date by the rows a change touched.
 
 ```
-domain/    the domain, in plain Rust (spec/AUTHORING.md): src/schema.rs,
-           types.rs, dates.rs; accounts.rs, categories.rs, budget.rs,
-           transactions.rs; plaid.rs, the bank import; receipts.rs and
-           stores.rs, the stores' receipts; migrations.rs. The demo's
-           household is beside the app, in seed/
-server/    money-server: the hub, sign-in, the browser client, and the
-           bank importer (src/importer.rs, Plaid over src/plaid.rs);
-           nix/module.nix is services.money
-iced/      the client, desktop and browser, on arkui and ark-peer: signed
-           in to a server, or (--features demo) a seeded household on a
-           peer that is its own authority
-ffi/       the library the phones load (ffi/README.md): ark-ffi with the
-           domain linked in, typed views, the demo, a server in the process
-ios/       the iPhone app (ios/README.md): SwiftUI on ffi/, with the demo
-android/   the Android app (android/README.md): Material You on ffi/,
-           over kotlin/arkui, the look it shares with harken
+app.toml        what money is to every platform: its name, id, accent,
+                platforms, its phones' shell (`[shell]`) and what it asks of
+                each (ui/docs/app.md, "Generated, Not Committed"); every
+                native project is generated from it and the Rust views:
+                `nix run .#money-prebuild` writes them into .native/
+icon.svg        its icon, every platform's
+core/           the domain, in plain Rust (spec/AUTHORING.md): src/schema.rs,
+                types.rs, dates.rs; accounts.rs, categories.rs, budget.rs,
+                transactions.rs; plaid.rs, the bank import; receipts.rs and
+                stores.rs, the stores' receipts; migrations.rs
+app/            money as an Ark app: the screens' state, messages, update and
+                #[view]s, drawn by iced and the browser and generated as
+                SwiftUI and Compose; its part of every host (src/host.rs)
+server/         money-server: the hub, sign-in, a web directory if given one,
+                the bank importer (src/importer.rs, Plaid over src/plaid.rs);
+                nix/module.nix is services.money
+demo/           the demo's household on a peer and a disk (`money-seed DATA`),
+                the screenshots' shots.json and server.sh
+iced/           the desktop client, on arkui and ark-peer: signed in to a
+                server, or (--features demo) a seeded household on a peer
+                that is its own authority (going: ui/docs/app.md, "The
+                Desktop's Own Pages, Moved")
+debug.keystore  the one key every Android build signs with (below)
 ```
+
+## The phones
+
+Nothing of money's phones is written by hand. Their library is generated
+from app.toml (`[ffi]`), their screens from money-app's views, and their
+shell is the app library's (ArkApp's and ark-app-android's `ArkShell`):
+the sections and their tabs, toolbars, search and inspectors are the
+shell's view (`app/src/shell/view.rs`); which screen is hosted where, what
+goes over every section (the sheets), Settings and the menu bar's commands
+are app.toml's `[shell]`. A route is one of the shell's places on every
+platform: an account is its section (Accounts pushes it on a phone), a
+bank Connected Banks in Settings. The look is arkui's in money's green, an
+account's mark its kind's glyph in its chart slot's colour (`accounts::
+kind_glyph`, `kind_slot`), drawn by ArkUI's `MarkTile`.
+
+**One key, committed, and public on purpose.** `debug.keystore` is the key
+every Android build signs with, debug and release, so one APK installs over
+the last, for the reasons harken's README gives; its certificate's SHA-256
+is `125e43a7…646a6afa`. It is a PKCS#12 file made with openssl, which
+`storeType = "pkcs12"` says. Anyone can sign an APK as this app with it.
+F-Droid offers money from the same repository as harken and Revelation
+(`nix/fdroid.nix`; its metadata is app.toml's `[store]`, written out by
+`ui/prebuild.py fdroid`, and its icon icon.svg). Its Maven graph is ArkUI's
+(ui/kotlin/android/deps.json).
 
 The phones sign in the way the browser does (below).
 
@@ -313,16 +344,23 @@ end-to-end check walked Actual through, using the same mock answers.
 ```
 MONEY_DEV_AUTH=1 cargo run -p money-server        # from rust/; 127.0.0.1:8788
 cargo run -p money-iced -- --server http://127.0.0.1:8788 --user alice
-nix build .#money-server .#money-web-server       # what services.money runs
+nix build .#money-server                          # what services.money runs
 ```
 
 `money-server` is harken-server's shape around money's domain
 (`server/src/lib.rs`): the log on the hub, the sync socket at `/sync`,
 the sign-in routes under `/auth`, `/healthz` (which says `domain <schema
 hash> <version> current`, what a phone holds its build to), and the
-browser client at `/`; state in the data directory. Everything is the
-environment, under `MONEY_` (`money-server --help`; `Config::from_env`
-lists it), which the NixOS module writes.
+browser client at `/`; state in the data directory. It is one process
+and one NixOS service for all of it: the browser client is money-web, the
+SPA (app.toml's `[web] modes`; ui/docs/app.md, "The Browser's Modes"),
+whose build the `money-server` package carries as its default `MONEY_WEB`
+and serves through ark-peer's `web::Site` beside the socket, a deep link
+answered with its index.html, every file with the build as its validator,
+and money's own middleware (`/healthz`) over everything
+(`Server::layer`). Everything is the environment, under `MONEY_`
+(`money-server --help`; `Config::from_env` lists it), which the NixOS
+module writes.
 
 **Signing in.** The server is the only OpenID Connect client, a
 confidential one: it holds the secret, and the provider is told one
@@ -333,6 +371,30 @@ login whose token opens the socket. The browser comes back to its own
 page, the desktop to a loopback port, and a phone to `money://…` — the
 scheme every money server allows. Whoever the provider lets in is the
 household.
+
+**The browser** is a client like the others (`web/src/live.rs`). The
+page the server serves walks the sign-in machine every shell walks
+(`ark_auth::onboarding`): with nobody signed in it goes to `/auth/login`
+by itself, once a load, comes back to its own address with the code and
+trades it at `POST /auth/session`, which answers the login without its
+token and keeps the token in the session cookie, `ark-session`:
+`HttpOnly` (no script on the page reads it), `SameSite=Strict`, `Secure`
+behind https. The page's socket sends nothing as its first message, and
+the server takes the cookie — only from a page of its own origin (the
+upgrade's `Origin` is its `Host`; a proxy in front must pass `Host`
+through). What the page keeps in `localStorage` is who is signed in,
+never the token. Its replica is an ark-peer compiled to wasm, in memory:
+it fills at every load, shows every device's changes as they land,
+authors through the domain's mutators like every device, and keeps what
+was authored while the server was away to push when it is back (until
+the page is closed: no durable replica yet). `?demo` is the demo
+household in the page instead, with no server — the screenshots', and
+the public demo's (`money/demo/shots.json`'s `web.query`).
+
+`money-peer SERVER USER wait PAYEE | add PAYEE AMOUNT`
+(`server/src/peer.rs`, beside the server's binary) is another device with
+no window, signed in to a dev server by name: what
+`checks.money-web-sync` stands up beside the page (below).
 
 **The importer** (`server/src/importer.rs`) is a peer in the server's
 process, signed in as the account `bank` and holding the `bank` role,
@@ -424,7 +486,7 @@ and their accounts' choices live now.
 
 `money-iced` without features is the household's client, as harken-iced
 is (`iced/src/live.rs`): it opens this device's replica of the server's
-budget (`--server`, `?server=`, or whoever served the page), signs in as
+budget (`--server`), signs in as
 above, remembers the login per server, and pumps the socket when it
 rings. **Sync** there is `banks.sync`. **Settings**, as harken has them
 (the account button at the top right: its menu opens Settings and signs
@@ -434,16 +496,15 @@ lists each connection with how its last import went (a dim line), Reconnect (onl
 with one control for what it feeds, a menu: a new account of its kind (the cursor on the account another login to the bank feeds from the same last digits, when there is one), every account here, or
 nothing (`iced/src/banks.rs`); **Account** says who is signed in where,
 with Sign out (`iced/src/settings.rs`). Connecting opens Plaid's page as soon as
-the server answers: in the system's browser on the desktop; in a browser,
-in a tab opened empty at the click (a browser opens tabs only right after
-one) and pointed at the page when the answer arrives, with the page's
-link in Settings if the tab was blocked. `money-web-server` is that
-page, which `services.money` serves at `/`; `money-web` is the demo.
+the server answers, in the system's browser, with the page's link in
+Settings too. The browser client (`money-web`, generated from app.toml:
+arkui-web's `WebHost` over money-app's window, Leptos over the DOM) runs
+the same shell, signed in to the server that serves it and synced
+(above).
 
 ## The demo
 
 ```
-nix build .#money-web                       # the page, as GitHub Pages would serve it
 cargo run -p money-iced --features demo     # the window, from rust/
 ```
 
@@ -524,10 +585,24 @@ opened under Xvfb and each page looked at.
 sites serve it today; the phones built against the regenerated types; a real OpenID
 provider in front of this server (the routes are ark-auth's, which
 harken's deployment uses); the module on a booted machine (the timer's
-signal, the credentials, the hardening); the live window drawn, on the
-desktop or in a browser (the browser build compiles for wasm32 with and
-without `demo`), and the desktop's hand-off to a browser to sign in
-or to Plaid's page (the browser build's tab opened at the click is
-unverified in a real browser);
+signal, the credentials, the hardening); the live window drawn, and the desktop's hand-off to a browser to sign
+in or to Plaid's page;
 typing into the demo's fields under Xvfb; and a phone, which does not
 exist yet.
+
+**The browser, end to end** (`checks.money-web-sync`,
+`server/tests/web_sync.py`, in CI's build): money-server on the seeded
+household with dev auth, the SPA it serves in Playwright's headless
+Chromium. A bad code is said on the sign-in page with Sign In; Sign In
+goes to the server's sign-in and back to the seeded household; the
+session is the `HttpOnly`, `SameSite=Strict` cookie and nothing in
+`localStorage` holds the token; a transaction added through New
+Transaction reaches `money-peer`, and one `money-peer` adds appears on
+the page without a reload; one added while the server is stopped
+reaches `money-peer` once the server is back on the same data; and a
+reload is still signed in. Its screenshots are the check's output. The
+socket's half is `server/tests/server.rs` (a page's cookie is its
+session from the server's own origin, and nobody from another). Not
+verified for the browser: a real provider's sign-in page, a proxy in
+front, Safari and Firefox, a phone's browser, and a session expiring
+while the page is open.

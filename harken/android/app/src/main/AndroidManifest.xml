@@ -11,6 +11,10 @@
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
+    <!-- allowBackup="false" keeps the app out of backups; the rules keep the
+         secure store's file (modules/ark-secure-store, the login's
+         ciphertext) out of a device-to-device transfer too, which on
+         Android 12 and later allowBackup alone does not. -->
     <!-- enableOnBackInvokedCallback: the back gesture is predictive (Android 14
          and later), so a page shrinks back into its card under the finger and
          the full player comes down with it (Motion.kt, PlayerSheet.kt). -->
@@ -19,6 +23,8 @@
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:allowBackup="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:fullBackupContent="@xml/backup_rules"
         android:usesCleartextTraffic="true"
         android:enableOnBackInvokedCallback="true"
         android:theme="@android:style/Theme.DeviceDefault.NoActionBar">
@@ -40,6 +46,15 @@
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="harken" android:host="auth" />
+                <data android:scheme="harken" android:host="join" />
+            </intent-filter>
+            <!-- A link to a route (harken://album/…, the domain's `Route` path):
+                 navigated to (ark-ui's Links and Navigator). -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="harken" />
             </intent-filter>
         </activity>
         <!-- The player and the media library (Playback.kt, Car.kt): what the

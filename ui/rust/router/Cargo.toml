@@ -1,0 +1,15 @@
+[package]
+name = "ark-router"
+workspace = "../../../rust"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+description = "How an app's routes are spelled as one string: the path every shell uses for a route — the address bar, a deep link, a notification's target, a restored back stack."
+
+# No UI: a domain spells its `Route` enum with this (`harken/domain`'s and
+# `money/core`'s `routes.rs`), and arkui's router writes that path into
+# the address bar.
+
+[dependencies]
+# `#[derive(Routes)]`, which writes a route enum's paths.
+ark-router-macros = { path = "../router-macros" }

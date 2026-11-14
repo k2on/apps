@@ -25,7 +25,8 @@
 package dev.harken.android.onboarding
 
 import android.content.Context
-import dev.arkdb.ffi.Login
+import dev.arkdb.auth.Login
+import dev.arkui.modules.PhoneSecureStore
 import dev.harken.android.gen.Device
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -216,7 +217,8 @@ public object ArkSessions {
      * opens.
      */
     public fun remembered(context: Context): Pair<String, Login>? {
-        val r = Remembered(PrefsShelf(context.applicationContext ?: context))
+        val ctx = context.applicationContext ?: context
+        val r = Kept(PrefsShelf(ctx), PhoneSecureStore(ctx)).remembered
         val server = r.server ?: return null
         val login = r.login ?: return null
         return server to login
@@ -242,7 +244,8 @@ public object ArkSessions {
     // A denial with no onboarding in front of it forgets the login as the onboarding would, so the
     // next end to ask finds nothing to open rather than a login the server has refused.
     private fun forget(ctx: Context, login: Login) {
-        val r = Remembered(PrefsShelf(ctx))
-        if (r.login?.session == login.session) r.login = null
+        val k = Kept(PrefsShelf(ctx), PhoneSecureStore(ctx))
+        val r = k.remembered
+        if (r.login?.session == login.session) k.remembered = r.copy(login = null)
     }
 }

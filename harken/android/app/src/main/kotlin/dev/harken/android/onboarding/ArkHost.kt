@@ -1,9 +1,10 @@
-// The onboarding, running: the [Onboarding] machine's step as state, and
-// its effects carried out — the probe and the exchange off the main
-// thread, the remembered store written, the browser opened, the session
-// held and closed. A `ViewModel`, so a configuration change keeps the
-// step and the session; the activity is only how a browser, a permission
-// dialog and a redirect reach it.
+// The onboarding, running: the sign-in machine (`ark_auth::onboarding`)
+// held, its step as state and its effects carried out — the probe and the
+// exchange off the main thread, the remembered store written, the browser
+// opened, the session held and closed — and the permissions an app asks
+// for, once, over the session opening beneath them. A `ViewModel`, so a
+// configuration change keeps the step and the session; the activity is
+// only how a browser, a permission dialog and a redirect reach it.
 //
 // **It holds the session; the process owns it** (Sessions.kt). Opening is
 // a [Hold] on the process's session for the login, which a media service
@@ -14,18 +15,23 @@
 // live state. Signing out and a denial close it for everyone.
 package dev.harken.android.onboarding
 
-import dev.arkui.server.Address
-import dev.arkui.server.Answer
-import dev.arkui.server.Found
-import dev.arkui.server.Health
-import dev.arkui.server.Probe
-
 import android.app.Application
 import android.content.Context
 import android.os.Build
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import dev.arkdb.auth.AppInfo
+import dev.arkdb.auth.Effect
+import dev.arkdb.auth.Event
+import dev.arkdb.auth.Found
+import dev.arkdb.auth.Login
+import dev.arkdb.auth.Onboarding
+import dev.arkdb.auth.Said
+import dev.arkdb.auth.Step
 import dev.arkdb.ffi.exchange
+import dev.arkdb.ffi.redeem
+import dev.arkui.modules.PhoneSecureStore
+import dev.arkui.server.Probe
 import dev.harken.ffi.harkenDomain
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -49,12 +55,17 @@ public class PrefsShelf(context: Context, name: String = "ark") : Shelf {
 public class ArkHost(app: Application) : AndroidViewModel(app) {
     private var machine: Onboarding? = null
     private var appName: String = ""
+    private var permissions: List<Permission> = emptyList()
     private var sessions: Sessions? = null
     private var hold: Hold? = null
-    private val remembered = Remembered(PrefsShelf(app))
+    private val kept = Kept(PrefsShelf(app), PhoneSecureStore(app))
 
-    private val _step = MutableStateFlow<Step>(Step.Server())
+    private val _step = MutableStateFlow<Step>(Step.Server("", false, null))
     public val step: StateFlow<Step> = _step.asStateFlow()
+
+    private val _said = MutableStateFlow(Said(null, null, null))
+    /** What the page says now: its question, what it waits on, its error. */
+    public val said: StateFlow<Said> = _said.asStateFlow()
 
     private val _session = MutableStateFlow<ArkSession?>(null)
     /** The session, while the app is running. */
@@ -64,6 +75,10 @@ public class ArkHost(app: Application) : AndroidViewModel(app) {
     private val _browse = MutableStateFlow<String?>(null)
     public val browse: StateFlow<String?> = _browse.asStateFlow()
 
+    private val _ask = MutableStateFlow<Permission?>(null)
+    /** The permission to ask before the app, while one is due: asked once, whatever the answer. */
+    public val ask: StateFlow<Permission?> = _ask.asStateFlow()
+
     /** A permission the activity is to ask the platform for, once. */
     private val _request = MutableStateFlow<Permission?>(null)
     public val request: StateFlow<Permission?> = _request.asStateFlow()
@@ -72,10 +87,10 @@ public class ArkHost(app: Application) : AndroidViewModel(app) {
     public fun begin(identity: AppIdentity, permissions: List<Permission>) {
         if (machine != null) return
         appName = identity.name
+        this.permissions = permissions
         sessions = ArkSessions.of(getApplication(), SessionSpec(identity.device))
-        val m = Onboarding(permissions, Build.VERSION.SDK_INT, identity.scheme)
-        machine = m
-        apply(m.start(remembered.server, remembered.login, remembered.asked))
+        machine = Onboarding(AppInfo(identity.name, identity.scheme, false, "your library"))
+        send(Event.Launched(kept.remembered, null, false))
     }
 
     private val _ready = MutableStateFlow(false)
@@ -86,10 +101,16 @@ public class ArkHost(app: Application) : AndroidViewModel(app) {
      */
     public val ready: StateFlow<Boolean> = _ready.asStateFlow()
 
-    /** An event from a screen, a redirect or a dialog. */
+    /** An event from a screen, a redirect or the app's phase. */
     public fun send(event: Event) {
         val m = machine ?: return
-        apply(m.next(_step.value, event, remembered.asked))
+        if (event is Event.Foreground) _session.value?.dialNow()
+        val effects = m.next(event)
+        val step = m.step()
+        _step.value = step
+        _said.value = m.said()
+        if (step !is Step.Running) _ready.value = true
+        for (e in effects) run(e)
     }
 
     /** The activity opened the browser, or asked the platform: forget the request. */
@@ -101,10 +122,15 @@ public class ArkHost(app: Application) : AndroidViewModel(app) {
         _request.value = null
     }
 
-    private fun apply(move: Move) {
-        _step.value = move.step
-        if (move.step !is Step.Running) _ready.value = true
-        for (e in move.effects) run(e)
+    /** "Allow" on a permission: the platform's dialog. */
+    public fun allow() {
+        _request.value = _ask.value
+    }
+
+    /** The permission answered — by the platform's dialog, or "Not now": the next, or the app. */
+    public fun answered() {
+        _ask.value?.let { kept.markAsked(it.key) }
+        _ask.value = pending(permissions, Build.VERSION.SDK_INT, kept.asked).firstOrNull()
     }
 
     private fun run(e: Effect) {
@@ -115,76 +141,67 @@ public class ArkHost(app: Application) : AndroidViewModel(app) {
                         withContext(Dispatchers.IO) {
                             Probe.find(e.typed, harkenDomain(), appName, Probe::http)
                         }
-                    send(Event.Checked(found))
+                    send(Event.Checked(found.machine()))
                 }
-            is Effect.RememberServer -> remembered.server = e.url
+            is Effect.Remember -> kept.remembered = e.remembered
             is Effect.Browse -> _browse.value = e.url
-            is Effect.Exchange ->
-                viewModelScope.launch {
-                    val answer =
-                        withContext(Dispatchers.IO) {
-                            try {
-                                Event.SignedIn(exchange(e.server, e.code))
-                            } catch (x: Exception) {
-                                Event.SignInFailed(
-                                    "Signing in didn't finish: ${x.message ?: "no answer"}. Try again.")
-                            }
-                        }
-                    send(answer)
-                }
-            is Effect.RememberLogin -> remembered.login = e.login
-            is Effect.ForgetLogin -> remembered.login = null
-            is Effect.Request -> _request.value = e.permission
-            is Effect.MarkAsked -> remembered.markAsked(e.key)
-            is Effect.OpenSession -> {
-                // At once: the session the process has open for this login — a media
-                // service's, say — or one opened now, whose peer opens on its own thread
-                // while the app's first screen is composed.
-                val server = e.server
-                val events =
-                    object : SessionEvents {
-                        override fun denied(reason: String) {
-                            viewModelScope.launch { send(Event.Denied(reason)) }
-                        }
-
-                        override fun signOut() {
-                            viewModelScope.launch { send(Event.SignOut) }
-                        }
-
-                        override fun failed(e: Exception) {
-                            viewModelScope.launch { failed(server) }
-                        }
-                    }
-                hold?.release()
-                val h = sessions!!.hold(e.server, e.login, "app", events)
-                hold = h
-                val s = h.session
-                _session.value = s
-                viewModelScope.launch {
-                    s.isReady.first { it }
-                    _ready.value = true
-                }
-                // Signed in just now: opening, until the replica has what the server had —
-                // or the server cannot be reached, and there is nothing more to wait for.
-                viewModelScope.launch {
-                    s.status.first { it.synced || it.link == "waiting" }
-                    if (_session.value === s) send(Event.Synced)
-                }
-            }
+            is Effect.Exchange -> trade { exchange(e.server, e.code) }
+            is Effect.Redeem -> trade { redeem(e.server, e.code) }
+            is Effect.OpenSession -> open(e.server, e.login)
+            is Effect.OpenDemo -> {}
             is Effect.CloseSession -> closeHeld()
         }
     }
 
-    // A replica that cannot be opened is not a reason to lose the login:
-    // signing in again opens it again.
-    private fun failed(server: String) {
-        closeHeld()
-        _step.value =
-            Step.SignIn(
-                server,
-                error =
-                    "This phone's copy of the library couldn't be opened. Sign in to try again.")
-        _ready.value = true
+    // A code traded off the main thread: the login, or the sentence why not.
+    private fun trade(f: () -> Login) {
+        viewModelScope.launch {
+            val answer =
+                withContext(Dispatchers.IO) {
+                    try {
+                        Event.SignedIn(f())
+                    } catch (x: Exception) {
+                        Event.SignInFailed(x.message ?: "no answer")
+                    }
+                }
+            send(answer)
+        }
+    }
+
+    // At once: the session the process has open for this login — a media service's, say — or
+    // one opened now, whose peer opens on its own thread while the app's first screen is
+    // composed. Any permission not yet asked is asked over it.
+    private fun open(server: String, login: Login) {
+        val events =
+            object : SessionEvents {
+                override fun denied(reason: String) {
+                    viewModelScope.launch { send(Event.Denied(reason)) }
+                }
+
+                override fun signOut() {
+                    viewModelScope.launch { send(Event.SignOut) }
+                }
+
+                override fun failed(e: Exception) {
+                    viewModelScope.launch { send(Event.OpenFailed(e.message ?: e.javaClass.simpleName)) }
+                }
+            }
+        hold?.release()
+        val h = sessions!!.hold(server, login, "app", events)
+        hold = h
+        val s = h.session
+        _session.value = s
+        _ask.value = pending(permissions, Build.VERSION.SDK_INT, kept.asked).firstOrNull()
+        viewModelScope.launch {
+            s.isReady.first { it }
+            _ready.value = true
+        }
+        // Signed in just now: opening, until the replica has what the server had — or the
+        // server cannot be reached, and there is nothing more to wait for.
+        viewModelScope.launch {
+            s.status.first { it.synced || it.link == "waiting" }
+            if (_session.value === s) send(Event.Synced)
+        }
     }
 
     // Closed for everyone: signing out, a denial, a replica that cannot be opened.
@@ -192,6 +209,7 @@ public class ArkHost(app: Application) : AndroidViewModel(app) {
         _session.value?.let { sessions?.close(it) }
         hold = null
         _session.value = null
+        _ask.value = null
     }
 
     /**
@@ -204,3 +222,10 @@ public class ArkHost(app: Application) : AndroidViewModel(app) {
         hold = null
     }
 }
+
+/** What ArkUI's probe found, as the machine takes it. */
+internal fun dev.arkui.server.Found.machine(): Found =
+    when (this) {
+        is dev.arkui.server.Found.Server -> Found.Server(url, newer)
+        is dev.arkui.server.Found.Failed -> Found.Failed(why)
+    }

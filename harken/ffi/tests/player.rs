@@ -1,13 +1,15 @@
 //! A phone's player (S3b) against harken's own session: real peers of the
 //! kernel in a [`Hall`] (a harken server in the process, which runs the
 //! domain's transitions and hooks), harken's one reconciler behind the
-//! phone's FFI ([`Player`]), and a stand-in player ([`Fake`], what
-//! ExoPlayer is to the phone). The phone's reconciler tests
-//! (`RemoteTests.kt`), moved here with the reconciler: the output obeying
+//! phone's FFI ([`Player`]) over the phone's own queue (`MediaSound`), and
+//! a stand-in media player ([`Fake`], what AVPlayer and ExoPlayer are to
+//! the phones, through `ark-media-player`'s `NativeMediaPlayer`). The phone's reconciler,
+//! case by case: the output obeying
 //! and nobody else sounding, a track's end said once, the session following
 //! the phone and the phone following a seek, a play recorded once by the
 //! output alone, both branches of coming back, a phone unlinked being its
-//! own session, a stall, a press, and the phone's own volume; and the
+//! own session, a stall, a press, the phone's own volume, the lock
+//! screen's buttons and what it shows; and the
 //! desktop's one case the phone's lacked, a hand-off picking up where the
 //! track stopped.
 //!
@@ -17,10 +19,14 @@
 use std::sync::{Arc, Mutex};
 
 use ark_ffi::Peer;
+use ark_media_player::phone::{MediaListener, NativeMediaPlayer};
+use ark_media_player::{BrowseItem, MediaControls, MediaEvent, NowPlaying, RemoteCommand, RouteChange};
 use harken_domain::{Active, Clock, Id, Output, Present, Track};
-use harken_ffi::{Hall, Loudness, PhoneSound, Player, SoundState};
+use harken_ffi::{Hall, Loudness, Player, PlayerShell};
 use harken_player::{Change, Level, Press, SYNC_MS};
 use serde_json::{json, Value};
+
+const SERVER: &str = "http://harken.test";
 
 /// A track of a test's queue: `n` names it, and it is `ms` long.
 fn track(title: &str, n: u8, ms: i64) -> Track {
@@ -40,142 +46,152 @@ fn queue() -> Vec<Track> {
     vec![track("a", 1, 100_000), track("b", 2, 100_000)]
 }
 
-/// A phone's media stream as `AudioManager` keeps it: fifteen steps and a
-/// mute, every write counted.
-#[derive(Clone, Copy, Debug)]
-struct Stream {
-    index: i64,
-    muted: bool,
-    writes: u32,
-}
-
-const STEPS: i64 = 15;
-
-/// A player that does what it is told, and moves only when a test says so.
+/// What a media player was told, as a test reads it.
 #[derive(Default)]
 struct State {
-    queue: Vec<Track>,
-    index: i64,
+    /// The track loaded, by its title (`music/<title>.mp3`).
+    title: Option<String>,
     playing: bool,
-    buffering: bool,
     position_ms: i64,
-    ended: bool,
-    from: String,
-    stalled: bool,
     loads: u32,
-    jumps: u32,
     seeks: u32,
-    wake: Option<i64>,
-    stream: Option<Stream>,
+    volume: Option<f32>,
+    shown: Option<NowPlaying>,
+    controls: Option<MediaControls>,
+    listener: Option<Arc<dyn MediaListener>>,
 }
 
+/// A media player that does what it is told at once and says so, as a
+/// phone's would a moment later; and moves by itself only when a test says
+/// (a track's end, an interruption, a read of where it is).
 struct Fake(Mutex<State>);
 
 impl Fake {
-    fn new(stream: Option<i64>) -> Arc<Fake> {
-        Arc::new(Fake(Mutex::new(State {
-            index: -1,
-            stream: stream.map(|index| Stream {
-                index,
-                muted: false,
-                writes: 0,
-            }),
-            ..State::default()
-        })))
+    fn new() -> Arc<Fake> {
+        Arc::new(Fake(Mutex::new(State::default())))
     }
 
     fn s(&self) -> std::sync::MutexGuard<'_, State> {
         self.0.lock().unwrap()
     }
 
-    /// The track played to its end, and the player went on to the next as
-    /// ExoPlayer does — or, at the last, stopped there.
-    fn finish(&self) {
-        let mut s = self.s();
-        if (s.index + 1) < s.queue.len() as i64 {
-            s.index += 1;
-            s.position_ms = 0;
-        } else {
-            s.ended = true;
-            s.position_ms = s.queue[s.index as usize].duration_ms;
+    fn tell(&self, e: MediaEvent) {
+        let l = self.s().listener.clone();
+        if let Some(l) = l {
+            l.heard(e)
         }
+    }
+
+    /// Where it is, read: as a player says it now and then while it plays.
+    fn at(&self, ms: i64) {
+        self.s().position_ms = ms;
+        self.tell(MediaEvent::Position { at_ms: ms });
+    }
+
+    /// The track played to its end: the queue's next follows by itself.
+    fn finish(&self) {
+        self.s().playing = false;
+        self.tell(MediaEvent::Ended);
+    }
+
+    /// The system took the audio (a call), at `ms`: it paused.
+    fn interrupt(&self, ms: i64) {
+        self.at(ms);
+        self.s().playing = false;
+        self.tell(MediaEvent::Interrupted);
+        self.tell(MediaEvent::Paused);
+    }
+
+    /// A button of the system's: the lock screen's, a headset's.
+    fn remote(&self, c: RemoteCommand) {
+        self.tell(MediaEvent::Remote { command: c });
+    }
+
+    fn title(&self) -> Option<String> {
+        self.s().title.clone()
     }
 }
 
-impl PhoneSound for Fake {
-    fn state(&self) -> SoundState {
-        let s = self.s();
-        SoundState {
-            queue: s.queue.iter().map(|t| t.id.hex()).collect(),
-            index: s.index,
-            playing: s.playing,
-            buffering: s.buffering,
-            position_ms: s.position_ms,
-            ended: s.ended,
-            from: s.from.clone(),
+impl NativeMediaPlayer for Fake {
+    fn load(&self, url: String, at_ms: i64) {
+        {
+            let mut s = self.s();
+            let title = url.rsplit('/').next().unwrap_or_default().trim_end_matches(".mp3").to_string();
+            (s.title, s.position_ms, s.playing) = (Some(title), at_ms, false);
+            s.loads += 1;
         }
+        self.tell(MediaEvent::Loaded { duration_ms: 100_000 });
     }
 
-    fn take_stalled(&self) -> bool {
-        std::mem::take(&mut self.s().stalled)
-    }
-
-    fn tracks(&self) -> String {
-        serde_json::to_string(&self.s().queue).unwrap()
-    }
-
-    fn load(&self, queue: String, at: i64, position_ms: i64, playing: bool, from: String) {
-        let mut s = self.s();
-        s.queue = serde_json::from_str(&queue).unwrap();
-        (s.index, s.position_ms, s.playing, s.from, s.ended) = (at, position_ms, playing, from, false);
-        s.loads += 1;
-    }
-
-    fn jump(&self, at: i64, position_ms: i64) {
-        let mut s = self.s();
-        (s.index, s.position_ms, s.ended) = (at, position_ms, false);
-        s.jumps += 1;
-    }
-
-    fn resume(&self) {
-        let mut s = self.s();
-        (s.playing, s.ended) = (true, false);
+    fn play(&self) {
+        self.s().playing = true;
+        self.tell(MediaEvent::Playing);
     }
 
     fn pause(&self) {
         self.s().playing = false;
+        self.tell(MediaEvent::Paused);
     }
 
-    fn seek(&self, ms: i64) {
-        let mut s = self.s();
-        (s.position_ms, s.ended) = (ms, false);
-        s.seeks += 1;
-    }
-
-    fn wake_in(&self, ms: i64) {
-        self.s().wake = Some(ms);
-    }
-
-    /// The stream's step as the session's 0 to 100.
-    fn volume(&self) -> Option<Loudness> {
-        self.s().stream.map(|st| Loudness {
-            level: ((st.index as f64) * 100.0 / STEPS as f64).round() as i64,
-            muted: st.muted,
-        })
-    }
-
-    /// A level as the stream's nearest step, then the mute.
-    fn set_volume(&self, level: i64, muted: bool) {
-        let mut s = self.s();
-        let Some(st) = &mut s.stream else { return };
-        let i = ((level.clamp(0, 100) as f64) * STEPS as f64 / 100.0).round() as i64;
-        if i != st.index {
-            st.index = i;
-            st.writes += 1;
+    fn seek(&self, at_ms: i64) {
+        {
+            let mut s = self.s();
+            s.position_ms = at_ms;
+            s.seeks += 1;
         }
-        if muted != st.muted {
-            st.muted = muted;
-            st.writes += 1;
+        self.tell(MediaEvent::Position { at_ms });
+    }
+
+    fn set_rate(&self, _: f32) {}
+
+    fn set_volume(&self, volume: f32) {
+        self.s().volume = Some(volume);
+    }
+
+    fn stop(&self) {
+        let mut s = self.s();
+        (s.title, s.playing) = (None, false);
+    }
+
+    fn set_now_playing(&self, info: Option<NowPlaying>) {
+        self.s().shown = info;
+    }
+
+    fn set_controls(&self, controls: MediaControls) {
+        self.s().controls = Some(controls);
+    }
+
+    fn set_children(&self, _: String, _: Vec<BrowseItem>) {}
+
+    fn set_listener(&self, listener: Option<Arc<dyn MediaListener>>) {
+        self.s().listener = listener;
+    }
+}
+
+/// The phone's end of its player: the wake it was last asked for, a cover
+/// for anything on an album, and (Android's) a media stream, or none (an
+/// iPhone's).
+#[derive(Default)]
+struct Shell(Mutex<Option<i64>>, Mutex<Option<Loudness>>);
+
+impl PlayerShell for Shell {
+    fn wake(&self, in_ms: i64) {
+        if in_ms > 0 {
+            *self.0.lock().unwrap() = Some(in_ms);
+        }
+    }
+
+    fn cover(&self, album: String, _: String) -> Option<String> {
+        (!album.is_empty()).then(|| format!("{SERVER}/art/{album}.jpg"))
+    }
+
+    fn volume(&self) -> Option<Loudness> {
+        *self.1.lock().unwrap()
+    }
+
+    fn set_volume(&self, level: i64, muted: bool) {
+        if let Some(v) = self.1.lock().unwrap().as_mut() {
+            *v = Loudness { level, muted };
         }
     }
 }
@@ -185,22 +201,25 @@ struct Device<'h> {
     peer: Arc<Peer>,
     player: Arc<Player>,
     sound: Arc<Fake>,
+    shell: Arc<Shell>,
     _dir: tempfile::TempDir,
 }
 
-fn on<'h>(hall: &'h Hall, id: &str, can_play: bool, kind: &str, stream: Option<i64>) -> Device<'h> {
+fn on<'h>(hall: &'h Hall, id: &str, can_play: bool, kind: &str) -> Device<'h> {
     let dir = tempfile::tempdir().unwrap();
     let said = json!({ "can_play": can_play, "id": "", "kind": kind, "name": id, "user": "" }).to_string();
     let peer = hall.device(dir.path().to_str().unwrap().into(), "alice".into(), id.into(), said).unwrap();
     let player = Player::new(peer.clone(), id.into(), Some(dir.path().to_str().unwrap().into()));
-    let sound = Fake::new(stream);
-    player.attach(Some(sound.clone()));
+    let sound = Fake::new();
+    let shell = Arc::new(Shell::default());
+    player.attach(Some(sound.clone()), SERVER.into(), Some(shell.clone()));
     hall.carry();
     Device {
         hall,
         peer,
         player,
         sound,
+        shell,
         _dir: dir,
     }
 }
@@ -240,6 +259,11 @@ impl Device<'_> {
 
     fn active(&self) -> Active {
         self.session().unwrap().session.unwrap()
+    }
+
+    /// What plays as the phone draws it: the session's, or its own alone.
+    fn drawn(&self) -> Active {
+        serde_json::from_value(self.view()["active"].clone()).unwrap()
     }
 
     fn calls(&self) -> u64 {
@@ -288,13 +312,12 @@ fn now() -> i64 {
 #[test]
 fn the_output_obeys_the_session_and_nobody_else_makes_a_sound() {
     let hall = Hall::new();
-    let phone = on(&hall, "phone", true, "phone", None);
-    let desk = on(&hall, "desktop", false, "computer", None);
+    let phone = on(&hall, "phone", true, "phone");
+    let desk = on(&hall, "desktop", false, "computer");
     phone.call("start", start(&queue(), 0, 0, "#album/Water%20Music"));
     phone.reconcile();
-    assert_eq!(phone.sound.s().queue, queue(), "the phone loaded what it pressed");
+    assert_eq!(phone.sound.title().as_deref(), Some("a"), "the phone loaded what it pressed");
     assert!(phone.sound.s().playing);
-    assert_eq!(phone.sound.s().index, 0);
     desk.reconcile();
     assert!(!desk.sound.s().playing, "the desktop makes no sound");
     assert_eq!(desk.sound.s().loads, 0, "and loads nothing");
@@ -309,12 +332,12 @@ fn the_output_obeys_the_session_and_nobody_else_makes_a_sound() {
     phone.reconcile();
     assert!(phone.sound.s().playing, "a play pressed on the desktop plays the phone");
 
-    let laptop = on(&hall, "laptop", true, "computer", None);
+    let laptop = on(&hall, "laptop", true, "computer");
     desk.call("transfer", json!({ "to": "laptop" }));
     phone.reconcile();
     laptop.reconcile();
     assert!(!phone.sound.s().playing, "the phone lost the sound and is silent");
-    assert!(laptop.sound.s().playing && laptop.sound.s().queue == queue());
+    assert!(laptop.sound.s().playing && laptop.sound.title().as_deref() == Some("a"));
     let s = laptop.session().unwrap();
     assert!(s.outputs("laptop") && !s.moving_to("laptop"), "the laptop said it had started");
     assert_eq!(phone.sound.s().loads, 1, "the phone loaded once");
@@ -332,8 +355,8 @@ fn the_output_obeys_the_session_and_nobody_else_makes_a_sound() {
 #[test]
 fn a_hand_off_picks_up_where_the_track_stopped() {
     let hall = Hall::new();
-    let phone = on(&hall, "phone", true, "phone", None);
-    let laptop = on(&hall, "laptop", true, "computer", None);
+    let phone = on(&hall, "phone", true, "phone");
+    let laptop = on(&hall, "laptop", true, "computer");
     phone.call("start", start(&queue(), 0, 40_000, ""));
     phone.reconcile();
     assert!(phone.sound.s().playing);
@@ -346,11 +369,13 @@ fn a_hand_off_picks_up_where_the_track_stopped() {
     assert_eq!(phone.active().position(now()), handed, "standing where it was");
     laptop.reconcile();
     assert_eq!(laptop.sound.s().position_ms, handed, "loaded where the track stopped");
+    laptop.sound.at(handed);
+    laptop.reconcile();
     let s = laptop.session().unwrap();
     assert!(s.outputs("laptop") && !s.moving_to("laptop"), "and said it had started");
     let a = s.session.unwrap();
     assert!(
-        matches!(a.clock, Clock::Playing { at_ms, .. } if at_ms == handed),
+        matches!(a.clock, Clock::Playing { at_ms, .. } if (at_ms - handed).abs() < 100),
         "started there: {:?}",
         a.clock
     );
@@ -372,17 +397,17 @@ fn a_hand_off_picks_up_where_the_track_stopped() {
 #[test]
 fn a_track_that_ends_is_said_once_and_the_next_one_plays() {
     let hall = Hall::new();
-    let phone = on(&hall, "phone", true, "phone", None);
+    let phone = on(&hall, "phone", true, "phone");
     phone.call("start", start(&queue(), 0, 0, ""));
     phone.reconcile();
     phone.sound.finish();
+    assert_eq!(phone.sound.title().as_deref(), Some("b"), "the next track, by itself");
     let calls = phone.calls();
     phone.reconcile();
     phone.reconcile();
     assert_eq!(phone.active().at, 1, "one track on");
     assert_eq!(phone.calls(), calls + 1, "said once");
-    assert_eq!(phone.sound.s().loads, 1, "the player was not loaded again");
-    assert_eq!(phone.sound.s().jumps, 0, "nor dragged back");
+    assert_eq!(phone.sound.s().loads, 2, "the next loaded once, by the player itself");
     assert!(phone.sound.s().playing);
 
     phone.sound.finish();
@@ -401,19 +426,19 @@ fn a_track_that_ends_is_said_once_and_the_next_one_plays() {
     assert_eq!(phone.sound.s().position_ms, 0);
 }
 
-/// The phone is right about where it is. ExoPlayer a second behind a clock
+/// The phone is right about where it is. A player a second behind a clock
 /// nobody touched is followed: the session is told where the player is
 /// (`report_position`), and the player is not sent a second ahead. Within
-/// the bound nothing is said; filling a buffer, nothing either; a seek on
-/// another device is the session moving, and the player goes there.
+/// the bound nothing is said; a seek on another device is the session
+/// moving, and the player goes there.
 ///
 /// Falsified by the old rule, the player always sent where the clock counts
 /// (the `moved` test taken out): "not sent ahead" failed.
 #[test]
 fn the_session_follows_the_phone_and_the_phone_follows_a_seek() {
     let hall = Hall::new();
-    let phone = on(&hall, "phone", true, "phone", None);
-    let desk = on(&hall, "desktop", false, "computer", None);
+    let phone = on(&hall, "phone", true, "phone");
+    let desk = on(&hall, "desktop", false, "computer");
     phone.call("start", start(&queue(), 0, 40_000, ""));
     phone.reconcile();
     let loaded = phone.sound.s().position_ms;
@@ -422,6 +447,7 @@ fn the_session_follows_the_phone_and_the_phone_follows_a_seek() {
 
     // A second on the clock, and the player has played none of it.
     std::thread::sleep(std::time::Duration::from_millis(1_000));
+    phone.sound.at(loaded);
     let seeks = phone.sound.s().seeks;
     phone.reconcile();
     assert_eq!(phone.sound.s().position_ms, loaded, "not sent ahead to where the clock counts");
@@ -429,30 +455,16 @@ fn the_session_follows_the_phone_and_the_phone_follows_a_seek() {
     let at = counted();
     assert!((at - loaded).abs() <= SYNC_MS, "the session is where the player is: {at}");
     let calls = phone.calls();
+    phone.sound.at(counted());
     phone.reconcile();
     assert_eq!(phone.calls(), calls, "and says it once");
 
-    // Within the bound, nothing either way; filling a buffer, nothing either.
-    let c = counted();
-    phone.sound.s().position_ms = c - SYNC_MS / 2;
+    // Within the bound, nothing either way.
+    phone.sound.at(counted() - SYNC_MS / 2);
     phone.reconcile();
     assert_eq!(phone.calls(), calls);
     assert_eq!(phone.sound.s().seeks, seeks);
-    let c = counted();
-    {
-        let mut s = phone.sound.s();
-        s.position_ms = c - 3_000;
-        s.buffering = true;
-    }
-    phone.reconcile();
-    assert_eq!(phone.calls(), calls);
-    assert_eq!(phone.sound.s().seeks, seeks);
-    let c = counted();
-    {
-        let mut s = phone.sound.s();
-        s.buffering = false;
-        s.position_ms = c;
-    }
+    phone.sound.at(counted());
 
     // A seek on the desktop is the session moving: the player goes.
     desk.call("seek", json!({ "ms": 100_000 }));
@@ -465,27 +477,27 @@ fn the_session_follows_the_phone_and_the_phone_follows_a_seek() {
 /// A play counts once it has played thirty seconds or half the track, once
 /// per load of a track, and only on the device making the sound — offline
 /// too, as a pending intent the server gets later. Short of the threshold
-/// the player is asked to wake the reconciler when it will be reached.
+/// the shell is asked to step when it will be reached.
 ///
 /// Falsified by counting on every look past the threshold (the `counted`
 /// flag never written): the second look authored a second play.
 #[test]
 fn a_play_is_recorded_once_by_the_output_alone() {
     let hall = Hall::new();
-    let phone = on(&hall, "phone", true, "phone", None);
-    let laptop = on(&hall, "laptop", true, "computer", None);
+    let phone = on(&hall, "phone", true, "phone");
+    let laptop = on(&hall, "laptop", true, "computer");
     phone.call("start", start(&queue(), 0, 29_000, "#album/Water%20Music"));
     phone.reconcile();
     assert_eq!(phone.plays().len(), 0, "not yet: half of a hundred seconds is fifty, thirty is first");
-    let wake = phone.sound.s().wake.unwrap_or(0);
+    let wake = phone.shell.0.lock().unwrap().unwrap_or(0);
     assert!((900..=1_100).contains(&wake), "a wake at the threshold: {wake}");
-    phone.sound.s().position_ms = 30_500;
+    phone.sound.at(30_500);
     phone.call("seek", json!({ "ms": 30_500 }));
     phone.reconcile();
     assert_eq!(phone.plays().len(), 1, "thirty seconds in: a play");
     phone.reconcile();
     assert_eq!(phone.plays().len(), 1, "once per play");
-    laptop.sound.s().position_ms = 40_000;
+    laptop.sound.at(40_000);
     laptop.reconcile();
     assert_eq!(laptop.view()["stats"]["plays"], 0, "a device watching records nothing");
     assert_eq!(phone.plays()[0]["from"], "#album/Water%20Music");
@@ -493,9 +505,9 @@ fn a_play_is_recorded_once_by_the_output_alone() {
 
     // Offline the phone is its own session, and a play is the log's all the same.
     drop_link(&phone);
-    phone.sound.jump(1, 0);
+    phone.press(Press::Skip { by: 1 });
     phone.reconcile();
-    phone.sound.s().position_ms = 31_000;
+    phone.sound.at(31_000);
     phone.reconcile();
     assert_eq!(phone.peer.status().pending, 1, "a play made offline, pending");
     assert_eq!(phone.plays().len(), 2);
@@ -511,8 +523,8 @@ fn a_play_is_recorded_once_by_the_output_alone() {
 #[test]
 fn coming_back_to_a_session_sounding_elsewhere_stops_this_phone() {
     let hall = Hall::new();
-    let phone = on(&hall, "phone", true, "phone", None);
-    let laptop = on(&hall, "laptop", true, "computer", None);
+    let phone = on(&hall, "phone", true, "phone");
+    let laptop = on(&hall, "laptop", true, "computer");
     phone.call("start", start(&queue(), 0, 0, ""));
     phone.reconcile();
     laptop.reconcile();
@@ -542,16 +554,17 @@ fn coming_back_to_a_session_sounding_elsewhere_stops_this_phone() {
 #[test]
 fn coming_back_playing_to_a_quiet_session_makes_it_this_one() {
     let hall = Hall::new();
-    let phone = on(&hall, "phone", true, "phone", None);
-    phone.call("start", start(&queue(), 0, 0, ""));
+    let phone = on(&hall, "phone", true, "phone");
+    phone.call("start", start(&queue(), 0, 0, "#playlist/Favorites"));
     phone.reconcile();
 
     drop_link(&phone);
     // On its own it moved to the second track and on into it.
-    phone.sound.jump(1, 12_000);
-    phone.sound.s().from = "#playlist/Favorites".into();
+    phone.press(Press::Skip { by: 1 });
+    phone.sound.at(12_000);
     phone.reconcile();
     relink(&phone);
+    phone.sound.at(12_000);
     phone.reconcile();
     phone.reconcile();
     assert!(phone.sound.s().playing, "its own sound goes on");
@@ -560,33 +573,36 @@ fn coming_back_playing_to_a_quiet_session_makes_it_this_one() {
     assert!(s.outputs("phone") && s.sounding());
     assert_eq!(a.at, 1);
     assert_eq!(a.from, "#playlist/Favorites");
-    assert!(matches!(a.clock, Clock::Playing { at_ms: 12_000, .. }), "{:?}", a.clock);
+    assert!(
+        matches!(a.clock, Clock::Playing { at_ms, .. } if (12_000..12_500).contains(&at_ms)),
+        "{:?}",
+        a.clock
+    );
     assert_eq!(phone.view()["stats"]["came_back"], 1);
-    assert_eq!(phone.sound.s().loads, 1, "not loaded again");
+    assert_eq!(phone.sound.s().loads, 2, "the skip's load, and not loaded again");
 }
 
 /// Unlinked, nothing is called: a call made then would be said on the next
 /// connection, long after it meant anything; and the stale session, which
 /// says playing, is not obeyed — while what plays is drawn from the player
-/// itself, as its own session.
+/// itself, as its own session, and a press is done to it.
 ///
 /// Falsified by `joined` not asking whether the peer is linked: the offline
 /// look drove the player from the stale session and resumed it.
 #[test]
 fn a_phone_unlinked_is_its_own_session() {
     let hall = Hall::new();
-    let phone = on(&hall, "phone", true, "phone", None);
+    let phone = on(&hall, "phone", true, "phone");
     phone.call("start", start(&queue(), 0, 0, ""));
     phone.reconcile();
     drop_link(&phone);
-    phone.sound.pause();
     let calls = phone.calls();
+    assert_eq!(phone.player.press(r#""Pause""#.into()), None, "a press alone is the player's own");
     phone.reconcile();
     assert!(!phone.sound.s().playing, "the stale session is not obeyed");
     assert!(phone.session().is_none());
     assert_eq!(phone.calls(), calls, "and nothing is called");
-    assert_eq!(phone.player.press(r#""Pause""#.into()).as_deref(), Some(harken_player::NOT_PART));
-    let own: Active = serde_json::from_value(phone.view()["active"].clone()).unwrap();
+    let own = phone.drawn();
     assert_eq!((own.at, own.queue), (0, queue()), "what plays is the player's own");
     assert!(matches!(own.clock, Clock::Paused { at_ms } if at_ms < 100), "{:?}", own.clock);
     assert_eq!(
@@ -598,26 +614,36 @@ fn a_phone_unlinked_is_its_own_session() {
     );
 }
 
-/// The player stopping by itself — focus taken by a call, the headphones
-/// out — is the session pausing there, said once; the phone does not fight
-/// it by resuming.
+/// The player stopped by the system — focus taken by a call, the
+/// headphones out — is the session pausing there, said once; the phone does
+/// not fight it by resuming.
 ///
 /// Falsified by not asking the player whether it stalled (`take` never
 /// read): the reconciler resumed it, and the session went on saying playing.
 #[test]
 fn a_stall_is_said_and_not_fought() {
     let hall = Hall::new();
-    let phone = on(&hall, "phone", true, "phone", None);
+    let phone = on(&hall, "phone", true, "phone");
     phone.call("start", start(&queue(), 0, 5_000, ""));
     phone.reconcile();
-    {
-        let mut s = phone.sound.s();
-        (s.playing, s.stalled, s.position_ms) = (false, true, 7_000);
-    }
+    phone.sound.interrupt(7_000);
     phone.reconcile();
     phone.reconcile();
     assert!(!phone.sound.s().playing, "not resumed");
     assert_eq!(phone.active().clock, Clock::Paused { at_ms: 7_000 });
+
+    // The headphones out: the same.
+    phone.call("play", Value::Null);
+    phone.reconcile();
+    assert!(phone.sound.s().playing);
+    phone.sound.at(9_000);
+    phone.sound.s().playing = false;
+    phone.sound.tell(MediaEvent::Route {
+        change: RouteChange::Unplugged,
+    });
+    phone.reconcile();
+    assert!(!phone.sound.s().playing);
+    assert!(matches!(phone.active().clock, Clock::Paused { at_ms } if (9_000..9_200).contains(&at_ms)));
 }
 
 /// A press is a transition, and the ones that need reading are read the
@@ -630,9 +656,20 @@ fn a_stall_is_said_and_not_fought() {
 #[test]
 fn a_press_is_a_transition() {
     let hall = Hall::new();
-    let phone = on(&hall, "phone", true, "phone", None);
-    let laptop = on(&hall, "laptop", true, "computer", None);
-    phone.sound.load(serde_json::to_string(&queue()).unwrap(), 1, 0, true, "#library".into());
+    let phone = on(&hall, "phone", true, "phone");
+    let laptop = on(&hall, "laptop", true, "computer");
+    // Alone first (offline): this phone's own queue, at its second track.
+    drop_link(&phone);
+    phone.press(Press::Start {
+        queue: queue(),
+        at: 1,
+        position_ms: 0,
+        from: "#library".into(),
+        shuffled: false,
+    });
+    phone.press(Press::Pause);
+    relink(&phone);
+    phone.reconcile();
     phone.press(Press::Play);
     assert_eq!(phone.active().at, 1, "nothing queued: this phone's own, pressed again");
     laptop.press(Press::Toggle);
@@ -652,35 +689,97 @@ fn a_press_is_a_transition() {
     assert!(phone.session().unwrap().outputs("phone"), "the sound here already: nothing asked");
 }
 
+/// The lock screen's buttons and a headset's are presses of the session
+/// while the phone is part of it — a pause there pauses whichever device
+/// plays — and of its own queue alone; a skip of seconds a seek from where
+/// the session stands.
+///
+/// Falsified by doing a button to the player itself (the `remote_press`
+/// loop taken out of `step`): the session went on playing on the laptop.
+#[test]
+fn the_lock_screens_buttons_are_presses() {
+    let hall = Hall::new();
+    let phone = on(&hall, "phone", true, "phone");
+    let laptop = on(&hall, "laptop", true, "computer");
+    laptop.call("start", start(&queue(), 0, 10_000, ""));
+    laptop.reconcile();
+    phone.reconcile();
+    phone.sound.remote(RemoteCommand::Pause);
+    phone.reconcile();
+    assert!(!phone.session().unwrap().sounding(), "a pause on the lock screen pauses the laptop");
+    phone.sound.remote(RemoteCommand::SkipForward { seconds: 30 });
+    phone.reconcile();
+    assert!(
+        matches!(phone.active().clock, Clock::Paused { at_ms } if (40_000..40_200).contains(&at_ms)),
+        "{:?}",
+        phone.active().clock
+    );
+    phone.sound.remote(RemoteCommand::Next);
+    phone.reconcile();
+    assert_eq!(phone.active().at, 1);
+    assert_eq!(phone.sound.s().loads, 0, "the phone made no sound of it");
+
+    drop_link(&phone);
+    phone.press(Press::Start {
+        queue: queue(),
+        at: 0,
+        position_ms: 0,
+        from: String::new(),
+        shuffled: false,
+    });
+    phone.sound.remote(RemoteCommand::Next);
+    phone.reconcile();
+    assert_eq!(phone.sound.title().as_deref(), Some("b"), "alone, next is the phone's own next");
+}
+
+/// What the system shows is what plays: the track, its cover, where it is,
+/// whether it moves; while the sound is on another device, where it is;
+/// and the controls a track has.
+#[test]
+fn the_lock_screen_shows_what_plays() {
+    let hall = Hall::new();
+    let phone = on(&hall, "phone", true, "phone");
+    let laptop = on(&hall, "laptop", true, "computer");
+    laptop.call("start", start(&queue(), 0, 10_000, ""));
+    laptop.reconcile();
+    phone.reconcile();
+    let shown = phone.sound.s().shown.clone().expect("something shown");
+    assert_eq!(shown.title, "a");
+    assert_eq!(shown.artist, "Handel · Playing on laptop");
+    assert_eq!(shown.album, "Water Music");
+    assert_eq!(shown.artwork.as_deref(), Some("http://harken.test/art/Water Music.jpg"));
+    assert_eq!(shown.rate, 1.0);
+    let c = phone.sound.s().controls.unwrap();
+    assert!(c.has_next && c.can_seek && c.skip_forward_s == 0, "{c:?}");
+    laptop.call("skip", json!({ "by": 1 }));
+    phone.reconcile();
+    assert!(!phone.sound.s().controls.unwrap().has_next, "the last track has no next");
+}
+
 /// The phone's own volume is its entry in the session: said once a
 /// connection (`equip`) — a volume anybody can move, no family, at its
-/// media stream's level — and followed whoever moves it; the stream moved by
-/// anything else — the buttons, the system's panel — is said once, as
-/// `report_volume`. Never what the phone set itself: a stream has fifteen
-/// steps, so the 30 the desktop asks for is the fifth, and the 33 that reads
-/// back is where the phone left it, not a hand.
+/// player's gain — and followed whoever moves it, never said back.
 ///
-/// Falsified by a look that compared the stream with the level the session
+/// Falsified by a look that compared the gain with the level the session
 /// asked for rather than with what it read after its own write (`seen` set
-/// to `want`): the phone said 33 back ("and the 33 it reads is not said
-/// back").
+/// to `want`): the phone said its own level back.
 #[test]
 fn the_phones_volume_is_its_entry_and_only_a_hand_is_said() {
     let hall = Hall::new();
-    let phone = on(&hall, "phone", true, "phone", Some(9));
-    let desk = on(&hall, "desktop", false, "computer", None);
+    let phone = on(&hall, "phone", true, "phone");
+    let desk = on(&hall, "desktop", false, "computer");
     assert!(!phone.me("phone").can_volume, "nothing has a volume until it says so");
     phone.reconcile();
     let me = phone.me("phone");
     assert!(me.can_volume, "said once it joined");
-    assert_eq!(me.volume, 60, "at its stream's level: the ninth of fifteen steps");
+    assert_eq!(me.volume, 100, "at its player's gain");
     assert_eq!(me.family, None, "and no family: a phone joins no group");
     let calls = phone.calls();
     for _ in 0..3 {
         phone.reconcile();
     }
     assert_eq!(phone.calls(), calls, "once a connection, not once a look");
-    assert_eq!(phone.sound.s().stream.unwrap().writes, 0, "and nothing written to the stream");
+    assert_eq!(phone.sound.s().volume, None, "and nothing written to the player");
 
     let set = |p: Press| desk.press(p);
     set(Press::Loud {
@@ -688,39 +787,18 @@ fn the_phones_volume_is_its_entry_and_only_a_hand_is_said() {
         change: Change::To { level: 30 },
     });
     phone.reconcile();
-    assert_eq!(
-        phone.sound.s().stream.unwrap().index,
-        5,
-        "a level set on the desktop is the stream's nearest step"
-    );
+    assert_eq!(phone.sound.s().volume, Some(0.3), "a level set on the desktop is the player's gain");
     for _ in 0..3 {
         phone.reconcile();
     }
-    assert_eq!(phone.me("phone").volume, 30, "and the 33 it reads is not said back");
+    assert_eq!(phone.me("phone").volume, 30, "and not said back");
     assert_eq!(phone.calls(), calls);
     set(Press::Loud {
         level: Level::Device { id: "phone".into() },
         change: Change::Mute { muted: true },
     });
     phone.reconcile();
-    assert!(phone.sound.s().stream.unwrap().muted, "a mute is a mute");
-    assert_eq!(phone.sound.s().stream.unwrap().index, 5, "the step left where it was");
-
-    // The buttons: the stream moved by a hand.
-    {
-        let mut s = phone.sound.s();
-        let st = s.stream.as_mut().unwrap();
-        (st.index, st.muted) = (12, false);
-    }
-    for _ in 0..3 {
-        phone.reconcile();
-    }
-    assert_eq!(phone.calls(), calls + 1, "said once");
-    let me = phone.me("phone");
-    assert_eq!((me.volume, me.muted), (80, false));
-    let heard = desk.session().unwrap();
-    assert_eq!(heard.device("phone").unwrap().volume, 80, "and the desktop hears it");
-    assert_eq!(phone.sound.s().stream.unwrap().index, 12, "not fought");
+    assert_eq!(phone.sound.s().volume, Some(0.0), "a mute is silence");
 
     // A new connection is a room that has never heard what this phone can do.
     drop_link(&phone);
@@ -728,8 +806,8 @@ fn the_phones_volume_is_its_entry_and_only_a_hand_is_said() {
     assert!(!phone.me("phone").can_volume);
     phone.reconcile();
     assert!(phone.me("phone").can_volume, "said again on the new connection");
-    assert_eq!(phone.me("phone").volume, 80);
-    assert_eq!(phone.calls(), calls + 2);
+    assert_eq!(phone.me("phone").volume, 30);
+    assert_eq!(phone.calls(), calls + 1);
 }
 
 /// The peer tells the app that something moved at once, on the thread that
@@ -753,7 +831,7 @@ fn a_step_told_of_its_own_change_does_not_wait_on_itself() {
     let (done, finished) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
         let hall = Hall::new();
-        let phone = on(&hall, "phone", true, "phone", None);
+        let phone = on(&hall, "phone", true, "phone");
         let again = Arc::new(Again(Mutex::new(Some(phone.player.clone()))));
         // A play recorded is a change of the log, which a view the app keeps sees.
         let _plays = phone.peer.view("recently_played".into(), "null".into()).unwrap();
@@ -767,4 +845,282 @@ fn a_step_told_of_its_own_change_does_not_wait_on_itself() {
         .recv_timeout(std::time::Duration::from_secs(20))
         .expect("a step waited on itself");
     assert_eq!(loads, 1);
+}
+
+/// A phone with a media stream (Android's) has the stream's level as its
+/// volume in the session: said at its `equip`, and set by whoever moves
+/// it; the player's gain is never written.
+///
+/// Falsified by the shell's volume left out of the player (no knob): the
+/// phone said 100, its gain, where its stream was at 33.
+#[test]
+fn a_phone_with_a_stream_has_the_stream_s_level() {
+    let hall = Hall::new();
+    let dir = tempfile::tempdir().unwrap();
+    let said = json!({ "can_play": true, "id": "", "kind": "phone", "name": "phone", "user": "" }).to_string();
+    let peer = hall
+        .device(dir.path().to_str().unwrap().into(), "alice".into(), "phone".into(), said)
+        .unwrap();
+    let player = Player::new(peer.clone(), "phone".into(), None);
+    let sound = Fake::new();
+    let shell = Arc::new(Shell::default());
+    *shell.1.lock().unwrap() = Some(Loudness { level: 33, muted: false });
+    player.attach(Some(sound.clone()), SERVER.into(), Some(shell.clone()));
+    hall.carry();
+    let phone = Device {
+        hall: &hall,
+        peer,
+        player,
+        sound,
+        shell,
+        _dir: dir,
+    };
+    let desk = on(&hall, "desktop", false, "computer");
+    phone.reconcile();
+    assert_eq!(phone.me("phone").volume, 33, "the stream's level, said at its equip");
+    desk.press(Press::Loud {
+        level: Level::Device { id: "phone".into() },
+        change: Change::To { level: 60 },
+    });
+    phone.reconcile();
+    assert_eq!(
+        *phone.shell.1.lock().unwrap(),
+        Some(Loudness { level: 60, muted: false }),
+        "set on the stream"
+    );
+    assert_eq!(phone.sound.s().volume, None, "the gain never written");
+}
+
+/// A phone that steps as soon as it is told to — inline, reading the
+/// peer, as the apps' tests drain their sessions — is told only once the
+/// step or press that made the player answer is over: the player answers
+/// on the thread that asked it, inside that step, which holds the peer.
+///
+/// Falsified by telling the wake at once (no `Gate`): the press never
+/// returned, the inline step waiting on the peer its own press held.
+#[test]
+fn a_wake_told_during_a_step_waits_for_its_end() {
+    struct Inline {
+        player: Mutex<Option<Arc<Player>>>,
+        peer: Mutex<Option<Arc<Peer>>>,
+        woken: Mutex<u32>,
+    }
+    impl PlayerShell for Inline {
+        fn wake(&self, in_ms: i64) {
+            if in_ms > 0 {
+                return;
+            }
+            *self.woken.lock().unwrap() += 1;
+            let (player, peer) = (self.player.lock().unwrap().clone(), self.peer.lock().unwrap().clone());
+            if let (Some(player), Some(peer)) = (player, peer) {
+                player.step();
+                let _ = peer.status();
+            }
+        }
+        fn cover(&self, _: String, _: String) -> Option<String> {
+            None
+        }
+        fn volume(&self) -> Option<Loudness> {
+            None
+        }
+        fn set_volume(&self, _: i64, _: bool) {}
+    }
+    let (done, finished) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let hall = Hall::new();
+        let dir = tempfile::tempdir().unwrap();
+        let said = json!({ "can_play": true, "id": "", "kind": "phone", "name": "phone", "user": "" }).to_string();
+        let peer = hall
+            .device(dir.path().to_str().unwrap().into(), "alice".into(), "phone".into(), said)
+            .unwrap();
+        let player = Player::new(peer.clone(), "phone".into(), None);
+        let shell = Arc::new(Inline {
+            player: Mutex::new(Some(player.clone())),
+            peer: Mutex::new(Some(peer.clone())),
+            woken: Mutex::new(0),
+        });
+        let sound = Fake::new();
+        player.attach(Some(sound.clone()), SERVER.into(), Some(shell.clone()));
+        hall.carry();
+        player.step();
+        hall.carry();
+        let why = player.press(
+            serde_json::to_string(&Press::Start {
+                queue: queue(),
+                at: 0,
+                position_ms: 0,
+                from: String::new(),
+                shuffled: false,
+            })
+            .unwrap(),
+        );
+        hall.carry();
+        player.step();
+        let woken = *shell.woken.lock().unwrap();
+        *shell.player.lock().unwrap() = None;
+        let _ = done.send((why, sound.s().playing, woken));
+    });
+    let (why, playing, woken) = finished
+        .recv_timeout(std::time::Duration::from_secs(20))
+        .expect("a wake waited on the step that asked for it");
+    assert_eq!(why, None);
+    assert!(playing, "it plays");
+    assert!(woken > 0, "and the phone was told, after");
+}
+
+/// A list started shuffled while the phone plays alone lights its Shuffle:
+/// the queue it plays says so, as the phone draws it (`local.shuffle`); a
+/// list started in its order puts it out again.
+///
+/// Falsified by a start that leaves the queue's shuffle as it was (the
+/// `shuffled` the press carries not read): Shuffle stayed out.
+#[test]
+fn a_list_started_shuffled_alone_lights_shuffle() {
+    let hall = Hall::new();
+    let phone = on(&hall, "phone", true, "phone");
+    drop_link(&phone);
+    let started = |shuffled: bool| {
+        let mut p = serde_json::to_value(Press::Start {
+            queue: queue(),
+            at: 0,
+            position_ms: 0,
+            from: "#album/Water%20Music".into(),
+            shuffled: false,
+        })
+        .unwrap();
+        // As the phones say it: the flag only when it is on.
+        if shuffled {
+            p["Start"]["shuffled"] = json!(true);
+        }
+        assert_eq!(phone.player.press(p.to_string()), None);
+        phone.reconcile();
+        phone.view()["local"]["shuffle"].as_bool()
+    };
+    assert_eq!(started(true), Some(true), "started shuffled: Shuffle is lit");
+    assert_eq!(phone.sound.title().as_deref(), Some("a"), "and what it pressed plays");
+    assert_eq!(started(false), Some(false), "started in order: it is out");
+}
+
+/// A track with no cover is shown its derived square, as the screens draw
+/// it under a cover: the system is given the square's seed (the album's
+/// name, else the track's) beside the cover's address, or in its place —
+/// never an empty tile.
+///
+/// Falsified by showing no placeholder (`placeholder: None` in `show`): a
+/// track with no cover had nothing on the lock screen.
+#[test]
+fn a_track_with_no_cover_is_shown_its_square() {
+    let hall = Hall::new();
+    let phone = on(&hall, "phone", true, "phone");
+    drop_link(&phone);
+    let mut bare = track("a", 1, 100_000);
+    bare.album = String::new();
+    phone.press(Press::Start {
+        queue: vec![bare, track("b", 2, 100_000)],
+        at: 0,
+        position_ms: 0,
+        from: String::new(),
+        shuffled: false,
+    });
+    phone.reconcile();
+    let shown = phone.sound.s().shown.clone().expect("something shown");
+    assert_eq!(shown.artwork, None, "no cover to fetch");
+    assert_eq!(shown.placeholder.as_deref(), Some("a"), "the track's own square stands in");
+    phone.press(Press::Skip { by: 1 });
+    phone.reconcile();
+    let shown = phone.sound.s().shown.clone().expect("something shown");
+    assert_eq!(shown.artwork.as_deref(), Some("http://harken.test/art/Water Music.jpg"));
+    assert_eq!(
+        shown.placeholder.as_deref(),
+        Some("Water Music"),
+        "and the album's, should its cover not come"
+    );
+}
+
+/// What a watch or a car adds to the queue while the phone plays alone
+/// reaches the phone's own queue, as it did when the media session's
+/// player was the phone's own: the tracks it names, read from the replica
+/// with their album, at the end — or, for a "play next", after what plays.
+///
+/// Falsified by the asks a step takes being dropped (as before this fix):
+/// the queue stayed as it was started.
+#[test]
+fn a_watch_adds_to_the_queue_the_phone_plays_alone() {
+    let dir = tempfile::tempdir().unwrap();
+    let login = ark_ffi::Login {
+        token: String::new(),
+        session: "phone".into(),
+        user: "alice".into(),
+        name: String::new(),
+        email: String::new(),
+        roles: vec![harken_domain::LIBRARY.into()],
+        expires_ms: 0,
+        picture: String::new(),
+    };
+    let said = json!({ "can_play": true, "id": "", "kind": "phone", "name": "phone", "user": "" }).to_string();
+    let peer = harken_ffi::harken_open(dir.path().to_str().unwrap().into(), Some(login), said).unwrap();
+    peer.alone();
+    let song = |title: &str, file: &str| {
+        json!({ "title": title, "artist": "Bach", "album": "Suites", "duration_ms": 90_000, "file": file, "track": 1,
+                "part": "", "catalogue": "", "performer": "", "bpm": 0, "album_art": "", "artist_art": "", "disc": 1,
+                "work_title": "", "movement_no": 0, "artist_banner": "", "released": 0, "folder": "" })
+        .to_string()
+    };
+    peer.mutate("library.add_song".into(), song("Air", "music/Air.mp3")).unwrap();
+    peer.mutate("library.add_song".into(), song("Gigue", "music/Gigue.mp3")).unwrap();
+    let id_of = |file: &str| {
+        let file = file.to_string();
+        peer.with(|p| {
+            ark::db::read::<harken_domain::Harken, _>(&p.log.store, |db| {
+                db.media.by(harken_domain::Media::FILE).from(&file).first().map(|m| m.id)
+            })
+        })
+        .map(|id| serde_json::to_value(id).unwrap().as_str().unwrap().to_string())
+        .unwrap()
+    };
+    let (air, gigue) = (id_of("music/Air.mp3"), id_of("music/Gigue.mp3"));
+
+    let player = Player::new(peer.clone(), "phone".into(), None);
+    let sound = Fake::new();
+    player.attach(Some(sound.clone()), SERVER.into(), Some(Arc::new(Shell::default())));
+    let start = Press::Start {
+        queue: queue(),
+        at: 0,
+        position_ms: 0,
+        from: String::new(),
+        shuffled: false,
+    };
+    assert_eq!(player.press(serde_json::to_string(&start).unwrap()), None);
+    player.step();
+    assert!(sound.s().controls.unwrap().can_add, "a controller is offered adding");
+    let titles = || -> Vec<String> {
+        let v: Value = serde_json::from_str(&player.view()).unwrap();
+        let a: Active = serde_json::from_value(v["active"].clone()).unwrap();
+        a.queue.iter().map(|t| t.title.clone()).collect()
+    };
+
+    sound.tell(MediaEvent::Add {
+        ids: vec![air.clone()],
+        next: false,
+    });
+    player.step();
+    assert_eq!(titles(), ["a", "b", "Air"], "added at the end");
+    sound.tell(MediaEvent::Add {
+        ids: vec![gigue, "not a track".into()],
+        next: true,
+    });
+    player.step();
+    assert_eq!(
+        titles(),
+        ["a", "Gigue", "b", "Air"],
+        "played next: after what plays, and what the replica has not, left out"
+    );
+    let v: Value = serde_json::from_str(&player.view()).unwrap();
+    let a: Active = serde_json::from_value(v["active"].clone()).unwrap();
+    let added = a.queue.iter().find(|t| t.title == "Air").unwrap();
+    assert_eq!(
+        (added.album.as_str(), added.creator.as_str(), added.file.as_str()),
+        ("Suites", "Bach", "music/Air.mp3")
+    );
+    assert_eq!(sound.title().as_deref(), Some("a"), "and what plays plays on");
 }

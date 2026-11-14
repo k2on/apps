@@ -112,3 +112,46 @@ pub fn hash_reader(mut r: impl std::io::Read) -> std::io::Result<String> {
         }
     }
 }
+
+/// A path on this device's disk as a `file:` URL: what an image part is
+/// handed to read a file a row names ([`crate::views::Views::file_url`]).
+/// Every byte but a URL path's own is escaped (an app's directory on the
+/// iPhone has a space in it).
+pub fn path_url(path: &str) -> String {
+    let mut url = String::from("file://");
+    for b in path.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'/' | b'-' | b'_' | b'.' | b'~' => url.push(b as char),
+            _ => url.push_str(&format!("%{b:02X}")),
+        }
+    }
+    url
+}
+
+/// `bytes` as a `data:` URL of `media`: a file a device with no disk (the
+/// browser) holds in memory.
+pub fn data_url(media: &str, bytes: &[u8]) -> String {
+    const ABC: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut url = format!("data:{media};base64,");
+    url.reserve(bytes.len().div_ceil(3) * 4);
+    for c in bytes.chunks(3) {
+        let n = (u32::from(c[0]) << 16) | (u32::from(*c.get(1).unwrap_or(&0)) << 8) | u32::from(*c.get(2).unwrap_or(&0));
+        for (i, shift) in [18, 12, 6, 0].into_iter().enumerate() {
+            url.push(if i <= c.len() { ABC[(n >> shift) as usize & 63] as char } else { '=' });
+        }
+    }
+    url
+}
+
+#[cfg(test)]
+mod url_tests {
+    use super::*;
+
+    #[test]
+    fn a_path_is_escaped_and_bytes_are_base64() {
+        assert_eq!(path_url("/var/Application Support/ab.jpg"), "file:///var/Application%20Support/ab.jpg");
+        assert_eq!(data_url("image/jpeg", b"Man"), "data:image/jpeg;base64,TWFu");
+        assert_eq!(data_url("image/jpeg", b"Ma"), "data:image/jpeg;base64,TWE=");
+        assert_eq!(data_url("image/jpeg", b"M"), "data:image/jpeg;base64,TQ==");
+    }
+}

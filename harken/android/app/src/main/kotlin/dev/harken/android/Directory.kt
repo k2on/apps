@@ -38,7 +38,7 @@ object Directory {
 
     /** The directory's search for `words`, podcasts only. */
     fun searchUrl(words: String): String =
-        "https://itunes.apple.com/search?media=podcast&entity=podcast&limit=$LIMIT&term=" + Places.encode(words.trim())
+        "https://itunes.apple.com/search?media=podcast&entity=podcast&limit=$LIMIT&term=" + Percent.encode(words.trim())
 
     /**
      * The shows the sheet lists for what was typed: a feed's address is the one show it names;

@@ -1,4 +1,4 @@
-// harken's look on the phone: arkui's theme (arkui/theme.toml) — the
+// harken's look on the phone: arkui's theme (ui/theme.toml) — the
 // neutrals every Ark app shares and harken's accent, the gold — as the
 // Material scheme in light and dark, and one type scale. The spacings are
 // `ark-ui`'s (`Space`), which is drawn in these colours.
@@ -6,7 +6,7 @@
 // **No colour is written down here.** Every screen asks
 // `MaterialTheme.colorScheme` or [Harken], which is what makes the dark
 // theme work: a colour chosen against one background is wrong on the other.
-// A colour is changed in arkui/theme.toml, for every app and platform at once.
+// A colour is changed in ui/theme.toml, for every app and platform at once.
 //
 // The gold is not one colour: a dark page can take a bright leaf gold, and a
 // white one cannot, because text in the gold has to be legible on it.

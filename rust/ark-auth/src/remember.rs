@@ -2,9 +2,11 @@
 //! of the `login` table of a local schema of this crate's own
 //! ([`Remembered`]), which every app's peer opens as a local instance
 //! (`ark_peer::Logins`: natively under `$XDG_CONFIG_HOME/<app>/logins/`, or
-//! `~/.config/…`; in a browser `localStorage`, under `<app>.logins`). The
-//! token is the user's own secret, on the user's own disk; a server's
-//! secrets stay in its configuration.
+//! `~/.config/…`; in a browser `localStorage`, under `<app>.logins`). A
+//! browser's has no token (its session is a cookie); a desktop's logins
+//! are kept in the secure store now ([`crate::keep`]), and this is where
+//! they are moved from, once. A server's secrets stay in its
+//! configuration.
 
 use ark::db::Db;
 use ark::prelude::{Deserialize, Row, Schema, Serialize};

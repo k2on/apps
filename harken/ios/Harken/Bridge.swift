@@ -10,19 +10,19 @@
 // — never on a clock, so a library at rest runs nothing at all. A burst of
 // tells is one drain.
 //
-// **The lists are spliced, not re-read.** The songs, the playlists, the
-// albums, the artists, the songs' details and the last play are the
-// kernel's maintained views (§1.10), typed by the generated stubs
-// (`LiveView<T>`), read once — Home's three first, published, and the rest a
-// turn later — and after every change each is asked what it did and its
-// patches spliced into the list the screens hold; only a reset reads one
-// again. A page — an album, an artist, a playlist, a performance — is a view
-// too, held while a screen shows it ([hold]) and let go when the last one
-// leaves; and so are the catalogue's views a page reads beside its tracks
-// (`Page.listings`: a person's works and the episodes they are on, a work
-// and its performances, who is on one), each held by its key for as long
-// as some page holds it. Who is on an episode, and its transcript, are read
-// once when a screen asks.
+// **The views are the core's** (`HarkenSession`, harken/ffi): it holds
+// each one by count, keeps its rows spliced on the kernel's thread, and says
+// by its version whether it moved. The songs, the playlists, the albums,
+// the artists, the songs' details and the last play are held for the
+// session's life — Home's three read first, published, and the rest a turn
+// later — and after every change each whose version moved is read again
+// from the core (the songs and the playlists as records, the rest as their
+// JSON through the generated types). A page — an album, an artist, a
+// playlist, a performance — is a view too, held while a screen shows it
+// ([hold]) and let go with it; and so are the catalogue's views a page reads
+// beside its tracks (`Page.listings`: a person's works and the episodes
+// they are on, a work and its performances, who is on one). Who is on an
+// episode, and its transcript, are read once when a screen asks.
 //
 // **The listening session is the reconciler's** (`Player`, harken's one
 // reconciler, S3b): each drain steps it, which makes this phone's player
@@ -75,6 +75,9 @@ struct Snapshot {
     /// The episodes a held person is on, newest first, by their name.
     var appearances = [String: [LibraryEntry]]()
     var status: Status? = nil
+    /// Nothing the phone asked for still on its way (`Peer.settled`): what a
+    /// screenshot waits for (ArkUI's `Ready`).
+    var settled = false
     var heard = Heard()
     /// How many changes the peer has reported: what the diagnostics read again on.
     var moved = 0
@@ -87,72 +90,91 @@ private final class Told: Listener, @unchecked Sendable {
     func changed() { then() }
 }
 
-/// A view and the list it is spliced into; on the session's queue only.
+/// A view the session holds and the list read from it; on the session's queue only.
 private final class Held<E> {
-    let open: (Harken) throws -> LiveView<E>?
-    var view: LiveView<E>? = nil
-    var rows = [E]()
-    init(_ open: @escaping (Harken) throws -> LiveView<E>?) { self.open = open }
-
-    func hydrate(_ h: Harken) {
-        view = (try? open(h)) ?? nil
-        rows = view?.rows() ?? []
+    let view: HarkenView
+    private let read: (HarkenSession, HarkenView) -> [E]
+    private var holding: Holding? = nil
+    /// Its version when it was last read: what says it moved.
+    private var seen: UInt64 = 0
+    private(set) var rows = [E]()
+    init(_ view: HarkenView, _ read: @escaping (HarkenSession, HarkenView) -> [E]) {
+        self.view = view
+        self.read = read
     }
 
-    /// What it did since last asked, spliced; true when it moved.
-    func update() -> Bool {
-        guard let v = view else { return false }
-        switch v.take() {
-        case .unchanged: return false
-        case .patched(let changes):
-            rows.splice(changes)
-            return true
-        case .reset(let all):
-            rows = all
-            return true
-        }
+    /// Held, and read.
+    func hydrate(_ s: HarkenSession) {
+        if holding == nil { holding = s.hold(view: view) }
+        reread(s)
     }
+
+    private func reread(_ s: HarkenSession) {
+        seen = s.version(view: view)
+        rows = read(s, view)
+    }
+
+    /// Read again when its version moved since it was last read; true when it did.
+    func update(_ s: HarkenSession) -> Bool {
+        guard holding != nil, s.version(view: view) != seen else { return false }
+        reread(s)
+        return true
+    }
+
+    func letGo() { holding = nil }
 }
 
-/// Views opened by a key while some page holds them, each held as many
-/// times as pages hold it, spliced like the rest and let go with the last;
+/// The JSON rows of a view, read by the generated type.
+private func json<E>(_ of: @escaping (Any?) -> E) -> (HarkenSession, HarkenView) -> [E] {
+    { s, v in s.rows(view: v).map { of(J.parse($0)) } }
+}
+
+private let tracks: (HarkenSession, HarkenView) -> [LibraryEntry] = { s, v in s.tracks(view: v) }
+
+/// Views held by a key while some page holds them — each hold one of the
+/// core's, which keeps the view while any is held — and read like the rest;
 /// on the session's queue only.
 private final class Holds<E> {
-    private let open: (Harken, String) throws -> LiveView<E>
-    private var held = [String: (view: Held<E>, refs: Int)]()
-    init(_ open: @escaping (Harken, String) throws -> LiveView<E>) { self.open = open }
+    private let view: (String) -> HarkenView
+    private let read: (HarkenSession, HarkenView) -> [E]
+    private var held = [String: (view: Held<E>, holdings: [Holding])]()
+    init(_ view: @escaping (String) -> HarkenView, _ read: @escaping (HarkenSession, HarkenView) -> [E]) {
+        self.view = view
+        self.read = read
+    }
 
     /// Held once more; its rows when it was opened just now, none when it was already held.
-    func hold(_ key: String, _ h: Harken?) -> [E]? {
+    func hold(_ key: String, _ s: HarkenSession?) -> [E]? {
+        guard let s else { return nil }
+        let h = s.hold(view: view(key))
         if var e = held[key] {
-            e.refs += 1
+            e.holdings.append(h)
             held[key] = e
             return nil
         }
-        let open = self.open
-        let v = Held<E> { try open($0, key) }
-        held[key] = (v, 1)
-        guard let h = h else { return nil }
-        v.hydrate(h)
+        let v = Held<E>(view(key), read)
+        v.hydrate(s)
+        held[key] = (v, [h])
         return v.rows
     }
 
     /// Held once less; true when nothing holds it now and it is let go.
     func release(_ key: String) -> Bool {
         guard var e = held[key] else { return false }
-        e.refs -= 1
-        if e.refs > 0 {
+        e.holdings.removeLast()
+        if !e.holdings.isEmpty {
             held[key] = e
             return false
         }
+        e.view.letGo()
         held[key] = nil
         return true
     }
 
     /// Every held view that moved, and its rows now.
-    func update() -> [(String, [E])] {
+    func update(_ s: HarkenSession) -> [(String, [E])] {
         var moved = [(String, [E])]()
-        for (k, e) in held where e.view.update() { moved.append((k, e.view.rows)) }
+        for (k, e) in held where e.view.update(s) { moved.append((k, e.view.rows)) }
         return moved
     }
 
@@ -165,7 +187,7 @@ final class Bridge {
     private let queue = DispatchQueue(label: "harken-session")
     private let root: URL
     private let name: String
-    private let sound: SoundCore
+    private let media: NativeMediaPlayer
     /// Told on the main queue.
     private let publish: (Snapshot) -> Void
     private let notice: (String) -> Void
@@ -180,36 +202,38 @@ final class Bridge {
     private var deniedSaid = false
     private var snap = Snapshot()
     private var changes = [Authored]()
-    private let library = Held<LibraryEntry> { try Phone.library($0) }
-    private let playlists = Held<Playlist> { try $0.playlists() }
-    private let albums = Held<AlbumsEntry> { try $0.albums() }
-    private let artists = Held<ArtistsEntry> { try $0.artists() }
-    private let composers = Held<ComposersEntry> { try $0.composers() }
-    private let shows = Held<ShowsEntry> { try $0.shows() }
-    private let subscriptions = Held<SubscriptionsEntry> { try $0.subscriptions() }
-    private let downloads = Held<DownloadsEntry> { try $0.downloads() }
-    private let mine = Held<ProgressEntry> { try $0.myProgress() }
-    private let progress = Holds<ProgressEntry> { h, show in try h.showProgress(ShowInput(playlistId: Phone.noPlaylist, id: show)) }
-    private let episodes = Holds<EpisodeDetailsEntry> { h, show in try h.episodeDetails(ShowInput(playlistId: Phone.noPlaylist, id: show)) }
-    private let details = Held<TrackDetailsEntry> { try $0.trackDetails() }
-    private let played = Held<Play> { try $0.lastPlayed() }
-    private var pages = [Page: (held: Held<LibraryEntry>, refs: Int)]()
-    private let works = Holds<WorkSummary> { h, composer in try h.works(Works(composer: composer)) }
-    private let work = Holds<WorkSummary> { h, id in try h.work(WorkInput(id: id)) }
-    private let recordings = Holds<RecordingsEntry> { h, work in try h.recordings(Recordings(workId: work)) }
-    private let credits = Holds<CreditsEntry> { h, take in try h.credits(Credits(recordingId: take)) }
-    private let appearances = Holds<LibraryEntry> { h, name in try Phone.appearances(h, name) }
+    private var views: HarkenSession? = nil
+    private let library = Held<LibraryEntry>(.library(playlist: Phone.noPlaylist), tracks)
+    private let playlists = Held<Playlist>(.playlists, { s, v in s.playlists(view: v) })
+    private let albums = Held<AlbumsEntry>(.albums, json { AlbumsEntry(json: $0) })
+    private let artists = Held<ArtistsEntry>(.artists, json { ArtistsEntry(json: $0) })
+    private let composers = Held<ComposersEntry>(.composers, json { ComposersEntry(json: $0) })
+    private let shows = Held<ShowsEntry>(.shows, json { ShowsEntry(json: $0) })
+    private let subscriptions = Held<SubscriptionsEntry>(.subscriptions, json { SubscriptionsEntry(json: $0) })
+    private let downloads = Held<DownloadsEntry>(.downloads, json { DownloadsEntry(json: $0) })
+    private let mine = Held<ProgressEntry>(.myProgress, json { ProgressEntry(json: $0) })
+    private let progress = Holds<ProgressEntry>({ .showProgress(playlist: Phone.noPlaylist, id: $0) }, json { ProgressEntry(json: $0) })
+    private let episodes = Holds<EpisodeDetailsEntry>({ .episodeDetails(playlist: Phone.noPlaylist, id: $0) }, json { EpisodeDetailsEntry(json: $0) })
+    private let details = Held<TrackDetailsEntry>(.trackDetails, json { TrackDetailsEntry(json: $0) })
+    private let played = Held<Play>(.lastPlayed, json { Play(json: $0) })
+    private var pages = [Page: (held: Held<LibraryEntry>, holdings: [Holding])]()
+    private let works = Holds<WorkSummary>({ .works(composer: $0) }, json { WorkSummary(json: $0) })
+    private let work = Holds<WorkSummary>({ .work(id: $0) }, json { WorkSummary(json: $0) })
+    private let recordings = Holds<RecordingsEntry>({ .recordings(work: $0) }, json { RecordingsEntry(json: $0) })
+    private let credits = Holds<CreditsEntry>({ .credits(recording: $0) }, json { CreditsEntry(json: $0) })
+    private let appearances = Holds<LibraryEntry>({ .appearances(playlist: Phone.noPlaylist, name: $0) }, tracks)
 
     /// The session for `login` at `server`, its replica under `root`; this
-    /// phone named `name` in the listening session, playing through `sound`.
-    init(server: String, login: Login, root: URL, name: String, sound: SoundCore,
+    /// phone named `name` in the listening session, playing through `media`
+    /// (ark-media-player's `PhoneMediaPlayer`).
+    init(server: String, login: Login, root: URL, name: String, media: NativeMediaPlayer,
          publish: @escaping (Snapshot) -> Void, notice: @escaping (String) -> Void,
          denied: @escaping (String) -> Void, failed: @escaping (String) -> Void) {
         self.server = server
         self.login = login
         self.root = root
         self.name = name
-        self.sound = sound
+        self.media = media
         self.publish = publish
         self.notice = notice
         self.denied = denied
@@ -254,12 +278,14 @@ final class Bridge {
         harken = h
         // What it counted is kept beside the replica.
         let p = Player(peer: h.peer, me: login.session, dir: dir.path)
-        p.attach(sound: sound)
+        p.attach(media: media, server: server, shell: PlayerHost(self))
         player = p
         h.peer.setListener(listener: Told { [weak self] in self?.drainSoon() })
-        library.hydrate(h)
-        playlists.hydrate(h)
-        albums.hydrate(h)
+        let v = HarkenSession(peer: h.peer)
+        views = v
+        library.hydrate(v)
+        playlists.hydrate(v)
+        albums.hydrate(v)
         snap.tracks = library.rows
         snap.playlists = playlists.rows
         snap.albums = albums.rows
@@ -267,15 +293,15 @@ final class Bridge {
         drain()
         // A later turn, so nothing that published waits on it.
         queue.async {
-            guard let h = self.harken else { return }
-            self.artists.hydrate(h)
-            self.composers.hydrate(h)
-            self.shows.hydrate(h)
-            self.subscriptions.hydrate(h)
-            self.downloads.hydrate(h)
-            self.mine.hydrate(h)
-            self.details.hydrate(h)
-            self.played.hydrate(h)
+            guard let v = self.views else { return }
+            self.artists.hydrate(v)
+            self.composers.hydrate(v)
+            self.shows.hydrate(v)
+            self.subscriptions.hydrate(v)
+            self.downloads.hydrate(v)
+            self.mine.hydrate(v)
+            self.details.hydrate(v)
+            self.played.hydrate(v)
             self.snap.artists = self.artists.rows
             self.snap.composers = self.composers.rows
             self.snap.shows = self.shows.rows
@@ -330,6 +356,7 @@ final class Bridge {
         splice()
         let st = h.peer.status()
         snap.status = st
+        snap.settled = h.peer.settled()
         if let d = st.denied, !deniedSaid {
             deniedSaid = true
             main { self.denied(d) }
@@ -343,25 +370,26 @@ final class Bridge {
     }
 
     private func splice() {
-        if library.update() { snap.tracks = library.rows }
-        if playlists.update() { snap.playlists = playlists.rows }
-        if albums.update() { snap.albums = albums.rows }
-        if artists.update() { snap.artists = artists.rows }
-        if composers.update() { snap.composers = composers.rows }
-        if shows.update() { snap.shows = shows.rows }
-        if subscriptions.update() { snap.subscriptions = subscriptions.rows }
-        if downloads.update() { snap.downloads = Bridge.downloadsByMedia(downloads.rows) }
-        if mine.update() { snap.mine = Bridge.mineByMedia(mine.rows) }
-        for (k, rows) in progress.update() { snap.progress[k] = rows }
-        for (k, rows) in episodes.update() { snap.episodes[k] = Bridge.episodesByMedia(rows) }
-        if details.update() { snap.details = Bridge.byMedia(details.rows) }
-        if played.update() { snap.lastPlayed = played.rows.first }
-        for (page, p) in pages where p.held.update() { snap.pages[page] = p.held.rows }
-        for (k, rows) in works.update() { snap.works[k] = rows }
-        for (k, rows) in work.update() { snap.work[k] = rows.first }
-        for (k, rows) in recordings.update() { snap.recordings[k] = rows }
-        for (k, rows) in credits.update() { snap.credits[k] = rows }
-        for (k, rows) in appearances.update() { snap.appearances[k] = rows }
+        guard let v = views else { return }
+        if library.update(v) { snap.tracks = library.rows }
+        if playlists.update(v) { snap.playlists = playlists.rows }
+        if albums.update(v) { snap.albums = albums.rows }
+        if artists.update(v) { snap.artists = artists.rows }
+        if composers.update(v) { snap.composers = composers.rows }
+        if shows.update(v) { snap.shows = shows.rows }
+        if subscriptions.update(v) { snap.subscriptions = subscriptions.rows }
+        if downloads.update(v) { snap.downloads = Bridge.downloadsByMedia(downloads.rows) }
+        if mine.update(v) { snap.mine = Bridge.mineByMedia(mine.rows) }
+        for (k, rows) in progress.update(v) { snap.progress[k] = rows }
+        for (k, rows) in episodes.update(v) { snap.episodes[k] = Bridge.episodesByMedia(rows) }
+        if details.update(v) { snap.details = Bridge.byMedia(details.rows) }
+        if played.update(v) { snap.lastPlayed = played.rows.first }
+        for (page, p) in pages where p.held.update(v) { snap.pages[page] = p.held.rows }
+        for (k, rows) in works.update(v) { snap.works[k] = rows }
+        for (k, rows) in work.update(v) { snap.work[k] = rows.first }
+        for (k, rows) in recordings.update(v) { snap.recordings[k] = rows }
+        for (k, rows) in credits.update(v) { snap.credits[k] = rows }
+        for (k, rows) in appearances.update(v) { snap.appearances[k] = rows }
     }
 
     private func step() {
@@ -396,7 +424,7 @@ final class Bridge {
     /// A press — a transition while this phone is part of the session —
     /// previewed on the session's queue, so what is published next already
     /// shows it; then `done` on the main queue with the refusal, if any.
-    /// Unlinked it is refused ([notPart]), and the caller does it to the player itself.
+    /// Alone it is done to this phone's own player's queue.
     func press(_ p: Press, done: @escaping (String?) -> Void = { _ in }) {
         queue.async {
             guard let player = self.player else { return self.main { done(notPart) } }
@@ -405,6 +433,33 @@ final class Bridge {
             self.show()
             self.main { done(w) }
         }
+    }
+
+    /// Alone: what is still to come shuffled, or not.
+    func shuffle() { alone { $0.shuffle() } }
+
+    /// Alone: off, all, one, off.
+    func cycleRepeat() { alone { $0.cycleRepeat() } }
+
+    private func alone(_ f: @escaping (Player) -> Void) {
+        queue.async {
+            guard let p = self.player else { return }
+            f(p)
+            self.step()
+            self.show()
+        }
+    }
+
+    /// A track's cover by its album, else its show's (an episode names its show as its creator),
+    /// as the lock screen fetches it. On `queue`, where the player asks.
+    fileprivate func cover(_ album: String, _ creator: String) -> String? {
+        let art = snap.albums.first(where: { $0.name == album })?.art ?? snap.shows.first(where: { $0.title == creator })?.art ?? ""
+        return art.isEmpty ? nil : Files.url(server, art)
+    }
+
+    /// Step again in `ms`: a play will count then.
+    fileprivate func pokeIn(_ ms: Int64) {
+        queue.asyncAfter(deadline: .now() + .milliseconds(Int(ms))) { self.poke() }
     }
 
     /// The player said something happened to it: reconcile.
@@ -432,22 +487,37 @@ final class Bridge {
 
     // On `queue`: a page's tracks held once more; true when they were read just now.
     private func holdTracks(_ page: Page) -> Bool {
+        guard let v = views, let view = Bridge.view(page) else { return false }
+        let h = v.hold(view: view)
         if var p = pages[page] {
-            p.refs += 1
+            p.holdings.append(h)
             pages[page] = p
             return false
         }
-        let held = Held<LibraryEntry> { try Phone.view($0, page) }
-        pages[page] = (held, 1)
-        guard let h = harken else { return false }
-        held.hydrate(h)
+        let held = Held<LibraryEntry>(view, tracks)
+        held.hydrate(v)
+        pages[page] = (held, [h])
         snap.pages[page] = held.rows
         return true
     }
 
+    /// A page's tracks as the domain names the view; none for every song,
+    /// which is the library's own, and for a work's ([Page.listings]).
+    private static func view(_ page: Page) -> HarkenView? {
+        let none = Phone.noPlaylist
+        switch page {
+        case let .album(id): return .album(playlist: none, id: id)
+        case let .artist(name): return .artist(playlist: none, name: name)
+        case let .playlist(id): return .playlist(id: id)
+        case let .recording(id): return .recording(playlist: none, id: id)
+        case let .show(id): return .show(playlist: none, id: id)
+        case .work, .songs: return nil
+        }
+    }
+
     // On `queue`: a listing held once more; true when it was read just now.
     private func hold(_ l: Listing) -> Bool {
-        let h = harken
+        let h = views
         switch l {
         case let .works(k):
             guard let rows = works.hold(k, h) else { return false }
@@ -478,11 +548,12 @@ final class Bridge {
         queue.async {
             for l in page.listings { self.release(l) }
             guard var p = self.pages[page] else { return }
-            p.refs -= 1
-            if p.refs > 0 {
+            p.holdings.removeLast()
+            if !p.holdings.isEmpty {
                 self.pages[page] = p
                 return
             }
+            p.held.letGo()
             self.pages[page] = nil
             self.snap.pages[page] = nil
         }
@@ -584,7 +655,7 @@ final class Bridge {
         onPeer { h in
             let before = Set(self.playlists.rows.map { $0.id })
             self.record(Phone.createPlaylist(h, name), "make the playlist \(name.trimmingCharacters(in: .whitespaces))", "Couldn't make it")
-            if self.playlists.update() { self.snap.playlists = self.playlists.rows }
+            if let v = self.views, self.playlists.update(v) { self.snap.playlists = self.playlists.rows }
             if let t = then, let made = self.playlists.rows.first(where: { !before.contains($0.id) }) {
                 self.record(Phone.addToPlaylist(h, made.id, t.id), "add \(t.title) to \(made.name)", "Couldn't add it")
             }
@@ -640,7 +711,7 @@ final class Bridge {
         queue.async {
             self.closed = true
             self.harken?.peer.setListener(listener: nil)
-            self.player?.attach(sound: nil)
+            self.player?.attach(media: nil, server: self.server, shell: nil)
             self.player = nil
             self.pages = [:]
             self.works.clear()
@@ -650,7 +721,28 @@ final class Bridge {
             self.progress.clear()
             self.episodes.clear()
             self.appearances.clear()
+            self.views = nil
             self.harken = nil
         }
     }
+}
+
+/// What the player asks of the phone: a step now or later, and a track's cover. Told on the
+/// session's queue, or the player's (the main queue); each goes to the session's queue.
+private final class PlayerHost: PlayerShell, @unchecked Sendable {
+    private weak var bridge: Bridge?
+
+    init(_ b: Bridge) { bridge = b }
+
+    func wake(inMs: Int64) {
+        if inMs <= 0 { bridge?.poke() } else { bridge?.pokeIn(inMs) }
+    }
+
+    func cover(album: String, creator: String) -> String? { bridge?.cover(album, creator) }
+
+    /// An iPhone's system volume is the person's and no app may set it: the
+    /// player's own gain is this phone's volume in the session.
+    func volume() -> Loudness? { nil }
+
+    func setVolume(level: Int64, muted: Bool) {}
 }

@@ -12,8 +12,9 @@
 //! `/auth/exchange` for a login. The desktop listens on a loopback port and
 //! hands the page to the browser; the page goes there itself and comes
 //! back to its own address. The server is the only OpenID Connect client,
-//! so this needs nothing but its address. A login is remembered per server
-//! ([`logins`]), so the next start is signed in already.
+//! so this needs nothing but its address. A login is kept per server in the
+//! desktop's secure store ([`logins`]), so the next start is signed in
+//! already.
 //!
 //! **The replica** is one per server: a directory natively, in memory in a
 //! browser (the page fills from its server at every load). It dials the
@@ -22,6 +23,7 @@
 //! the thread it draws on — a household's budget is small.
 #![cfg_attr(feature = "demo", allow(dead_code))]
 
+use ark_auth::keep::ServerLogins;
 use ark_auth::Login;
 use ark_peer::{Config, Disk, Logins};
 
@@ -35,39 +37,59 @@ pub struct Server {
     pub url: String,
     /// Who is signed in; none until somebody is.
     pub login: Option<Login>,
-    /// Where logins are remembered — none in a test, which must not write
-    /// into the config directory of whoever runs it.
-    pub logins: Option<Logins>,
+    /// Where logins are kept — none in a test, which must not write into
+    /// the keyring or the config directory of whoever runs it.
+    pub logins: Option<ServerLogins>,
     /// A name to offer a dev server's sign-in (`--user`, `?user=`).
     pub user: Option<String>,
-    /// This load has gone to sign in once, and does not go again by itself:
-    /// a sign-in that came back empty would otherwise go round for ever.
-    pub tried: bool,
+    /// Signing in, as every app's shell walks it: this load goes to sign in
+    /// once by itself, and a sign-in that came back empty is said, not
+    /// tried again (`ark_auth::onboarding`, under the first run every app
+    /// shares, `ark_auth::first_run`). The window is the app from the
+    /// start, over its replica: what the machine says is the note's.
+    pub first_run: ark_auth::first_run::FirstRun,
     /// What the socket rings.
     pub bell: arkui::wake::Bell,
+    /// "Add a Device": the join link another device signs in with, once it
+    /// is made, or why it was not.
+    pub device: Option<Result<String, String>>,
 }
 
-/// The logins this device remembers, one per server.
-pub fn logins() -> Logins {
-    Logins::new("money")
+/// Who money is, to the sign-in machine.
+pub fn app() -> ark_auth::onboarding::AppInfo {
+    ark_auth::onboarding::AppInfo {
+        name: "Money".into(),
+        scheme: "money".into(),
+        demo: false,
+        what: "your budget".into(),
+    }
+}
+
+/// The logins this device keeps, one per server: in the secure store
+/// (ark-secure-store: the Secret Service on Linux), each moved there once
+/// from the logins directory they were kept in before. With no Secret
+/// Service, a login lasts the run, and the next launch signs in again.
+/// Made once a run, so what is held for the run is the same everywhere.
+pub fn logins() -> ServerLogins {
+    static LOGINS: std::sync::OnceLock<ServerLogins> = std::sync::OnceLock::new();
+    LOGINS
+        .get_or_init(|| {
+            #[allow(unused_mut)]
+            let mut m = ark_app::Modules::new();
+            #[cfg(target_os = "linux")]
+            m.register::<dyn ark_app::modules::secure_store::SecureStore>(std::sync::Arc::new(ark_secure_store::SecretService::new("money")));
+            Logins::new("money").secured(m)
+        })
+        .clone()
 }
 
 /// Where the server is, and a name to offer a dev server.
 pub fn config() -> (String, Option<String>) {
-    #[cfg(not(target_arch = "wasm32"))]
     {
         let args: Vec<String> = std::env::args().collect();
         let flag = |name: &str| args.iter().position(|a| a == name).and_then(|i| args.get(i + 1)).cloned();
         let server = flag("--server").unwrap_or_else(|| DEFAULT_SERVER.into());
         (server.trim_end_matches('/').to_string(), flag("--user"))
-    }
-    #[cfg(target_arch = "wasm32")]
-    {
-        let location = web_sys::window().map(|w| w.location());
-        let query = location.as_ref().and_then(|l| l.search().ok()).unwrap_or_default();
-        let origin = location.as_ref().and_then(|l| l.origin().ok()).unwrap_or_else(|| DEFAULT_SERVER.into());
-        let server = ark_auth::query_value(&query, "server").unwrap_or(origin);
-        (server.trim_end_matches('/').to_string(), ark_auth::query_value(&query, "user"))
     }
 }
 
@@ -82,23 +104,35 @@ pub fn open(server: &str, login: Option<&Login>) -> Result<Replica, String> {
 
 /// Where a server's replica is kept.
 fn disk(server: &str) -> Result<Box<dyn Disk>, String> {
-    #[cfg(not(target_arch = "wasm32"))]
     {
         let dir = data_dir(server);
         ark_peer::Files::new(&dir)
             .map(|f| Box::new(f) as Box<dyn Disk>)
             .map_err(|e| format!("{}: {e}", dir.display()))
     }
-    #[cfg(target_arch = "wasm32")]
-    {
-        let _ = server;
-        Ok(Box::new(ark_peer::Memory::default()))
+}
+
+/// Where this desktop keeps that money's pages were seen: its app data.
+fn seen_file() -> std::path::PathBuf {
+    data_dir("x").with_file_name("intro-seen")
+}
+
+/// Whether this desktop has seen money's pages.
+pub fn intro_seen() -> bool {
+    seen_file().exists()
+}
+
+/// That money's pages were seen, kept for the next launch.
+pub fn remember_intro() {
+    let f = seen_file();
+    if let Some(dir) = f.parent() {
+        let _ = std::fs::create_dir_all(dir);
     }
+    let _ = std::fs::write(f, "1\n");
 }
 
 /// `$XDG_DATA_HOME/money/<server>`, or `~/.local/share/…`, or the temp
 /// directory on a machine with neither.
-#[cfg(not(target_arch = "wasm32"))]
 pub fn data_dir(server: &str) -> std::path::PathBuf {
     use std::path::PathBuf;
     let base = std::env::var_os("XDG_DATA_HOME")
@@ -110,24 +144,15 @@ pub fn data_dir(server: &str) -> std::path::PathBuf {
 
 /// A server's address as one path segment: `http://127.0.0.1:8788` is
 /// `http___127_0_0_1_8788`.
-#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 pub fn server_key(server: &str) -> String {
     let server = server.trim_end_matches('/');
     server.chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '_' }).collect()
 }
 
-/// The socket's wake: ring the window's bell, from the socket's thread
-/// natively and from the `WebSocket`'s callbacks in a browser.
+/// The socket's wake: ring the window's bell, from the socket's thread.
 pub fn waker(bell: &arkui::wake::Bell) -> ark_peer::Wake {
     let bell = bell.clone();
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        std::sync::Arc::new(move || bell.ring())
-    }
-    #[cfg(target_arch = "wasm32")]
-    {
-        std::rc::Rc::new(move || bell.ring())
-    }
+    std::sync::Arc::new(move || bell.ring())
 }
 
 /// The name Settings gives a login.

@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- What never leaves this phone in a backup or a device-to-device transfer:
+     the secure store's file (modules/ark-secure-store/module.toml, which
+     ui/prebuild.py writes into a generated app's rules the same way). -->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="sharedpref" path="ark-secure-store.xml" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="sharedpref" path="ark-secure-store.xml" />
+    </device-transfer>
+</data-extraction-rules>

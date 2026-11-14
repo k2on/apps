@@ -19,7 +19,7 @@
       },
       "ios": {
         "at": [
-          "swift/ArkUI: Space, Squares, \\.squares, Color(light:dark:)"
+          "ui/swift: Space, Squares, \\.squares, Color(light:dark:)"
         ],
         "how": [
           "import ArkUI. Space.xs … Space.xxl, Space.page, Space.corner: the spacing, Android's.",
@@ -70,8 +70,19 @@
       "desktop": [
         "fit",
         "line",
-        "format",
-        "clipboard"
+        "format"
+      ],
+      "android": null,
+      "ios": null,
+      "shots": []
+    },
+    {
+      "id": "writing",
+      "name": "Writing",
+      "section": "foundations",
+      "summary": "Long-form writing, once for every toolkit: headings, paragraphs with links, emphasis and code, lists, highlighted code, callouts, quotes and tables, written as Markdown (`ark_app::writing`) and said in a view as `writing(md)`. A help page, a release note, these docs.",
+      "desktop": [
+        "writing"
       ],
       "android": null,
       "ios": null,
@@ -98,7 +109,7 @@
       },
       "ios": {
         "at": [
-          "swift/ArkUI: Square, Art (ArkUICore)"
+          "ui/swift: Square, Art (ArkUICore)"
         ],
         "how": [
           "Square(seed:): the same square for the same name as Android's and the desktop's.",
@@ -168,7 +179,7 @@
     },
     {
       "id": "reorder",
-      "name": "Reorderable list",
+      "name": "Reorderable List",
       "section": "components",
       "summary": "Rows dragged into a new order, the rest sliding out of the way: what a queue is rearranged with.",
       "desktop": [
@@ -186,7 +197,7 @@
       },
       "ios": {
         "at": [
-          "swift/ArkUI: Reorderable, ReorderHandle"
+          "ui/swift: Reorderable, ReorderHandle"
         ],
         "how": [
           "Reorderable(items, key:, onMove:) { item, handle in … }: the row places the handle it is given, and is dragged by it, as the Music app's queue is.",
@@ -256,7 +267,7 @@
     },
     {
       "id": "empty",
-      "name": "Empty states",
+      "name": "Empty States",
       "section": "components",
       "summary": "What a page says while it has nothing to show, or is still asking for it.",
       "desktop": [],
@@ -283,7 +294,7 @@
     },
     {
       "id": "account",
-      "name": "Account and sign-in",
+      "name": "Account and Sign-In",
       "section": "components",
       "summary": "Who is signed in, as a circle of their picture or their initials, and the screens that get them signed in.",
       "desktop": [
@@ -369,7 +380,7 @@
     },
     {
       "id": "command",
-      "name": "Command box",
+      "name": "Command Box",
       "section": "overlays",
       "summary": "One search box over everything, opened by Ctrl+K from anywhere.",
       "desktop": [
@@ -407,7 +418,7 @@
     },
     {
       "id": "expanding-card",
-      "name": "Expanding card",
+      "name": "Expanding Card",
       "section": "motion",
       "summary": "A bar at the foot of the screen that rises into the whole screen and falls back, following a finger or on its own.",
       "desktop": [],
@@ -422,7 +433,7 @@
       },
       "ios": {
         "at": [
-          "swift/ArkUI: View.expandingCard(isPresented:bar:expanded:) (iOS 26)"
+          "ui/swift: View.expandingCard(isPresented:bar:expanded:) (iOS 26)"
         ],
         "how": [
           "On a TabView: tabView.expandingCard(isPresented: $open) { bar } expanded: { screen }. The bar sits on glass above the tab bar (tabViewBottomAccessory) and zooms into the screen and back (navigationTransition(.zoom)).",
@@ -449,7 +460,7 @@
       "desktop": [],
       "android": {
         "at": [
-          "kotlin/arkui/src/dev/arkui/Glass.kt: GlassContainer, Modifier.glass, GlassMorph, GlassShape, Glass"
+          "ui/kotlin/src/dev/arkui/Glass.kt: GlassContainer, Modifier.glass, GlassMorph, GlassShape, Glass"
         ],
         "how": [
           "GlassContainer(modifier, spacing = Space.s) { … }: one surface for every piece of glass in it, as SwiftUI's GlassEffectContainer. Two pieces nearer than `spacing` are joined by a neck that thickens as they close; a piece appearing buds out of its nearest neighbour, and one going shrinks back into it. Best as large as the screen, since a menu opens over all of it.",
@@ -512,7 +523,7 @@
     },
     {
       "id": "pages",
-      "name": "Page motion",
+      "name": "Page Motion",
       "section": "motion",
       "summary": "Going in and coming back: a page grows over the last, and a swipe from the edge takes it away.",
       "desktop": [
@@ -549,7 +560,7 @@
       },
       "ios": {
         "at": [
-          "swift/ArkUI: Springs"
+          "ui/swift: Springs"
         ],
         "how": [
           "Springs.move, Springs.size, Springs.fade: Android's springs converted exactly (docs/plan-arkui-swift.md)."
@@ -610,17 +621,19 @@
       "id": "routes",
       "name": "Routes",
       "section": "behaviour",
-      "summary": "Places as addresses, kept in step with the address bar or the back stack.",
+      "summary": "An app's routes as URLs, one spelling on every shell, kept in step with the address bar or the back stack.",
       "desktop": [
-        "route",
+        "router",
         "url"
       ],
       "android": {
         "at": [
-          "ui/Destination.kt: Destination, Destinations"
+          "ui/Destination.kt: Destination",
+          "Router.kt: RouteArg"
         ],
         "how": [
-          "Destination(owner, name) { content }: a page's own ViewModel store, kept while it is on the stack."
+          "Destination(owner, name) { content }: a page's own ViewModel store, kept while it is on the stack.",
+          "RouteArg.of(route.url()) / RouteArg.path(arg): a route's URL as a destination's argument, and back."
         ]
       },
       "ios": null,
@@ -718,13 +731,14 @@
     {
       "module": "format",
       "name": "Format",
-      "summary": "Words for numbers: a clock, a count spelt out, a plural, a span of time, a day.",
+      "summary": "Words for numbers: a clock, a length, a plural, a span of time, a day.",
       "api": [
-        "clock(secs)",
-        "spell(ms)",
+        "clock(ms)",
+        "clock_secs(secs)",
+        "length(ms)",
         "plural(n, word)",
         "span(born, died)",
-        "day(ms, now)"
+        "published(ms, now, offset)"
       ],
       "rules": [
         "A length past an hour is h:mm:ss."
@@ -746,16 +760,19 @@
       ]
     },
     {
-      "module": "clipboard",
-      "name": "Clipboard",
-      "summary": "Copy, cut and paste in every text box, in a browser too: the window's view handed the browser's clipboard, and a paste put in where the keys are once the browser hands it over.",
+      "module": "writing",
+      "name": "Writing",
+      "summary": "Long-form writing drawn in iced (`ark_app::writing`'s blocks): rich text with emphasis, code and links, Fira Mono code coloured by the theme's roles, callouts on the palette's tints, tables and rules, in a column of a reader's measure. arkui-web draws the same blocks as HTML (`arkui_web::writing`).",
       "api": [
-        "view(view): the whole window's, once",
-        "pastes() -> Subscription<()>"
+        "markdown(md), markdown_with(md, on_link)",
+        "blocks(&[Block], on_link), block(b, on_link), code(lang, text)",
+        "MEASURE (680), BODY (15)",
+        "ark_app::writing: parse(md), inline(s), highlight(lang, code), writing(md) (Part::Writing)"
       ],
       "rules": [
-        "A paste is asked for and arrives later; it goes into whichever box has the keys, at its cursor, as typed text does.",
-        "On the desktop it is iced's own clipboard, untouched."
+        "Every colour is the theme's, asked for as it is drawn: the same writing is right in light and dark.",
+        "Nothing in it moves.",
+        "SwiftUI and Compose have no Writing part yet: the phones' emitters write the call, the part is what is left."
       ]
     },
     {
@@ -889,7 +906,7 @@
         "BOLD, FIRA_SANS_BOLD"
       ],
       "rules": [
-        "Fira Sans Bold is embedded: a browser has no system fonts, and with none bold is not bold."
+        "Fira Sans Bold is embedded: a system with no fonts still draws bold."
       ]
     },
     {
@@ -1099,18 +1116,20 @@
       ]
     },
     {
-      "module": "route",
-      "name": "Route",
-      "summary": "Places as URL fragments, and the address bar kept in step: reconciled, not pushed, and a scrub one history entry. Each page here has one.",
+      "module": "router",
+      "name": "Router",
+      "summary": "An app's routes as URLs, the browser's and the desktop's alike (`/album/water-music/`), and the address bar kept in step: reconciled, not pushed, and a scrub one history entry. Each page here has one.",
       "api": [
-        "trait Route { fragment(), parse() }",
-        "join(kind, name), split(fragment)",
-        "Router::new(), sync(&place), replace_next(), poll(ready), go(by), can_go(by)",
-        "AddressBar, Browser, Nav"
+        "trait Routable { address(), from_address(), url(), from_url(), key(), home() } (ark-router; #[derive(Routes)] writes it)",
+        "Address { path, query }: of_url(url, base), url(), url_under(base), with(key, value), get(key)",
+        "parse(url)",
+        "Router::new(), sync(&route), replace_next(), poll(ready), go(by), can_go(by)",
+        "AddressBar, Memory, Nav"
       ],
       "rules": [
-        "`parse` never fails: an unknown fragment is home.",
-        "Call `sync` after every update."
+        "`parse` never fails: a URL that names nothing is home.",
+        "Call `sync` after every update.",
+        "A query key no route names is the UI's, passed over."
       ]
     },
     {
@@ -1126,7 +1145,7 @@
     {
       "module": "history",
       "name": "History",
-      "summary": "Back and forward every way an app is asked: the browser's buttons, ^O and ^I, and two fingers sideways. The router and the swipe, wired once.",
+      "summary": "Back and forward every way an app is asked: ^O and ^I, and two fingers sideways. The router and the swipe, wired once.",
       "api": [
         "History::new(), go(by), can_go(by), wheel(delta, now), tick(now), active(), sync(&place), replace_next(), poll(ready), view(page, now)",
         "scrolled(&place, y), arrive(&place) -> y: back and forward land where a page was left",
@@ -1148,18 +1167,16 @@
         "FAR, LET_GO, QUIET, BACK, STRETCH"
       ],
       "rules": [
-        "It goes when the fingers lift, and only where there is somewhere to go.",
-        "In a browser the browser's own back does this instead."
+        "It goes when the fingers lift, and only where there is somewhere to go."
       ]
     },
     {
       "module": "wake",
       "name": "Wake",
-      "summary": "What wakes a window that runs no loop: a bell anything can ring, one timer at a deadline, and the browser's address bar moving.",
+      "summary": "What wakes a window that runs no loop: a bell anything can ring, and one timer at a deadline.",
       "api": [
         "Bell::new(), ring(), rung(), subscription()",
-        "at(key, delay)",
-        "page_changes(f)"
+        "at(key, delay)"
       ],
       "rules": [
         "With nothing playing, dwelling or arriving, a window runs no timer."
@@ -1168,7 +1185,7 @@
     {
       "module": "images",
       "name": "Images",
-      "summary": "A picture cache: fetched off the render thread, decoded and bounded, kept on disk natively and in the Cache API in a browser. A failure is remembered.",
+      "summary": "A picture cache: fetched off the render thread, decoded and bounded, kept on disk. A failure is remembered.",
       "api": [
         "Images::new(name)",
         "want(url) -> Option<Task<Loaded>>",

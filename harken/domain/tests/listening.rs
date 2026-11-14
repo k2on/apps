@@ -14,6 +14,9 @@
 //!
 //! Each test was falsified once by breaking the rule it holds; its doc
 //! comment says how, and what failed.
+// A test reads its fixtures and times itself: the kernel's and the core's
+// purity (clippy.toml) is their library's, not their tests'.
+#![allow(clippy::disallowed_methods, clippy::disallowed_types)]
 
 mod common;
 
@@ -113,14 +116,14 @@ impl House {
     /// `device` signed out: its session's sign-in revoked, as
     /// `session.revoke` leaves it, before the hub closes its connections.
     fn signed_out(&mut self, device: &str) {
-        let row = ark_auth::SignIn {
+        let row = ark::auth::SignIn {
             id: device.into(),
             user: "alice".into(),
             revoked: true,
             ..Default::default()
         };
         let c = Change::Add {
-            table: ark_auth::SignIn::TABLE.into(),
+            table: ark::auth::SignIn::TABLE.into(),
             row: row.to_bytes(),
         };
         self.store.apply(&c).unwrap();

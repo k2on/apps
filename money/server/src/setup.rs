@@ -1,6 +1,6 @@
 //! Setting up where receipts come from, from the app's Settings: the
 //! functions of the server's own a device calls over its link
-//! (`money_domain::setup`, ark-peer's `Config::calls`), outside the log.
+//! (`money_core::setup`, ark-peer's `Config::calls`), outside the log.
 //! What they are told is kept in the vault ([`crate::vault`]), never a row,
 //! and what they answer is [`Stores`]: who, masked, and no secret.
 //!
@@ -20,7 +20,7 @@ use std::sync::{Arc, Mutex};
 use anyhow::{anyhow, bail, Result};
 use ark::format::Encode;
 use ark::peer::Who;
-use money_domain::setup::{self as calls, AmazonState, BrowserPage, CostcoState, Stores};
+use money_core::setup::{self as calls, AmazonState, BrowserPage, CostcoState, Stores};
 
 use crate::costco::Costco;
 use crate::importer::ImporterHandle;

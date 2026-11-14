@@ -1,0 +1,17 @@
+# What an app takes on when its crate depends on ark-background (ui/docs/app.md,
+# Background And Notifications; README.md says why). ui/prebuild.py reads it.
+#
+# Nothing of a platform's here: the background modes, the task's
+# identifier, the job service and the boot receiver are written only from
+# the app's own `[background]` (ui/prebuild.py), never because a module is
+# listed. An app that declares none runs nothing in the background.
+crate = "ark-background"
+
+[ops]
+SetSync = "()"
+Wanted = "Option<u32>"
+
+[ios.info]
+
+[android]
+permissions = []

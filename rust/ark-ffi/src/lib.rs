@@ -34,8 +34,21 @@ use ark_peer::{monotonic_ms, Config, Files, Update, Watched};
 
 uniffi::setup_scaffolding!();
 
+pub mod devices;
+pub mod hall;
+pub mod host;
+pub mod hosted;
+pub mod keep;
+pub mod process;
+pub mod session;
 pub mod typed;
-pub use typed::{Op, RowId, Taken, Twin, Typed};
+pub mod wake;
+pub use host::{ArkHost, Handle, HostApp, HostShell, Launch, Opened, ShotsTook};
+pub use keep::{LoginKeep, OldShelf};
+pub use process::{ArkProcess, Attached, BackgroundWork};
+pub use session::{Hold, Session};
+pub use typed::{FileRefFfi, Op, RowId, Taken, Twin, Typed};
+pub use wake::{WakeDone, WakeReason, Wakeful};
 
 /// Why something was not done, as a sentence: what a form shows.
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Error)]
@@ -66,43 +79,42 @@ pub struct Due {
 }
 
 /// A login as the server hands it over: the token the link proves itself
-/// with, and who it is.
-#[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
-pub struct Login {
-    pub token: String,
-    pub session: String,
-    pub user: String,
-    pub name: String,
-    pub email: String,
-    pub roles: Vec<String>,
-    pub expires_ms: i64,
-    /// The provider's picture of them (`ark_auth::Account::picture`), or
-    /// empty. Last and defaulted, so a login made before it still builds.
-    #[uniffi(default = "")]
-    pub picture: String,
-}
+/// with, and who it is. The sign-in machine's (`ark_auth::onboarding`),
+/// which hands it to the app.
+pub use ark_auth::onboarding::Login;
 
-impl From<ark_auth::Login> for Login {
-    fn from(l: ark_auth::Login) -> Login {
-        Login {
-            token: l.token,
-            session: l.session,
-            user: l.user.id,
-            name: l.user.name,
-            email: l.user.email,
-            roles: l.user.roles,
-            expires_ms: l.expires_ms,
-            picture: l.user.picture,
-        }
+/// Who a login is, as an entry carries it.
+fn who(l: &Login) -> Who {
+    Who {
+        actor: l.user.clone(),
+        session: l.session.clone(),
+        roles: l.roles.clone(),
     }
 }
 
-impl Login {
-    fn who(&self) -> Who {
-        Who {
-            actor: self.user.clone(),
-            session: self.session.clone(),
-            roles: self.roles.clone(),
+/// What only the phone's shell does, asked of it in order
+/// (`ark_app::host::ShellAsk`): every app's, so the app library's shell
+/// (ui/swift's ArkApp, ui/kotlin/app) carries it out with nothing of the
+/// app's own.
+#[derive(Clone, Debug, PartialEq, Eq, uniffi::Enum)]
+pub enum ShellAsk {
+    /// Settings put up (its pane is the shell's, chosen already).
+    Settings { pane: String },
+    /// Add a Device's page.
+    AddDevice,
+    /// A link taken: what the shell shows of its own put away.
+    Reset,
+    /// Signed out (the host signs out itself; a shell is never asked).
+    SignOut,
+}
+
+impl From<ark_app::host::ShellAsk> for ShellAsk {
+    fn from(a: ark_app::host::ShellAsk) -> ShellAsk {
+        match a {
+            ark_app::host::ShellAsk::Settings { pane } => ShellAsk::Settings { pane },
+            ark_app::host::ShellAsk::AddDevice => ShellAsk::AddDevice,
+            ark_app::host::ShellAsk::Reset => ShellAsk::Reset,
+            ark_app::host::ShellAsk::SignOut => ShellAsk::SignOut,
         }
     }
 }
@@ -198,6 +210,8 @@ struct Kept {
 struct State {
     peer: ark_peer::Peer,
     views: BTreeMap<u64, Kept>,
+    /// Each app's store of its views ([`Session`]), by number.
+    stores: BTreeMap<u64, Box<dyn session::Attached>>,
     next: u64,
     /// Until when the driver wakes often: a live call's relay is due.
     hurry: u64,
@@ -222,6 +236,9 @@ impl State {
                 Update::Reset => k.update = Update::Reset,
             }
             moved = true;
+        }
+        for a in self.stores.values_mut() {
+            moved |= a.settle(&mut self.peer);
         }
         let replies = self.peer.replies_waiting();
         moved |= replies > self.replies;
@@ -282,6 +299,7 @@ impl Shared {
         if let Some(l) = l {
             l.changed();
         }
+        self.tell_sessions();
     }
 
     /// How long the driver may sleep: until the next dial, a relay's
@@ -368,7 +386,7 @@ impl Peer {
     /// started. What an app's own crate calls with its domain.
     pub fn open(config: Config, dir: &str, login: Option<Login>) -> Result<Arc<Peer>, Refusal> {
         let disk = Files::new(dir).map_err(|e| format!("{dir}: {e}"))?;
-        let login = login.map(|l| (l.who(), l.token));
+        let login = login.map(|l| (who(&l), l.token));
         Peer::of(ark_peer::Peer::open_as(config, Box::new(disk), login))
     }
 
@@ -382,6 +400,7 @@ impl Peer {
         let state = State {
             peer,
             views: BTreeMap::new(),
+            stores: BTreeMap::new(),
             next: 0,
             hurry: 0,
             denied: None,
@@ -486,6 +505,23 @@ impl Peer {
             }
             s.peer.begin(&name);
             let out = s.peer.mutate_bytes(&name, input);
+            s.peer.end();
+            out
+        })?;
+        Ok(ark::hash::hex(&id.0))
+    }
+
+    /// An intent of the function `name` on its input's bytes (the value
+    /// format), as [`Peer::mutate`] makes one of JSON: what an app's typed
+    /// change (money's `MoneyChange`) is sent as, no JSON on the way.
+    pub fn mutate_encoded(&self, name: &str, input: Vec<u8>) -> Result<String, Refusal> {
+        let _call = tracing::debug_span!(target: "ark", "ffi", call = "mutate", name = %name).entered();
+        let id = self.shared.act(|s| {
+            if s.peer.open_span().is_some() {
+                return s.peer.mutate_bytes(name, input);
+            }
+            s.peer.begin(name);
+            let out = s.peer.mutate_bytes(name, input);
             s.peer.end();
             out
         })?;
@@ -616,6 +652,31 @@ impl Peer {
         live.store.rows(&table).map(|r| text(s.peer.row_json(&table, r))).collect()
     }
 
+    /// Whether nothing this device has asked for is still on its way: alone,
+    /// or linked with no intent of its own unconfirmed and no call's answer
+    /// waiting to be taken. A screenshot is taken only once it is (and the
+    /// app's own runtime is idle: ui/docs/shots.md), so it never shows a
+    /// replica half caught up.
+    pub fn settled(&self) -> bool {
+        self.unsettled().is_none()
+    }
+
+    /// What it is still waiting on, said: none when [`Peer::settled`].
+    pub fn unsettled(&self) -> Option<String> {
+        let s = self.shared.lock();
+        let st = s.peer.status();
+        let replies = s.peer.replies_waiting();
+        let why: Vec<String> = [
+            (!(st.alone || st.linked)).then(|| format!("not linked ({})", st.link)),
+            (st.pending > 0).then(|| format!("{} intent(s) of its own unconfirmed", st.pending)),
+            (replies > 0).then(|| format!("{replies} call answer(s) to take")),
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
+        (!why.is_empty()).then(|| why.join(", "))
+    }
+
     pub fn status(&self) -> Status {
         let s = self.shared.lock();
         let st = s.peer.status();
@@ -669,7 +730,7 @@ impl Peer {
     pub fn login(&self, login: Login) {
         self.shared.act(|s| {
             s.denied = None;
-            s.peer.login(login.who(), login.token)
+            s.peer.login(who(&login), login.token)
         });
     }
 
@@ -811,15 +872,124 @@ pub fn socket_url(server: String) -> String {
     ark_auth::socket_url(&server)
 }
 
-/// Where a sign-in starts: the server's own page, which sends its code on
-/// to `redirect` (`harken://auth`).
+/// A join link's device code redeemed at `server`
+/// (`ark_auth::onboarding::Effect::Redeem`): a login of this device's own.
+/// A refusal is the server's sentence.
 #[uniffi::export]
-pub fn login_url(server: String, redirect: String) -> String {
-    ark_auth::login_url(&server, &redirect, None)
+pub fn redeem(server: String, code: String) -> Result<Login, Refusal> {
+    Ok(ark_auth::client::redeem(&server, &code)?.into())
+}
+
+/// "Add a Device": the join link another device scans or opens — a
+/// one-time code made at `server` as `token`'s account, on the app's
+/// `scheme` — and its QR code. Blocking: the server is asked.
+#[uniffi::export]
+pub fn device_link(scheme: String, server: String, token: String) -> Result<DeviceLink, Refusal> {
+    let (code, _) = ark_auth::client::device_code(&server, &token)?;
+    let link = ark_auth::onboarding::join_link(scheme, server, Some(code));
+    let qr = ark_auth::onboarding::qr_code(link.clone()).ok_or("the link is too long for a QR code")?;
+    Ok(DeviceLink { link, qr })
+}
+
+/// What "Add a Device" shows: the link, and the link as a QR code.
+#[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
+pub struct DeviceLink {
+    pub link: String,
+    pub qr: ark_auth::onboarding::Qr,
 }
 
 /// The login a sign-in's code stands for, from the server that gave it.
 #[uniffi::export]
 pub fn exchange(server: String, code: String) -> Result<Login, Refusal> {
     Ok(ark_auth::client::exchange(&server, &code)?.into())
+}
+
+/// The sign-in machine and the first run's pages, for an app's bridge
+/// (`welcome_app!`'s), which names them by these paths.
+pub use ark_app;
+pub use ark_auth;
+/// The periodic sync's foreign trait, linked into every app's library (see
+/// Cargo.toml).
+pub use ark_background;
+/// What an app's generated library names through this crate
+/// (`phone_host!`): the login's store, its routes, its words.
+pub use ark_format_ffi;
+pub use ark_peer;
+pub use ark_router;
+pub use ark_secure_store;
+
+/// An app's first run over UniFFI: the shared pages (`ark_app::welcome`)
+/// over the sign-in machine its host runs ([`ArkHost`]), as one screen the
+/// phone's generated `WelcomeView` / `WelcomeScreen` reads and sends to —
+/// the same shape as every other screen's runtime (`page`, `send`,
+/// `version`, `is_idle`, `drawn`), so the phones' shared screen holder
+/// holds it. Written in the app's bridge, after its twins of
+/// `ark_app::welcome`'s records (`WelcomePageFfi`, `WelcomeMsgFfi`,
+/// `AddDevicePageFfi`), which UniFFI exports in the app's own namespace:
+/// `ark_ffi::welcome_app!()`.
+#[macro_export]
+macro_rules! welcome_app {
+    () => {
+        /// The app's first run: its pages, over its host's sign-in machine.
+        #[derive(uniffi::Object)]
+        pub struct WelcomeApp(std::sync::Arc<$crate::ArkHost>);
+
+        #[uniffi::export]
+        impl WelcomeApp {
+            /// The first run `host` runs.
+            #[uniffi::constructor]
+            pub fn new(host: std::sync::Arc<$crate::ArkHost>) -> std::sync::Arc<WelcomeApp> {
+                std::sync::Arc::new(WelcomeApp(host))
+            }
+
+            /// The page that shows; none of them while the app does.
+            pub fn page(&self) -> WelcomePageFfi {
+                use $crate::Twin;
+                self.0.with_run(|r| r.page()).ffi()
+            }
+
+            /// A press on a page: its effects carried out by the host.
+            pub fn send(&self, msg: WelcomeMsgFfi) {
+                use $crate::Twin;
+                self.0.press($crate::ark_app::welcome::WelcomeMsg::from_ffi(msg))
+            }
+
+            /// Grows with everything the host's shell shows.
+            pub fn version(&self) -> u64 {
+                self.0.version()
+            }
+
+            /// Whether nothing is on its way.
+            pub fn is_idle(&self) -> bool {
+                self.0.idle()
+            }
+
+            /// Nothing comes later: answers are the host's.
+            pub fn drain(&self) -> bool {
+                false
+            }
+
+            /// Nothing waits on a draw.
+            pub fn drawn(&self) -> bool {
+                false
+            }
+
+            pub fn awaits_draw(&self) -> bool {
+                false
+            }
+        }
+
+        /// "Add a Device" as it stands: none while the code is made, the
+        /// link made, or why not.
+        #[uniffi::export]
+        pub fn add_device_page(link: Option<$crate::DeviceLink>, failed: Option<String>) -> AddDevicePageFfi {
+            use $crate::Twin;
+            let made = match (link, failed) {
+                (Some(l), _) => Some(Ok((l.link, l.qr))),
+                (None, Some(why)) => Some(Err(why)),
+                (None, None) => None,
+            };
+            $crate::ark_auth::first_run::add_device_page(made).ffi()
+        }
+    };
 }

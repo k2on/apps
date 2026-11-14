@@ -11,7 +11,7 @@
 
 use ark::peer::Who;
 
-use crate::{Patch, Peer, Update};
+use crate::{Peer, Update};
 
 /// One view and the rows a UI holds of it.
 pub struct Watched<T> {
@@ -116,15 +116,4 @@ impl<T> Watched<T> {
     }
 }
 
-/// The patches, in order, onto the decoded list: `ark::plan::splice` with
-/// the decoding said, because a row here is the UI's type.
-pub fn splice<T>(rows: &mut Vec<T>, patches: &[Patch], read: fn(&[u8]) -> T) {
-    for p in patches {
-        match p {
-            Patch::Insert { at, node } => rows.insert((*at).min(rows.len()), read(node)),
-            Patch::Remove { at } if *at < rows.len() => drop(rows.remove(*at)),
-            Patch::Update { at, node } if *at < rows.len() => rows[*at] = read(node),
-            _ => {}
-        }
-    }
-}
+pub use ark::views::splice;

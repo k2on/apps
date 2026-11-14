@@ -7,8 +7,8 @@
 #
 # **Nothing here names an app.** The apps are the flake's one list
 # (`publish`: its APKs, its iPhone apps), and of those an app is taken when
-# it has <app>/screens/shots.json — each shot as the steps that open it —
-# and, if it signs in to a server, <app>/screens/server.sh, which starts
+# it has <app>/demo/shots.json — each shot as the steps that open it —
+# and, if it signs in to a server, <app>/demo/server.sh, which starts
 # that server with something in it. Its builds are the
 # artifacts `apk-<app>` (build.yaml), for the iPhone `nix build
 # .#<app>-ios-simulator` at the commit (flake.nix, `iosSimulator`), and for
@@ -98,9 +98,8 @@ on:
     branches: [main]
     paths:
       - ".github/screens/**"
-      - "*/screens/**"
-      # What the servers are seeded with.
-      - "*/seed/**"
+      # The shots and what the servers are seeded with.
+      - "*/demo/**"
       - ".github/workflows/app-screens.yaml"
   # By hand: every app again, from what was published. Or, given a pull
   # request's number, that PR's iPhone shots, at its head, of each app whose
@@ -114,7 +113,8 @@ on:
         default: ""
       # Every app taken as by hand, and nothing published (no `screens`
       # branch): to try this file as a branch has it, run on that branch,
-      # before it is merged. Its builds still go to the cache, as every run
+      # before it is merged. A run by hand on any branch but main is a dry
+      # one whatever this says. Its builds still go to the cache, as every run
       # of this repository's code.
       dry:
         description: "Without a PR: take every app, publish nothing"
@@ -176,12 +176,17 @@ jobs:
       # Each iPhone app taken, and the hash of what it is taken from
       # (ios-inputs.sh), as a JSON object: kept beside its shots.
       ios-inputs: ${{ steps.which.outputs.ios-inputs }}
+      # The run's day (UTC), which every job's sample-data server is seeded
+      # up to (DEMO_DAY, <app>/demo/server.sh) and the Mac's demo opens on
+      # (app-mac.sh): the phones, the tablets and the desktop show one
+      # household on one day, however long a job waited for its runner.
+      day: ${{ steps.which.outputs.day }}
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
       # The apps, as the flake lists them (`publish`): each phone's, of those
-      # with <app>/screens/shots.json, and the desktop's, of those whose
+      # with <app>/demo/shots.json, and the desktop's, of those whose
       # shots.json has `desktop`.
       - uses: DeterminateSystems/nix-installer-action@main
       - name: The apps
@@ -217,12 +222,14 @@ jobs:
             {
               echo "mode=$mode"; echo "pr=$pr"; echo "sha=$sha"; echo "branch=$branch"
               echo "android=$android"; echo "ios=$ios"; echo "desktop=$desktop"; echo "ios-inputs=$inputs"
+              echo "day=$(date -u +%F)"
               lists
             } | tee -a "$GITHUB_OUTPUT"
           }
-          shots() { [ -f "$1/screens/shots.json" ]; }
+          # harken and revelation come back to the screenshots once ported to Ark apps.
+          shots() { [ -f "$1/demo/shots.json" ] && ! grep -qxE 'harken|revelation' <<< "$1"; }
           # An app whose shots.json has the desktop's shots.
-          desktop() { shots "$1" && jq -e '.desktop.shots | length > 0' "$1/screens/shots.json" > /dev/null; }
+          desktop() { shots "$1" && jq -e '.desktop.shots | length > 0' "$1/demo/shots.json" > /dev/null; }
           iphones() { for a in $(jq -r '.ios[]' "$RUNNER_TEMP/apps.json"); do if shots "$a"; then echo "$a"; fi; done; }
           # The hash kept beside an app's iPhone shots on a branch
           # (<dir>/ios/inputs), or nothing: none kept, or no such branch.
@@ -361,42 +368,135 @@ jobs:
           fi
           said
 
+  # With no run to take them from (a push, a run by hand): every app's
+  # APK fetched once (published.sh), here, and handed to the emulators'
+  # jobs. A dry run's are build's at the commit, waited for while that run
+  # makes them: one job waiting rather than eighteen, which held every
+  # Linux runner while build's own APK jobs queued for one (twenty-two
+  # minutes in app-screens 42959400546) and asked the API for its
+  # artifacts until it refused them.
+  # Each app's server, its <app>/demo/server.sh's packages as the
+  # Android and desktop jobs start them, and the crates both desktop windows
+  # link (flake.nix, `screens-crates`, at the commit they are built from),
+  # built once and pushed before those jobs and the kernels' fan out: with
+  # none of it in the cache, each of a dozen Android jobs and both desktop
+  # jobs compiled the same server and crates at once (app-screens
+  # 42959400546: harken-server in six jobs, money-web in five). A fork's
+  # code is never built here (`SAME_REPO`): its jobs build what they need.
+  servers:
+    needs: which
+    if: needs.which.outputs.mode != '' && (github.event_name != 'workflow_run' || github.event.workflow_run.head_repository.full_name == github.repository)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      SOURCE: ${{ github.event.workflow_run.head_sha || github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.SOURCE }}
+          path: src
+          persist-credentials: false
+      - uses: DeterminateSystems/nix-installer-action@main
+        with:
+          extra-conf: |
+            extra-substituters = https://k2on.cachix.org
+            extra-trusted-public-keys = k2on.cachix.org-1:oI4Db0uW5ER+s4Te/MrXSmjWUWkOc9rmKdzsgUDxQP8=
+      - if: vars.CACHIX_NAME != ''
+        uses: cachix/cachix-action@v15
+        with:
+          name: ${{ vars.CACHIX_NAME }}
+          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
+      - name: Build the servers and the windows' crates
+        run: |
+          refs=()
+          for f in */demo/server.sh; do
+            # harken and revelation come back to the screenshots once ported to Ark apps.
+            grep -qxE 'harken|revelation' <<< "${f%%/*}" && continue
+            while read -r p; do refs+=(".#$p"); done < <(grep -o '\.#[A-Za-z0-9_-]*' "$f" | cut -c3- | sort -u)
+          done
+          # A commit from before `screens-crates` has none to build.
+          if [ "$(nix eval --json ./src#packages.x86_64-linux --apply 'p: p ? screens-crates' 2> /dev/null)" = true ]; then
+            refs+=("./src#screens-crates")
+          fi
+          echo "${refs[*]}"
+          nix build --no-link --print-build-logs "${refs[@]}"
+
+  apks:
+    needs: which
+    if: needs.which.outputs.mode != '' && needs.which.outputs.android != '' && github.event_name != 'workflow_run'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+    env:
+      APPS: ${{ needs.which.outputs.android }}
+      GH_TOKEN: ${{ github.token }}
+      # A dry run: the APKs build made at the branch's commit, where it made any.
+      # A run by hand on any branch but main is one, `dry` said or not: F-Droid's
+      # APKs are main's, and have no ready signal to wait for (43159033586,
+      # dispatched on a branch without `dry`: every Android job failed so).
+      COMMIT: ${{ (inputs.dry == true || (github.event_name == 'workflow_dispatch' && github.ref_name != 'main')) && github.sha || '' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      # What was fetched listed beside it, so the artifact is there even
+      # when F-Droid offers none of the apps.
+      # A dry run whose build failed or was cancelled for an app fails here
+      # (published.sh), after the others are fetched and uploaded: their
+      # shots are still taken.
+      - run: |
+          status=0
+          bash .github/screens/published.sh android "$RUNNER_TEMP/apk" $APPS || status=$?
+          mkdir -p "$RUNNER_TEMP/apk" && ls "$RUNNER_TEMP/apk" > "$RUNNER_TEMP/apk/fetched.txt"
+          exit $status
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: apks-published
+          path: ${{ runner.temp }}/apk
+          retention-days: 3
+
   # A job per app, at once: each its own emulator.
   android:
-    needs: which
-    if: needs.which.outputs.mode != '' && needs.which.outputs.android != ''
+    needs: [which, apks, servers]
+    if: >-
+      !cancelled() && needs.which.outputs.mode != '' && needs.which.outputs.android != '' &&
+      (needs.apks.result == 'success' || needs.apks.result == 'skipped' || needs.apks.result == 'failure')
     strategy:
       fail-fast: false
       matrix:
         app: ${{ fromJSON(needs.which.outputs.android-json) }}
-        # Each theme on an emulator of its own: a light run and a dark run
-        # at once rather than one after the other (harken's was eight
-        # minutes of its ten). Their captures meet in the same
-        # <app>/android/ (merge-multiple), whole when both are there.
-        theme: [light, dark]
+        # Both themes in the one walk through the app: each stop taken in the
+        # theme the app is in, the theme switched in the app, and taken again
+        # (app-android.sh), so a job per app and device, not per theme too.
         # The phone (a Pixel 7), a Pixel Tablet in landscape, and a Pixel
-        # Fold open and then folded (apps-android.sh): the same APK, driver
+        # Fold open and then folded (apps-android.sh): the same APK, walk
         # and shots on each, each its own job. The tablet and the Fold were
         # one job, one emulator after the other, to pay one nix, one server
         # and one wait for the APK; that job was the longest of a run
         # (harken's 16.7 minutes in app-screens 42728322097, the Fold's 10.3
         # after the tablet's 5.1), and those are a minute or two each.
         device: [phone, tablet, fold]
-    name: android (${{ matrix.app }}, ${{ matrix.theme }}, ${{ matrix.device }})
+    name: android (${{ matrix.app }}, ${{ matrix.device }})
     runs-on: ubuntu-latest
     # One of each app's at a time on a branch: a newer commit's (or the
     # same commit's again, from another event: on main both a script
     # change and build) takes over from the one going.
     concurrency:
-      group: app-screens-android-${{ github.event.workflow_run.head_branch || github.ref_name }}-${{ matrix.app }}-${{ matrix.theme }}-${{ matrix.device }}
+      group: app-screens-android-${{ github.event.workflow_run.head_branch || github.ref_name }}-${{ matrix.app }}-${{ matrix.device }}
       cancel-in-progress: true
     timeout-minutes: 90
     env:
       APPS: ${{ matrix.app }}
-      THEMES: ${{ matrix.theme }}
       # A run still going: its APK awaited (await-apk.sh), not downloaded.
       EARLY: ${{ github.event.action == 'requested' }}
       GH_TOKEN: ${{ github.token }}
+      DEMO_DAY: ${{ needs.which.outputs.day }}
     steps:
       - uses: actions/checkout@v4
 
@@ -419,12 +519,12 @@ jobs:
           path: ${{ runner.temp }}/apk
           run-id: ${{ env.RUN }}
           github-token: ${{ github.token }}
+      # With no run: what `apks` fetched, each in apk-<app>/.
       - if: env.RUN == ''
-        run: bash .github/screens/published.sh android "$RUNNER_TEMP/apk" $APPS
-        env:
-          GH_TOKEN: ${{ github.token }}
-          # A dry run: the APKs build made at the branch's commit, where it made any.
-          COMMIT: ${{ inputs.dry == true && github.sha || '' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: apks-published
+          path: ${{ runner.temp }}/apk
 
       # The app's server, as nix builds it (its server.sh): the cache's,
       # which build.yaml's own build of the servers fills, or else built,
@@ -450,7 +550,7 @@ jobs:
         run: |
           bash .github/screens/meanwhile.sh start servers bash -c '
             for a in $APPS; do
-              if [ -f "$a/screens/server.sh" ]; then bash .github/screens/app-server.sh "$a" "$RUNNER_TEMP/server/$a"; fi
+              if [ -f "$a/demo/server.sh" ]; then bash .github/screens/app-server.sh "$a" "$RUNNER_TEMP/server/$a"; fi
             done'
 
       # As screens.yaml, with its retries.
@@ -545,14 +645,14 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: android-steps-${{ matrix.app }}-${{ matrix.theme }}-${{ matrix.device }}
+          name: android-steps-${{ matrix.app }}-${{ matrix.device }}
           path: ${{ runner.temp }}/steps
           if-no-files-found: ignore
 
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: app-screens-android-${{ matrix.app }}-${{ matrix.theme }}-${{ matrix.device }}
+          name: app-screens-android-${{ matrix.app }}-${{ matrix.device }}
           path: ${{ runner.temp }}/out
           if-no-files-found: ignore
 
@@ -561,7 +661,7 @@ jobs:
   # install, the servers' builds and a simulator's boot. Here they are paid
   # once: one simulator booted, every app built (ios-build.sh) and its
   # server started under the boot, then each app taken in turn on it
-  # (apps-ios.sh), the driver built once for all. One that fails to build
+  # (apps-ios.sh), each walking itself. One that fails to build
   # or to be taken is said, the others still taken and kept, and the job
   # fails at its end. Each app's shots are its own <app>/ios/ in the
   # artifact, as a job each had them.
@@ -571,9 +671,11 @@ jobs:
   # is that run's already, and this is a minute of finding it so; by hand
   # (a dry run, a PR's number) it is built here.
   kernels:
-    needs: which
+    # After `servers`: money's server and the kernels' Mac builds share its
+    # page (money-web).
+    needs: [which, servers]
     if: >-
-      needs.which.outputs.mode != '' && needs.which.outputs.ios != '' &&
+      !cancelled() && needs.which.outputs.mode != '' && needs.which.outputs.ios != '' &&
       (github.event_name != 'workflow_run' || github.event.workflow_run.head_repository.full_name == github.repository)
     runs-on: ubuntu-latest
     permissions:
@@ -599,10 +701,17 @@ jobs:
           name: ${{ vars.CACHIX_NAME }}
           authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
           pushFilter: "macOS-SDK"
+      # And what of the Mac's servers is Linux's (money's browser client):
+      # each server.sh's packages, as the Mac's job builds them.
       - name: Build the kernels
         run: |
           attrs=()
-          for a in $APPS; do attrs+=("$a-ios-simulator" "$a-macos"); done
+          for a in $APPS; do
+            attrs+=("$a-ios-simulator" "$a-macos")
+            if [ -f "src/$a/demo/server.sh" ]; then
+              while read -r p; do attrs+=("$p"); done < <(grep -o '\.#[A-Za-z0-9_-]*' "src/$a/demo/server.sh" | cut -c3- | sort -u)
+            fi
+          done
           bash .github/apple-ahead.sh "$PWD/src" "$RUNNER_TEMP/kernels.txt" "${attrs[@]}"
 
   ios:
@@ -611,7 +720,12 @@ jobs:
     if: >-
       needs.which.outputs.mode != '' && needs.which.outputs.ios != '' &&
       (github.event_name != 'workflow_run' || github.event.workflow_run.head_repository.full_name == github.repository)
-    runs-on: macos-15
+    # macOS 26: the Mac's window is an app for macOS 26 (its deployment
+    # target), which macos-15's macOS 15 cannot open (dyld: SwiftUI's
+    # `ButtonRole.confirm` not found, #102's dry run 42929213705). The same
+    # pinned Xcode is on both images, and the simulators are the pinned
+    # Xcode's iOS on either (ios-runtime.sh).
+    runs-on: macos-26
     # One at a time on a branch: a newer commit's (or the same commit's
     # again, from another event: on main a push that moves the scripts and
     # starts ios) takes over from the one going, rather than a second Mac.
@@ -634,6 +748,7 @@ jobs:
       INPUTS: ${{ needs.which.outputs.ios-inputs }}
       SOURCE: ${{ needs.which.outputs.sha }}
       PR: ${{ needs.which.outputs.pr }}
+      DEMO_DAY: ${{ needs.which.outputs.day }}
     steps:
       # The queue for a Mac can be an hour: a PR merged or closed meanwhile
       # is taken nothing of. Every step after says `open`, so the job ends
@@ -658,10 +773,9 @@ jobs:
             fi
           fi
           echo "open=$open" >> "$GITHUB_OUTPUT"
-          # The driver, built once for the iPhone and the iPad (app-ios.sh);
-          # and each app any of whose shots failed (apps-ios.sh,
-          # apps-mac.sh), for which no hash is kept.
-          { echo "DRIVER=$RUNNER_TEMP/driver"; echo "PARTIAL=$RUNNER_TEMP/partial"; } >> "$GITHUB_ENV"
+          # Each app any of whose shots failed (apps-ios.sh, apps-mac.sh), for
+          # which no hash is kept.
+          echo "PARTIAL=$RUNNER_TEMP/partial" >> "$GITHUB_ENV"
 
       # The scripts, main's; and the commit whose apps are built, beside them.
       - if: steps.open.outputs.open == 'true'
@@ -697,23 +811,17 @@ jobs:
       # here and a run by hand alike (the job's `if` already refuses a fork's;
       # SAME_REPO says so again where the token is): the next run on any
       # branch fetches what has not moved rather than spend most of an hour
-      # compiling it. Xcode never (Apple's licence).
+      # compiling it. That includes what the pinned Xcode compiles of this
+      # repository's own code (the apps, unsigned, and ArkUI's Swift): the
+      # repository is public, and nothing signed is ever in the store
+      # (ios-upload.sh signs outside nix). Xcode itself never (Apple's
+      # licence), nor the macOS SDK.
       - if: steps.open.outputs.open == 'true' && env.SAME_REPO == 'true' && vars.CACHIX_NAME != ''
         uses: cachix/cachix-action@v15
         with:
           name: ${{ vars.CACHIX_NAME }}
           authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
           pushFilter: "[Xx]code([^Gg]|$)"
-
-      # The driver (driver-ios.sh), built in the background for any
-      # simulator, under the apps' build and the simulator's boot: the
-      # captures only run it. XcodeGen from the flake (the cache's), as every
-      # other tool here: no Homebrew.
-      - if: steps.open.outputs.open == 'true'
-        name: Start building the driver
-        run: |
-          bash .github/screens/tools.sh get xcodegen
-          PATH="$(tail -n 1 "$RUNNER_TEMP/tools")/bin:$PATH" bash .github/screens/meanwhile.sh start driver bash .github/screens/driver-ios.sh "$DRIVER"
 
       # The servers' packages (each server.sh's `.#<name>`) and the apps
       # (ios-build.sh's), evaluated once, with nothing beside them: under a
@@ -725,8 +833,8 @@ jobs:
         run: |
           refs=()
           for a in $APPS; do
-            if [ -f "$a/screens/server.sh" ]; then
-              while read -r p; do refs+=(".#$p"); done < <(grep -o '\.#[A-Za-z0-9_-]*' "$a/screens/server.sh" | cut -c3- | sort -u)
+            if [ -f "$a/demo/server.sh" ]; then
+              while read -r p; do refs+=(".#$p"); done < <(grep -o '\.#[A-Za-z0-9_-]*' "$a/demo/server.sh" | cut -c3- | sort -u)
             fi
           done
           start=$(date +%s)
@@ -735,35 +843,77 @@ jobs:
           # warm-up: what fails here is said again by the build after.
           if [ ${#refs[@]} -gt 0 ]; then nix build --dry-run "${refs[@]}" 2> /dev/null || echo "::warning::the servers' packages did not all evaluate"; fi
           echo "evaluated ${refs[*]} in $(( $(date +%s) - start ))s"
-          # An app the commit has none of is said by ios-build.sh.
+          # An app the commit has none of is said by ios-build.sh. Each the
+          # very expression nix-xcode.sh evaluates (its `.drvPath`), the Mac's
+          # too, so that one is the evaluation cache's: money's, asked after
+          # a warm-up of the package alone, took 196 seconds under the
+          # servers' build and the simulator's boot (app-screens 42959400546).
+          # Each derivation is written down (`<attr> <drv>`, NIX_XCODE_DRVS),
+          # and nix-xcode.sh takes it from there rather than evaluate again:
+          # money's was evaluated again in 156s in 42965705977 all the same.
           start=$(date +%s)
+          : > "$RUNNER_TEMP/drvs"
+          # Only what the commit has: an app with no Mac build (harken's)
+          # is not asked for one. nix's refusal of a missing attribute lists
+          # every path it tried, `packages.aarch64-darwin.` put before the
+          # one given among them, which read as a doubled path in the log.
+          names=$(nix eval --json "git+file://$PWD/src#packages.aarch64-darwin" --apply builtins.attrNames 2> /dev/null || echo '[]')
           for a in $APPS; do
-            nix build --dry-run "git+file://$PWD/src#packages.aarch64-darwin.$a-ios-simulator" 2> /dev/null || true
+            for p in "$a-ios-simulator" "$a-macos"; do
+              if [ "$names" != '[]' ] && ! jq -e --arg p "$p" 'index($p) != null' <<< "$names" > /dev/null; then
+                echo "$p: the commit has none"
+                continue
+              fi
+              t=$(date +%s)
+              if drv=$(nix eval --raw "git+file://$PWD/src#packages.aarch64-darwin.$p.drvPath" 2> "$RUNNER_TEMP/eval.err"); then
+                echo "$p $drv" >> "$RUNNER_TEMP/drvs"
+                echo "$p: $(( $(date +%s) - t ))s"
+              else
+                echo "$p: not evaluated ($(( $(date +%s) - t ))s): $(tail -n 1 "$RUNNER_TEMP/eval.err")"
+              fi
+            done
           done
+          echo "NIX_XCODE_DRVS=$RUNNER_TEMP/drvs" >> "$GITHUB_ENV"
           echo "evaluated the apps in $(( $(date +%s) - start ))s"
 
-      # As screens.yaml: the newest iPhone Pro, booting under the rest. One
-      # for every app: each is installed on it in turn.
+      # As screens.yaml: the newest iPhone Pro of the pinned Xcode's iOS
+      # (ios-runtime.sh), booting under the rest. One for every app: each is
+      # installed on it in turn.
       - if: steps.open.outputs.open == 'true'
         name: Start booting a simulator
         run: |
           bash .github/screens/meanwhile.sh start boot bash -c '
-            device=$(xcrun simctl list devices available -j | jq -r "
-              .devices | to_entries | map(select(.key | test(\"iOS\"))) | sort_by(.key) | last | .value
-              | map(select(.name | test(\"^iPhone [0-9]+ Pro$\"))) | sort_by(.name) | last | .name")
+            rt=$(bash .github/screens/ios-runtime.sh)
+            device=$(xcrun simctl list devices available -j | jq -r --arg rt "$rt" "
+              .devices[\$rt]
+              | map(select(.name | test(\"^iPhone [0-9]+ Pro$\"))) | sort_by(.name) | last | .udid + \" \" + .name")
+            udid=${device%% *} device=${device#* }
             echo "Booting $device"
             echo "$device" > "$RUNNER_TEMP/device"
-            xcrun simctl boot "$device" && xcrun simctl bootstatus "$device" -b'
+            xcrun simctl boot "$udid" && xcrun simctl bootstatus "$udid" -b'
 
       # Each app's server, as nix builds it (its server.sh), all at once, each
       # on its own port: the cache's once main's run has pushed it, or else
       # built, under the apps' build.
+      # Every server's packages built by one `nix build` first, so what
+      # they do not share compiles side by side (harken's and then money's,
+      # one after the other, took until seven minutes after the apps in
+      # app-screens 42949637068); then each started.
       - if: steps.open.outputs.open == 'true'
         name: Start the servers
         run: |
           bash .github/screens/meanwhile.sh start servers bash -c '
+            refs=()
             for a in $APPS; do
-              if [ -f "$a/screens/server.sh" ]; then bash .github/screens/app-server.sh "$a" "$RUNNER_TEMP/server/$a"; fi
+              if [ -f "$a/demo/server.sh" ]; then
+                while read -r p; do refs+=(".#$p"); done < <(grep -o "\.#[A-Za-z0-9_-]*" "$a/demo/server.sh" | cut -c3- | sort -u)
+              fi
+            done
+            start=$(date +%s)
+            if [ ${#refs[@]} -gt 0 ]; then nix build --no-link --keep-going "${refs[@]}" || true; fi
+            echo "the servers built or fetched in $(( $(date +%s) - start ))s"
+            for a in $APPS; do
+              if [ -f "$a/demo/server.sh" ]; then bash .github/screens/app-server.sh "$a" "$RUNNER_TEMP/server/$a"; fi
             done'
 
       # Each app as nix has it at the commit (ios-build.sh): the cache's
@@ -777,6 +927,16 @@ jobs:
         continue-on-error: true
         run: bash .github/screens/ios-build.sh src "$XCODE" "$RUNNER_TEMP/apps" $APPS
 
+      # Each app installed on the iPhone in the background as soon as it has
+      # booted, its plan written (apps-ios.sh's PHASE=install), while the
+      # servers come up; the capture walks what is installed.
+      - if: ${{ !cancelled() && steps.open.outputs.open == 'true' }}
+        name: Install on the iPhone, meanwhile
+        run: |
+          bash .github/screens/meanwhile.sh start install bash -c '
+            bash .github/screens/meanwhile.sh wait boot > /dev/null || exit 1
+            PHASE=install bash .github/screens/apps-ios.sh "$RUNNER_TEMP/out" "$RUNNER_TEMP/apps" "$(cat "$RUNNER_TEMP/device")" $APPS'
+
       # The iPad's apps: those whose build takes it (its Info.plist's
       # UIDeviceFamily has 2: ios-family.sh). With none, no iPad is booted
       # and nothing more is done on this Mac.
@@ -788,13 +948,11 @@ jobs:
           if [ -z "${ipad// /}" ]; then echo "no app's build takes the iPad: none will be booted"; else echo "the iPad's: $ipad"; fi
 
       # Everything the captures run, there before any starts: the servers
-      # (built under the apps' build) and the driver. No capture step
-      # builds or fetches anything.
+      # (built under the apps' build). No capture step builds or fetches
+      # anything.
       - if: steps.open.outputs.open == 'true'
-        name: The servers, and the driver
-        run: |
-          bash .github/screens/meanwhile.sh wait servers
-          bash .github/screens/meanwhile.sh wait driver
+        name: The servers
+        run: bash .github/screens/meanwhile.sh wait servers
 
       - if: steps.open.outputs.open == 'true'
         name: The simulator, booted
@@ -810,7 +968,10 @@ jobs:
         timeout-minutes: 40
         env:
           RESULTS: ${{ runner.temp }}/results
-        run: bash .github/screens/apps-ios.sh "$RUNNER_TEMP/out" "$RUNNER_TEMP/apps" "$(cat "$RUNNER_TEMP/device")" $APPS
+        run: |
+          bash .github/screens/meanwhile.sh wait install || echo "an app did not install as the iPhone booted: the walk installs it"
+          bash .github/screens/apps-ios.sh "$RUNNER_TEMP/out" "$RUNNER_TEMP/apps" "$(cat "$RUNNER_TEMP/device")" $APPS
+          echo "memory: $(vm_stat | awk '/free|active|wired/ {printf "%s %s ", $1$2, $NF}')"
       - uses: actions/upload-artifact@v4
         if: always() && steps.open.outputs.open == 'true'
         with:
@@ -818,11 +979,9 @@ jobs:
           path: ${{ runner.temp }}/out/*/ios/
           if-no-files-found: ignore
 
-      # The iPad's, after the iPhone's: the iPhone shut down and only then
-      # the iPad booted (not under the iPhone's shots, which a second
-      # simulator would slow), the newest iPad Pro 13-inch (else an iPad Air
-      # 13-inch, else the newest iPad); each app whose build takes it, in
-      # portrait and then on its side, light and dark, on the same driver
+      # The iPad's, after the iPhone's walk (the newest iPad Pro 13-inch,
+      # else an iPad Air 13-inch, else the newest iPad): each app whose
+      # build takes it, upright and on its side, light and dark, in one walk
       # (apps-ios.sh, FAMILY=ipad).
       - if: ${{ !cancelled() && steps.open.outputs.open == 'true' && env.IPAD_APPS != '' }}
         name: Capture (iPad)
@@ -831,10 +990,16 @@ jobs:
           RESULTS: ${{ runner.temp }}/results
           FAMILY: ipad
         run: |
+          # Booted once the iPhone's walk is done and the iPhone shut down:
+          # booted beside the iPhone's walk (app-screens 43327637228), the
+          # iPhone's walk's start took 315 s instead of about 20 (its
+          # uninstall alone 185 s) and the iPad's boot 103 s, slower in all
+          # than one after the other. Of the pinned Xcode's iOS's
+          # simulators (ios-runtime.sh), the first kind there is.
           xcrun simctl shutdown all || true
-          # Of the newest iOS's simulators, the first kind there is.
-          read -r udid name < <(xcrun simctl list devices available -j | jq -r '
-            .devices | to_entries | map(select(.key | test("iOS"))) | sort_by(.key) | last | .value as $d
+          rt=$(bash .github/screens/ios-runtime.sh)
+          read -r udid name < <(xcrun simctl list devices available -j | jq -r --arg rt "$rt" '
+            .devices[$rt] as $d
             | ["^iPad Pro 13-inch", "^iPad Air 13-inch", "^iPad"]
             | map(. as $p | $d | map(select(.name | test($p))) | sort_by(.name) | last) | map(select(. != null)) | first
             | "\(.udid) \(.name)"')
@@ -887,18 +1052,18 @@ jobs:
             fi
           done
 
-      # The driver's results (its log, and the test's recording of the
-      # screen), when a capture failed: what to look at, each app's its own.
+      # The walks' results (each walk's log, its plan), when a capture
+      # failed: what to look at, each app's its own.
       - uses: actions/upload-artifact@v4
         if: failure() && steps.open.outputs.open == 'true'
         with:
-          name: ios-driver-results
+          name: ios-walk-results
           path: ${{ runner.temp }}/results
           if-no-files-found: ignore
 
       - if: always() && steps.open.outputs.open == 'true'
         name: The servers' logs
-        run: tail -n 40 "$RUNNER_TEMP"/server/*/server.log || true
+        run: tail -n 40 "$RUNNER_TEMP"/server/*/server.log "$RUNNER_TEMP"/server/*-iphone.log || true
 
       # The iPhone's again, now with each app's hash beside its shots (the
       # step above): compare and publish lay the app-screens-* artifacts
@@ -922,11 +1087,13 @@ jobs:
   # The desktop windows: each app's built by nix at the run's commit, as the
   # iPhone's are, and photographed with no window (arkui-shots) on Linux.
   desktop:
-    needs: which
+    # After `servers`, which has built the server and the crates both
+    # windows link.
+    needs: [which, servers]
     # Built from the run's own commit and then run, so only a run of this
     # repository's.
     if: >-
-      needs.which.outputs.mode != '' && needs.which.outputs.desktop != '' &&
+      !cancelled() && needs.which.outputs.mode != '' && needs.which.outputs.desktop != '' &&
       (github.event_name != 'workflow_run' || github.event.workflow_run.head_repository.full_name == github.repository)
     strategy:
       fail-fast: false
@@ -947,6 +1114,7 @@ jobs:
     env:
       APPS: ${{ matrix.app }}
       SOURCE: ${{ github.event.workflow_run.head_sha || github.sha }}
+      DEMO_DAY: ${{ needs.which.outputs.day }}
     steps:
       # The scripts, main's; and the commit whose windows are built, beside them.
       - uses: actions/checkout@v4
@@ -975,7 +1143,7 @@ jobs:
         run: |
           bash .github/screens/meanwhile.sh start servers bash -c '
             for a in $APPS; do
-              if [ -f "$a/screens/server.sh" ]; then bash .github/screens/app-server.sh "$a" "$RUNNER_TEMP/server/$a"; fi
+              if [ -f "$a/demo/server.sh" ]; then bash .github/screens/app-server.sh "$a" "$RUNNER_TEMP/server/$a"; fi
             done'
 
       # Each window as nix has it at the commit (desktop-build.sh): the
@@ -1008,7 +1176,12 @@ jobs:
   # run replaced, the rest as it was.
   publish:
     needs: [which, android, ios, desktop]
-    if: ${{ !cancelled() && needs.which.outputs.mode == 'release' && inputs.dry != true }}
+    # Not a dry run, nor one by hand on any branch but main: a branch's shots
+    # are never main's published ones (43159033586, by hand on a branch
+    # without `dry`, pushed its shots to `screens`).
+    if: >-
+      ${{ !cancelled() && needs.which.outputs.mode == 'release' && inputs.dry != true &&
+      (github.event_name != 'workflow_dispatch' || github.ref_name == 'main') }}
     runs-on: ubuntu-latest
     # One writer of the branch at a time, with screens.yaml's publish.
     concurrency:
@@ -1042,7 +1215,9 @@ jobs:
           branch="$RUNNER_TEMP/branch"
           py=$(nix build --no-link --print-out-paths .#screens-python)
           inter=$(nix build --no-link --print-out-paths --inputs-from . nixpkgs#inter)
-          for shots in */screens/shots.json; do
+          # An Ark app's logo is its icon.svg, which hero.py draws with it.
+          PATH="$(nix build --no-link --print-out-paths --inputs-from . nixpkgs#librsvg.out)/bin:$PATH"
+          for shots in */demo/shots.json; do
             app=${shots%%/*}
             [ -d "$branch/apps/$app" ] || continue
             "$py/bin/python3" -I .github/screens/hero.py "$shots" "$branch/apps/$app" "$inter/share/fonts/truetype/Inter.ttc"

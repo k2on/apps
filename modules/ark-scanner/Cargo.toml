@@ -1,0 +1,43 @@
+[package]
+name = "ark-scanner"
+workspace = "../../rust"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+description = "A page photographed and made flat, as an Ark module: over ark-camera's live page on the phones, its eyes (the page found, held still and sharp) and the warp in Rust; a file chosen on the desktop and in the browser; and its fake."
+
+# A device module (ui/docs/app.md, The Device): what it is to an app's
+# projects is its module.toml. An app takes it on by depending on this
+# crate, directly or through another; ui/prebuild.py and nix/ark-app.nix
+# find it so, and no app lists it anywhere else.
+[package.metadata.ark]
+module = "module.toml"
+
+[dependencies]
+ark-module = { path = "../../ui/rust/module" }
+# The frames and the shutter: the camera module's, never a camera of its own.
+ark-camera = { path = "../ark-camera" }
+# The photo decoded and the flat page written again.
+image = { version = "0.25", default-features = false, features = ["jpeg"] }
+# DocAligner's corner model (`model`, src/model.rs).
+tract-onnx = { version = "0.22", optional = true }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+web-sys = { version = "0.3", optional = true, features = ["Window", "Document", "Element", "HtmlInputElement", "FileList", "File", "Blob"] }
+wasm-bindgen = { version = "0.2", optional = true }
+wasm-bindgen-futures = { version = "0.4", optional = true }
+js-sys = { version = "0.3", optional = true }
+
+[features]
+# Where the page is, by the corner model on tract: an app's phones' library
+# links it (money's Android; the iPhone's camera gives no colour square
+# yet, and the bright region does there).
+model = ["dep:tract-onnx"]
+# `Chosen`: a file an iced window's chooser gives.
+desktop = []
+# `Browser`: the page's own file input; wasm32 only.
+web = ["dep:web-sys", "dep:wasm-bindgen", "dep:wasm-bindgen-futures", "dep:js-sys"]
+
+[dev-dependencies]
+# The drawn scenes read (tests/pages).
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }

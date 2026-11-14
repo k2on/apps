@@ -1,0 +1,56 @@
+# Revelation (revelation/README.md): the Bible as one scroll, zoomed like a
+# map. Kotlin alone, no Rust and none of ArkDB, so no crate and no kernel;
+# its native project is generated as every app's is (ui/docs/app.md,
+# "Generated, Not Committed"): `nix run .#revelation-prebuild`.
+
+name = "Revelation"
+# us.koon.revelation
+id = "revelation"
+version = "0.1"
+# ArkUI's own, nobody's: revelation draws nothing of ArkUI's.
+accent = "blue"
+platforms = ["android"]
+
+[icon]
+# The whole Bible zoomed all the way out: one thin white line on the dark
+# page; the page the adaptive icon's ground.
+svg = "icon.svg"
+
+[android]
+package = "dev.revelation.android"
+min-sdk = 26
+target-sdk = 35
+keystore = "native/android/debug.keystore"
+# Its own first frame: the page black before the text is laid out, the
+# bars drawn over (native/android/res/values/themes.xml).
+theme = "@style/Theme.Revelation"
+# A rotation lays the text out again at the new width inside the same view
+# (BibleView.onSizeChanged) rather than recreating the activity and parsing
+# the text twice.
+config-changes = ["orientation", "screenSize", "screenLayout", "smallestScreenSize", "keyboardHidden"]
+# No ArkUI and no kernel: Compose and Material alone.
+dependencies = [
+  "platform:androidx.compose:compose-bom:2024.12.01",
+  "androidx.compose.ui:ui",
+  "androidx.compose.material3:material3",
+  "androidx.activity:activity-compose:1.9.3",
+  "androidx.core:core-ktx:1.15.0",
+  "androidx.profileinstaller:profileinstaller:1.3.1",
+]
+
+# What a store lists of it: F-Droid's metadata (nix/fdroid.nix writes its
+# .yml from this through `ui/prebuild.py fdroid`), the docs' listing.
+[store]
+summary = "The Bible as one scroll, zoomed like a map"
+categories = ["Reading"]
+license = "MIT OR Apache-2.0"
+website = "https://k2on.github.io/apps/"
+source = "https://github.com/k2on/apps"
+issues = "https://github.com/k2on/apps/issues"
+description = """
+Revelation is the whole Bible as one continuous column of text, Genesis 1:1 at the top and Revelation 22:21 at the bottom. It scrolls the way the phone scrolls and zooms the way a map does: pinch out and the words become lines, the lines a column, and the column, at the far end, one white line the height of the screen. Pinch in and it comes back. Going anywhere, from the book picker, a search or a label beside the column, is a map's camera move: out, across, and in.
+
+The text is the Berean Standard Bible, which its translators have dedicated to the public domain; it is in the app, so nothing is fetched and nothing is synced. The app's own code is MIT OR Apache-2.0.
+
+This is a release build signed with a key committed to the source repository, so anyone could sign an APK as this app.
+"""

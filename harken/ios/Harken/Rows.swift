@@ -124,9 +124,6 @@ extension PeopleEntry: Identifiable {
         return people.filter { seen.insert($0.name).inserted }
     }
 
-    /// Their names in a line, in the feed's order: `Jacek Galowicz, Kiara Grouwstra`.
-    static func named(_ people: [PeopleEntry]) -> String { people.map { $0.name }.joined(separator: ", ") }
-
     /// Their web page, when the feed gives one a browser opens.
     var web: URL? {
         guard let c = URLComponents(string: link.trimmingCharacters(in: .whitespaces)),
@@ -411,43 +408,46 @@ enum Page: Hashable {
         }
     }
 
-    /// Where a track was played from, as the listening session and the plays
-    /// carry it — the desktop's address-bar spelling (`#album/Water%20Music`),
-    /// so a page named on one device is the same page on another. A playlist
-    /// by its name; one this phone cannot name is nowhere in particular.
-    func place(_ playlists: [Playlist]) -> String {
+    /// The route this page is (harken's `Route`, the domain's): a playlist
+    /// by its id, its name to read; one this phone has not got is none.
+    func route(_ playlists: [Playlist]) -> Route? {
         switch self {
-        case let .album(id): return "#album/" + Places.encode(id)
-        case let .artist(name): return "#artist/" + Places.encode(name)
-        case let .playlist(id):
-            guard let p = playlists.first(where: { $0.id == id }) else { return "" }
-            return "#playlist/" + Places.encode(p.name)
-        case let .work(id): return "#work/" + Places.encode(id)
-        case let .recording(id): return "#recording/" + Places.encode(id)
-        case let .show(id): return "#show/" + Places.encode(id)
-        case .songs: return "#library"
+        case let .album(id): return .album(key: id, title: "")
+        case let .artist(name): return .artist(name: name)
+        case let .playlist(id): return playlists.first(where: { $0.id == id }).map { .playlist(id: $0.id.hex, name: $0.name) }
+        case let .work(id): return .work(key: id, title: "")
+        case let .recording(id): return .recording(key: id, title: "")
+        case let .show(id): return .show(key: id, title: "")
+        case .songs: return .library
         }
     }
 
-    /// The page a place names; nil for nowhere, or a page this phone has not got.
-    static func of(place: String, playlists: [Playlist]) -> Page? {
-        var body = Substring(place)
-        if body.hasPrefix("#") { body = body.dropFirst() }
-        let kind = body.split(separator: "/", maxSplits: 1, omittingEmptySubsequences: false).first.map(String.init) ?? ""
-        let rest = body.firstIndex(of: "/").map { String(body[body.index(after: $0)...]) } ?? ""
-        let name = Places.decode(rest)
-        switch kind {
-        case "album": return name.isEmpty ? nil : .album(name)
-        case "artist": return name.isEmpty ? nil : .artist(name)
-        case "playlist": return playlists.first(where: { $0.name == name }).map { .playlist($0.id) }
-        // A composer's page is their artist page: a person has one.
-        case "composer": return name.isEmpty ? nil : .artist(name)
-        case "work": return name.isEmpty ? nil : .work(name)
-        case "recording": return name.isEmpty ? nil : .recording(name)
-        case "show": return name.isEmpty ? nil : .show(name)
-        case "library": return .songs
+    /// The page a route shows, if it is a list of tracks this phone has: a
+    /// playlist by its id (an older link's by its name, `Route.names`).
+    static func of(_ route: Route, playlists: [Playlist]) -> Page? {
+        switch route {
+        case let .album(key, _): return .album(key)
+        case let .artist(name): return .artist(name)
+        case .playlist: return playlists.first(where: { route.names(id: $0.id.hex, name: $0.name) }).map { .playlist($0.id) }
+        case let .work(key, _): return .work(key)
+        case let .recording(key, _): return .recording(key)
+        case let .show(key, _): return .show(key)
+        case .library: return .songs
         default: return nil
         }
+    }
+
+    /// Where a track was played from, as the listening session and the plays
+    /// carry it: the route's URL as every address bar says it
+    /// (`/album/Water%20Music/`), so a page named on one device is the same
+    /// page on another. One this phone cannot name is nowhere in particular.
+    func from(_ playlists: [Playlist]) -> String {
+        route(playlists).map { $0.url() } ?? ""
+    }
+
+    /// The page a "played from" names; nil for nowhere, or a page this phone has not got.
+    static func of(from: String, playlists: [Playlist]) -> Page? {
+        routeFromUrl(url: from).flatMap { of($0, playlists: playlists) }
     }
 }
 
@@ -467,8 +467,8 @@ enum Listing: Hashable {
     case appearances(String)
 }
 
-/// A place's name, percent-encoded as `rust/arkui`'s `url::encode` writes it: what is not unreserved.
-enum Places {
+/// A name percent-encoded as `ark-router`'s `url::encode` writes it: what is not unreserved.
+enum Percent {
     static func unreserved(_ c: UInt8) -> Bool {
         (c >= 0x41 && c <= 0x5A) || (c >= 0x61 && c <= 0x7A) || (c >= 0x30 && c <= 0x39) || c == 0x2D || c == 0x5F || c == 0x2E || c == 0x7E
     }
@@ -513,7 +513,7 @@ enum Files {
         while base.hasSuffix("/") { base.removeLast() }
         var out = base + "/media"
         for part in file.split(separator: "/", omittingEmptySubsequences: false) {
-            out += "/" + Places.encode(String(part))
+            out += "/" + Percent.encode(String(part))
         }
         return out
     }
@@ -521,35 +521,6 @@ enum Files {
 
 /// How a length and a count are said.
 enum Spell {
-    /// A face's letters when it has no picture (`Avatar`): the first letters
-    /// of the name's first and last words, upper case — `Ada Lovelace` is
-    /// `AL`, `Ada` is `A` — the desktop's `Who::initials`. Here rather than
-    /// beside `Avatar`, a SwiftUI view, so Linux's type-check runs its test.
-    static func initials(_ name: String) -> String {
-        func first(_ w: Substring) -> Character? { w.first { $0.isLetter || $0.isNumber } }
-        let words = name.split(whereSeparator: { $0.isWhitespace }).filter { first($0) != nil }
-        guard let a = words.first.flatMap(first) else { return "" }
-        guard words.count > 1, let z = words.last.flatMap(first) else { return String(a).uppercased() }
-        return (String(a) + String(z)).uppercased()
-    }
-
-    /// A track's length as a row shows it: `m:ss`, or `h:mm:ss` past an hour.
-    static func clock(_ ms: Int64) -> String {
-        let s = max(ms, 0) / 1000
-        func two(_ n: Int64) -> String { n < 10 ? "0\(n)" : "\(n)" }
-        if s >= 3600 { return "\(s / 3600):\(two(s / 60 % 60)):\(two(s % 60))" }
-        return "\(s / 60):\(two(s % 60))"
-    }
-
-    /// A record's length, as a header says it: `48 min`, `2 hr 30 min`.
-    static func length(_ ms: Int64) -> String {
-        let min = (ms + 30_000) / 60_000
-        if min < 1 { return "under a minute" }
-        if min < 60 { return "\(min) min" }
-        if min % 60 == 0 { return "\(min / 60) hr" }
-        return "\(min / 60) hr \(min % 60) min"
-    }
-
     /// How much of an episode is left to hear, as its row says it: its
     /// length (`47 min`) until the signed-in person begins it, then what is
     /// left (`12 min left`), then `Played`. Nothing for a length not known.
@@ -557,46 +528,17 @@ enum Spell {
         if mine?.finished == true { return "Played" }
         let whole = (mine?.durationMs ?? 0) > 0 ? mine!.durationMs : durationMs
         guard whole > 0 else { return "" }
-        guard let m = mine, m.positionMs > 0 else { return length(whole) }
-        return length(max(whole - m.positionMs, 0)) + " left"
-    }
-
-    private static let thisYear: DateFormatter = {
-        let f = DateFormatter()
-        f.setLocalizedDateFormatFromTemplate("MMMd")
-        return f
-    }()
-
-    private static let anotherYear: DateFormatter = {
-        let f = DateFormatter()
-        f.setLocalizedDateFormatFromTemplate("MMMdyyyy")
-        return f
-    }()
-
-    /// When an episode came out, as a podcast app's row says it: `Today`,
-    /// `Yesterday`, `Oct 21`, and its year when that is not this one.
-    static func day(_ ms: Int64, now: Date = Date()) -> String {
-        let d = Date(timeIntervalSince1970: TimeInterval(ms) / 1000)
-        let cal = Calendar.current
-        if cal.isDate(d, inSameDayAs: now) { return "Today" }
-        if let y = cal.date(byAdding: .day, value: -1, to: now), cal.isDate(d, inSameDayAs: y) { return "Yesterday" }
-        return (cal.isDate(d, equalTo: now, toGranularity: .year) ? thisYear : anotherYear).string(from: d)
-    }
-
-    /// `1 song`, `12 songs`.
-    static func count(_ n: Int, _ one: String, _ many: String? = nil) -> String {
-        "\(n) \(n == 1 ? one : (many ?? one + "s"))"
+        guard let m = mine, m.positionMs > 0 else { return formatLength(ms: whole) }
+        return formatLength(ms: max(whole - m.positionMs, 0)) + " left"
     }
 
     /// The facts a page's header says, joined: "12 songs · 48 min".
-    static func facts(_ parts: [String?]) -> String {
-        parts.compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
-    }
+    static func facts(_ parts: [String?]) -> String { formatFacts(parts: parts.compactMap { $0 }) }
 
     /// A list's whole length, or none for nothing.
     static func total(_ tracks: [LibraryEntry]) -> String? {
         let ms = tracks.reduce(Int64(0)) { $0 + $1.durationMs }
-        return ms > 0 ? length(ms) : nil
+        return ms > 0 ? formatLength(ms: ms) : nil
     }
 }
 

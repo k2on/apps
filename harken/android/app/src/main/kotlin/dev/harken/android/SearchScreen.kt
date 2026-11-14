@@ -36,13 +36,13 @@ import dev.arkui.Empty
 import dev.arkui.Glyph
 import dev.arkui.Heading
 import dev.arkui.Press
-import dev.arkui.Recompositions
 import dev.arkui.ScrollsToTop
 import dev.arkui.Shelf
 import dev.arkui.Space
 import dev.arkui.TabTitle
 import dev.arkui.pressable
 import dev.arkui.rememberDestinationListState
+import uniffi.ark_format.formatCount
 
 /** What a needle found, in three groups. */
 data class Results(val needle: String, val songs: List<Track>, val albums: List<Album>, val artists: List<Artist>) {
@@ -78,7 +78,6 @@ fun SearchScreen(
     /** Who is signed in: the face at the end of the title, which raises the account sheet. */
     who: Who = Who(""),
 ) {
-    Recompositions.hit("SearchScreen")
     val list = rememberDestinationListState("search")
     ScrollsToTop(list)
     LazyColumn(Modifier.fillMaxSize(), state = list) {
@@ -160,7 +159,7 @@ fun SearchScreen(
                     item { Heading("Artists") }
                     item {
                         Shelf("artists", found.artists, key = { it.name }) { a ->
-                            CoverCard(a.name, a.art, a.name, Media.count(a.tracks.toInt(), "song"), SEARCH_ARTIST, round = true, opens = true, onClick = {
+                            CoverCard(a.name, a.art, a.name, formatCount(a.tracks, "song"), SEARCH_ARTIST, round = true, opens = true, onClick = {
                                 onSearched(needle)
                                 act.open(Page.ForArtist(a.name))
                             })

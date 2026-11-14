@@ -237,4 +237,84 @@ impl Logins {
             let _ = i.write::<Remembered, Run, _>(|db| ark_auth::remember::forget(db, server));
         }
     }
+
+    /// `server`'s login as it was kept here before the secure store
+    /// (`ark_auth::keep`), to move there once. Deleting it deletes the
+    /// directory, every server's login with it: the instance's log keeps
+    /// what it is told to forget, so nothing less takes the token off the
+    /// disk. A browser keeps no token here.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn before(&self, server: &str) -> LoginsBefore {
+        LoginsBefore {
+            logins: self.clone(),
+            server: server.into(),
+        }
+    }
+
+    /// The logins kept in the secure store `modules` has, each server's
+    /// moved there once from here (`ark_auth::keep::ServerLogins`): a
+    /// desktop's, which makes them once a run.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn secured(self, modules: ark_auth::keep::Modules) -> ark_auth::keep::ServerLogins {
+        ark_auth::keep::ServerLogins::new(modules, move |server| {
+            Some(std::sync::Arc::new(self.before(server)) as std::sync::Arc<dyn ark_auth::keep::Before>)
+        })
+    }
+}
+
+/// A server's login kept in [`Logins`] before the secure store.
+#[cfg(not(target_arch = "wasm32"))]
+pub struct LoginsBefore {
+    logins: Logins,
+    server: String,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl ark_auth::keep::Before for LoginsBefore {
+    fn read(&self) -> Option<String> {
+        // No directory, nothing to read: not one made by asking.
+        let at = self.logins.at.as_ref()?;
+        if !std::path::Path::new(at).exists() {
+            return None;
+        }
+        let l = self.logins.recall(&self.server)?;
+        Some(ark_auth::onboarding::login_json(l.into()))
+    }
+
+    fn delete(&self) {
+        if let Some(at) = &self.logins.at {
+            let _ = std::fs::remove_dir_all(at);
+        }
+    }
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod tests {
+    use super::*;
+
+    /// A desktop's login kept in its logins directory is moved once, and the
+    /// directory, whose log would still hold the token, deleted.
+    #[test]
+    fn a_login_kept_in_the_directory_is_moved_and_the_directory_deleted() {
+        let dir = tempfile::tempdir().unwrap();
+        let at = dir.path().join("logins");
+        let l = ark_auth::Login {
+            token: "placeholder".into(),
+            session: "s1".into(),
+            user: ark_auth::Account {
+                id: "ana".into(),
+                ..Default::default()
+            },
+            expires_ms: 9,
+        };
+        Logins::at(&at).remember("https://h", &l);
+        assert!(at.exists());
+        // No secure store here: the login lasts this run, and the copy goes.
+        let logins = Logins::at(&at).secured(ark_auth::keep::Modules::new());
+        assert_eq!(logins.recall("https://h"), Some(l.clone()));
+        assert!(!at.exists());
+        assert_eq!(logins.recall("https://h"), Some(l));
+        assert_eq!(Logins::at(&at).secured(ark_auth::keep::Modules::new()).recall("https://h"), None);
+        assert!(!at.exists(), "reading made no directory");
+    }
 }

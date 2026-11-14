@@ -9,15 +9,15 @@ package dev.harken.android
 import dev.harken.android.gen.CreditsEntry
 import dev.harken.android.gen.RecordingsEntry
 import dev.harken.android.gen.WorkSummary
+import uniffi.ark_format.formatCount
+import uniffi.ark_format.formatFacts
+import uniffi.ark_format.formatLength
 
 object Catalogue {
     /** How many works a composer's page lists before its "See All". */
     const val KNOWN_WORKS = 6
 
-    /** What a catalogue's lines are joined with. */
-    const val DOT = " · "
-
-    private fun facts(vararg parts: String?): String = parts.filterNotNull().filter { it.isNotEmpty() }.joinToString(DOT)
+    private fun facts(vararg parts: String?): String = formatFacts(parts.filterNotNull())
 
     /**
      * Works best known first: the most recorded, then the most tracks, the catalogue's order (the
@@ -46,19 +46,10 @@ object Catalogue {
     }
 
     /** The set-apart work's line: its catalogue number and how many performances of it there are. */
-    fun recordedFacts(w: WorkSummary): String = facts(w.catalogue, Media.count(w.recordings.toInt(), "recording"))
+    fun recordedFacts(w: WorkSummary): String = facts(w.catalogue, formatCount(w.recordings, "recording"))
 
     /** What a work is, at its page's head: catalogue number (unless its title ends with it), form, period. */
     fun workFacts(w: WorkSummary): String = facts(w.catalogue.takeUnless { it.isNotEmpty() && w.title.contains(it) }, w.form, w.period)
-
-    /** When a person lived, as a catalogue heads them: `1685–1750`, `1685–`, `–1750`, or nothing. */
-    fun span(born: Long, died: Long): String =
-        when {
-            born == 0L && died == 0L -> ""
-            born == 0L -> "–$died"
-            died == 0L -> "$born–"
-            else -> "$born–$died"
-        }
 
     /**
      * How a catalogue writes who a work is by over its title: every name but the last as an
@@ -76,7 +67,7 @@ object Catalogue {
 
     /** A performance's line: when, how much, how long — `2016 · 4 tracks · 22 min`. */
     fun takeFacts(r: RecordingsEntry): String =
-        facts(if (r.recorded > 0) r.recorded.toString() else null, Media.count(r.tracks.toInt(), "track"), if (r.durationMs > 0) Media.spell(r.durationMs) else null)
+        facts(if (r.recorded > 0) r.recorded.toString() else null, formatCount(r.tracks, "track"), if (r.durationMs > 0) formatLength(r.durationMs) else null)
 
     /** What a work's page sets its first performance apart as: the fullest of several, or the only one. */
     fun featuredLabel(recordings: Int): String = if (recordings > 1) "Most Complete" else "The Recording"

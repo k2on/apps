@@ -6,12 +6,12 @@
 mod common;
 
 use common::*;
-use money_domain::*;
+use money_core::*;
 
 fn open_account(name: &str) -> OpenAccount {
     OpenAccount {
         name: name.into(),
-        kind: "checking".into(),
+        kind: money_core::accounts::AccountKind::Checking,
         on_budget: true,
         balance: 10_000,
         date: "2026-10-01".into(),
@@ -155,12 +155,148 @@ fn health_says_which_domain() {
     let mut alice = signed_in(&server, "alice");
     pump_until(&mut [&mut alice], 10, |ps| ps[0].client.linked);
     let text = ureq::get(&format!("{}/healthz", server.url())).call().unwrap().into_string().unwrap();
-    let d = money_domain::shared();
+    let d = money_core::shared();
     assert!(text.starts_with("ok\n"), "{text}");
     assert!(
-        text.contains(&format!("domain {} {} current\n", d.schema_hash(), money_domain::VERSION)),
+        text.contains(&format!("domain {} {} current\n", d.schema_hash(), money_core::VERSION)),
         "{text}"
     );
     assert!(text.contains("connections 2\n"), "{text}");
+    rt.block_on(server.stop());
+}
+
+/// One process: the browser client's build is served by the server that
+/// holds the socket and sign-in — a deep link answered with its
+/// index.html, the module with the build as its validator — and
+/// `/healthz`, money's middleware, is still over all of it.
+#[test]
+fn the_browser_client_is_served_beside_the_socket() {
+    let rt = runtime();
+    let (data, web) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    std::fs::write(web.path().join("index.html"), "<!doctype html><title>Money</title>").unwrap();
+    std::fs::create_dir(web.path().join("pkg")).unwrap();
+    std::fs::write(web.path().join("pkg/money-web.js"), "export default 1").unwrap();
+    let dir = web.path().to_path_buf();
+    let server = serve(&rt, data.path(), move |c| c.web = Some(dir));
+    let get = |path: &str| ureq::get(&format!("{}{path}", server.url())).call().unwrap();
+    for deep in ["/", "/budget/2026-10/category/0a1b/?inspector=1"] {
+        let page = get(deep);
+        assert_eq!(page.header("cache-control"), Some("no-cache"));
+        assert!(page.header("etag").is_some());
+        assert!(page.into_string().unwrap().contains("<title>Money</title>"), "{deep}");
+    }
+    assert_eq!(get("/pkg/money-web.js").into_string().unwrap(), "export default 1");
+    assert!(get("/healthz").into_string().unwrap().contains("\ndomain "));
+    let mut alice = signed_in(&server, "alice");
+    pump_until(&mut [&mut alice], 10, |ps| ps[0].client.linked);
+    rt.block_on(server.stop());
+}
+
+/// A page signs in as the phones do and keeps its session where no script
+/// reads it: `/auth/session` trades the code for the login without its
+/// token, which is set as an `HttpOnly`, `SameSite=Strict` cookie, and the
+/// socket opened from the server's own origin with that cookie and an
+/// empty first message is that session — the household's budget comes. A
+/// socket from another origin with the same cookie proves nobody, and so
+/// does an empty message with no cookie. Falsified by taking the cookie
+/// whatever the origin: the other site's socket synced.
+#[test]
+fn a_page_s_session_is_its_cookie_and_its_origin() {
+    use tungstenite::client::IntoClientRequest;
+    use tungstenite::Message;
+
+    let rt = runtime();
+    let data = tempfile::tempdir().unwrap();
+    let server = serve(&rt, data.path(), |_| {});
+    let url = server.url();
+    let mut laptop = signed_in(&server, "alice");
+    laptop.mutate("accounts.open_account", &open_account("Checking"));
+    pump_until(&mut [&mut laptop], 10, |ps| ps[0].pending() == 0);
+
+    // The page's own address is a redirect the server allows.
+    let agent = ureq::AgentBuilder::new().redirects(0).build();
+    let back = agent
+        .get(&format!("{url}/auth/login"))
+        .query("redirect", &format!("{url}/budget/"))
+        .query("user", "sam")
+        .call()
+        .unwrap();
+    let location = back.header("Location").unwrap().to_string();
+    assert!(location.starts_with(&format!("{url}/budget/?code=")), "{location}");
+    let code = ark_auth::query_value(location.split_once('?').unwrap().1, "code").unwrap();
+    let answer = agent
+        .post(&format!("{url}/auth/session"))
+        .send_json(serde_json::json!({ "code": code }))
+        .unwrap();
+    let cookie = answer.header("Set-Cookie").unwrap().to_string();
+    for part in ["HttpOnly", "SameSite=Strict", "Path=/"] {
+        assert!(cookie.contains(part), "{cookie}");
+    }
+    let login: ark_auth::Login = answer.into_json().unwrap();
+    assert_eq!(
+        (login.user.id.as_str(), login.token.as_str()),
+        ("sam", ""),
+        "the token is the cookie's alone"
+    );
+    let pair = cookie.split(';').next().unwrap().to_string();
+    assert!(server.auth.verify(ark_auth::cookie_token(&pair).unwrap()) == Some(login.session.as_str()));
+
+    // A socket from `origin`, sending `cookie`, its first message empty.
+    let socket = |origin: &str, cookie: Option<&str>| {
+        let mut req = ark_auth::socket_url(&url).into_client_request().unwrap();
+        req.headers_mut().insert("Origin", origin.parse().unwrap());
+        if let Some(c) = cookie {
+            req.headers_mut().insert("Cookie", c.parse().unwrap());
+        }
+        let (mut ws, _) = tungstenite::connect(req).unwrap();
+        if let tungstenite::stream::MaybeTlsStream::Plain(s) = ws.get_mut() {
+            s.set_read_timeout(Some(std::time::Duration::from_millis(20))).unwrap();
+        }
+        ws.send(Message::Binary(vec![])).unwrap();
+        ws
+    };
+    // Closed with 4401 within five seconds; anything else is not denied.
+    let denied = |mut ws: tungstenite::WebSocket<_>| {
+        let until = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while std::time::Instant::now() < until {
+            match ws.read() {
+                Ok(Message::Close(Some(f))) => return u16::from(f.code) == 4401,
+                Ok(Message::Close(None)) | Err(tungstenite::Error::ConnectionClosed) => return false,
+                Ok(_) => {}
+                Err(tungstenite::Error::Io(e)) if e.kind() == std::io::ErrorKind::WouldBlock => {}
+                Err(e) => panic!("{e}"),
+            }
+        }
+        false
+    };
+    assert!(denied(socket("https://elsewhere.example", Some(&pair))), "another site's page is nobody");
+    assert!(denied(socket(&url, None)), "no cookie is nobody");
+
+    // The page's own: a peer driven by hand over it, as the page's is.
+    let mut page = open(ark_peer::who(&login));
+    let mut ws = socket(&url, Some(&pair));
+    page.client.connected();
+    let synced = eventually(10, || {
+        for f in page.client.take_frames() {
+            ws.send(Message::Binary(f)).unwrap();
+        }
+        loop {
+            match ws.read() {
+                Ok(Message::Binary(b)) => page.client.receive(b),
+                Ok(Message::Close(f)) => panic!("closed: {f:?}"),
+                Ok(_) => {}
+                Err(tungstenite::Error::Io(e)) if e.kind() == std::io::ErrorKind::WouldBlock => break,
+                Err(e) => panic!("{e}"),
+            }
+        }
+        page.cursor() == head(&server)
+    });
+    assert!(synced, "the page's session synced");
+    let accounts: Vec<AccountLine> = page.query("accounts.accounts", &()).unwrap();
+    assert_eq!(accounts.iter().map(|a| a.name.as_str()).collect::<Vec<_>>(), ["Checking"]);
+
+    // Signing out forgets the cookie.
+    let out = agent.post(&format!("{url}/auth/logout")).call().unwrap();
+    assert!(out.header("Set-Cookie").unwrap().contains("Max-Age=0"));
     rt.block_on(server.stop());
 }

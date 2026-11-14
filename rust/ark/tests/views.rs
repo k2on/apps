@@ -3,6 +3,9 @@
 //! and a replica fed by a scope holds exactly its union after every
 //! delivery. The `views/` vectors — a named view of a reference domain over
 //! a store and batches of changes — are `arkdb`'s (`tests/views.rs`).
+// A test reads its fixtures and times itself: the kernel's and the core's
+// purity (clippy.toml) is their library's, not their tests'.
+#![allow(clippy::disallowed_methods, clippy::disallowed_types)]
 
 #[path = "demo.rs"]
 mod demo;

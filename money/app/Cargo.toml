@@ -1,0 +1,44 @@
+[package]
+name = "money-app"
+version = "0.1.0"
+workspace = "../../rust"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "money as an Ark app (ui/docs/app.md): its screens' state, messages, update and views in Rust, run by ark-app on every platform; the views are drawn natively by iced, Leptos, SwiftUI and Compose."
+
+[lib]
+name = "money_app"
+path = "src/lib.rs"
+
+[dependencies]
+ark = { path = "../../rust/ark" }
+ark-app = { path = "../../ui/rust/app" }
+ark-format = { path = "../../rust/ark-format" }
+# The demo's household and its bank, which the host runs behind Sync in the demo.
+money-core = { path = "../core", features = ["demo"] }
+# Where money can be, spelled as paths (`src/routes.rs`).
+ark-router = { path = "../../ui/rust/router" }
+# The device modules money's update asks through their ports
+# (ark_app::modules): depending on one is what takes it on, on every
+# platform (ui/docs/app.md, How an App Opts In). The tests register their
+# fakes.
+ark-haptics = { path = "../../modules/ark-haptics" }
+ark-clipboard = { path = "../../modules/ark-clipboard" }
+ark-share = { path = "../../modules/ark-share" }
+ark-camera = { path = "../../modules/ark-camera" }
+ark-scanner = { path = "../../modules/ark-scanner" }
+# The login kept in the keychain and the keystore.
+ark-secure-store = { path = "../../modules/ark-secure-store" }
+
+[dev-dependencies]
+# The tests' store, a peer's, over the demo's household.
+ark-peer = { path = "../../rust/ark-peer", default-features = false }
+money-core = { path = "../core", features = ["demo"] }
+money-seed = { path = "../demo" }
+# money as its phones run it (tests/phone.rs): its part of its host under
+# ark-ffi's `Hosted`, as its generated library puts them together.
+ark-ffi = { path = "../../rust/ark-ffi" }
+tempfile = "3"
+# Reading money/demo/shots.json: each screen's route the launch its
+# arguments are (src/shell/tests.rs).
+serde_json = { workspace = true }

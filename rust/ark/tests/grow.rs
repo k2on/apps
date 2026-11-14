@@ -3,6 +3,9 @@
 //! head, its chain and its rows, the rows widened and the store's digests
 //! this schema's; a replica of the older schema takes what the wider one
 //! logs on faith, as it says (it is behind).
+// A test reads its fixtures and times itself: the kernel's and the core's
+// purity (clippy.toml) is their library's, not their tests'.
+#![allow(clippy::disallowed_methods, clippy::disallowed_types)]
 
 #[path = "demo.rs"]
 mod demo;

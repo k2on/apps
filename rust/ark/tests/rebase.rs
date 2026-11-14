@@ -2,6 +2,9 @@
 //! for v5: every confirmed entry is applied by its facts, ids are drawn from
 //! the entry, the chain is the log's identity. The states it reaches are
 //! pinned here; the domain in Rust must reach them byte for byte.
+// A test reads its fixtures and times itself: the kernel's and the core's
+// purity (clippy.toml) is their library's, not their tests'.
+#![allow(clippy::disallowed_methods, clippy::disallowed_types)]
 
 #[path = "demo.rs"]
 mod demo;

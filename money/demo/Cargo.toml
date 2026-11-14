@@ -1,0 +1,27 @@
+[package]
+name = "money-seed"
+version = "0.1.0"
+workspace = "../../rust"
+edition.workspace = true
+license.workspace = true
+description = "money's demo household (the core's `demo`) on a peer and a disk: what the demo window, the phones' demo and the browser's open on; and `money-seed DATA`, the household written into a money server's data directory as the log it boots on."
+
+[lib]
+name = "money_seed"
+path = "src/lib.rs"
+
+# `money-seed DATA [DAY]`: only with `cli`, so what links the library (the
+# phones' bridge, cross-built for Apple and Android; the browser's demo)
+# links no binary.
+[[bin]]
+name = "money-seed"
+path = "src/main.rs"
+required-features = ["cli"]
+
+[features]
+cli = []
+
+[dependencies]
+money-core = { path = "../core", features = ["demo"] }
+# The log on disk, and the clock.
+ark-peer = { path = "../../rust/ark-peer", default-features = false }

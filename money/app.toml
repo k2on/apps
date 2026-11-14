@@ -1,0 +1,223 @@
+# money as an Ark app (ui/docs/app.md, "The App's Files"). Every native
+# project is generated from this, the modules' module.toml and the Rust
+# views (`nix run .#money-prebuild` writes them into money/.native, for
+# Xcode and Android Studio; nothing there is committed).
+
+name = "Money"
+# The bundle id and the applicationId are the flake's `bundlePrefix` and
+# this: us.koon.money.
+id = "money"
+version = "0.1"
+# ui/theme.toml's [accent.green].
+accent = "green"
+platforms = ["iphone", "ipad", "mac", "android", "desktop", "web"]
+# Its device modules are its crate's dependencies (money/app/Cargo.toml):
+# depending on a module's crate is what takes it on (ui/docs/app.md, How an
+# App Opts In).
+# The scheme the server's sign-in sends the code back on (money://auth),
+# and a route opened by a link (money://account/…).
+scheme = "money"
+# The Rust crate that is the app (money/app): its #[view]s, `screens()` and
+# `commands()`; its UniFFI namespace is the crate's.
+crate = "money-app"
+
+# Each screen's runtime (`app`, its type in the app's crate, whose page and
+# message are beside it) as the phones' library exports it (`beside`: one
+# the phone runs for as long as it shows a page, told what it shows, rather
+# than one of its host's; money has none), its page and message, and
+# the holder each toolkit's generated views read it through (ui/prebuild.py
+# writes the holders over the app library's `ArkScreen`); its `#[view]` in
+# the app's crate (`view`, a path in it: its source is that module's file)
+# and the names the phones' generator writes it under (`swift-view`,
+# `kotlin-view`). ui/prebuild.py writes the generator's main from these
+# (`views`; nix/ark-app.nix builds it as `<id>-gen`), the first run's
+# screen, every app's, among them.
+[screens]
+accounts = { app = "accounts::Accounts", runtime = "AccountsApp", page = "AccountsPage", msg = "AccountsMsg", swift = "AccountsScreen", kotlin = "AccountsHolder", view = "accounts::view::accounts", swift-view = "AccountsView", kotlin-view = "AccountsScreen" }
+budget = { app = "budget::Budget", runtime = "BudgetApp", page = "BudgetPage", msg = "BudgetMsg", swift = "BudgetScreen", kotlin = "BudgetHolder", view = "budget::view::budget", swift-view = "BudgetView", kotlin-view = "BudgetScreen" }
+transactions = { app = "transactions::Transactions", runtime = "TransactionsApp", page = "TransactionsPage", msg = "TransactionsMsg", swift = "TransactionsScreen", kotlin = "TransactionsHolder", view = "transactions::view::transactions", swift-view = "TransactionsView", kotlin-view = "TransactionsScreen" }
+insights = { app = "insights::Insights", runtime = "InsightsApp", page = "InsightsPage", msg = "InsightsMsg", swift = "InsightsScreen", kotlin = "InsightsHolder", view = "insights::view::insights", swift-view = "InsightsView", kotlin-view = "InsightsScreen" }
+register = { app = "register::Register", runtime = "RegisterApp", page = "RegisterPage", msg = "RegisterMsg", swift = "RegisterScreen", kotlin = "RegisterHolder", view = "register::view::register", swift-view = "RegisterView", kotlin-view = "RegisterScreen" }
+sheets = { app = "sheets::Sheets", runtime = "SheetsApp", page = "SheetsPage", msg = "SheetsMsg", swift = "SheetsScreen", kotlin = "SheetsHolder", view = "sheets::view::sheets", swift-view = "SheetsView", kotlin-view = "SheetsScreen" }
+# The shell's main window.
+shell = { app = "shell::MoneyShell", runtime = "ShellApp", page = "ShellPage", msg = "ShellMsg", swift = "MoneyShellScreen", kotlin = "MoneyShellHolder", view = "shell::view::money_shell", swift-view = "MoneyShellView", kotlin-view = "MoneyShell" }
+
+# The shell every phone shows once the app runs, the app library's (ArkApp's
+# and ark-app-android's `ArkShell`; ui/docs/app.md, "The App Library"),
+# drawn from these names alone (ui/prebuild.py writes its holders and its
+# scenes): which screen is the shell (its view the sections, their tabs and
+# glyphs, toolbars, search and inspectors, said in Rust), which of `[views]`
+# are its Settings and its menu bar's commands, which screen goes over every
+# section (its sheets and dialogs), the hosted name drawn as who is signed
+# in, and the shell page's fields it reads: the section showing (the ready
+# signal's route), Light or Dark (`appearance`), who is signed in
+# (`household`, ark_app's `Household`), and a page shown in the system's
+# browser while it is set, with the message that says it was closed. A
+# route is one of the shell's places on every host (money's host), so none
+# is pushed by the phone.
+[shell]
+screen = "shell"
+settings = "settings"
+commands = "commands"
+over = "sheets"
+account = "household"
+section = "section"
+appearance = "appearance"
+household = "household"
+browse = "settings.plaid"
+closed = "PageClosed"
+
+# Each name the shell's view hosts (`hosted(…)`) and the screen whose view
+# it is; any other is who is signed in (`account`) or an inspector with
+# nothing chosen.
+[shell.hosted]
+budget = "budget"
+accounts = "accounts"
+transactions = "transactions"
+insights = "insights"
+"accounts.register" = "register"
+
+# A screen's further views, over its runtime (`screen`): Settings, Connected
+# Banks alone (where Accounts' Bank Connections opens it), and the menu
+# bar's commands (`commands`: a function of the app's menus, not a view).
+[views]
+settings = { screen = "shell", view = "shell::view::money_settings", swift-view = "MoneySettingsView", kotlin-view = "MoneySettings" }
+banks = { screen = "shell", view = "shell::view::settings_banks", swift-view = "MoneyBanksView", kotlin-view = "MoneyBanks" }
+commands = { screen = "shell", commands = "shell::view::commands", swift-view = "MoneyCommands", kotlin-view = "moneyCommands" }
+
+[icon]
+# icon.svg's full-canvas rectangle is the background; on Android the rest
+# is the adaptive icon's foreground and its themed (monochrome) icon.
+svg = "icon.svg"
+
+[apple]
+# The scheme and the product: Money.app.
+product = "Money"
+category = "public.app-category.finance"
+deployment = "26.0"
+# The team is CI's secret (ios.yaml), never written here or generated.
+# What money itself asks of the iPhone and the Mac, beside its modules'.
+[apple.info]
+ITSAppUsesNonExemptEncryption = false
+NSLocalNetworkUsageDescription = "Money syncs with your own budget server, which may be on this network."
+NSCameraUsageDescription = "Money scans a paper receipt so your server can read its items, and the code another of your devices shows to sign you in."
+NSPhotoLibraryUsageDescription = "Money reads a photo of a receipt you choose so your server can read its items."
+
+[android]
+# The Kotlin package of the generated screens and entry points.
+package = "dev.money.android"
+min-sdk = 26
+target-sdk = 35
+# The one key every build is signed with, committed and public on purpose
+# (money/README.md says why): one APK installs over the last.
+keystore = "debug.keystore"
+# What money asks of Android, beside its modules'.
+permissions = ["android.permission.INTERNET", "android.permission.CAMERA"]
+features = [{ name = "android.hardware.camera", required = false }]
+# The hosts its scheme opens on: money://auth, money://join.
+hosts = ["auth", "join"]
+# What the app compiles against beyond ArkUI's template: the rest of ArkUI's
+# graph (ui/kotlin/android/deps.json, which every Ark app's build replays).
+dependencies = [
+  "androidx.media3:media3-exoplayer:1.5.1",
+  "androidx.media3:media3-session:1.5.1",
+]
+
+[web]
+# How the browser's page is made (ui/docs/app.md, "The Browser's Modes"):
+# the SPA alone, served by money-server beside the sync socket. The budget
+# is private, so no page of it is written ahead (`ssg`), and the server
+# writes none either (`ssr`): the page draws itself over the household it
+# syncs. The page is generated from this file (ui/prebuild.py's `web`,
+# nix/ark-app.nix's `webSrc`): `money-web`, arkui-web's `WebHost` over
+# `[ffi]`'s app, domain and demo, and its index.html. Nothing of it is
+# committed.
+modes = ["spa"]
+
+# What a store lists of it: F-Droid's metadata (nix/fdroid.nix writes its
+# .yml from this through `ui/prebuild.py fdroid`), the docs' listing.
+[store]
+summary = "A household's budget, shared, every dollar given a job"
+categories = ["Money"]
+license = "MIT OR Apache-2.0"
+website = "https://k2on.github.io/apps/"
+source = "https://github.com/k2on/apps"
+issues = "https://github.com/k2on/apps/issues"
+description = """
+Money is a zero-based budget for a household, the kind YNAB made familiar: money that comes in is ready to assign, each category keeps what it was given until it is spent, and an overspent category is paid for by the next month. One budget per server, and everyone who signs in to it shares it.
+
+The budget lives on the phone and syncs with the server, so it opens at once and works offline; a change made offline lands when the server can be reached. The server can follow bank accounts through Plaid, and what it imports waits on the phone to be approved. Without a server, the app runs a demo household on the phone alone.
+
+It needs a money server to sign in to; there is no account anywhere else. The server, the desktop client and the browser client are in the same repository.
+
+This is a release build signed with a key committed to that repository, so anyone could sign an APK as this app. It is for the household running the server.
+"""
+
+[ffi]
+# The phones' library, generated (ui/prebuild.py's `ffi`, nix/ark-app.nix):
+# `money-ffi` (lib and UniFFI namespace `money_ffi`, Kotlin's
+# `uniffi.money_ffi`), the UniFFI twins of what crosses and the exports
+# over money's part of its host (`app`), run by ark-ffi's `Hosted` under the
+# app host every Ark app has. Nothing of it is committed.
+# The object the phone holds: the app host's (ark-ffi's ArkHost), the first
+# run's, and each screen's runtime by its `[screens]` name.
+host = "MoneyHost"
+# The app's part of its host, in its crate (`ark_app::host::HostedApp`), and
+# where its routes are (its `Route`, crossing as a twin; a twin is named as
+# its type, so never one a binding names already: `Native` is JNA's in
+# Kotlin). What only the phone's shell does is every app's
+# (`ark_app::host::ShellAsk`, read from the app host).
+app = "host::Money"
+route = "routes::Route"
+# The domain its replica's log is of: a function of a crate's giving it.
+domain = "money_core::shared"
+# The crate of its demo's household (demo/): its `seeded_disk(today,
+# now_ms)` opened as a peer of its own by its `open(disk)`. An app with no
+# demo says none.
+demo = "money-seed"
+# ark-ffi's features each phone's library links: Android's camera gives
+# the scanner's eyes a colour square, which the corner model reads
+# (`model`, ark-scanner's); the iPhone and the Mac find the page by its
+# bright region, so with none.
+android = ["model"]
+apple = []
+
+# What else crosses to the phones, by crate, as a `use` names them: every
+# type a screen's page or message holds, the domain's change and what it
+# carries (`ark::twins!`, written in the library). The screens' pages and
+# messages, the route, the native and the first run's are written without
+# being listed.
+[ffi.twins]
+money_core = [
+  "accounts::{AccountKind, AccountShelf, Shelving}",
+  "banks::Follow",
+  "changes::MoneyChange",
+  "schema::{AskState, Direction, Filter, Term}",
+  "transactions::Draft",
+  """types::{
+    AccountLine, AddCategory, AddGroup, AddPhoto, AddSplit, AddSubcategory, AddTransaction, Answer, AskLine,
+    Assign, Auto, AutoAssign, BankAccount, BankFailed, BankLine, BankName, BankRemoved, BankTxn, BudgetLine,
+    Categorize, ChangeFilter, ChargeImport, ClassifyItems, ClearFormula, Cleared, CloseAccount,
+    DeleteCategory, DeleteGroup, EditTransaction, FilterId, GroupLine, HideCategory, HideGroup,
+    IgnoreLinked, Import, ItemLine, ItemRef, LinkAccount, LinkedLine, MatchReceipt, MoveCategory,
+    MoveFilter, MoveGroup, MoveMoney, OpenAccount, OpenLinked, PayCharge, PayeeLine, PhotoLine,
+    ReceiptImport, ReceiptLine, Reconcile, RenameAccount, RenameCategory, RenameFilter, RenameGroup,
+    SaveFilter, SetCleared, SetFormula, SetRule, SetTarget, SpendingLine, SplitPart, SplitTxn,
+    StoreCharge, StoreItem, StoreReceipt, Summary, TxnLine, Txns, WriteReceipt,
+  }""",
+  "words::{Meter, Tone}",
+]
+money_app = [
+  "MoneyRequest",
+  "accounts::{AccountItem, AccountsShelf, AddForm, KindChoice, RenameForm}",
+  "insights::{PlanRow, SpentGroup}",
+  "budget::{AmountForm, BudgetChoice, CategoryForm, CategoryItem, GroupItem, MoveForm, NameForm}",
+  "receipts::{FormItem, MatchRow, MatchSheet, PhotoSheet, ReadingPhoto, ReceiptForm, ReceiptSection}",
+  "register::{RegisterDay, RegisterRow}",
+  "sheets::{CategorizeSheet, PayeeChoice, ReconcileSheet, SheetChoice, TxnSheet}",
+  "transactions::{CategorizeForm, CategoryChoice, DeleteQuestion, TxnDay, TxnItem}",
+  "shell::{AccountPlace, Appearance}",
+  "shell::settings::{AskItem, BankItem, BankPage, FeedChoice, FeedItem, FeedTarget, SessionFacts, SettingsPage}",
+  "shell::inspect::{CategoryInspector, DetailLine, TransactionInspector}",
+  "words::{BankStatus, Captions}",
+]

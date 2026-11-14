@@ -1,20 +1,27 @@
-# The phone's F-Droid repository, https://k2on.github.io/apps/fdroid/repo
-# (harken/android/fdroid/README.md): add that URL in the F-Droid client and
-# each APK CI builds arrives as an update. One repository for every app of
-# this tree, so a phone adds it once.
+# The phones' F-Droid repositories, one per release channel
+# (docs/releasing.md, harken/android/fdroid/README.md), each for every app
+# of this tree, so a phone adds one address for all of them:
 #
-#   fdroid-repo     the repository for the APKs this flake builds, signed
-#                   and checked, laid out exactly as it is served
-#   apps-fdroid     what build.yaml's deploy runs: the same layout over the
-#                   new APKs and the newest of those already published
+#   https://k2on.github.io/apps/fdroid/repo            stable: `v*` tags'
+#                                                      builds, the apps' own ids
+#   https://k2on.github.io/apps/fdroid/unstable/repo   unstable: main's
+#                                                      builds, `<id>.unstable`
+#
+#   fdroid-repo     the stable repository for the APKs this flake builds,
+#                   signed and checked, laid out exactly as it is served
+#   apps-fdroid     what build.yaml's deploy runs (.github/channels.sh): one
+#                   channel's repository over its new APKs and the newest
+#                   of those already published
 #   fdroid-keygen   a private repository key, for the day there is one
 #
 # `apps` is the list of them, each
 #
-#   { appid; apk; apkName; metadata; icon; }
+#   { appid; apk; apkUnstable; apkName; metadata; icon; stable; unstable; }
 #
-# its application id, the derivation that builds it and the APK's name in
-# it, its F-Droid metadata (a .yml) and its icon (an SVG).
+# its application id, the derivations that build its stable and unstable
+# APKs and the APK's name in them, its F-Droid metadata (a .yml), its icon
+# (an SVG), and whether it is in each channel. The unstable app's id,
+# metadata and icon are made from the stable's (nix/channels.nix).
 #
 # **The index is signed with a key committed beside the metadata**
 # (harken/android/fdroid/repo.keystore, `harken` / `harken`), public on
@@ -27,7 +34,7 @@
 # costs one thing on the phone — the repository re-added, because its
 # fingerprint is the key's. The APKs keep their own key, so no app is
 # uninstalled for it.
-{ lib, pkgs, apps }:
+{ lib, pkgs, apps, channels }:
 let
   py = pkgs.python3Packages;
 
@@ -61,34 +68,73 @@ let
   });
   python = pkgs.python3.withPackages (_: [ (py.toPythonModule fdroidserver) ]);
 
-  appids = map (a: a.appid) apps;
-  # How many versions the repository offers of each app: the new one and
-  # two to go back to. Each of harken's is ~14 MB, against Pages' 1 GB site
-  # and 100 MB file.
+  # Each channel's repository (nix/channels.nix): its address, its name,
+  # what it says of itself and its apps, the unstable channel's apps made
+  # from the stable's (`.unstable` ids, " Unstable" names, banded icons).
+  # An app is in a channel unless its app.toml's `[channels]` says not.
+  site = "https://k2on.github.io/apps/fdroid";
+  repos = {
+    stable = {
+      url = "${site}/repo";
+      name = "apps";
+      description = ''
+        A personal repository for the apps of https://github.com/k2on/apps,
+        their stable channel: each APK is a tagged release's build, signed
+        with a key that is public. Every build of main is in the unstable
+        repository beside this one (${site}/unstable/repo), as apps of
+        their own.'';
+      apps = map (a: { inherit (a) appid apk apkName metadata; icon = icon a.appid a.icon; }) (lib.filter (a: a.stable) apps);
+      icon = icon "apps" (lib.head apps).icon;
+    };
+    unstable = {
+      url = "${site}/unstable/repo";
+      name = "apps unstable";
+      description = ''
+        The unstable channel of https://github.com/k2on/apps: every build
+        of main, each app installed beside its stable release as an app of
+        its own (its id ending in .unstable, its own data and sign-in),
+        signed with a key that is public. The stable releases are at
+        ${site}/repo.'';
+      apps = map (a: {
+        appid = a.appid + channels.suffix;
+        apk = a.apkUnstable;
+        inherit (a) apkName;
+        metadata = channels.fdroidYml a.appid a.metadata;
+        icon = icon (a.appid + channels.suffix) (channels.badge a.appid a.icon);
+      }) (lib.filter (a: a.unstable) apps);
+      icon = icon "apps-unstable" (channels.badge "apps" (lib.head apps).icon);
+    };
+  };
+  # How many versions a repository offers of each app: the newest and two
+  # to go back to. Each of harken's is ~14 MB, against Pages' 1 GB site
+  # and 100 MB file. The stable repository's are releases alone, so its
+  # newest three are the last three releases, whatever main has built
+  # since: main's builds are in the other repository, under other ids.
   keep = 3;
   repoKey = {
     file = ../harken/android/fdroid/repo.keystore;
     alias = "harken";
     pass = "harken";
     # SHA-256 of its certificate: what `?fingerprint=` pins, and what the
-    # repository below is checked against before it is a package.
+    # repository below is checked against before it is a package. Both
+    # channels' indexes are signed with it.
     fingerprint = "E48F7E6E1AB9C74C4F0404835580DE590334C636EAF654680E1BF0D250BEF3DD";
   };
 
-  # Each app's icon from its SVG. An APK's own is an adaptive icon, XML and
-  # nothing else (minSdk 26), and fdroidserver takes an icon out of an APK
-  # only as a PNG of the same name, so F-Droid takes this from the metadata.
-  icon = a: pkgs.runCommand "${a.appid}-icon.png" { nativeBuildInputs = [ pkgs.librsvg ]; } ''
-    rsvg-convert -w 512 -h 512 ${a.icon} -o $out
+  # Each icon as a PNG from its SVG. An APK's own is an adaptive icon, XML
+  # and nothing else (minSdk 26), and fdroidserver takes an icon out of an
+  # APK only as a PNG of the same name, so F-Droid takes this from the
+  # metadata. The repository's own is the first app's (harken's trumpet,
+  # which phones have shown for the repository since it began), banded for
+  # the unstable one.
+  icon = name: svg: pkgs.runCommand "${name}-icon.png" { nativeBuildInputs = [ pkgs.librsvg ]; } ''
+    rsvg-convert -w 512 -h 512 ${svg} -o $out
   '';
-  # The repository's own is the first app's: harken's trumpet, which phones
-  # have shown for the repository since it began.
-  repoIcon = icon (lib.head apps);
 
-  # Per app, once the APKs are in repo/: all but its newest `keep`
-  # dropped, and its metadata and icon laid out if any APK is left. An app
-  # with no APK has no metadata either, so fdroid is never asked to list an
-  # app with nothing to install.
+  # Per app of a channel, once the APKs are in repo/: all but its newest
+  # `keep` dropped, and its metadata and icon laid out if any APK is left.
+  # An app with no APK has no metadata either, so fdroid is never asked to
+  # list an app with nothing to install.
   perApp = a: ''
     mapfile -t codes < <(find "$work/repo" -maxdepth 1 -name '${a.appid}_*.apk' -printf '%f\n' \
       | sed -n 's/^${lib.escapeRegex a.appid}_\([0-9]*\)\.apk$/\1/p' | sort -n -r)
@@ -100,8 +146,23 @@ let
       offered=$((offered + 1))
       mkdir -p "$work/metadata/${a.appid}/en-US"
       cp ${a.metadata} "$work/metadata/${a.appid}.yml"
-      cp ${icon a} "$work/metadata/${a.appid}/en-US/icon.png"
+      cp ${a.icon} "$work/metadata/${a.appid}/en-US/icon.png"
     fi
+  '';
+
+  # A channel's own: its app ids, how its APKs are laid out, and its
+  # config.yml's lines.
+  channelCase = c: r: ''
+    ${c})
+      appids=(${lib.concatMapStringsSep " " (a: a.appid) r.apps})
+      repo_url=${lib.escapeShellArg r.url}
+      repo_name=${lib.escapeShellArg r.name}
+      repo_description=${lib.escapeShellArg (lib.replaceStrings [ "\n" ] [ " " ] r.description)}
+      repo_icon=${r.icon}
+      lay_out() {
+        ${lib.concatMapStrings perApp r.apps}
+      }
+      ;;
   '';
 
   helper = "${python}/bin/python3 -I ${./fdroid.py}";
@@ -112,13 +173,18 @@ let
     text = ''
       usage() {
         cat >&2 <<'EOF'
-      apps-fdroid repo [--keep URL] OUT [APK...]
-          A signed repository in OUT (which must not exist): the APKs given,
-          each one of ${lib.concatStringsSep ", " appids}
-          by its application id, and with --keep, those the repository at
-          URL already offers; of each app the newest ${toString keep} by version
-          code. URL unreachable or empty is not an error; nothing at all to
-          offer is (exit 3).
+      apps-fdroid repo [--channel stable|unstable] [--keep URL [--strict]] OUT [APK...]
+          A signed repository of one channel (stable when not said) in OUT
+          (which must not exist): the APKs given, each one of the channel's
+          apps by its application id
+            stable:   ${lib.concatMapStringsSep ", " (a: a.appid) repos.stable.apps}
+            unstable: ${lib.concatMapStringsSep ", " (a: a.appid) repos.unstable.apps}
+          and with --keep, those the repository at URL already offers; of
+          each app the newest ${toString keep} by version code. URL with no index
+          (404) is not an error, nor, without --strict, is URL unreachable
+          or an APK it lists that will not download; with --strict those
+          are (exit 1): what carries a channel forward unchanged. Nothing at
+          all to offer is exit 3.
           Signed with FDROID_KEYSTORE (base64 PKCS12), FDROID_KEYSTORE_PASS
           and FDROID_KEY_ALIAS when FDROID_KEYSTORE is set, and otherwise with
           the committed key (nix/fdroid.nix says why).
@@ -130,44 +196,65 @@ let
       }
 
       repo() {
-        local url=""
-        if [ "''${1:-}" = --keep ]; then url=''${2:?--keep wants a URL}; shift 2; fi
+        local channel=stable url="" strict=""
+        while [ $# -gt 0 ]; do
+          case $1 in
+            --channel) channel=''${2:?--channel wants stable or unstable}; shift 2 ;;
+            --keep) url=''${2:?--keep wants a URL}; shift 2 ;;
+            --strict) strict=1; shift ;;
+            *) break ;;
+          esac
+        done
         [ $# -ge 1 ] || usage
         local out=$1; shift
         [ ! -e "$out" ] || { echo "apps-fdroid: $out exists" >&2; exit 2; }
+
+        local appids repo_url repo_name repo_description repo_icon
+        case $channel in
+          ${channelCase "stable" repos.stable}
+          ${channelCase "unstable" repos.unstable}
+          *) echo "apps-fdroid: no channel $channel (stable or unstable)" >&2; exit 2 ;;
+        esac
 
         # Everything with a password in it lives here, and goes with it.
         work=$(mktemp -d -p "''${RUNNER_TEMP:-''${TMPDIR:-/tmp}}" apps-fdroid.XXXXXX)
         trap 'rm -rf "$work"' EXIT
         mkdir -p "$work/repo" "$work/metadata" "$work/fetched"
         # Relative to where fdroid runs; it copies it into repo/icons itself.
-        cp ${repoIcon} "$work/apps.png"
+        cp "$repo_icon" "$work/apps.png"
 
-        # An APK is the app its manifest names, and one this repository
-        # does not know is refused rather than listed without metadata.
-        local apk id code
+        # An APK is the app its manifest names, and one this channel does
+        # not know is refused rather than listed without metadata: a
+        # stable build is never offered as unstable, nor the reverse.
+        local apk id code known k
         for apk in "$@"; do
           read -r id code < <(${helper} apkid "$apk")
-          case $id in
-            ${lib.concatStringsSep "|" appids}) ;;
-            *) echo "apps-fdroid: $apk is $id, which is none of ${lib.concatStringsSep ", " appids}" >&2; exit 2 ;;
-          esac
+          known=""
+          for k in "''${appids[@]}"; do [ "$k" != "$id" ] || known=1; done
+          if [ -z "$known" ]; then
+            echo "apps-fdroid: $apk is $id, which is none of the $channel channel's: ''${appids[*]}" >&2
+            exit 2
+          fi
           cp "$apk" "$work/repo/''${id}_$code.apk"
           echo "apps-fdroid: offering $id $code ($apk)"
         done
 
         # Pages deploys the site whole, so what was offered before is
-        # fetched back from the live index, app by app. Best effort: a first
-        # deploy, a site down or an index that does not parse is the new
-        # APKs alone, and an app the index does not list yet keeps nothing.
+        # fetched back from the live index, app by app. Without --strict,
+        # best effort: a first deploy, a site down or an index that does
+        # not parse is the new APKs alone, and an app the index does not
+        # list yet keeps nothing. With --strict, only an index that is not
+        # there (404: the channel has never been published) is nothing.
         if [ -n "$url" ]; then
           url=''${url%/}
-          if curl -fsSL --max-time 60 --retry 2 -o "$work/index-v2.json" "$url/index-v2.json"; then
+          local status
+          status=$(curl -sSL --max-time 60 --retry 2 -w '%{http_code}' -o "$work/index-v2.json" "$url/index-v2.json") || status=000
+          if [ "$status" = 200 ]; then
             local name digest
-            local ids=(${lib.concatStringsSep " " appids})
-            for id in "''${ids[@]}"; do
+            for id in "''${appids[@]}"; do
               if ! ${helper} listed "$work/index-v2.json" "$id" ${toString keep} > "$work/listed"; then
                 echo "apps-fdroid: the index at $url does not parse; offering only what was given" >&2
+                [ -z "$strict" ] || exit 1
                 break
               fi
               while read -r code name digest; do
@@ -178,18 +265,22 @@ let
                   echo "apps-fdroid: keeping $id $code from $url"
                 else
                   echo "apps-fdroid: could not fetch $name from $url; leaving it out" >&2
+                  [ -z "$strict" ] || exit 1
                 fi
               done < "$work/listed"
             done
+          elif [ "$status" = 404 ]; then
+            echo "apps-fdroid: no index at $url (404); offering only what was given" >&2
           else
-            echo "apps-fdroid: no index at $url; offering only what was given" >&2
+            echo "apps-fdroid: the index at $url did not answer ($status); offering only what was given" >&2
+            [ -z "$strict" ] || exit 1
           fi
         fi
 
         local codes offered=0
-        ${lib.concatMapStrings perApp apps}
+        lay_out
         if [ "$offered" -eq 0 ]; then
-          echo "apps-fdroid: no APK to offer" >&2
+          echo "apps-fdroid: no APK to offer in the $channel channel" >&2
           exit 3
         fi
 
@@ -208,13 +299,10 @@ let
         (
           umask 077
           cat > "$work/config.yml" <<EOF
-      repo_url: https://k2on.github.io/apps/fdroid/repo
-      repo_name: apps
+      repo_url: $repo_url
+      repo_name: $repo_name
       repo_description: >-
-        A personal repository for the apps of https://github.com/k2on/apps:
-        Harken, a music library synced from your own server, and Revelation,
-        the Bible as one scroll zoomed like a map. Each APK is the release
-        build of a commit, signed with a key that is public.
+        $repo_description
       repo_icon: apps.png
       archive_older: 0
       make_current_version_link: false
@@ -305,7 +393,7 @@ let
     passthru = { inherit fdroidserver; fingerprint = repoKey.fingerprint; };
   } ''
     export HOME=$TMPDIR
-    apps-fdroid repo $out ${lib.concatMapStringsSep " " (a: "${a.apk}/${a.apkName}") apps}
+    apps-fdroid repo $out ${lib.concatMapStringsSep " " (a: "${a.apk}/${a.apkName}") repos.stable.apps}
     apps-fdroid check $out ${repoKey.fingerprint}
   '';
 in

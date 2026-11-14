@@ -86,3 +86,18 @@ pub fn view(attr: TokenStream, item: TokenStream) -> TokenStream {
 pub fn scope(attr: TokenStream, item: TokenStream) -> TokenStream {
     out(domain::register("scope", attr.into(), item.into()))
 }
+
+/// `#[derive(Twin)]`: a plain struct's or enum's shape for its UniFFI twin,
+/// which the adapter writes (`ark::twins!`); `#[ark(ffi_eq)]` for a twin
+/// that compares and hashes. A row or an input asks with `#[ark(ffi)]`.
+#[proc_macro_derive(Twin, attributes(ark))]
+pub fn twin(input: TokenStream) -> TokenStream {
+    out(ffi::twin_derive(&syn::parse_macro_input!(input as syn::DeriveInput)))
+}
+
+/// `twins!(money_core: AccountLine, BudgetLine)`: each type's twin (its
+/// `__ark_twin_<Type>!`), written here, in the adapter that calls it.
+#[proc_macro]
+pub fn twins(input: TokenStream) -> TokenStream {
+    out(ffi::twins(input.into()))
+}

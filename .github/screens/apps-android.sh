@@ -136,7 +136,7 @@ for a in "$@"; do
   apk=$(find "$apks/apk-$a" -name '*.apk' 2>/dev/null | head -1)
   # Nothing published for it yet: said where it was fetched, and its shots kept.
   [ -n "$apk" ] || { echo "$a: no APK to take; skipped"; continue; }
-  server=$(jq -r '.server.port // empty | "http://10.0.2.2:\(.)"' "$a/screens/shots.json")
+  server=$(jq -r '.server.port // empty | "http://10.0.2.2:\(.)"' "$a/demo/shots.json")
   case $device in
     phone)
       bash "$here/app-android.sh" "$out/$a/android" "$apk" "$a" "$server" ||
@@ -148,7 +148,11 @@ for a in "$@"; do
         { echo "::error::$a's Android tablet screenshots failed"; failed=1; }
       ;;
     fold)
-      # Open first, signed in there; then folded, as it is, the login kept.
+      # Open first, then folded. An app that walks its shots (shots.json's
+      # `walk`) is a new install in each, walked from its first run; the
+      # others are signed in once, open, and keep the login folded.
+      kept=1
+      jq -e '.walk' "$a/demo/shots.json" > /dev/null && kept=
       if opened; then
         echo "$a: the Fold is open already ($(adb shell cmd device_state state 2>/dev/null | tr -d '\r' | grep -i committed))"
       else
@@ -157,7 +161,7 @@ for a in "$@"; do
       if DEVICE_NAME="${FOLD_NAME:-Pixel Fold}" CORNER=60 CUTOUT=hole \
         bash "$here/app-android.sh" "$out/$a/fold-unfolded" "$apk" "$a" "$server"; then
         if posture fold; then
-          DEVICE_NAME="${FOLD_NAME:-Pixel Fold}" CORNER=110 CUTOUT=hole SIGNED_IN=1 \
+          DEVICE_NAME="${FOLD_NAME:-Pixel Fold}" CORNER=110 CUTOUT=hole SIGNED_IN=$kept \
             bash "$here/app-android.sh" "$out/$a/fold-folded" "$apk" "$a" "$server" ||
             { echo "::error::$a's Fold (folded) screenshots failed"; failed=1; }
         else

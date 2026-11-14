@@ -1,0 +1,35 @@
+# The kernel is pure (layers.toml, ui/docs/app.md "Layers"): no file, no
+# socket, no process, no environment, no thread and no clock. What it needs
+# of the world it is handed. The same list is beside every crate of the
+# kernel and the core (ark, ark-macros, money-core, harken-domain).
+disallowed-methods = [
+  { path = "std::fs::read", reason = "the kernel and the core do no I/O: take the bytes" },
+  { path = "std::fs::read_to_string", reason = "the kernel and the core do no I/O: take the text" },
+  { path = "std::fs::read_dir", reason = "the kernel and the core do no I/O" },
+  { path = "std::fs::write", reason = "the kernel and the core do no I/O: return the bytes" },
+  { path = "std::fs::create_dir_all", reason = "the kernel and the core do no I/O" },
+  { path = "std::fs::remove_file", reason = "the kernel and the core do no I/O" },
+  { path = "std::fs::remove_dir_all", reason = "the kernel and the core do no I/O" },
+  { path = "std::fs::rename", reason = "the kernel and the core do no I/O" },
+  { path = "std::fs::metadata", reason = "the kernel and the core do no I/O" },
+  { path = "std::env::var", reason = "the kernel and the core read no environment: take the setting" },
+  { path = "std::env::var_os", reason = "the kernel and the core read no environment" },
+  { path = "std::env::vars", reason = "the kernel and the core read no environment" },
+  { path = "std::env::args", reason = "the kernel and the core read no command line" },
+  { path = "std::env::current_dir", reason = "the kernel and the core have no working directory" },
+  { path = "std::env::set_var", reason = "the kernel and the core change no environment" },
+  { path = "std::process::exit", reason = "the kernel and the core return, they do not exit" },
+  { path = "std::process::Command::new", reason = "the kernel and the core start no process" },
+  { path = "std::thread::spawn", reason = "the kernel and the core start no thread" },
+  { path = "std::time::SystemTime::now", reason = "the kernel and the core read no clock: take the time" },
+  { path = "std::time::Instant::now", reason = "the kernel and the core read no clock: take the time" },
+]
+disallowed-types = [
+  { path = "std::fs::File", reason = "the kernel and the core do no I/O" },
+  { path = "std::fs::OpenOptions", reason = "the kernel and the core do no I/O" },
+  { path = "std::net::TcpStream", reason = "the kernel and the core open no socket" },
+  { path = "std::net::TcpListener", reason = "the kernel and the core open no socket" },
+  { path = "std::net::UdpSocket", reason = "the kernel and the core open no socket" },
+  { path = "std::process::Command", reason = "the kernel and the core start no process" },
+  { path = "std::thread::Builder", reason = "the kernel and the core start no thread" },
+]

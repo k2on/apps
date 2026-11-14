@@ -94,7 +94,6 @@ pub fn after(ms: u64) -> Task<()> {
     Task::perform(sleep(ms), |()| ())
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 fn sleep(ms: u64) -> impl std::future::Future<Output = ()> {
     let (tx, rx) = iced::futures::channel::oneshot::channel();
     std::thread::spawn(move || {
@@ -108,7 +107,6 @@ fn sleep(ms: u64) -> impl std::future::Future<Output = ()> {
 
 /// The body of a GET, on a thread of its own as a picture is fetched
 /// (`arkui::images`): the desktop has no runtime to await it on.
-#[cfg(not(target_arch = "wasm32"))]
 fn get(url: String) -> impl std::future::Future<Output = Result<String, String>> {
     let (tx, rx) = iced::futures::channel::oneshot::channel();
     std::thread::spawn(move || {
@@ -118,50 +116,6 @@ fn get(url: String) -> impl std::future::Future<Output = Result<String, String>>
             .and_then(|r| r.into_string().map_err(|e| format!("could not read the answer: {e}")));
         let _ = tx.send(answer);
     });
-    async move { rx.await.unwrap_or_else(|_| Err("the search was dropped".into())) }
-}
-
-#[cfg(target_arch = "wasm32")]
-mod web {
-    use wasm_bindgen::prelude::*;
-    #[wasm_bindgen(inline_js = r#"
-export function later(ms, done) { setTimeout(done, ms); }
-export function get(url, done) {
-  fetch(url, { mode: "cors" })
-    .then((r) => r.ok ? r.text().then((t) => done(true, t)) : done(false, "HTTP " + r.status))
-    .catch((e) => done(false, String(e)));
-}
-"#)]
-    extern "C" {
-        pub fn later(ms: u32, done: &JsValue);
-        pub fn get(url: &str, done: &JsValue);
-    }
-}
-
-#[cfg(target_arch = "wasm32")]
-fn sleep(ms: u64) -> impl std::future::Future<Output = ()> {
-    use wasm_bindgen::prelude::*;
-    let (tx, rx) = iced::futures::channel::oneshot::channel();
-    let done = Closure::once_into_js(move || {
-        let _ = tx.send(());
-    });
-    web::later(ms as u32, &done);
-    async move {
-        let _ = rx.await;
-    }
-}
-
-#[cfg(target_arch = "wasm32")]
-fn get(url: String) -> impl std::future::Future<Output = Result<String, String>> {
-    use wasm_bindgen::prelude::*;
-    let (tx, rx) = iced::futures::channel::oneshot::channel();
-    let done = Closure::once_into_js(move |ok: bool, body: String| {
-        let _ = tx.send(match ok {
-            true => Ok(body),
-            false => Err(format!("could not search: {body}")),
-        });
-    });
-    web::get(&url, &done);
     async move { rx.await.unwrap_or_else(|_| Err("the search was dropped".into())) }
 }
 

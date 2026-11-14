@@ -2,7 +2,7 @@
 //!
 //! The log on the hub, the socket at `/sync`, `/healthz`, the sign-in
 //! routes under `/auth` and the browser client at `/` are `ark_peer`'s and
-//! `ark_auth`'s, generic over any app; the domain is `money/domain`'s, in
+//! `ark_auth`'s, generic over any app; the domain is `money/core`'s, in
 //! plain Rust. What is money's is the bank importer ([`importer`]: Plaid
 //! over [`plaid`], inside the server, the banks' logins in [`store`]) and
 //! [`start`], the wiring: a [`Config`] read from the environment (what the
@@ -15,7 +15,7 @@
 //! keys, is the whole server: every bank still connected.
 //!
 //! **One budget, the household's.** Whoever the OpenID provider lets in
-//! shares it: every connection is fed every row (`money_domain::feed`), and
+//! shares it: every connection is fed every row (`money_core::feed`), and
 //! the server is the only OpenID Connect client — it holds the secret,
 //! talks to the provider, and hands each peer a session of its own, so the
 //! desktop, the browser and the phones all sign in the same way: to
@@ -31,6 +31,7 @@
 
 pub mod browser;
 pub mod costco;
+pub mod feed;
 pub mod importer;
 pub mod paper;
 pub mod photos;
@@ -188,7 +189,7 @@ fn banks(env: &impl Fn(&str) -> Option<String>) -> Result<Option<Banks>> {
 /// as a phone's build of the same domain says it (and as harken's server
 /// does).
 pub fn version() -> String {
-    let d = money_domain::shared();
+    let d = money_core::shared();
     format!("{} {}", d.schema_hash(), d.version)
 }
 
@@ -258,10 +259,10 @@ pub async fn start(config: Config) -> Result<Server> {
     // by construction: asked at every connection and stamped on every
     // entry that connection pushes.
     let roles =
-        (config.roles.iter().map(|(r, a)| (r.clone(), a.clone()))).chain([(money_domain::BANK.to_string(), vec![importer::ACCOUNT.to_string()])]);
+        (config.roles.iter().map(|(r, a)| (r.clone(), a.clone()))).chain([(money_core::BANK.to_string(), vec![importer::ACCOUNT.to_string()])]);
     let mode = config.sign_in.mode().await?;
     eprintln!("money-server: {}", mode.announce());
-    let mut auth = Auth::open::<money_domain::Money>(mode, &public_url, &config.data)
+    let mut auth = Auth::open::<money_core::Money>(mode, &public_url, &config.data)
         .context("the session key")?
         .allow_redirect(PHONE_SCHEME)
         .with_roles(roles);
@@ -288,18 +289,21 @@ pub async fn start(config: Config) -> Result<Server> {
             ocr: stores.ocr.clone(),
             importer: importer_slot.clone(),
         }),
-        ..ark_peer::Config::of(money_domain::shared())
+        ..ark_peer::Config::of(money_core::shared())
     };
     if config.scoped {
         hub.feed = Arc::new(|_| ark::peer::Feed::Scoped("session.feed".into()));
     }
     let mut server = ark_peer::Server::new(hub).auth(auth.clone());
     (server.data, server.keepalive) = (Some(config.data.clone()), config.keepalive.every);
+    // One process: the browser client's files beside the socket and
+    // sign-in (the build the package embeds unless told another), and
+    // `/healthz` said in more words over all of it.
     if let Some(dir) = &config.web {
-        server.web = Some((dir.clone(), config.web_module.clone()));
+        server = server.site(ark_peer::web::Site::files(dir.clone(), config.web_module.clone()));
     }
+    let server = server.layer(|r, hub| r.layer(axum::middleware::from_fn_with_state(hub.clone(), healthz)));
     let (hub, router) = server.build()?;
-    let router = router.layer(axum::middleware::from_fn_with_state(hub.clone(), healthz));
     let running = Running::listen(hub.clone(), router, &config.listen).await?;
     eprintln!("money-server: listening on http://{}", running.addr);
     match &config.web {
@@ -328,7 +332,7 @@ pub async fn start(config: Config) -> Result<Server> {
             let account = Account {
                 id: importer::ACCOUNT.into(),
                 name: "Bank".into(),
-                roles: vec![money_domain::BANK.into()],
+                roles: vec![money_core::BANK.into()],
                 ..Account::default()
             };
             let auth = auth.clone();

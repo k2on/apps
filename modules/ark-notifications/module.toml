@@ -1,0 +1,36 @@
+# What an app takes on when its crate depends on ark-notifications (ui/docs/app.md,
+# The Device, and Background And Notifications; README.md says why each is
+# asked). ui/prebuild.py reads it.
+crate = "ark-notifications"
+
+# Its operations, each with the type of what comes of it (ark_module::Op):
+# ui/prebuild.py checks each is an `impl Op` in the crate or its port with
+# this Output.
+[ops]
+NotificationsOp = "()"
+Authorize = "bool"
+
+# Nothing in Info.plist: the person is asked at run time
+# (`requestAuthorization`). Push (APNs' entitlement, the
+# `remote-notification` background mode) is the app's to declare
+# (app.toml's `[background] push`), not every app's that shows a notice.
+[ios.info]
+
+[android]
+permissions = [
+  # Android 13 and later: asked at run time (`NotificationsPermission`).
+  "android.permission.POST_NOTIFICATIONS",
+]
+# The notices still to come and the UnifiedPush keys and endpoint: this
+# device's alone.
+backup-exclude = [{ domain = "sharedpref", path = "ark-notifications.xml" }]
+
+# A notice's alarm going off and a button pressed on one: the module's own
+# receiver, reached by its name alone and by nothing outside the app.
+[[android.receivers]]
+name = "dev.arkui.modules.ArkNoticeReceiver"
+
+# Nothing runs at boot unless the app's app.toml declares `[background]`
+# (ui/prebuild.py then adds ark-background's boot receiver, which sets each
+# notice still to come again); without it, a notice for later is lost to a
+# restart.

@@ -1,0 +1,14 @@
+[package]
+name = "ark-format-ffi"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+description = "ark-format for the phones: its functions through UniFFI, prefixed format_, and its NumberStyle as a record, in the namespace ark_format. An adapter, so ark-format stays free of UniFFI; each app's library links it."
+
+[lib]
+name = "ark_format_ffi"
+path = "src/lib.rs"
+
+[dependencies]
+ark-format = { path = "../ark-format" }
+uniffi = { version = "0.32.2", default-features = false }

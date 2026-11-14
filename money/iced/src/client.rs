@@ -13,7 +13,7 @@ pub use ark_peer::Peer as Replica;
 
 /// money's domain, registered once.
 pub fn domain() -> Arc<Domain> {
-    money_domain::shared()
+    money_core::shared()
 }
 
 /// The peer `disk` holds, as whoever last signed in on it.

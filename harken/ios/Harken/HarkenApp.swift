@@ -16,15 +16,15 @@ struct HarkenApp: App {
     @StateObject private var model: Model
     @Environment(\.scenePhase) private var phase
     @State private var wasAway = false
-    private let nowPlaying: NowPlayingHolder
 
     init() {
         // harken's accent, the gold, before the first view draws it.
         Accent.use(.gold)
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        let m = Model(shelf: DefaultsShelf(), root: support, deviceName: UIDevice.current.name, engine: AVEngine())
+        // The phone's media player (modules/ark-media-player): AVPlayer, the audio session, and
+        // the lock screen's, Control Center's and a headset's, which the session's player drives.
+        let m = Model(shelf: DefaultsShelf(), secure: PhoneSecureStore(), root: support, deviceName: UIDevice.current.name, media: PhoneMediaPlayer(squares: .harken))
         _model = StateObject(wrappedValue: m)
-        nowPlaying = NowPlayingHolder(NowPlaying(model: m))
     }
 
     var body: some Scene {
@@ -34,7 +34,9 @@ struct HarkenApp: App {
                 .tint(Color.accent)
                 // The derived square in harken's colours (ArkUI's are neutral).
                 .environment(\.squares, .harken)
-                .onOpenURL { model.open(url: $0) }
+                .onOpenURL { Ready.shared.changed(); model.open(url: $0) }
+                // A screenshot's motion and ready signal (ArkUI's `Shots`).
+                .arkShots()
         }
         .onChange(of: phase) { _, now in
             if now == .background { wasAway = true }
@@ -44,12 +46,6 @@ struct HarkenApp: App {
             }
         }
     }
-}
-
-/// The lock screen's end, kept for the app's life.
-final class NowPlayingHolder {
-    let held: NowPlaying
-    init(_ n: NowPlaying) { held = n }
 }
 
 /// The onboarding's step, drawn; the app once it is running.
@@ -64,6 +60,8 @@ struct Root: View {
             case let .signIn(server, phase, error): SignInScreen(server: server, phase: phase, error: error)
             case let .opening(server, _): OpeningScreen(server: server)
             case .running: Shell()
+            case let .confirm(_, _, error): ConfirmScreen(error: error)
+            case .demo: Shell()
             }
         }
         .animation(Springs.fade, value: stepKind)
@@ -71,12 +69,15 @@ struct Root: View {
         .task(id: model.browse) {
             guard let url = model.browse else { return }
             do {
-                let back = try await web.authenticate(using: url, callbackURLScheme: Onboarding.scheme)
+                // The shared session, never an ephemeral one: the provider's cookie is
+                // what makes signing in to the next app one tap.
+                let back = try await web.authenticate(
+                    using: url, callbackURLScheme: AppInfo.harken.scheme, preferredBrowserSession: .shared)
                 model.signInReturned(back, error: nil)
             } catch let e as ASWebAuthenticationSessionError where e.code == .canceledLogin {
-                model.signInReturned(nil, error: "The sign-in was closed before it finished.")
+                model.signInReturned(nil, error: nil)
             } catch {
-                model.signInReturned(nil, error: "Signing in didn't finish: \(error.localizedDescription)")
+                model.signInReturned(nil, error: error.localizedDescription)
             }
         }
     }
@@ -86,7 +87,8 @@ struct Root: View {
         case .server: return 0
         case .signIn: return 1
         case .opening: return 2
-        case .running: return 3
+        case .running, .demo: return 3
+        case .confirm: return 4
         }
     }
 }

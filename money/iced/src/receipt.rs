@@ -13,16 +13,15 @@
 //! detached.
 
 use arkui::style;
-use iced::widget::{button, column, container, image, mouse_area, row, scrollable, text, text_input, Column, Space};
+use arkui::text::{self, text};
+use arkui::text_input::text_input;
+use iced::widget::{button, column, container, image, mouse_area, row, scrollable, Column, Space};
 use iced::{Alignment, Color, Element, Length, Task};
-use money_domain::*;
+use money_core::*;
 
 use crate::amount::{self, money};
 use crate::view::{action, bold, dim, fill, link, quiet};
 use crate::{look, App, Message, Modal, Page};
-
-/// The width of the panel beside the register.
-pub const SIDE: f32 = 350.0;
 
 /// What the receipt panel does.
 #[derive(Debug, Clone)]
@@ -63,15 +62,6 @@ pub struct Paper {
 /// What a receipt's photo may be, for the chooser.
 const PHOTOS: &[&str] = &["image/jpeg", "image/png", "image/heic", "image/webp"];
 
-/// The receipts that paid for nothing yet, nearest this transaction in
-/// amount and then in days first.
-pub fn unmatched<'a>(receipts: &'a [ReceiptLine], t: &TxnLine) -> Vec<&'a ReceiptLine> {
-    let mut free: Vec<&ReceiptLine> = receipts.iter().filter(|r| r.txn_id.is_none() && r.charges == 0).collect();
-    free.sort_by_key(|r| ((r.total - t.amount).abs(), money_domain::dates::days_between(&r.date, &t.date).abs()));
-    free.truncate(5);
-    free
-}
-
 impl App {
     /// The transaction whose receipt is beside the register: the one open
     /// in the form, else the one under the register's cursor.
@@ -82,7 +72,22 @@ impl App {
 
     fn open_txn(&self) -> Option<&TxnLine> {
         let id = self.receipt_txn()?;
-        self.peer.register.rows.iter().find(|t| t.id == id)
+        self.peer.register().iter().find(|t| t.id == id)
+    }
+
+    /// A receipt's JPEG kept and sent to the server, which reads it: for
+    /// `txn`, or for the server to match.
+    pub fn keep_photo(&mut self, jpeg: &[u8], txn: Option<Id<Txn>>) {
+        self.keep_with(jpeg, "image/jpeg", txn)
+    }
+
+    fn keep_with(&mut self, bytes: &[u8], media: &str, txn_id: Option<Id<Txn>>) {
+        match self.peer.client.put_file(bytes, media) {
+            Ok(file) => {
+                self.author("add the photo", "add_photo", &AddPhoto { file, txn_id });
+            }
+            Err(e) => self.note = format!("could not keep the photo: {e}"),
+        }
     }
 
     pub fn receipt(&mut self, m: Msg) -> Task<Message> {
@@ -103,12 +108,7 @@ impl App {
                     self.note = format!("{} is not a photo", p.name);
                     return Task::none();
                 };
-                match self.peer.client.put_file(&p.bytes, &media) {
-                    Ok(file) => {
-                        self.author("add the photo", "add_photo", &AddPhoto { file, txn_id: Some(txn_id) });
-                    }
-                    Err(e) => self.note = format!("could not keep the photo: {e}"),
-                }
+                self.keep_with(&p.bytes, &media, Some(txn_id));
             }
             Msg::Attach(receipt_id) => {
                 self.author("attach the receipt", "pay", &MatchReceipt { receipt_id, txn_id: txn });
@@ -208,8 +208,7 @@ impl App {
         }
     }
 
-    /// The panel beside the register, as the inspector is beside the
-    /// budget: the selected transaction's receipt drawn as paper, and what
+    /// The inspector beside a register: the selected transaction's receipt drawn as paper, and what
     /// can be done with it; or how one is added; or, typing one, its form.
     pub fn view_receipt_side(&self) -> Element<'_, Message> {
         let body: Element<'_, Message> = match self.open_txn() {
@@ -226,38 +225,30 @@ impl App {
             ],
             None => column![bold("Receipt", 15)],
         };
-        // Its top clear of the account button, which floats over the corner.
-        let pad = iced::Padding {
-            top: crate::view::PAD + arkui::account::HEIGHT + 6.0,
-            ..iced::Padding::new(crate::view::PAD)
-        };
+        // The shell's inspector holds it (`arkui::view::shell`), under the toolbar.
         container(arkui::scroll::elastic(
-            scrollable(crate::view::under_face(
-                column![head.spacing(2), body].spacing(12).padding(pad),
-                style::surface_color,
-            ))
-            .height(Length::Fill)
-            .style(style::bars),
+            scrollable(column![head.spacing(2), body].spacing(12).padding(crate::view::PAD))
+                .height(Length::Fill)
+                .style(style::bars),
         ))
-        .width(Length::Fixed(SIDE))
+        .width(Length::Fill)
         .height(Length::Fill)
-        .style(style::surface)
         .into()
     }
 
     /// A transaction's receipt and what is done with it, one under another.
     fn view_receipt<'a>(&'a self, t: &'a TxnLine) -> Element<'a, Message> {
-        let photos: Vec<&PhotoLine> = self.peer.photos.rows.iter().filter(|p| p.txn_id == Some(t.id)).collect();
+        let photos: Vec<&PhotoLine> = self.peer.photos().iter().filter(|p| p.txn_id == Some(t.id)).collect();
         let mut side = column![].spacing(8);
         match self.peer.txn_receipts().first() {
             Some(r) => {
-                let photo = self.peer.photos.rows.iter().find(|p| p.receipt_id == r.id);
+                let photo = self.peer.photos().iter().find(|p| p.receipt_id == r.id);
                 side = side.push(self.view_paper(r, photo));
                 if photo.is_some_and(|p| p.state == "check") {
                     side = side.push(
                         text("Check this: what was read does not add up to the total.")
                             .size(12)
-                            .style(look::Tone::Short.text()),
+                            .style(look::Looks::text(look::Tone::Short)),
                     );
                 }
                 let mut links = row![].spacing(16);
@@ -270,8 +261,8 @@ impl App {
                 }
                 side = side.push(links);
                 // Paid shipment by shipment: each charge and what paid it.
-                if let Some(c) = self.peer.charges.as_ref().filter(|_| r.charges > 0) {
-                    side = side.push(self.view_charges(&c.rows));
+                if let Some(c) = self.peer.charges().filter(|_| r.charges > 0) {
+                    side = side.push(self.view_charges(c));
                 }
             }
             None => {
@@ -290,10 +281,10 @@ impl App {
                     ]
                     .spacing(16),
                 );
-                let free = unmatched(&self.peer.receipts.rows, t);
+                let free = money_core::words::unmatched_for(self.peer.receipts(), t.amount, &t.date);
                 if !free.is_empty() {
                     side = side.push(dim("Or attach one that paid for nothing yet:", 12));
-                    for r in free {
+                    for r in &free {
                         let what = format!("{} \u{b7} {} \u{b7} {}", r.date, place_of(r), money(-r.total));
                         side = side.push(
                             row![
@@ -318,7 +309,12 @@ impl App {
         // which white paper would hide.
         let ink = arkui::tokens::light::INK;
         let faded = arkui::tokens::light::QUIET;
-        let mono = |s: String, size: u32, c: Color| text(s).font(arkui::fonts::MONO).size(size).style(move |_| text::Style { color: Some(c) });
+        let mono = |s: String, size: u32, c: Color| {
+            text(s).font(arkui::fonts::MONO).size(size).style(move |_| text::Style {
+                color: Some(c),
+                ..Default::default()
+            })
+        };
         let rule = || mono("-".repeat(30), 12, faded);
         let mut paper: Column<'a, Message> = column![
             container(mono(place_of(r), 15, ink)).center_x(Length::Fill),
@@ -338,7 +334,7 @@ impl App {
                     match i.quantity {
                         // One, or none said (a coupon is -1): no count.
                         q if q == 1000 || q <= 0 => format!("  {filed}"),
-                        q => format!("  {} \u{b7} {filed}", crate::view::quantity(q, &i.unit)),
+                        q => format!("  {} \u{b7} {filed}", money_app::words::quantity(q, &i.unit)),
                     },
                     10,
                     tint
@@ -385,7 +381,7 @@ impl App {
                 .on_submit(Message::Receipt(Msg::Save))
                 .size(12)
                 .padding([3, 6])
-                .style(look::input)
+                .style(arkui::style::field)
         };
         let mut form = column![
             bold(
@@ -411,14 +407,14 @@ impl App {
                     .size(12)
                     .padding([3, 6])
                     .width(Length::Fill)
-                    .style(look::input),
+                    .style(arkui::style::field),
                 text_input("0.00", cost)
                     .on_input(move |v| Message::Receipt(Msg::Amount(i, v)))
                     .on_submit(Message::Receipt(Msg::Save))
                     .size(12)
                     .padding([3, 6])
                     .width(Length::Fixed(76.0))
-                    .style(look::input),
+                    .style(arkui::style::field),
             ]
             .spacing(8)
             .align_y(Alignment::Center);
@@ -470,7 +466,7 @@ impl App {
 /// A receipt's store, as its paper names it.
 fn place_of(r: &ReceiptLine) -> String {
     match (r.place.trim(), r.store.as_str()) {
-        ("", s) => crate::view::store_name(s),
+        ("", s) => money_core::words::store_name(s),
         (p, _) => p.into(),
     }
 }

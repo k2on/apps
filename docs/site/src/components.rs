@@ -5,12 +5,12 @@
 //! whatever each platform calls it. Only what is shared: on the desktop it
 //! is arkui's, and its page shows it drawn by arkui itself; on a phone it is the
 //! shared Compose (`ui/`, ark-ui for Android) or SwiftUI (ArkUI for SwiftUI,
-//! `swift/ArkUI`), and its page says where and how, with the latest capture
+//! `ui/swift`), and its page says where and how, with the latest capture
 //! from a real emulator and simulator: `shots` names them, the showcase apps
 //! draw them (`showcase/`), the `screens` workflow takes them
 //! (`.github/workflows/screens.yaml`), and the page fetches what it last
 //! published.
-use arkui::glyphs;
+use arkui_glyphs as glyphs;
 use serde::Serialize;
 
 /// The sidebar's headings, in the order they are drawn.
@@ -37,6 +37,39 @@ impl Section {
         Section::Motion,
         Section::Behaviour,
     ];
+
+    /// Its page's tag and path: `/foundations/`.
+    pub fn tag(self) -> &'static str {
+        match self {
+            Section::Foundations => "foundations",
+            Section::Components => "components",
+            Section::Overlays => "overlays",
+            Section::Motion => "motion",
+            Section::Behaviour => "behaviour",
+        }
+    }
+
+    /// Its glyph, in the sidebar's heading's place on a phone's tab bar.
+    pub fn glyph(self) -> &'static str {
+        match self {
+            Section::Foundations => "layers",
+            Section::Components => "list",
+            Section::Overlays => "copy",
+            Section::Motion => "zap",
+            Section::Behaviour => "wrench",
+        }
+    }
+
+    /// What its pages are, for its own page.
+    pub fn about(self) -> &'static str {
+        match self {
+            Section::Foundations => "The colours, the styles, the glyphs and the words every part is made of.",
+            Section::Components => "What a page is built of: its navigation, its lists and cards, its headers and fields.",
+            Section::Overlays => "What goes over a page: a menu, the command box, a picker, a dialog or a sheet.",
+            Section::Motion => "What moves, and how: the shared springs and the parts built on them.",
+            Section::Behaviour => "The rules with no drawing of their own: the keyboard, the address bar, waking.",
+        }
+    }
 
     pub fn heading(self) -> &'static str {
         match self {
@@ -136,7 +169,7 @@ pub const COMPONENTS: &[Component] = &[
             ],
         }),
         ios: Some(Mobile {
-            at: &["swift/ArkUI: Space, Squares, \\.squares, Color(light:dark:)"],
+            at: &["ui/swift: Space, Squares, \\.squares, Color(light:dark:)"],
             how: &[
                 "import ArkUI. Space.xs … Space.xxl, Space.page, Space.corner: the spacing, Android's.",
                 "Set the derived square's colours once at the root: .environment(\\.squares, Squares(light:dark:)); Squares.neutral until an app does.",
@@ -175,7 +208,18 @@ pub const COMPONENTS: &[Component] = &[
         section: Section::Foundations,
         glyph: glyphs::MINUS,
         summary: "Words fitted to a width, cut where a reader loses least, and numbers said as words.",
-        desktop: &["fit", "line", "format", "clipboard"],
+        desktop: &["fit", "line", "format"],
+        android: None,
+        ios: None,
+        shots: &[],
+    },
+    Component {
+        id: "writing",
+        name: "Writing",
+        section: Section::Foundations,
+        glyph: glyphs::RENAME,
+        summary: "Long-form writing, once for every toolkit: headings, paragraphs with links, emphasis and code, lists, highlighted code, callouts, quotes and tables, written as Markdown (`ark_app::writing`) and said in a view as `writing(md)`. A help page, a release note, these docs.",
+        desktop: &["writing"],
         android: None,
         ios: None,
         shots: &[],
@@ -192,7 +236,7 @@ pub const COMPONENTS: &[Component] = &[
             how: &["Square(seed, modifier)", "Cover(seed, art, side, modifier, round = false, corner = Space.corner): the square until the picture loads.", "Art.hash is FNV-1a over UTF-16, the desktop's."],
         }),
         ios: Some(Mobile {
-            at: &["swift/ArkUI: Square, Art (ArkUICore)"],
+            at: &["ui/swift: Square, Art (ArkUICore)"],
             how: &["Square(seed:): the same square for the same name as Android's and the desktop's.", "Art.hash and Art.pick are in ArkUICore, which needs only Foundation."],
         }),
         shots: &[shot("art", "Squares derived from twelve names.", BOTH)],
@@ -228,7 +272,7 @@ pub const COMPONENTS: &[Component] = &[
     },
     Component {
         id: "reorder",
-        name: "Reorderable list",
+        name: "Reorderable List",
         section: Section::Components,
         glyph: glyphs::PLAYLIST,
         summary: "Rows dragged into a new order, the rest sliding out of the way: what a queue is rearranged with.",
@@ -242,7 +286,7 @@ pub const COMPONENTS: &[Component] = &[
             ],
         }),
         ios: Some(Mobile {
-            at: &["swift/ArkUI: Reorderable, ReorderHandle"],
+            at: &["ui/swift: Reorderable, ReorderHandle"],
             how: &[
                 "Reorderable(items, key:, onMove:) { item, handle in … }: the row places the handle it is given, and is dragged by it, as the Music app's queue is.",
                 "The rows that make way move on Springs.move; the row keeps its tap and its context menu.",
@@ -280,7 +324,7 @@ pub const COMPONENTS: &[Component] = &[
     },
     Component {
         id: "empty",
-        name: "Empty states",
+        name: "Empty States",
         section: Section::Components,
         glyph: glyphs::MINUS,
         summary: "What a page says while it has nothing to show, or is still asking for it.",
@@ -294,7 +338,7 @@ pub const COMPONENTS: &[Component] = &[
     },
     Component {
         id: "account",
-        name: "Account and sign-in",
+        name: "Account and Sign-In",
         section: Section::Components,
         glyph: glyphs::ARTIST,
         summary: "Who is signed in, as a circle of their picture or their initials, and the screens that get them signed in.",
@@ -337,7 +381,7 @@ pub const COMPONENTS: &[Component] = &[
     },
     Component {
         id: "command",
-        name: "Command box",
+        name: "Command Box",
         section: Section::Overlays,
         glyph: glyphs::SEARCH,
         summary: "One search box over everything, opened by Ctrl+K from anywhere.",
@@ -371,7 +415,7 @@ pub const COMPONENTS: &[Component] = &[
     // Motion.
     Component {
         id: "expanding-card",
-        name: "Expanding card",
+        name: "Expanding Card",
         section: Section::Motion,
         glyph: glyphs::PLAY,
         summary: "A bar at the foot of the screen that rises into the whole screen and falls back, following a finger or on its own.",
@@ -384,7 +428,7 @@ pub const COMPONENTS: &[Component] = &[
             ],
         }),
         ios: Some(Mobile {
-            at: &["swift/ArkUI: View.expandingCard(isPresented:bar:expanded:) (iOS 26)"],
+            at: &["ui/swift: View.expandingCard(isPresented:bar:expanded:) (iOS 26)"],
             how: &[
                 "On a TabView: tabView.expandingCard(isPresented: $open) { bar } expanded: { screen }. The bar sits on glass above the tab bar (tabViewBottomAccessory) and zooms into the screen and back (navigationTransition(.zoom)).",
                 "The system does the motion, a swipe down on the screen included; `isPresented` going false zooms it back into the bar.",
@@ -400,7 +444,7 @@ pub const COMPONENTS: &[Component] = &[
         summary: "Buttons and chips on glass that changes shape: pieces near each other in one space join, a piece that appears buds from its neighbour, and a button's glass grows into the menu or the sheet it opens and shrinks back. On Android it is iOS 26's Liquid Glass as it moves, and only that: the shape and the motion, on a solid fill.",
         desktop: &[],
         android: Some(Mobile {
-            at: &["kotlin/arkui/src/dev/arkui/Glass.kt: GlassContainer, Modifier.glass, GlassMorph, GlassShape, Glass"],
+            at: &["ui/kotlin/src/dev/arkui/Glass.kt: GlassContainer, Modifier.glass, GlassMorph, GlassShape, Glass"],
             how: &[
                 "GlassContainer(modifier, spacing = Space.s) { … }: one surface for every piece of glass in it, as SwiftUI's GlassEffectContainer. Two pieces nearer than `spacing` are joined by a neck that thickens as they close; a piece appearing buds out of its nearest neighbour, and one going shrinks back into it. Best as large as the screen, since a menu opens over all of it.",
                 "Modifier.glass(shape = GlassShape.Capsule, id = null): this element on glass, a capsule or GlassShape.rounded(corner). Moved in its layout, it glides there on Springs.MOVE, its content with it. `id` is what the container knows it by, as glassEffectID.",
@@ -428,7 +472,7 @@ pub const COMPONENTS: &[Component] = &[
     },
     Component {
         id: "pages",
-        name: "Page motion",
+        name: "Page Motion",
         section: Section::Motion,
         glyph: glyphs::SKIP_BACK,
         summary: "Going in and coming back: a page grows over the last, and a swipe from the edge takes it away.",
@@ -452,7 +496,7 @@ pub const COMPONENTS: &[Component] = &[
             how: &["Springs.settle() and the rest: spring specs with a cap on how long any move takes."],
         }),
         ios: Some(Mobile {
-            at: &["swift/ArkUI: Springs"],
+            at: &["ui/swift: Springs"],
             how: &["Springs.move, Springs.size, Springs.fade: Android's springs converted exactly (docs/plan-arkui-swift.md)."],
         }),
         shots: &[],
@@ -494,11 +538,14 @@ pub const COMPONENTS: &[Component] = &[
         name: "Routes",
         section: Section::Behaviour,
         glyph: glyphs::BACK,
-        summary: "Places as addresses, kept in step with the address bar or the back stack.",
-        desktop: &["route", "url"],
+        summary: "An app's routes as URLs, one spelling on every shell, kept in step with the address bar or the back stack.",
+        desktop: &["router", "url"],
         android: Some(Mobile {
-            at: &["ui/Destination.kt: Destination, Destinations"],
-            how: &["Destination(owner, name) { content }: a page's own ViewModel store, kept while it is on the stack."],
+            at: &["ui/Destination.kt: Destination", "Router.kt: RouteArg"],
+            how: &[
+                "Destination(owner, name) { content }: a page's own ViewModel store, kept while it is on the stack.",
+                "RouteArg.of(route.url()) / RouteArg.path(arg): a route's URL as a destination's argument, and back.",
+            ],
         }),
         ios: None,
         shots: &[],

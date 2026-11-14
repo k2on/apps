@@ -30,7 +30,7 @@ class MainActivity : ComponentActivity() {
         holdSplash()
         super.onCreate(savedInstanceState)
         // A debuggable build is the developer's: a mistake in how the screens use ark-ui throws
-        // there, as in a test. A release says it once in the log and keeps working.
+        // there. A release says it once in the log and keeps working.
         if (applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0) Strict.on = true
         enableEdgeToEdge()
         // Compose on arkui's duration scale: "Remove animations" is the app's to interpret

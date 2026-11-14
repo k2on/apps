@@ -23,6 +23,7 @@ extern crate self as ark;
 
 pub use domain::{effect, Domain};
 
+pub mod auth;
 pub mod db;
 pub mod domain;
 pub mod dynamic;
@@ -38,6 +39,9 @@ pub mod plan;
 pub mod row;
 pub mod schema;
 pub mod store;
+pub mod twin;
+pub use ark_macros::twins;
+pub mod views;
 
 /// Why something was not done, as a sentence: a parse that failed, a write
 /// a constraint refused, an intent its function refused. What a form shows

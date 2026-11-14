@@ -6,13 +6,10 @@
 // server as it is shown, and which phase a sign-in is in.
 package dev.harken.android.onboarding
 
-import dev.arkui.server.Address
-import dev.arkui.server.Answer
-import dev.arkui.server.Found
-import dev.arkui.server.Health
-import dev.arkui.server.Probe
-
 import androidx.compose.runtime.Composable
+import dev.arkdb.auth.Phase
+import dev.arkdb.auth.Step
+import dev.arkui.server.Probe
 import dev.arkui.OpeningScreen
 import dev.arkui.PermissionScreen
 import dev.arkui.ServerScreen
@@ -57,21 +54,21 @@ public fun SignInStep(
         Probe.display(step.server),
         step.error,
         when (step.phase) {
-            Step.Phase.Idle -> SignInPhase.Idle
-            Step.Phase.Browser -> SignInPhase.Browser
-            Step.Phase.Exchanging -> SignInPhase.Exchanging
+            Phase.IDLE -> SignInPhase.Idle
+            Phase.BROWSER -> SignInPhase.Browser
+            Phase.EXCHANGING -> SignInPhase.Exchanging
         },
         onSignIn,
         onChangeServer)
 }
 
-/** Step three: one permission, with the app's reason, asked once. */
+/** On the way to the app: one permission, with the app's reason, asked once. */
 @Composable
 public fun PermissionStep(
     identity: AppIdentity,
-    step: Step.Ask,
+    permission: Permission,
     onAllow: () -> Unit,
     onNotNow: () -> Unit
 ) {
-    PermissionScreen(identity.mark, step.permission.title, step.permission.why, onAllow, onNotNow)
+    PermissionScreen(identity.mark, permission.title, permission.why, onAllow, onNotNow)
 }

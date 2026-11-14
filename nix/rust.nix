@@ -16,10 +16,23 @@
 # scripts' dependencies and proc macros), each with its own features. On a
 # native build the two are one, as crate2nix has them, so a crate needed by
 # both is compiled once with the union of their features.
-{ lib, cargoNix }:
+#
+# `extraCrates` are crates that are no workspace member's and are written by
+# nix, in crate2nix's form beside its own (`crates`): an Ark app's generated
+# crates (nix/ark-app.nix), its generator's main and its phones' library,
+# resolved and built as any crate of the workspace is, for any target.
+#
+# `buildRust` is the toolchain every build machine's crate is compiled with
+# (a cross build's build scripts and proc macros), whatever the target's
+# toolchain: the plain one, with no target added, so that those crates are
+# one derivation for every target rather than one per toolchain. A target's
+# toolchain is that same toolchain with the target's std added (rustc's
+# `targets`), so the proc macros it compiles are the ones its rustc loads.
+{ lib, cargoNix, extraCrates ? { }, buildRust ? null }:
 let
   inherit (cargoNix.internal)
-    crates expandFeatures enableFeatures dependencyFeatures filterEnabledDependencies sortedUnique;
+    expandFeatures enableFeatures dependencyFeatures filterEnabledDependencies sortedUnique;
+  crates = cargoNix.internal.crates // extraCrates;
 
   # crate2nix's makeDefaultTarget, which a dependency's `cfg(...)` is
   # evaluated against, with the os and env rustc has for Android, wasm and
@@ -78,6 +91,17 @@ let
   # The features of every crate the root reaches, by graph ("target" or
   # "build"): cargo's resolution, a crate's features the union of what each
   # of its dependents in that graph asks of it.
+  # `src` without the top-level swift/ and kotlin/ directories a device
+  # module (modules/ark-*) keeps beside its Rust.
+  nativeLess = src:
+    let root = toString (src.origSrc or src); in
+    lib.cleanSourceWith {
+      inherit src;
+      filter = path: type:
+        !(type == "directory" && dirOf (toString path) == root
+          && lib.elem (baseNameOf (toString path)) [ "swift" "kotlin" ]);
+    };
+
   resolve = { packageId, features, tests, split, targets }:
     let
       visit = cache: graph: id: wanted:
@@ -144,7 +168,7 @@ let
       resolved = if unified != null then unified.resolved else resolve { inherit packageId features tests split targets; };
       builders = {
         target = args: (builderFor { inherit rust overrides; } pkgs args).overrideAttrs targetAttrs;
-        build = builderFor { inherit rust overrides; } pkgs.buildPackages;
+        build = builderFor { rust = if buildRust != null then buildRust else rust; inherit overrides; } pkgs.buildPackages;
       };
       fetch = p: config: p.fetchurl {
         name = "${config.crateName}-${config.version}.tar.gz";
@@ -179,7 +203,10 @@ let
             (lib.groupBy (dep: dep.name) (lib.filter (dep: dep ? rename) (buildDeps ++ deps)));
         in
         builders.${graph} (config // {
-          src = config.src or (fetch pkgsOf.${graph} config);
+          # A crate of this tree is compiled from its directory less what
+          # is not Rust's: a device module's swift/ and kotlin/ (built by
+          # their own derivations), so an edit there recompiles no crate.
+          src = if config ? src then nativeLess config.src else fetch pkgsOf.${graph} config;
           features = sortedUnique features;
           dependencies = map drvOf deps;
           buildDependencies = map (dep: built.${buildGraph}.${dep.packageId}) buildDeps;
@@ -193,11 +220,13 @@ let
   # resolves them (`cargo test --workspace`): each crate the union of what
   # each root's graph asks of it, so a crate is one build whichever root
   # reaches it. Each root `{ packageId; features ? [ "default" ]; tests ? false; }`,
-  # for the host. Passed to `build` as `unified`.
+  # for `pkgs`' host, and for a cross build its two graphs apart, as `build`
+  # has them. Passed to `build` as `unified`, with the same `pkgs`.
   unify = { pkgs, roots }:
     let
-      targets = { target = targetOf pkgs.stdenv.hostPlatform; build = targetOf pkgs.stdenv.hostPlatform; };
-      each = map (r: resolve { inherit (r) packageId; features = r.features or [ "default" ]; tests = r.tests or false; split = false; inherit targets; }) roots;
+      split = pkgs.stdenv.buildPlatform != pkgs.stdenv.hostPlatform;
+      targets = { target = targetOf pkgs.stdenv.hostPlatform; build = targetOf pkgs.stdenv.buildPlatform; };
+      each = map (r: resolve { inherit (r) packageId; features = r.features or [ "default" ]; tests = r.tests or false; inherit split targets; }) roots;
     in
     {
       resolved = lib.zipAttrsWith (_: lib.foldl' (a: b: a // b) { }) each;

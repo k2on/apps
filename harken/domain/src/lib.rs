@@ -6,8 +6,8 @@
 //! listened to each episode ([`progress`]) and the listening session
 //! ([`listening`], [`queue`], [`devices`], [`groups`]) — one file per part
 //! — and what a host knows of
-//! it beside its functions ([`host`]). Who is signed in is `ark-auth`'s
-//! two tables and functions ([`ark_auth::rows`]), and [`feed`]. [`domain`] registers every function
+//! it beside its functions ([`host`]). Who is signed in is the kernel's
+//! two tables and functions ([`ark::auth`]), and [`feed`]. [`domain`] registers every function
 //! by its name; the apps link this crate and call its types and functions
 //! as they are.
 
@@ -34,13 +34,12 @@ pub mod queue;
 pub mod schema;
 pub mod shows;
 pub mod types;
-
-#[cfg(feature = "ffi")]
-uniffi::setup_scaffolding!();
+pub mod views;
 
 pub use ark::row::Id;
 pub use schema::*;
 pub use types::*;
+pub use views::HarkenView;
 
 /// The library's role: the scanner's account holds it, and nobody else
 /// unless the server's configuration grants it. Every library mutation is
@@ -74,7 +73,7 @@ pub fn domain() -> Domain {
         downloads::downloads, progress::report_progress, progress::mark_played, progress::my_progress,
         progress::show_progress, shows::set_chapters, shows::chapters, shows::set_people, shows::people,
         shows::show_people, shows::appearances, shows::set_transcript, shows::transcript, shows::name_voice, feed)
-    .with(ark_auth::register::<Harken>)
+    .with(ark::auth::register::<Harken>)
     .with(<Look as ark::effect::Effect>::register::<Harken>)
     .with(|d| migrations::all().into_iter().fold(d, Domain::migration))
     // Nearly every row is a transcript's line: a device filling is sent
@@ -89,7 +88,7 @@ pub fn feed() -> Scope<Harken> {
     fn all<R>(_: &Ctx, _: &R) -> bool {
         true
     }
-    ark_auth::feed(
+    ark::auth::feed(
         Scope::new()
             .on::<Media>(all)
             .on::<Album>(all)

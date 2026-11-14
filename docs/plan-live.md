@@ -835,8 +835,8 @@ it — the track, playing or not, up next from its queue, and where the
 sound is (`PlayerState.on`) — and presses it for every button; alone it is
 the controller it was. The position is still its own flow, ticked twice a
 second only while something plays, here or anywhere, and read by the
-hairline and the scrubber alone: `ScrollTests` holds at rest `{}`, over
-four ticks `{Progress=4}`. Another device's scrubber is a third flow,
+hairline and the scrubber alone: nothing composes at rest, and only the
+progress over the ticks. Another device's scrubber is a third flow,
 `scrubbing`, read by the scrubber alone; dragging this one says `scrub`
 (throttled, ephemeral) and the release says `seek` and empties the slot.
 The session has no shuffle and no repeat: shuffle is a queue in another
@@ -887,42 +887,12 @@ state yet, so `fleet_swift.rs` does not run it.
 **Tested**, each test falsified once (the comment beside each says how,
 and what failed):
 
-- `RemoteTests` (8), real Kotlin peers against a server in the test
-  (`Hall`: the module's transitions and hooks, sequencing, relays and
-  refusals, interpreted): the output obeys and nobody else sounds
-  (falsified by leaving a device that is not the output alone); a track's
-  end said once and the next one played without a reload (falsified by
-  taking the player's own move for somebody else's, and by saying an end
-  with neither the memory nor the clock — either alone holds it, and each
-  was taken away alone first and passed); a play recorded once, by the
-  output alone, offline too (falsified by counting every reconcile, and by
-  counting from the session's clock on every device — counting the
-  watcher's own player first passed, since it had nothing loaded); both
-  branches of coming back (always and never `start`); unlinked is its own
-  session (`joined` without `linked`); a stall said and not fought; a
-  press as a transition (a toggle that always plays).
-- `ListenTests` (4): the picker's default, tick, cursor, away row and
-  transfer (no default: nothing ticked); Home's last played from the
-  session, else the log (the log preferred); a scrub on another device
-  shown here, relayed and not sequenced, the final value sent by the pump
-  after the throttle's window (every slot read, this phone's own
-  included); the lock screen's player forwarding every command as a
-  transition, on layoutlib's Looper (a seek within the track taken for a
-  jump; a stop answered with nothing).
 - `LiveTests` in ark-client: `liveStatus` (falsified by reading `asked` for
   `synced`).
 - The fleet's K7 (falsified by a `harken-peer-kt` that dropped
   `--device`, and by a Kotlin client that did not say its pending live
   calls again on a new connection).
 - `checks.harken-domain`, the printed types (above).
-
-**Screenshots** (`Screens.g1_listening`, light and dark): the full player
-with the sound on another device, here, and connecting to a speaker; the
-mini player with the sound elsewhere; a scrub from another device; the
-picker playing, with nothing playing, and with the output not answering;
-Home's last played from the session; and the diagnostics' listening
-numbers. Every other screenshot is byte for byte what the parent commit
-draws, but `f2_diagnostics_numbers`, which gains the "Listening" group.
 
 ### Decisions phase 3 had to make
 
@@ -957,9 +927,7 @@ draws, but `f2_diagnostics_numbers`, which gains the "Listening" group.
 
 `checks.harken-domain`, `checks.kotlin`, `harken-apk` (the release
 `harken.apk`, certificate SHA-256 `1a8859fb…df431139`, the committed key),
-`harken-android-screens` (every app test with it: RemoteTests, ListenTests,
-ScrollTests, RestorationTests, LifecycleTests, SourceTests, MotionTests,
-LaunchTests, FlingTests), `checks.fleet-kotlin` (K1–K7, K4 and K5 skipped
+`checks.fleet-kotlin` (K1–K7, K4 and K5 skipped
 as before, with nothing pinned), `checks.rust`, and `harken-fdroid-repo`.
 The fling bench, run beside the parent commit: 32,874–32,875 B per entering
 row against 33,147–33,151, the draw 27,977 B a frame in both.
@@ -967,9 +935,7 @@ row against 33,147–33,151, the draw 27,977 B a frame in both.
 ### Not verified
 
 No real phone has stood in a real session beside a real browser or a real
-speaker: the reconciler ran against a stand-in player and a server in the
-test, the lock screen's player on layoutlib's Looper with no system UI to
-draw it, and the fleet with headless peers. Not seen: what Android's media
+speaker: the fleet ran with headless peers. Not seen: what Android's media
 notification draws for the `RemotePlayer` (and whether a remote's
 "playing" keeps the service in the foreground as Media3 says it does), the
 swap between the two players on a running media session, ExoPlayer's own
@@ -1197,14 +1163,7 @@ client, the bridge and two stand-in Sonos: equip, join, a group volume told
 per speaker, a hand on a knob, the Sonos app's grouping both ways, unjoin.
 In `harken-iced`: the player following its volume and a change behind it
 said, through real peers and the engine's desk; the picker's rows for a
-group, the keys on a row, the transition a control calls. On the phone, with
-real Kotlin peers and the test's server (`Hall`): the phone's volume said once
-a connection, followed, a hand said once and its own write never
-(`RemoteTests`); the buttons a speaker's, a group's, nothing from a car, and
-local with the sound here (`ListenTests`, `RemotePlayer` on layoutlib's
-Looper); the picker's sliders, mutes, group row and joins (`ListenTests`); a
-stream's steps and the drag's throttle (`VolumeTests`). The falsifications
-are in `docs/plan-android.md`.
+group, the keys on a row, the transition a control calls.
 
 ### Found on the way, in the engine
 

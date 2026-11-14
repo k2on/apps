@@ -1,0 +1,22 @@
+[package]
+name = "money-core"
+version = "0.1.0"
+workspace = "../../rust"
+edition = "2021"
+description = "money's core in plain Rust (docs/plan-v5.md §1.16): the domain of a household's budget — accounts, categories, the month's assignments, transactions and the Plaid import — its tests, and behind `demo` the demo's household (money/demo writes it to disk)."
+
+[lib]
+name = "money_core"
+path = "src/lib.rs"
+
+[dependencies]
+ark = { path = "../../rust/ark" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[features]
+# The demo's household (`demo`, docs/seed.md): three months of a family's
+# budget up to a day, which the demo window, the phones' demo and a seeded
+# server's data directory open on. Off by default, so a client or a server
+# carries none of it unless it asks.
+demo = []

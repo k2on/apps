@@ -77,7 +77,7 @@ rest (desktop/web). Falsify each once.
 
 ## Landed: the Rust half
 
-`rust/ark-client`, `rust/arkui`, `harken/iced` and `harken-peer`. The engine,
+`rust/ark-client`, `ui/rust/arkui`, `harken/iced` and `harken-peer`. The engine,
 the protocol, `spec/vectors` and the trace corpus did not change. The
 Android half is a later round.
 
@@ -211,7 +211,7 @@ value moves and cancelled when it goes away, which is the link dialling.
 `onPump` is now `onChange(peer, what)`, called only after a drain that was
 not quiet. `status` is computed only then, and the `StateFlow` publishes it
 only when it differs. `run` is a read and drains nothing. Launch views and
-the splash hand-off are untouched (`LaunchTests` still pass).
+the splash hand-off are untouched.
 
 **harken.** `Library` splices on `onChange`. Each list is still published
 only when its rows moved. The diagnostics screen polled
@@ -252,7 +252,7 @@ before 2d68d75) over the new client.
 
 While a track plays, this client's session does exactly what it does at
 rest, because nothing playing says anything to the peer. Over four position
-ticks, `ScrollTests` counts:
+ticks, what composes:
 
 | composed, per four ticks | before (the position in `PlayerState`) | after |
 |---|---|---|
@@ -294,9 +294,6 @@ otherwise, before and after.
   `run` sends with no drain (falsified by removing the client's flush), and
   a post that changes nothing tells nobody (falsified by telling on quiet
   drains: 5, not 4).
-- `harken/android` `ScrollTests`: as above (falsified by the position in
-  the state: `HarkenApp`, `Chrome`, `MiniPlayer` 4 each; and by a 500 ms
-  beat read at the app's top: "composed at rest … {HarkenApp=2}").
 - The process fleet with `harken-peer-kt` on wakes: `fleet-kotlin` 7 of 7
   pass. It also passed before this change against the waking harness,
   since a peer that polls is a superset. With `QueuedSocket` not ringing,
@@ -307,8 +304,7 @@ otherwise, before and after.
 122 of 130 vectors, 2,565 traces twice, the storage fixture, `ClientTests`,
 `LaunchViewTests`, `WakeTests`); `.#harken-apk` (`:ark-android:testDebugUnitTest`
 with `SessionWakeTests`, then `assembleDebug`, 13,804,986 bytes);
-`.#harken-android-screens` (83 files, the player's position drawn from the
-new flow); `.#checks.x86_64-linux.fleet-kotlin`; `.#checks.x86_64-linux.fleet-swift`
+`.#checks.x86_64-linux.fleet-kotlin`; `.#checks.x86_64-linux.fleet-swift`
 (7 of 7).
 
 **Swift was not changed.** `harken-peer-swift` still pumps every
@@ -318,12 +314,11 @@ says the Swift client agrees with the fleet. It does not say the Swift
 client wakes, because it does not, and no Swift app drives it yet.
 
 **Not verified.** No phone, no emulator, no ART. Every number above is
-HotSpot on a JVM, and Paparazzi's frame clock rather than a device's
-Choreographer. In particular, nothing here has seen any of these on a
+HotSpot on a JVM, not a device's Choreographer. In particular, nothing here has seen any of these on a
 device: OkHttp's callbacks waking the thread across Doze and app standby;
 the one-shot redial timer surviving the process being frozen in the
 background (a `ScheduledExecutorService` does not wake a dozing phone, and
 the next wake after thaw is what runs it); the battery or radio effect of
 removing the loop; Media3's `onEvents` stopping the ticker on a real pause
-or a lost audio focus. The splash hand-off and launch views are held by
-`LaunchTests` and were not looked at on a screen.
+or a lost audio focus. The splash hand-off and launch views were not
+looked at on a screen.
