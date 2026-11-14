@@ -82,19 +82,16 @@ enum ShotsWarm {
         #endif
     }
 
-    /// The app's own images decoded once (its bundle's PNGs and JPEGs, its
-    /// icon) and the symbol catalog opened, as the screens will want them.
+    /// The app's own images decoded once (its bundle's PNGs and JPEGs) and
+    /// the symbol catalog opened, as the screens will want them. Never the
+    /// app icon by name: UIKit throws on it (app-screens 43604961847).
     private static func images() -> String? {
         var n = 0
+        // Not the app icon's files (the system's, read by the home screen).
         let paths = ["png", "jpg", "jpeg"].flatMap { Bundle.main.paths(forResourcesOfType: $0, inDirectory: nil) }
+            .filter { !($0 as NSString).lastPathComponent.hasPrefix("AppIcon") }
         for p in paths {
             if let i = UIImage(contentsOfFile: p)?.preparingForDisplay() {
-                _ = i.size
-                n += 1
-            }
-        }
-        for name in ["AppIcon", "AccentColor"] {
-            if let i = UIImage(named: name)?.preparingForDisplay() {
                 _ = i.size
                 n += 1
             }

@@ -162,8 +162,12 @@ for w in ${walks[@]+"${walks[@]}"}; do
         echo "::error::$a $kind: the app ended with its walk unsaid"
         # Why, when the system wrote it down: the newest crash report of
         # the app's process, its exception and where it stopped.
-        sleep 5
-        ips=$(ls -t "$HOME/Library/Logs/DiagnosticReports/"*.ips 2> /dev/null | xargs grep -l "\"$bundle\"" 2> /dev/null | head -1)
+        ips=
+        for _ in $(seq 1 20); do
+          ips=$(find "$HOME/Library/Logs/DiagnosticReports" -name '*.ips' -newer "$shots/plan.json" 2> /dev/null | xargs grep -l "\"$bundle\"" 2> /dev/null | head -1)
+          [ -n "$ips" ] && break
+          sleep 1
+        done
         [ -n "$ips" ] && python3 "$here/crash.py" "$ips" | sed 's/^/  /' || echo "  no crash report found"
       fi
       break
