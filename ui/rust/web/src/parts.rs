@@ -436,6 +436,20 @@ fn drawn<M: Clone + std::fmt::Debug + 'static>(v: View<M>) -> Option<AnyView> {
         Part::TableRow(r) => data_table(vec![], View::Part(Part::TableRow(r))),
         Part::TableHeading { title } => html::div().class("ark-caption").child(title.get()).into_any(),
         p @ (Part::Sheet { .. } | Part::Prompt { .. } | Part::Confirm { .. } | Part::Alert { .. }) => dialog(p),
+        // A screen searchable on its own (one the shell hosts, harken's
+        // Search): its field over it, as the shell draws one.
+        Part::Searchable {
+            prompt,
+            text,
+            typed,
+            content,
+        } => html::div()
+            .class("ark-column ark-fill")
+            .child((
+                html::div().class("ark-search-row").child(crate::shell::search(prompt, text.get(), typed)),
+                render(*content),
+            ))
+            .into_any(),
         // The shell's are `shell`'s.
         _ => return None,
     })

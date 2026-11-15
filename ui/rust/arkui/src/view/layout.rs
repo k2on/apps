@@ -63,8 +63,12 @@ pub(super) fn layout<M: Clone + 'static>(l: Layout<M>, axis: Option<Axis>) -> Op
             if w.style.bold() {
                 t = t.font(crate::hero::BOLD);
             }
-            if w.lines == Some(1) {
-                t = t.wrapping(text::Wrapping::None);
+            // Kept to its lines, cut short with an ellipsis: a tile's
+            // caption stays inside its cover's width.
+            if let Some(n) = w.lines {
+                t = t.ellipsize(iced::advanced::text::Ellipsize::End(iced::advanced::text::EllipsizeHeightLimit::Lines(
+                    n as usize,
+                )));
             }
             if w.centred {
                 t = t.align_x(Alignment::Center);
@@ -130,7 +134,10 @@ fn modified<M: 'static>(mut el: Element<'static, M>, mods: &[Modifier]) -> Eleme
             // iced has no screen reader yet.
             Modifier::Combine => el,
             // The desktop's filling cover is a shelf's (a grid's tiles wrap at it).
-            Modifier::ArtWidth(a) => container(el).width(art_side(*a).unwrap_or(crate::layout_tokens::ART_SHELF)).into(),
+            Modifier::ArtWidth(a) => container(el)
+                .width(art_side(*a).unwrap_or(crate::layout_tokens::ART_SHELF))
+                .clip(true)
+                .into(),
         };
         i += 1;
     }

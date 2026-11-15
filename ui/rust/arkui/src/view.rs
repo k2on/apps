@@ -465,6 +465,16 @@ fn part<M: Clone + 'static>(v: View<M>) -> Option<Element<'static, M>> {
             placement,
         } => bar_button(title, glyph, placement, enabled.get(), tap),
         Part::Writing { markdown } => crate::writing::markdown(&markdown.get()),
+        // A screen searchable on its own (one the shell hosts, harken's
+        // Search): its field over it, as the shell draws one.
+        Part::Searchable {
+            prompt,
+            text: t,
+            typed,
+            content,
+        } => column![container(search(prompt, t.get(), typed)).padding([6, 12]), element(*content)]
+            .height(Length::Fill)
+            .into(),
         // The shell's are drawn by `shell`, with the window's frame; a
         // hosted screen and the dialogs need it too.
         Part::Page { .. }
@@ -477,7 +487,6 @@ fn part<M: Clone + 'static>(v: View<M>) -> Option<Element<'static, M>> {
         | Part::Split { .. }
         | Part::Toolbar { .. }
         | Part::Account { .. }
-        | Part::Searchable { .. }
         | Part::Inspector { .. }
         | Part::Hosted { .. }
         // A toolkit's specimen of its own part is the browser's: the

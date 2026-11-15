@@ -34,6 +34,16 @@ pub fn harken_shell(p: &ShellPage) -> View<ShellMsg> {
                     (),
                 ),
             ),
+            section_tab(
+                "Search",
+                "search",
+                "search",
+                toolbar(
+                    "Search",
+                    pushes(hosted("search"), toolbar(p.page_title, hosted("page"), ()), p.showing, ShellMsg::Back),
+                    (),
+                ),
+            ),
         ),
     )
     .into()
