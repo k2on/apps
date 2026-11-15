@@ -1,6 +1,6 @@
 //! harken's part of its host (`ark_app::host`), once for every platform:
 //! over a session it runs every screen's runtime — the shell, Home,
-//! Library and the page a route shows — and carries out what each asks of
+//! Library, Search and the page a route shows — and carries out what each asks of
 //! the app ([`HarkenRequest`]): a route is a page pushed over the section
 //! it was opened from; a play is the player's, which keeps what it was
 //! asked until it is a runtime of the host's own (ui/docs/app.md,
@@ -12,6 +12,7 @@ use harken_domain::{HarkenChange, HarkenView};
 use crate::home::{Home, HomeMsg};
 use crate::library::{Library, LibraryMsg};
 use crate::page::{Page, PageMsg};
+use crate::search::{Search, SearchMsg};
 use crate::shell::{HarkenShell, ShellMsg};
 use crate::{HarkenRequest, Route};
 
@@ -20,6 +21,7 @@ pub struct Harken {
     pub shell: Screen<HarkenShell>,
     pub home: Screen<Home>,
     pub library: Screen<Library>,
+    pub search: Screen<Search>,
     pub page: Screen<Page>,
     /// What was asked of the player, in order, until it is the host's.
     pub played: Vec<HarkenRequest>,
@@ -55,22 +57,24 @@ impl HostedApp for Harken {
             shell: Screen::new(),
             home: Screen::new(),
             library: Screen::new(),
+            search: Screen::new(),
             page: Screen::new(),
             played: vec![],
         };
         let server = session.server.clone();
         h.home.send(HomeMsg::Server { server: server.clone() }, cx);
         h.library.send(LibraryMsg::Server { server: server.clone() }, cx);
+        h.search.send(SearchMsg::Server { server: server.clone() }, cx);
         h.page.send(PageMsg::Server { server }, cx);
         h
     }
 
     fn screens(&mut self) -> Vec<&mut dyn Running<Harken>> {
-        vec![&mut self.shell, &mut self.home, &mut self.library, &mut self.page]
+        vec![&mut self.shell, &mut self.home, &mut self.library, &mut self.search, &mut self.page]
     }
 
     fn screens_ref(&self) -> Vec<&dyn Running<Harken>> {
-        vec![&self.shell, &self.home, &self.library, &self.page]
+        vec![&self.shell, &self.home, &self.library, &self.search, &self.page]
     }
 
     /// A route a screen opened: a section's own index is that section (an
@@ -128,7 +132,7 @@ macro_rules! has {
     )*};
 }
 
-has!(HarkenShell => shell, Home => home, Library => library, Page => page);
+has!(HarkenShell => shell, Home => home, Library => library, Search => search, Page => page);
 
 #[cfg(test)]
 mod tests;

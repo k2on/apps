@@ -1,4 +1,4 @@
-//! harken's shell: its sections — Home and Library, each its own stack of
+//! harken's shell: its sections — Home, Library and Search, each its own stack of
 //! the pages it opened — a record's page pushed over the section it was
 //! opened from, its title the page's. What each section shows is another
 //! runtime's (`hosted`); the host says which page is pushed
@@ -17,7 +17,7 @@ pub struct HarkenShell;
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct State {
-    /// The section shown (`home`, `library`); none is Home.
+    /// The section shown (`home`, `library`, `search`); none is Home.
     pub section: String,
     /// The title of the page pushed over it; none while none is.
     pub pushed: Option<String>,

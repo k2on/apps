@@ -5,8 +5,9 @@
 //! on its first run ([`welcome`]).
 //!
 //! The screens moved here so far are the library's: Home ([`home`]),
-//! Library ([`library`]) and a record's page ([`page`]). The player, the
-//! search, the sheets, the shell and the host's part follow
+//! Library ([`library`]), Search ([`search`]) and a record's page
+//! ([`page`]), under the shell ([`shell`]) and run by the host's part
+//! ([`host`]). The player, the sheets and Settings follow
 //! (ui/docs/app.md, "Where It Stands").
 
 pub mod home;
@@ -14,6 +15,7 @@ pub mod host;
 pub mod library;
 pub mod page;
 pub mod routes;
+pub mod search;
 pub mod shell;
 pub mod welcome;
 pub mod words;

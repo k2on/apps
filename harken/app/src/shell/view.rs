@@ -6,7 +6,7 @@ use ark_app::view::*;
 
 use super::{ShellMsg, ShellPage};
 
-/// Home and Library, each its toolbar over what it hosts, and a record's
+/// Home, Library and Search, each its toolbar over what it hosts, and a record's
 /// page pushed over it.
 #[view]
 pub fn harken_shell(p: &ShellPage) -> View<ShellMsg> {
