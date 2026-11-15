@@ -692,6 +692,15 @@ the runtime builds the notice.
 | Android | a persisted `JobScheduler` job (WorkManager is not in the offline Maven graph; it runs on JobScheduler itself) | UnifiedPush, the receiver protocol implemented directly; the person's distributor (FCM through one, if they choose) | `NotificationManager`, `AlarmManager` |
 | Desktop, browser | none | none (`Unavailable`) | none (`Unavailable`) |
 
+**Push is off for now** (below, Servers Already Deployed): the push table
+and `session.push` are in no schema, the hub wakes nobody, and "Notify Me"
+schedules the periodic sync alone. Each piece is behind an off-by-default
+`push` feature — money-core's and harken-domain's (the table, and the
+function registered: `ark::auth_tables!(App, push)`), ark-peer's (the
+hub's wakes, `Server::push`, `Apns::sender`), ark-ffi's (the endpoint
+written as the session's push row) and ark-app's (the device registered
+for push) — and comes back with them on, as docs/releasing.md says.
+
 The server's side is any app's: `ark_peer::Server::push(sender, wake)`,
 with `ark_peer::Apns::sender` reading `_APNS_KEY_FILE`, `_APNS_KEY_ID` and
 `_APNS_TEAM_ID` (a file and two ids: the key is never in the repository
@@ -707,6 +716,63 @@ a process of its own for each alert push marked `mutable-content`, with
 about 30 seconds and about 24 MB, and shows what it hands back. It cannot
 reach the app's process, runtime or replica, so it never runs the app's
 `update`; it only swaps words (modules/ark-notifications/README.md).
+
+## Servers Already Deployed
+
+The servers the owner runs are built from an older revision: the one
+k2on/os pins (`koon-apps` in its flake.lock, k2on/apps 77da9807 — the
+same money server, store path for store path, as main before the app
+restructure merged, 7a4f5634). The clients built now — the phones, the
+browser page, the desktop — work against that server unchanged, and
+nothing a client sends or expects is only a newer server's:
+
+- **The schema is the deployed one.** A client's schema hash is what the
+  server's `/healthz` names (`domain <hash> <version> current`): the
+  phone finds it the same domain, not newer, and every state hash an
+  entry carries is one the client works out too (an empty table is in
+  the state hash). The push table is the one table added since, so it is
+  off (Background And Notifications). `tests/deployed.json` in money-core
+  and harken-domain is that server's catalog (`ark::domain::Catalog`),
+  and `tests/deployed.rs` holds the schema to it and every intent a
+  client can send (a mutator, a live call) to one the server registers
+  with the same input; with `push` on, that the table and `session.push`
+  are all that is added.
+- **The sync protocol** (`ark::peer`, the frames, the value format) has
+  not changed since that revision.
+- **Sign-in.** `/auth/login`, `/auth/callback`, `/auth/exchange` (`{"code":
+  …}`), `/auth/picture`, the login's JSON and `ARK_DEV_USER`'s straight
+  redirect are as they were. What is newer, and how a client gets by
+  without it:
+  - the browser's session cookie (`/auth/session`, `/auth/logout`): a
+    404 or 405 there and the page trades the code at `/auth/exchange`, as
+    before; the login then holds its token, which the page remembers and
+    the socket says in the cookie's place (`ark_auth::web::session`);
+  - device codes (`/auth/device-code`, `/auth/redeem`, Add a Device and a
+    join link): refused with a sentence that says the server is older
+    (`ark_auth::client::OLDER`), and the device signs in instead;
+  - the display name (`ARK_DEV_NAME`, a dev server's): the login's name
+    is its id, and every client already says the id when the name is
+    empty or the id itself (`login_name`, money's `who`);
+  - a provider's other trusted clients and its groups rule: the server's
+    own configuration, nothing a client sends.
+- **`/healthz`** says `ok` and the `domain` line as before; harken's newer
+  `busy scanning` line is read only by the screenshot scripts
+  (.github/screens/app-server.sh), against servers built from the commit,
+  and an older server that never says it reads as not busy.
+- **No other request is new.** harken's `/media` routes, `/sync` and the
+  pictures are the same.
+
+`.github/compat-check.sh [REV]` proves it end to end: it builds money's
+and harken's servers from that revision (Cachix has them), starts them
+with dev auth (money's on its own seed's household), and runs this
+build's clients against them — money's phone host
+(money/app/tests/deployed.rs: the first run, the address typed, the dev
+sign-in, the household synced, a transaction confirmed by the server and
+seen on a second phone) and harken's headless client (`harken-peer`: a
+playlist made, confirmed, and seen by a second peer). It is not in CI: it
+builds the old servers and money's phone host. When the deployed
+servers move, the revision in the script, k2on/os's pin and
+`tests/deployed.json` move together (docs/releasing.md).
 
 ## The App Library
 

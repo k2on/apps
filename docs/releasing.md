@@ -111,6 +111,36 @@ before it is signed). No app says so, and before one does:
   catalog for the unstable build;
 - none of it has been run.
 
+## The servers already deployed
+
+The unstable clients — every push to main: the phones, the browser page,
+the desktop — work against the money and harken servers the owner runs,
+which are built from k2on/apps 77da9807 (the revision k2on/os pins; for
+money, the same server as main before the app restructure, 7a4f5634).
+ui/docs/app.md, Servers Already Deployed, lists every difference and how a
+client gets by; `.github/compat-check.sh` runs this build's money phone
+host and harken's headless client against servers built from that
+revision. Run it before a release the deployed servers will meet.
+
+**The push table is off** until the servers are deployed again. To bring
+it back:
+
+1. Turn on the `push` features: money-core's and harken-domain's (the
+   table appended to the schema, `session.push` registered), ark-peer's on
+   the servers (the hub's wakes; `Server::push` with `Apns::sender`),
+   ark-ffi's in the phones' libraries (the endpoint written as the
+   session's push row) and ark-app's where "Notify Me" should register
+   for push. The table is appended, empty: no migration step.
+2. Deploy the servers built with it first — money's and harken's, from
+   the commit that turns it on — and move k2on/os's pin to that commit.
+   A server with the table serves clients without it (a schema grows,
+   §1.2), so the phones can follow.
+3. Then move `tests/deployed.json` (money-core's, harken-domain's) to that
+   server's catalog and the revision in `.github/compat-check.sh`, so the
+   tests hold the clients to the server now deployed. A client with the
+   table against a server without it would send `session.push` that the
+   server holds for ever, and its state hashes would not be the server's.
+
 ## What is known not to be ready
 
 - harken's Android cover provider builds its `content://` URIs from a
