@@ -6,7 +6,7 @@
 device.json and, per theme, `<id>.png` for a screenshot and `<id>.mp4`
 for a recording. A phone whose capture failed this run keeps the
 directory it had, so it is listed as it was. The docs read this
-(docs/site/web/site.js).
+(docs/site/public/docs.js).
 """
 import datetime
 import json

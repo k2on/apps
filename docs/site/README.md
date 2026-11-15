@@ -2,20 +2,26 @@
 
 The documentation site: for now arkui's, and ArkDB's can join it.
 
-An ArkUI app, written as static HTML: published at
-https://k2on.github.io/apps/docs/ (`nix build .#docs`). Every page is a
+An Ark app (`app.toml`) with no data of its own, exported as static HTML
+as every app's web output is (ui/docs/app.md, "Export"): published at
+https://k2on.github.io/apps/docs/ (`nix build .#docs`, or `nix run
+.#docs-export-web -- dist`). Its part of its host is `src/app.rs`'s
+`Docs` (an `ark_app::host::HostedApp`, drawn in a window: `Windowed`), and
+it names no toolkit: its page is generated from app.toml. Every page is a
 path (`/`, `/all/`, `/menu/`) and a `#[view]` in ArkUI's own shell — the
 sidebar of pages by section, each page's toolbar, the search field — drawn
 by arkui-web as HTML (ui/docs/app.md, "The Browser's Modes") and right
 without script at every width (arkui-web writes each size class's draw and
 theme.css shows the one the window is in). With script, the page's module
-(`docs-web`) takes it over: the sidebar walks the pages without a load, the
-search finds words on any page, the live parts answer.
+(`docs-web`) takes it over: the sidebar and every link to another page
+walk the pages without a load, the address follows, the search finds
+words on any page, the live parts answer.
 
 Each component's page says how to use it:
 
 - **In the browser**: arkui-web's own parts, live — the same
-  `ark_app::view` parts an app's screen is made of (`src/live.rs`).
+  `ark_app::view` parts an app's screen is made of
+  (`ark_app::shell::specimen`, drawn by arkui-web's `specimens`).
 - **On the desktop**: arkui's modules for it, pictures of it drawn by arkui
   itself, tables of what its functions answer (worked out when the site is
   built), and each module's API and rules.
@@ -29,10 +35,10 @@ app can use for its own help pages: `writing(md)` in a view.
 
 ## Pages, Paths and What Is the Reader's
 
-A page's path is the page and nothing else: `DocsWeb::static_paths` is
-every page, and each is written, with its `<title>`, its description, a
+A page's path is the page and nothing else: `Windowed::paths` is every
+page, and each is written, with its `<title>`, its description, a
 canonical link, and a line in `sitemap.xml`. The search (`?q=`), the phone
-chosen and the appearance are the reader's: never a page, taken up by the
+chosen (`?phone=`) and the appearance are the reader's: never a page, taken up by the
 module once it has taken the page over. Without script the search field is
 disabled and **All Pages** in the toolbar is the index of every page; the
 live parts are drawn as they open.
@@ -69,26 +75,29 @@ times: in iced's light and dark themes with arkui's palette, at 640 and at
 shows, by its theme and a media query.
 
 `src/examples.rs` is what each component's pictures, tables and notes are.
-What the browser cannot work out (the pictures' sizes, the tables) is
-carried in each page as `#docs-built`, so the module draws the page it
-takes over exactly as it was written.
+What the browser cannot work out (the pictures' sizes, the tables) is what
+the export's `[web] prepare` (`src/export.rs`) returns, carried in each
+page as `#ark-prepared` and opened with as `Session::prepared`, so the
+module draws the page it takes over exactly as it was written.
 
 ## A Workspace of Its Own
 
 `docs/site` is a Cargo workspace on its own, with its own `Cargo.lock`, and
 not a member of `rust/`'s. So the docs and the apps never share a build: an
 edit here is no input to ArkDB's kernel or to any app. The docs reach the
-rest by path — arkui, arkui-web, ark-app — so they rebuild exactly when
-something they name changes. One crate, two builds: `docs` (feature
-`native`, the default) writes the site, `docs-web` (feature `hydrate`,
-wasm32) is the module. Its checks are `nix build .#checks.<system>.docs`
-(format, clippy, tests); the site is `nix build .#docs`.
+rest by path — arkui, ark-app, and arkui-web for the tests and the
+generated page — so they rebuild exactly when something they name changes.
+One crate, `docs`; its page, `docs-web`, generated from app.toml
+(ui/prebuild.py's `web`), is the module for wasm32 and, natively, the
+export. Its checks are `nix build .#checks.<system>.docs` (format, clippy,
+tests); the site is `nix build .#docs`.
 
-By hand, in a small target directory:
+By hand, in a small target directory, with the generated page added to
+this workspace (`members = [".", ".web"]`, not committed):
 
-    cargo run -- out --base /                     # the pages and pictures
-    cargo build --release --target wasm32-unknown-unknown \
-      --no-default-features --features hydrate --bin docs-web
+    python3 ../../ui/prebuild.py web docs/site --root ../..   # docs/site/.web
+    cargo run -p docs-web -- out --base /                     # the pages and pictures
+    cargo build -p docs-web --release --target wasm32-unknown-unknown
     wasm-bindgen --target web --no-typescript --out-dir out/pkg \
       $CARGO_TARGET_DIR/wasm32-unknown-unknown/release/docs-web.wasm
 
@@ -103,7 +112,7 @@ that wants it (it is published beside the pages).
 **If you change a component, change its entry here in the same commit**, then
 regenerate the JSON:
 
-    cargo run -- --json > catalogue.json        # in docs/site
+    DOCS_WRITE_CATALOGUE=1 cargo test catalogue_json   # in docs/site
 
 `cargo test` here fails until you have. It checks that:
 
@@ -117,7 +126,7 @@ regenerate the JSON:
 
 ## The Captures
 
-`web/docs.js` reads `manifest.json` from the `screens` branch through
+`public/docs.js` reads `manifest.json` from the `screens` branch through
 raw.githubusercontent.com, which any page may fetch, so a capture appears on
 the next load with nothing redeployed; a capture the module draws again is
 filled again. To try the site against captures of your own, serve a

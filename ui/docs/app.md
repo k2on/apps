@@ -148,8 +148,17 @@ in a tab of its own (`opens`), its appearance and its address (`address`).
 One message type reaches every screen (`Windowed::Msg`, money's
 `MoneyMsg`), taken inside the loop (`take`); a `ShellAsk` the toolkit's
 shell would carry out is the part's own in a window (`native`: Settings
-shown is its state there). The desktop's window is hosted the same way
+shown is its state there). A page written ahead reads three more of it:
+its title and description (`title`, `description`) and every path its
+export writes (`paths`). The desktop's window is hosted the same way
 ("The Desktop's Window", below).
+
+**An app with no data** (a static site: the docs) is the same part of its
+host over no domain: its views and changes are `ark_app::host::Nothing`,
+its runtimes none (its state is the part's own), and it says no first run
+(`KEEPS` and `welcome` have none by default). Its page holds no replica,
+and its session says only the day, where the site is rooted (`base`) and
+what its export prepared for it (`prepared`).
 
 ### The Phones' Library
 
@@ -191,28 +200,79 @@ write its Kotlin and Swift.
 ### The Browser's Page
 
 Generated, never committed, the phones' library's twin: `ui/prebuild.py
-web <app>` writes `<id>-web` (its binary the page's module) — `main.rs`
-and `Cargo.toml` — and the page that loads it, `index.html`, with the
-app's icon beside it (`favicon.svg`), from app.toml: its name, scheme,
-accent and version, and of `[ffi]` its part of its host, its domain and
-its demo. nix/ark-app.nix builds it (`webSrc`, `crates`), flake.nix's
-`<app>-web` binds it (`wasmPage`), and a cargo build of the page adds it to
-the workspace at `<app>/.web` (ignored by git). Its `main.rs` is one
-`arkui_web::host::WebHosted` and `arkui_web::host::run`, with the browser's
-device of each module its crate depends on whose module.toml says `[web]`
-(`device`, `port`: ark-scanner's file input, ark-clipboard's clipboard).
+web <app>` writes `<id>-web` — `main.rs` and `Cargo.toml` — and, for an
+app drawn in the browser alone, the page that loads it, `index.html`, with
+the app's icon beside it (`favicon.svg`), from app.toml: its name, scheme,
+accent and version, its part of its host (`[web] app`, else `[ffi]`'s),
+its domain and demo where it has data (`[ffi]`), its look (`[web] css`,
+`head`, `files`), how its pages are made (`[web] modes`) and what its
+export works out first (`[web] prepare`). nix/ark-app.nix builds it
+(`webSrc`, `webCrate`), flake.nix's `<app>-web` binds it (`wasmPage`), and
+a cargo build of the page adds it to the workspace at `<app>/.web`
+(ignored by git). Its `main.rs` is one `arkui_web::WebHosted`, with the
+browser's device of each module its crate depends on whose module.toml
+says `[web]` (`device`, `port`: ark-scanner's file input, ark-clipboard's
+clipboard), and `arkui_web::host::start` for wasm32; natively, for an app
+whose pages are written ahead, `arkui_web::export::main` (Export, below).
 
-arkui-web's `host` (feature `host`) is the rest, the same for every app:
-`WebPlace` (the page's replica and the views it holds; `Seen` to read),
-`WebHost<W>` driving `Hosting` over it and drawing what the part says
-(`Windowed`), and `live`, the sign-in and the socket: the server is
-whoever served the page, the first run is every app's
+arkui-web's `host` is the rest, the same for every app: `WebPlace` (the
+page's replica and the views it holds; `Seen` to read; none at all for an
+app with no data), `WebHost<W>` driving `Hosting` over it and drawing what
+the part says (`Windowed`), and `live`, the sign-in and the socket: the
+server is whoever served the page, the first run is every app's
 (`ark_app::welcome`), and `?demo` runs the app's demo in the page with no
-server, seeded to `?today=`. The address arrives as a link
+server, seeded to `?today=`. Every page is that `WebHost`, whatever made
+it: the SPA, a page the export wrote and the module takes over, a page a
+server writes (arkui-serve). The address arrives as a link
 (`HostedApp::link`): a launch when its query names a screen
 (`?screen=budget&inspector=1`), the address itself otherwise
-(`/account/<id>/checking/?inspector=1`). The page's root says where it is
-(`data-ark-address`, the part's `address`) beside its ready signal.
+(`/account/<id>/checking/?inspector=1`), and the browser's address follows
+the app's (`Windowed::address`) after every message: a new history entry
+for a move the person made, the entry replaced for a refinement (what is
+typed in a field, the page arriving where its address says); back and
+forward bring the app where the address says. (`data-ark-address`, the part's `address`) beside its ready signal.
+
+### Export
+
+As Expo's `expo export --platform web`: an app is written once, and its
+web output is a command, the same for every app, built from its definition
+(app.toml and its crate) and nothing else.
+
+```sh
+nix run .#money-export-web -- dist   # the SPA: index.html, favicon.svg, pkg/
+nix run .#docs-export-web -- dist    # every page written ahead, and pkg/
+```
+
+What it writes follows app.toml's `[web] modes`: `spa` is the page that
+loads the module, which draws the app in the browser alone; `ssg` is every
+path the app declares (`Windowed::paths`) written as HTML that is whole
+without script, each with its title and description (`Windowed::title`,
+`description`), a canonical link, `sitemap.xml` and `robots.txt`, and the
+module that takes it over. The page's crate is its own export: built for
+wasm32 it is the module (`arkui_web::host::start`), and natively, for an
+`ssg` app, the writer (`arkui_web::export::main`: `<id>-web <dir> --base
+/apps/docs/ --site https://… --version …`). Before writing it runs the
+app's `[web] prepare` (a function of its crate, native only: the docs draw
+their pictures with iced) and hands what it returned to every page as
+`Session::prepared`. An app's own CSS, `<head>` and files are `[web]
+css`, `head` and `files` (Expo's `public/`), copied beside the generated
+`main.rs`; nothing of it is hand-written, and no app names a toolkit:
+
+```toml
+[web]
+modes = ["ssg"]
+app = "app::Docs"            # its part of its host (else [ffi]'s `app`)
+css = ["public/docs.css"]
+head = "public/head.html"    # `{base}`, `{version}` filled in
+files = ["public/docs.js"]
+prepare = "export::prepare"  # fn(&Path) -> io::Result<String>
+path = "docs"                # published at /apps/docs/, one channel
+```
+
+An app asks which platform it runs on only where the platform itself is
+the fact (Expo's `Platform.OS`): `ark_app::platform()` is `Ios`,
+`Android`, `Mac`, `Desktop` or `Web` (a page written natively included).
+Everything else that differs is the toolkit's, or a device module's.
 
 ### Layout: `#[view]`
 
@@ -1188,15 +1248,20 @@ over by script (`ssr`, `hydrate`: "The Browser's Modes", below) — the way
   sheet from the foot; a pushed detail; questions and sheets over it.
   The size class is the window's width against `[layout]`'s tokens read
   from the theme's CSS variables, so it is written once.
-- **`run(app, accent, css)`** mounts a **`WebApp`** (its `view`, `update`,
-  `commands`, what the address asks for in `arrive`, what a field
-  `suggest`s); a message is **`send(m)`**: the app updates and the page is
-  drawn again, Leptos keeping the elements that are the same (a focused
-  field keeps its keys and its caret).
-- **`host`** (feature `host`): an Ark app's page whole, its part of its
-  host over a replica in the page, signed in and synced or on its demo
-  (`WebHost<W>`, `WebPlace`, `live`), what an app's generated entry point
-  runs ("The Browser's Page"); `parts::settings_window` is its Settings.
+- **`host`**: the page is an Ark app's whole, its part of its host
+  (`Windowed`) over a replica in the page, signed in and synced, on its
+  demo, or with no data of its own (`WebHost<W>`, `WebPlace`, `live`): the
+  one thing arkui-web drives, whatever made the page. `host::start` is
+  what an app's generated entry point runs ("The Browser's Page"):
+  **`run`** draws it in the browser alone, **`hydrate`** takes over a page
+  written ahead; a message is **`send(m)`**: the app's part takes it and
+  the page is drawn again, Leptos keeping the elements that are the same
+  (a focused field keeps its keys and its caret), and the browser's
+  address and title follow the app's. `parts::settings_window` is its
+  Settings.
+- **`specimens`**: arkui-web's own parts, live, over a little state of
+  its own, what goes over a window drawn open in its frame: what a page
+  about ArkUI shows of a part (`ark_app::shell::specimen`, the docs').
 - **The transient parts** (`menu`, `fields`): a row's context menu at the
   pointer (right click, the menu key, Shift-F10) and a control's menu
   under it (`menu::button`), each with its title, its entries, a check, a
@@ -1307,7 +1372,7 @@ app's crate is the same in each.
 | Mode | What the browser is sent | Without script |
 |---|---|---|
 | `spa` (the default) | index.html and the module (`nix build .#<app>-web`, feature `csr`); the page draws itself | nothing |
-| `ssg` | a page of HTML per path the app declares, written natively (`arkui_web::prerender`, feature `ssr`), then the module (`hydrate`), which takes it over | every page and every link between them; no UI state, nothing that changes the data |
+| `ssg` | a page of HTML per path the app declares, written natively by its export (`arkui_web::export`, `prerender`, feature `ssr`), then the module (`hydrate`), which takes it over | every page and every link between them; no UI state, nothing that changes the data |
 | `ssr` | each request's page, written by the app's own server, then the module | everything: a press is a form the server answers |
 
 **Which app uses which.** money and harken are the SPA alone
@@ -1330,11 +1395,11 @@ The SPA is what it always was: none of what follows is drawn in it, and
 its markup is the same.
 
 **Routes** are addresses (`ark_router::Address`, below): the app's
-`WebApp::route` says where it is — its `Route` enum's address and the
-UI's query over it — and `WebApp::arrive` brings it back there from one,
-so the state a page is written at is the state the module arrives at,
-from the address and the data alone. `static_paths` is every page a
-static site writes: an address's path, never a query.
+`Windowed::address` says where it is — its `Route` enum's address and the
+UI's query over it — and `HostedApp::link` brings it back there from one
+(`WebHost::arrive`), so the state a page is written at is the state the
+module arrives at, from the address and the data alone. `Windowed::paths`
+is every page a static site writes: an address's path, never a query.
 
 **Browser-only calls** (the window, its width, `DomRect`, history, focus,
 the keyboard) run only in wasm (`cfg!(target_arch = "wasm32")`).
@@ -1379,14 +1444,12 @@ script:
   form sent from then on: a press is the click's, as in the SPA.
 
 **The static site** (`ssg`) writes one page per path the app declares,
-`WebApp::static_paths` (Next.js's `generateStaticParams`): finite, and
-from the data — for a docs site its pages. There is no crawl and no cap;
-`arkui_web::prerender` refuses past the sanity bound app.toml's
-`[web] static-bound` sets, saying so. A query is never written: each page
+`Windowed::paths` (Next.js's `generateStaticParams`): finite, and from the
+data — for a docs site its pages. There is no crawl and no cap. A query is never written: each page
 is its path at the UI's defaults, and with script the module takes the
 address's query once it has taken the page over (Next.js's client-only
 `searchParams`). There is no server to run `update`, so each control is
-pressed on the app put back where the page opened (`WebApp::rewind`;
+pressed on the app put back where the page opened (`WebHost::rewind`;
 `dry_run` counts a change to the data and sends none): one that only
 moves the app to another declared path, its query empty, is a link to
 that page (`formaction` on the form `#ark-go`, a plain GET); one that
@@ -1592,7 +1655,7 @@ ui/docs/apps/money.md for money):
    sign-in machine the phones walk, the session an `HttpOnly` cookie the
    socket takes, the replica in memory. Next: a durable replica (ark-peer's
    `Disk` is synchronous and IndexedDB is not), and harken's client.
-   The docs site is the static case (`static_paths`, `prerender`,
+   The docs site is the static case (`Windowed::paths`, the export,
    `page::dangling`), harken's public pages after it. `ssr`
    (`arkui-serve`) is built and tested and turned on by no app; "The
    Browser's Modes" says what it lacks.

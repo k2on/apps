@@ -245,6 +245,6 @@ each opened by its launch arguments (the browser's address): read by
 `Navigator.launchArgs` / `Navigator.launchArgsOf`, taken by an app's
 shell as a launch. In the browser the same is the address moved in
 place (`history.pushState` and `popstate`): arkui-web puts the app back
-(`WebApp::rewind`) and its own menus, popovers, command box and focus with
+(`WebHost::rewind`) and its own menus, popovers, command box and focus with
 it, then arrives at the new address. Taps remain for what only a finger
 reaches (a menu, a gesture), and each is followed by the ready signal too.

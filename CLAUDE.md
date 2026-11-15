@@ -45,5 +45,10 @@ session's facts; a route is one of the shell's places on every host) in
 module behind an `ark-module` port, domain rules in `core/`, and anything
 of a shell another app could share in ArkApp, ark-app-android or arkui. An
 app takes a module on by depending on its crate from `app/`; nothing lists
-modules anywhere else. `ui/docs/app.md` ("Generated, Not Committed") says
+modules anywhere else. No app has a `main.rs` or names a toolkit crate
+(`arkui_web`, `arkui`, `leptos`): its page and its web export are
+generated from app.toml (`nix run .#<id>-export-web`), and what its pages
+load besides is its `public/`, named by `[web]`. A static app with no data
+(the docs, `docs/site`) is `app.toml`, `icon.svg`, `public/` and its crate
+in the one directory. `ui/docs/app.md` ("Generated, Not Committed") says
 what to do in each case.
