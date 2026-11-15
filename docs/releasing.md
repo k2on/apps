@@ -56,11 +56,20 @@ CI then, from the tag's commit:
   forward as it was.
 - `ios.yaml` archives each iPhone app, gives it the tag's version and the
   commit's time as its build number, signs it and sends it to TestFlight.
+- `app-screens.yaml` takes each Android app's shots from the stable APKs
+  the tag's `build` made, the release's own, and keeps them as that run's
+  artifacts: a check that the release's APKs walk, published nowhere (the
+  `screens` branch is main's, and main has taken the tag's commit already,
+  as its `.unstable` twins).
 
 A push to main does the other half: its APKs go to the unstable
 repository (the newest three of each app), its pages to `unstable/`, and
 the stable channel is carried forward as it was. Main's iPhone archives
-are signed to check the signing, and sent nowhere.
+are signed to check the signing, and sent nowhere. Main's screenshots (the
+`screens` branch, .github/screens/apps.md) are of the commit pushed: on
+Android the `.unstable` APKs its `build` made (or, for an app whose inputs
+had not moved, the unstable repository's, the same inputs' build), never
+the stable repository's, which holds the last release.
 
 **Once, in the repository's settings:** Settings → Environments →
 `github-pages` → Deployment branches and tags must allow the tags `v*`

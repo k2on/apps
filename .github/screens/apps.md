@@ -1,8 +1,9 @@
 # The apps' screenshots
 
-Each app's screens, taken from the builds that were published (the APK in
-the F-Droid repository, the commit sent to TestFlight), signed in to the
-app's own server with sample data. An app built on ArkUI's runtime walks
+Each app's screens, taken from the builds of the commit that was pushed
+(on main the APK its build put in the unstable F-Droid repository, the
+`.unstable` twin; the iPhone and desktop apps as nix builds that commit),
+signed in to the app's own server with sample data. An app built on ArkUI's runtime walks
 its shots on the phones and tablets itself, from a new install, and draws
 its own pictures (shots.json's `walk`, ui/docs/shots.md "In the App"); the
 others are driven from outside as a person would. No code in any app
@@ -250,9 +251,13 @@ which nix builds at the commit (see below).
   screens](#the-larger-screens)).
 - **`ios-inputs.sh`**: the hash of what an iPhone app's shots are taken
   from, said on Linux ([when it runs](#when-it-runs)).
-- **`published.sh`**: each APK as the F-Droid repository offers it, for a
-  run that builds nothing (a dry run: `build`'s at the commit), fetched
-  once by the workflow's `apks` job and handed to every emulator's job;
+- **`published.sh`**: each APK at the commit, for a run with no build run
+  of its own (a push that moved the scripts, a run by hand, a dry run):
+  `build`'s run at that commit on its branch, awaited while it makes them,
+  or for an app that run skipped as built before (main's only), as its
+  channel's F-Droid repository offers it, by the app's id in that channel
+  (the flake's `publish.apks`, `id`); fetched once by the workflow's
+  `apks` job and handed to every emulator's job;
   **`await-apk.sh`**: an APK from a `build` run still going, as soon as it
   is uploaded.
 - **`ios-build.sh`**: each iPhone app as nix builds it at the commit:
@@ -310,8 +315,13 @@ still open, and the iPhone's job asks again as it starts (it may have
 waited an hour for a Mac), then does nothing, and nothing is compared.
 
 - **On main**: Android once `build` has ended and its deploy has
-  succeeded, from that run's APKs: an APK is there only when its inputs
-  moved and it went to F-Droid. The iPhone once `ios` has ended, each
+  succeeded, from that run's APKs, the `.unstable` twins (main deploys the
+  unstable channel, [docs/releasing.md](../../docs/releasing.md)): an APK
+  is there only when its inputs moved and it went to the unstable F-Droid
+  repository. Nothing assumes the id: the driver reads it from the APK.
+  A commit that also moved the scripts has its Android shots taken by its
+  push's own run instead (below), from the same build run's APKs, so the
+  two runs' jobs do not cancel each other. The iPhone once `ios` has ended, each
   app whose hash moved built by nix at that commit: the cache's if its
   build has not moved, and the kernel's simulator slice the one `ios`
   built for its tests and pushed. The
@@ -339,22 +349,35 @@ waited an hour for a Mac), then does nothing, and nothing is compared.
   that can only read: a fork's PR gets its Android shots only.
 
 - **When only the screenshots' scripts change** (`.github/screens/`, an
-  app's `demo/`, the workflow) on main, every app is taken again: each
-  APK as the F-Droid repository's index offers it (`published.sh`), and
-  each desktop window as nix builds main, which, as its inputs have not
-  moved, is the cache's; each iPhone app whose hash moved (a change to
-  Android's scripts moves none). Running the workflow by hand does the
-  same, every iPhone app included. Run by hand with a PR's number (`pr`),
+  app's `demo/`, the workflow) on main, every app is taken again, at that
+  commit: each APK as the push's own `build` run makes it, awaited
+  (`published.sh`); an app whose APK that run skipped, its inputs built
+  before, as the unstable F-Droid repository offers it, which is the build
+  of those same inputs; an app whose build was cancelled by a newer push is
+  left to that push's run. Each desktop window as nix builds main, which, as
+  its inputs have not moved, is the cache's; each iPhone app whose hash
+  moved (a change to Android's scripts moves none). Running the workflow
+  by hand does the same, every iPhone app included. This once took the
+  stable F-Droid repository's APK, which since the channels split is the
+  last release's, not main's: from money's port (39eab3a0, app-screens
+  43622627318) every one of its Android jobs failed on the pre-port APK,
+  which has no walk to say ready. Run by hand with a PR's number (`pr`),
   it takes that PR's iPhone shots at its head, of each app whose hash
   moved, and updates its comment: after a Mac's run failed, or to try the
   workflow as a branch has it. Run by hand on a branch with `dry`, it
   takes every app as by hand, with that branch's workflow and scripts and
   its commit's iPhone apps (and its commit's APKs, those `build` made at
   that commit, awaited if it is making them: a build there that is missing,
-  cancelled or failed fails the run; only an app whose APK build was
-  skipped as already built takes F-Droid's), and publishes nothing (no `screens` branch, no
+  cancelled or failed fails the run), and publishes nothing (no `screens` branch, no
   cache): its artifacts are what it took. A `workflow_run` always runs
   main's file, so a change to it is tried this way before it is merged.
+- **A release** (a `v*` tag): Android only, once the tag's `build` has
+  ended, from the stable APKs it built under the apps' own ids, the APKs
+  the release attaches and the stable F-Droid repository offers. They are
+  the run's artifacts and published nowhere: the `screens` branch is
+  main's, and main has already taken the tag's commit. The iPhone and the
+  desktop are not taken again: nix builds the same commit alike in either
+  channel.
 
 ## The larger screens
 

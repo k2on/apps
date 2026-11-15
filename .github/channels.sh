@@ -24,6 +24,8 @@
 #                                       APKs (each the channel's package
 #                                       and key), as GITHUB_OUTPUT lines
 #   channels.sh version-name            the APKs' version name
+#   channels.sh repo-path CHANNEL       the channel's F-Droid repository,
+#                                       under the site (fdroid/repo)
 #   channels.sh deploy SITE_DIR         the whole site in SITE_DIR: needs
 #                                       CHANNEL, PAGES (every page of the
 #                                       plan), PAGES_DIR (this run's
@@ -57,7 +59,7 @@ plan() {
   # Each APK as the channel builds it: the unstable twin's package and key
   # in place of the app's own, and an app not in the channel left out.
   echo "apks=$(jq -c --arg c "$c" '[.apks[]
-    | if $c == "unstable" then select(.unstable.package) | .package = .unstable.package | .key = .unstable.key
+    | if $c == "unstable" then select(.unstable.package) | .package = .unstable.package | .key = .unstable.key | .id = .unstable.id
       else select(.stable) end
     | del(.stable, .unstable)]' "$publish")"
 }
@@ -111,6 +113,7 @@ repo_path() {
   case $1 in
     stable) echo fdroid/repo ;;
     unstable) echo fdroid/unstable/repo ;;
+    *) echo "channels.sh: no channel $1" >&2; exit 2 ;;
   esac
 }
 
@@ -227,6 +230,7 @@ case "${1:-}" in
   channel) channel ;;
   plan) plan "$2" ;;
   version-name) version_name ;;
+  repo-path) repo_path "$2" ;;
   deploy) deploy "$2" ;;
-  *) echo "usage: channels.sh channel | plan PUBLISH.json | version-name | deploy SITE_DIR" >&2; exit 2 ;;
+  *) echo "usage: channels.sh channel | plan PUBLISH.json | version-name | repo-path CHANNEL | deploy SITE_DIR" >&2; exit 2 ;;
 esac

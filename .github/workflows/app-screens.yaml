@@ -1,7 +1,8 @@
-# The apps' screenshots: Android's from the APKs build.yaml put in the
-# F-Droid repository, the iPhone's from nix's build of the commit ios.yaml
-# sent to TestFlight, the desktop window's from nix's build of the commit
-# build.yaml builds; each signed in to its own server run here with
+# The apps' screenshots, each of the commit pushed: Android's from the APKs
+# build.yaml built at it (on main the `.unstable` twins it deploys to the
+# unstable F-Droid repository), the iPhone's from nix's build of the
+# commit, the desktop window's from nix's build of the commit build.yaml
+# builds; each signed in to its own server run here with
 # something in it, and driven from outside as a person would. The how is in
 # .github/screens/apps.md.
 #
@@ -25,7 +26,8 @@
 # to fetch what ios built and pushed to the cache: the kernel's simulator
 # slice and, on a PR, the app; one kernel per commit). Android takes
 # that run's own APKs: one is there only when its inputs moved and it was
-# built (and so offered on F-Droid). The iPhone takes nix's build at that
+# built (on main the `.unstable` twin, and so offered on the unstable
+# F-Droid repository). The iPhone takes nix's build at that
 # run's commit, of each app whose shots would differ from those kept: what
 # they are taken from hashed on Linux (ios-inputs.sh: the app's store path,
 # evaluated, and what takes the shots), and held against the hash kept
@@ -37,10 +39,18 @@
 # the branch has of it stays.
 #
 # **The screenshots' own scripts changed.** A push to main that moves only
-# what takes the shots (.github/screens/, an app's screens/, this file)
-# takes every app again: each APK as the F-Droid repository offers it (its
-# index's newest for the package), each iPhone app as nix builds main (of
+# what takes the shots (.github/screens/, an app's demo/, this file)
+# takes every app again: each APK as build.yaml builds it at that commit
+# (published.sh: awaited from the push's own build run; an app whose APK
+# that run skipped as built before, as the unstable F-Droid repository
+# offers it, the same inputs' build), each iPhone app as nix builds main (of
 # those whose hash moved: an Android script moves none).
+#
+# **A release** (a `v*` tag's build) is taken on Android only, from the
+# stable APKs that run built under the apps' own ids, the release's: the
+# shots are kept as the run's artifacts and published nowhere (the
+# `screens` branch is main's). The iPhone and the desktop are built by nix
+# from the commit alike in either channel, and main has taken them there.
 #
 # **A pull request no longer open** is taken nothing of: a run queued behind
 # others (a Mac's queue is often an hour) can start after its PR was merged
@@ -101,7 +111,7 @@ on:
       # The shots and what the servers are seeded with.
       - "*/demo/**"
       - ".github/workflows/app-screens.yaml"
-  # By hand: every app again, from what was published. Or, given a pull
+  # By hand: every app again, at the commit. Or, given a pull
   # request's number, that PR's iPhone shots, at its head, of each app whose
   # hash moved (none of its build's runs needed): after a Mac's run failed,
   # or to try this file as a branch has it, on that branch's PR.
@@ -135,12 +145,13 @@ concurrency:
 
 env:
   # The run whose builds are taken; none for a push or a run by hand, which
-  # take what was published.
+  # take build's run at their commit (`apks`).
   RUN: ${{ github.event.workflow_run.id }}
   WORKFLOW: ${{ github.event.workflow_run.name }}
   BRANCH: ${{ github.event.workflow_run.head_branch }}
   SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
-  FDROID: https://k2on.github.io/apps/fdroid/repo
+  # The site the F-Droid repositories are under (.github/channels.sh).
+  SITE: https://k2on.github.io/apps
   # `true` when the code this run builds and runs is this repository's own
   # (see the top): a push to main or a run by hand (by someone who can
   # write here; a PR's by hand only of a branch here, `which` says), or a
@@ -150,7 +161,8 @@ env:
 
 jobs:
   # What there is to take, and what for: `release` (main, published),
-  # `pr` (a pull request's, compared), or nothing.
+  # `pr` (a pull request's, compared), `tag` (a release's APKs, kept as
+  # artifacts), or nothing.
   which:
     if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion != 'cancelled'
     runs-on: ubuntu-latest
@@ -173,6 +185,9 @@ jobs:
       android-json: ${{ steps.which.outputs.android-json }}
       ios-json: ${{ steps.which.outputs.ios-json }}
       desktop-json: ${{ steps.which.outputs.desktop-json }}
+      # Each Android app's applicationId in each channel, as JSON
+      # ({"<app>": {"stable": id, "unstable": id}}): published.sh's.
+      apk-ids: ${{ steps.which.outputs.apk-ids }}
       # Each iPhone app taken, and the hash of what it is taken from
       # (ios-inputs.sh), as a JSON object: kept beside its shots.
       ios-inputs: ${{ steps.which.outputs.ios-inputs }}
@@ -191,7 +206,7 @@ jobs:
       - uses: DeterminateSystems/nix-installer-action@main
       - name: The apps
         run: |
-          nix eval --json .#publish.x86_64-linux --apply 'p: { android = map (a: a.name) p.apks; ios = map (a: a.name) p.ios; desktop = map (a: a.name) (p.desktop or [ ]); }' > "$RUNNER_TEMP/apps.json"
+          nix eval --json .#publish.x86_64-linux --apply 'p: { android = map (a: a.name) p.apks; ios = map (a: a.name) p.ios; desktop = map (a: a.name) (p.desktop or [ ]); ids = builtins.listToAttrs (map (a: { name = a.name; value = { stable = a.id or null; unstable = a.unstable.id or null; }; }) p.apks); }' > "$RUNNER_TEMP/apps.json"
           cat "$RUNNER_TEMP/apps.json"
       - id: which
         env:
@@ -223,6 +238,7 @@ jobs:
               echo "mode=$mode"; echo "pr=$pr"; echo "sha=$sha"; echo "branch=$branch"
               echo "android=$android"; echo "ios=$ios"; echo "desktop=$desktop"; echo "ios-inputs=$inputs"
               echo "day=$(date -u +%F)"
+              echo "apk-ids=$(jq -c '.ids' "$RUNNER_TEMP/apps.json")"
               lists
             } | tee -a "$GITHUB_OUTPUT"
           }
@@ -293,9 +309,9 @@ jobs:
             said
             exit 0
           fi
-          # The scripts moved, or a run by hand: every app, from what was
-          # published; the iPhone's, by hand every one, after a push those
-          # whose hash moved.
+          # The scripts moved, or a run by hand: every app, at the commit
+          # (Android's APKs build's there, published.sh); the iPhone's, by
+          # hand every one, after a push those whose hash moved.
           if [ -z "$RUN" ]; then
             mode=release
             for a in $(jq -r '.android[]' "$RUNNER_TEMP/apps.json"); do if shots "$a"; then android="$android $a"; fi; done
@@ -316,6 +332,11 @@ jobs:
               deploy=$(gh api "repos/$repo/actions/runs/$RUN/jobs" --paginate --jq '.jobs[] | select(.name == "deploy") | .conclusion')
               [ "$deploy" = success ] || mode=
             fi
+          elif [ "$EVENT" = push ] && [ "$HEAD_REPO" = "$repo" ] && [[ "$BRANCH" == v* ]]; then
+            # A tag's (build runs on a push only to main and to `v*` tags):
+            # its build's stable APKs, the release's, once that run has
+            # ended; kept as artifacts, published nowhere.
+            mode=tag
           else
             pr=${PR:-$(gh api "repos/$repo/pulls?state=open&head=$OWNER:$BRANCH" --jq '.[0].number // empty')}
             mode=${pr:+pr}
@@ -338,18 +359,31 @@ jobs:
             fi
           fi
           made=
-          if [ "$WORKFLOW" = build ] && [ "$ACTION" = completed ] && [ "$mode" = release ]; then
+          if [ "$WORKFLOW" = build ] && [ "$ACTION" = completed ] && { [ "$mode" = release ] || [ "$mode" = tag ]; }; then
             made=$(gh api "repos/$repo/actions/runs/$RUN/artifacts" --paginate --jq '.artifacts[] | select(.expired | not) | .name')
+          fi
+          # A commit on main that moved the scripts has an app-screens run of
+          # its own (the push), which takes every app's APK from this same
+          # build run as it uploads them (published.sh). Taken again here,
+          # each Android job would cancel that run's (one per app and device
+          # on a branch), so they are left to it.
+          if [ -n "$made" ] && [ "$mode" = release ]; then
+            pushed=$(gh api "repos/$repo/actions/workflows/app-screens.yaml/runs?event=push&branch=main&head_sha=$SHA" --jq '.total_count' 2> /dev/null || echo 0)
+            if [ "${pushed:-0}" -gt 0 ]; then
+              echo "${SHA:0:7} moved the screenshots' scripts: its push's app-screens run takes its Android shots"
+              made=
+            fi
           fi
           # Every app with shots, and of those what this run built: an APK
           # in build's run; each iPhone app whose hash moved once ios ends,
-          # and every desktop window as build starts, as nix has it.
+          # and every desktop window as build starts, as nix has it. A
+          # tag's, its APKs only (the top says why).
           if [ -n "$mode" ]; then
             for a in $(jq -r '.android[]' "$RUNNER_TEMP/apps.json"); do
               shots "$a" || continue
               # Main's: what the ended run built. A PR's: every app, from the
               # run's start, each waiting for its APK (or for none).
-              if [ "$WORKFLOW" = build ] && [ "$ACTION" = completed ] && [ "$mode" = release ] && grep -qx "apk-$a" <<< "$made"; then android="$android $a"; fi
+              if [ "$WORKFLOW" = build ] && [ "$ACTION" = completed ] && { [ "$mode" = release ] || [ "$mode" = tag ]; } && grep -qx "apk-$a" <<< "$made"; then android="$android $a"; fi
               if [ "$WORKFLOW" = build ] && [ "$ACTION" = requested ] && [ "$mode" = pr ]; then android="$android $a"; fi
             done
             # The iPhone's only for main and for a pull request into main: a
@@ -358,20 +392,23 @@ jobs:
             # runs. Android's and the desktop's (Linux) are shot for every
             # one. And only of a branch of this repository's: a fork's flake
             # is not even evaluated.
-            if [ "$WORKFLOW" = ios ] && [ "$ACTION" = completed ] && [ "$HEAD_REPO" = "$repo" ] && { [ "$mode" != pr ] || [ "$base" = main ]; }; then
+            if [ "$WORKFLOW" = ios ] && [ "$ACTION" = completed ] && [ "$HEAD_REPO" = "$repo" ] && [ "$mode" != tag ] && { [ "$mode" != pr ] || [ "$base" = main ]; }; then
               # shellcheck disable=SC2046
               iphone $(iphones)
             fi
             for a in $(jq -r '.desktop[]' "$RUNNER_TEMP/apps.json"); do
-              if [ "$WORKFLOW" = build ] && [ "$ACTION" = requested ] && desktop "$a"; then desktop="$desktop $a"; fi
+              if [ "$WORKFLOW" = build ] && [ "$ACTION" = requested ] && [ "$mode" != tag ] && desktop "$a"; then desktop="$desktop $a"; fi
             done
           fi
           said
 
   # With no run to take them from (a push, a run by hand): every app's
   # APK fetched once (published.sh), here, and handed to the emulators'
-  # jobs. A dry run's are build's at the commit, waited for while that run
-  # makes them: one job waiting rather than eighteen, which held every
+  # jobs: build's at the commit, waited for while that run makes them (on
+  # main the push's own build run, its `.unstable` twins). Before, a push
+  # to main took the stable F-Droid repository's, the last release's and not
+  # main's, and every Android job of 43622627318 failed waiting for a ready
+  # signal that APK has not got. One job waiting rather than eighteen, which held every
   # Linux runner while build's own APK jobs queued for one (twenty-two
   # minutes in app-screens 42959400546) and asked the API for its
   # artifacts until it refused them.
@@ -435,18 +472,20 @@ jobs:
     env:
       APPS: ${{ needs.which.outputs.android }}
       GH_TOKEN: ${{ github.token }}
-      # A dry run: the APKs build made at the branch's commit, where it made any.
-      # A run by hand on any branch but main is one, `dry` said or not: F-Droid's
-      # APKs are main's, and have no ready signal to wait for (43159033586,
-      # dispatched on a branch without `dry`: every Android job failed so).
-      COMMIT: ${{ (inputs.dry == true || (github.event_name == 'workflow_dispatch' && github.ref_name != 'main')) && github.sha || '' }}
+      # The commit's APKs, build's run there on its branch (published.sh):
+      # main's push, or a branch's run by hand, dry or not (43159033586, by
+      # hand on a branch, took F-Droid's, main's, and every Android job
+      # failed waiting for a ready signal they have not got).
+      COMMIT: ${{ github.sha }}
+      REF: ${{ github.ref_name }}
+      IDS: ${{ needs.which.outputs.apk-ids }}
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
       # What was fetched listed beside it, so the artifact is there even
-      # when F-Droid offers none of the apps.
-      # A dry run whose build failed or was cancelled for an app fails here
+      # when none of the apps' APKs was.
+      # A run whose build failed or was cancelled for an app fails here
       # (published.sh), after the others are fetched and uploaded: their
       # shots are still taken.
       - run: |
@@ -510,8 +549,9 @@ jobs:
       - name: Free disk space
         run: nohup sudo rm -rf /usr/share/dotnet /opt/ghc /opt/hostedtoolcache/CodeQL /usr/local/share/boost > /dev/null 2>&1 &
 
-      # The APKs the run built — what F-Droid offers, or the PR's — each in
-      # apk-<app>/; with no run, each as the F-Droid repository offers it.
+      # The APKs the run built — main's (the `.unstable` twins it deployed),
+      # a tag's (the release's) or the PR's — each in apk-<app>/; with no
+      # run, build's at the commit (`apks`).
       - if: env.RUN != '' && env.EARLY != 'true'
         uses: actions/download-artifact@v4
         with:

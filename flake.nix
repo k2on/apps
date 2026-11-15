@@ -2352,14 +2352,18 @@
               # An APK and its unstable twin (nix/channels.nix): build.yaml
               # builds the stable one on a tag and a pull request, the
               # unstable one on main (.github/channels.sh `plan`).
+              # `id` is each one's applicationId, as F-Droid offers it
+              # (app-screens.yaml's published.sh looks it up by that).
               apk = name: app: { first ? [ ] }: {
                 inherit name first;
                 package = "${name}-apk";
                 file = "${name}.apk";
+                id = app.appid;
                 key = key (app.apk.overrideAttrs (_: { versionFlags = [ ]; }));
                 stable = channels.enabled name "stable";
                 unstable = lib.optionalAttrs (channels.enabled name "unstable") {
                   package = "${name}-unstable-apk";
+                  id = app.appid + channels.suffix;
                   key = key (app.apkUnstable.overrideAttrs (_: { versionFlags = [ ]; }));
                 };
               };
