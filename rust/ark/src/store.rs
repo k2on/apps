@@ -462,6 +462,12 @@ impl Store {
         self.hash_of(self.tables.iter().map(|r| r.digest))
     }
 
+    /// The state hash of this schema's store with no rows: what a replica
+    /// that has received nothing holds.
+    pub fn empty_state(&self) -> StateHash {
+        self.hash_of(self.tables.iter().map(|_| [0; 32]))
+    }
+
     /// What undoing `changes` does to the tables' digests, summed per
     /// table: worked out once for changes [`Store::hash_beside`] is asked
     /// past many times.

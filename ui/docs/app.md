@@ -1142,7 +1142,13 @@ changes, `.github/compat-check.sh`'s harken part grows with it.
    searches as a durable local row (which needs a place's local
    instance, not built).
 4. Generated targets, the old clients deleted: not started.
-5. Screenshots: not started.
+5. Screenshots: not started. The open issue it waited on is found and
+   fixed: a hub opened on `harken_seed::seeded_disk` (a log standing at
+   its start on a snapshot of rows) took a device at cursor 0 for one
+   that had it all, and the device took the fill's first part at seq 0
+   for one it had; both now compare the state (`Store::empty_state`), so
+   a seeded hub fills a device on its first hello
+   (harken-app's tests/seeded_hub.rs).
 
 ## Layers
 

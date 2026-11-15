@@ -908,7 +908,12 @@ impl Peer {
     /// that hash there, the snapshot at the head when it does not — a fill's
     /// first part, of about `most` bytes, for the durable space.
     fn serve(&mut self, cursor: Seq, hash: Option<EntryHash>, most: usize, o: &mut Out) {
+        // A log that stands at its start on a snapshot of rows (a seeded
+        // library's) is not where a replica at the start is: that one has
+        // nothing, and is filled.
+        let seeded = cursor == 0 && self.log().base_seq() == 0 && self.log().base().state != self.store.empty_state();
         let has = self.foreign.is_none_or(|f| cursor >= f)
+            && !seeded
             && match hash {
                 Some(h) => self.log().has(cursor, &h),
                 None => cursor == 0 && self.log().base_seq() == 0,
@@ -1315,7 +1320,10 @@ impl Peer {
         let (n, h) = self.log().head();
         let asked = self.more.take();
         if p.first {
-            if self.fill.is_none() && self.log().has(p.seq, &p.hash) && (p.seq == n || self.space == Space::Durable) {
+            // At the chain's start with other rows than these: a seeded
+            // log's snapshot (`serve`), taken.
+            let seeded = p.seq == 0 && p.state != self.store.state_hash();
+            if self.fill.is_none() && !seeded && self.log().has(p.seq, &p.hash) && (p.seq == n || self.space == Space::Durable) {
                 return;
             }
         } else if self.fill.is_none() || asked.is_none() || asked != p.from() {
