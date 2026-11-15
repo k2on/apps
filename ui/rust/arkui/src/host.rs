@@ -522,12 +522,26 @@ where
             }
             Msg::Swallow => Task::none(),
         };
+        self.follow();
         let said = self.said.pop();
         self.said.clear();
         if let Some(said) = said {
             self.toast.heard(&said);
         }
         Task::batch([task, self.devices.after()])
+    }
+
+    /// What the window cannot follow: a page the app opens (a bank's
+    /// sign-in) shown in the system's browser, taken as closed once opened.
+    fn follow(&mut self) {
+        if self.opening {
+            return;
+        }
+        let now = self.now_ms();
+        if let Some((url, opened)) = self.app().opens(&self.seen(), now) {
+            ark_auth::client::open_browser(&url);
+            self.host(|h, place| h.with(place, |app, cx| app.take(opened, cx)));
+        }
     }
 
     /// The replica read: the window on its server over it, as the login
