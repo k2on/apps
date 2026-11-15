@@ -1002,7 +1002,8 @@ rec {
         ];
         features = {
           "default" = [ "server" ];
-          "server" = [ "ark-auth/server" "dep:ark-push" "dep:anyhow" "dep:axum" "dep:tokio" "dep:tower-http" ];
+          "push" = [ "server" "dep:ark-push" ];
+          "server" = [ "ark-auth/server" "dep:anyhow" "dep:axum" "dep:tokio" "dep:tower-http" ];
         };
       };
       "ark-router" = rec {

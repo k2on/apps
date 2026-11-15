@@ -193,6 +193,9 @@ pub fn session_of<W: Desktop>(peer: &Peer, live: Option<&Live>, today: &str) -> 
         leaves: live.login.is_some(),
         // A code for another device is the phones' to make.
         adds_devices: false,
+        // The desktop's addresses are rooted nowhere, and nothing is
+        // prepared ahead for its window.
+        ..Default::default()
     }
 }
 

@@ -187,7 +187,8 @@ rec {
     [ ] (lib.splitString "/" p));
   # The device modules an app takes on: the crates its app crate
   # (`<dir>/app`) depends on, directly or through its other path
-  # dependencies (normal and build, never dev), whose Cargo.toml says
+  # dependencies (normal and build, never dev, never one a feature turns
+  # on: arkui's desktop devices are the desktop's, not every app's), whose Cargo.toml says
   # `[package.metadata.ark] module` — what ui/prebuild.py reads of `cargo
   # metadata`, read here off the same manifests while nix evaluates. Each
   # by its crate's name, with its module.toml.
@@ -196,7 +197,7 @@ rec {
       manifest = dir: builtins.fromTOML (builtins.readFile (self + "/${dir}/Cargo.toml"));
       paths = dir:
         let m = manifest dir; in
-        lib.concatMap (d: lib.optional (builtins.isAttrs d && d ? path) (normal "${dir}/${d.path}"))
+        lib.concatMap (d: lib.optional (builtins.isAttrs d && d ? path && !(d.optional or false)) (normal "${dir}/${d.path}"))
           (builtins.attrValues ((m.dependencies or { }) // (m.build-dependencies or { })));
       reached = builtins.genericClosure {
         startSet = [{ key = crateDir a; }];
