@@ -417,16 +417,6 @@ rec {
       # File a bug if you depend on any for non-debug work!
       debug = internal.debugCrate { inherit packageId; };
     };
-    "money-iced" = rec {
-      packageId = "money-iced";
-      build = internal.buildRustCrateWithFeatures {
-        packageId = "money-iced";
-      };
-
-      # Debug support which might change between releases.
-      # File a bug if you depend on any for non-debug work!
-      debug = internal.debugCrate { inherit packageId; };
-    };
     "money-seed" = rec {
       packageId = "money-seed";
       build = internal.buildRustCrateWithFeatures {
@@ -2277,21 +2267,61 @@ rec {
         src = lib.cleanSourceWith { filter = sourceFilter;  src = ../ui/rust/arkui; };
         dependencies = [
           {
+            name = "ark";
+            packageId = "ark";
+            optional = true;
+          }
+          {
             name = "ark-app";
             packageId = "ark-app";
             optional = true;
+          }
+          {
+            name = "ark-auth";
+            packageId = "ark-auth";
+            optional = true;
+            usesDefaultFeatures = false;
+          }
+          {
+            name = "ark-clipboard";
+            packageId = "ark-clipboard";
+            optional = true;
+            features = [ "desktop" ];
           }
           {
             name = "ark-format";
             packageId = "ark-format";
           }
           {
+            name = "ark-peer";
+            packageId = "ark-peer";
+            optional = true;
+            usesDefaultFeatures = false;
+          }
+          {
             name = "ark-router";
             packageId = "ark-router";
           }
           {
+            name = "ark-scanner";
+            packageId = "ark-scanner";
+            optional = true;
+            features = [ "desktop" ];
+          }
+          {
+            name = "ark-secure-store";
+            packageId = "ark-secure-store";
+            optional = true;
+            features = [ "desktop" ];
+          }
+          {
             name = "arkui-glyphs";
             packageId = "arkui-glyphs";
+          }
+          {
+            name = "arkui-shots";
+            packageId = "arkui-shots";
+            optional = true;
           }
           {
             name = "chrono";
@@ -2319,6 +2349,12 @@ rec {
             name = "raw-window-handle";
             packageId = "raw-window-handle";
             target = { target, features }: ("linux" == target."os" or null);
+          }
+          {
+            name = "serde_json";
+            packageId = "serde_json";
+            optional = true;
+            features = [ "raw_value" ];
           }
           {
             name = "ureq";
@@ -2354,8 +2390,11 @@ rec {
         ];
         features = {
           "app" = [ "dep:ark-app" ];
+          "clipboard" = [ "host" "dep:ark-clipboard" ];
+          "host" = [ "app" "dep:ark" "dep:ark-peer" "dep:ark-auth" "dep:ark-secure-store" "dep:arkui-shots" "dep:serde_json" ];
+          "scanner" = [ "host" "dep:ark-scanner" ];
         };
-        resolvedDefaultFeatures = [ "app" ];
+        resolvedDefaultFeatures = [ "app" "clipboard" "host" "scanner" ];
       };
       "arkui-glyphs" = rec {
         crateName = "arkui-glyphs";
@@ -15253,99 +15292,6 @@ rec {
             name = "serde_json";
             packageId = "serde_json";
             features = [ "raw_value" ];
-          }
-        ];
-        features = {
-        };
-        resolvedDefaultFeatures = [ "demo" ];
-      };
-      "money-iced" = rec {
-        crateName = "money-iced";
-        version = "0.1.0";
-        edition = "2021";
-        crateBin = [
-          {
-            name = "money-iced";
-            path = "src/main.rs";
-            requiredFeatures = [ ];
-          }
-        ];
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../money/iced; };
-        dependencies = [
-          {
-            name = "ark";
-            packageId = "ark";
-          }
-          {
-            name = "ark-app";
-            packageId = "ark-app";
-          }
-          {
-            name = "ark-auth";
-            packageId = "ark-auth";
-            usesDefaultFeatures = false;
-          }
-          {
-            name = "ark-clipboard";
-            packageId = "ark-clipboard";
-            features = [ "desktop" ];
-          }
-          {
-            name = "ark-peer";
-            packageId = "ark-peer";
-            usesDefaultFeatures = false;
-          }
-          {
-            name = "ark-secure-store";
-            packageId = "ark-secure-store";
-            features = [ "desktop" ];
-          }
-          {
-            name = "arkui";
-            packageId = "arkui";
-            features = [ "app" ];
-          }
-          {
-            name = "arkui-shots";
-            packageId = "arkui-shots";
-          }
-          {
-            name = "iced";
-            packageId = "iced";
-            usesDefaultFeatures = false;
-            features = [ "winit" "wgpu" "tiny-skia" "crisp" "web-colors" "thread-pool" "linux-theme-detection" "x11" "wayland" "a11y" "smol" "svg" "image" "advanced" "fira-sans" ];
-          }
-          {
-            name = "money-app";
-            packageId = "money-app";
-          }
-          {
-            name = "money-core";
-            packageId = "money-core";
-            features = [ "demo" ];
-          }
-          {
-            name = "money-seed";
-            packageId = "money-seed";
-          }
-        ];
-        devDependencies = [
-          {
-            name = "iced_test";
-            packageId = "iced_test";
-          }
-          {
-            name = "money-server";
-            packageId = "money-server";
-          }
-          {
-            name = "tempfile";
-            packageId = "tempfile";
-          }
-          {
-            name = "tokio";
-            packageId = "tokio";
-            features = [ "rt-multi-thread" ];
           }
         ];
         features = {

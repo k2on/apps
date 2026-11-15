@@ -80,7 +80,7 @@
       channelsOf = pkgs: import ./nix/channels.nix { inherit lib pkgs self; };
       arkApps = [ "money" "revelation" ];
 
-      rustDirs = [ "rust" "ui/rust" "modules" "harken/domain" "harken/app" "harken/player" "harken/server" "harken/iced" "harken/ffi" "money/core" "money/demo" "money/app" "money/iced" "money/server" "harken/demo" ];
+      rustDirs = [ "rust" "ui/rust" "modules" "harken/domain" "harken/app" "harken/player" "harken/server" "harken/iced" "harken/ffi" "money/core" "money/demo" "money/app" "money/server" "harken/demo" ];
       # The typed Kotlin and Swift `arkdb gen` writes, which harken/ffi's
       # tests hold to its domain (`tests/gen.rs`).
       genDirs = [
@@ -128,10 +128,9 @@
             # toolchain, whichever target's it is (nix/rust.nix): one
             # derivation each for every Android ABI, Apple slice and wasm.
             buildRust = rust;
-            # Each Ark app's generated crates (its generator's main), and
-            # its entry points built from the app's directory, beside the
-            # icon they draw (nix/ark-app.nix's `entrySources`).
-            extraCrates = lib.foldl' (acc: dir: acc // arkApp.crates pkgs cargoMetadata dir // arkApp.entrySources cargoNix.internal.crates dir) { } arkApps;
+            # Each Ark app's generated crates (its generator's main, its
+            # phones' library, its page and its window: nix/ark-app.nix).
+            extraCrates = lib.foldl' (acc: dir: acc // arkApp.crates pkgs cargoMetadata dir) { } arkApps;
           };
           # The root crate `packageId` of the workspace, for the host unless
           # `pkgs` and `rust` say another target; its binaries under `bin/`,
@@ -145,7 +144,7 @@
           # first on NixOS (nix/gpu-env.sh).
           desktopOverrides = lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux (
             let xkb = _: { nativeBuildInputs = [ pkgs.pkg-config ]; buildInputs = [ pkgs.libxkbcommon ]; }; in
-            lib.genAttrs [ "smithay-client-toolkit" "xkbcommon" "arkui" "arkui-shots" "money-iced" "harken-iced" "money-app" "docs" ] (_: xkb)
+            lib.genAttrs [ "smithay-client-toolkit" "xkbcommon" "arkui" "arkui-shots" "money-desktop" "harken-iced" "money-app" "docs" ] (_: xkb)
           );
           crossPkgs = crossSystem: importPkgs {
             localSystem = pkgs.stdenv.buildPlatform.system;
@@ -187,14 +186,12 @@
               # Compiled from a tree that is the crate's directory alone, at
               # the path it has in `dirs`: so `CARGO_MANIFEST_DIR` is where
               # the run finds it, and an edit elsewhere compiles nothing.
-              built = { packageId, member, features ? [ "default" ], doctests ? false }:
+              built = { packageId, member, features ? [ "default" ], doctests ? false, ... }:
                 let name' = lib.replaceStrings [ "-" ] [ "_" ] packageId; in
                 build {
                   inherit packageId features unified;
                   tests = true;
-                  # An app's entry point with the app's icon and app.toml
-                  # beside it, as `entrySources` builds it.
-                  root = { src = only ([ member ] ++ arkApp.entryFiles arkApps member); workspace_member = member; };
+                  root = { src = only [ member ]; workspace_member = member; };
                   # rustdoc compiles and runs the doctests against the
                   # library and its dependencies as the build has them.
                   rootAttrs = old: rootAttrs old // lib.optionalAttrs doctests {
@@ -424,7 +421,9 @@
               ''
             else built;
           harken-iced = icedApp "harken-iced";
-          money-iced = icedApp "money-iced";
+          # money's window, generated from money/app.toml (nix/ark-app.nix's
+          # `desktopSrc`): arkui's `DesktopHost` over money-app.
+          money-desktop = icedApp "money-desktop";
 
           # The browser (ui/docs/app.md, "The Layers"): an app's Leptos
           # client (`<app>/web`, on arkui-web) compiled to wasm32 and bound by
@@ -1796,7 +1795,7 @@
           # One member's tests (and harken-iced's again with its demo, a
           # feature), run from a tree that is what any of them reads.
           memberTests = m: crateTests {
-            name = m.packageId + lib.optionalString (m ? features) "-demo";
+            name = m.packageId + (m.suffix or (lib.optionalString (m ? features) "-demo"));
             unified = if m ? features then demoUnified else checksUnified;
             crates = [ m ];
             dirs = rustDirs ++ genDirs ++ [ "spec/vectors" "spec/README.md" "spec/AUTHORING.md" ];
@@ -1804,7 +1803,10 @@
             nativeBuildInputs = [ pkgs.ffmpeg-headless ];
             rootAttrs = rustcHook { inherit (m) packageId; };
           };
-          demos = map (app: { packageId = "${app}-iced"; member = "${app}/iced"; features = [ "default" "demo" ]; }) [ "harken" "money" ];
+          demos = map (app: { packageId = "${app}-iced"; member = "${app}/iced"; features = [ "default" "demo" ]; }) [ "harken" ]
+            # And arkui with the desktop's host and devices, which no member
+            # turns on: an app's generated window does (nix/ark-app.nix).
+            ++ [{ packageId = "arkui"; member = "ui/rust/arkui"; features = [ "default" "host" "clipboard" "scanner" ]; suffix = "-host"; }];
           # One member lint-clean, as `cargo clippy --all-targets -- -D
           # warnings`: its libraries and binaries, and again as its tests
           # build them.
@@ -1962,7 +1964,7 @@
             # whoever they say.
             harken-serve = pkgs.callPackage ./harken/server/nix/serve.nix { inherit harken-server; };
             inherit harken-iced docs docs-web screens-ffmpeg screens-python xcodegen;
-            inherit money-iced money-web money-server;
+            inherit money-desktop money-web money-server;
             inherit money-seed harken-seed harken-covers money-demo harken-demo;
           } // {
             # money's library for its phones (the generated shim over
@@ -2022,7 +2024,7 @@
             # (iced, wgpu, arkui, …), which each desktop job compiled at once.
             screens-crates = allOf "screens-crates" (lib.attrValues (sharedCrates {
               harken = [ harken-iced.crate ];
-              money = [ money-iced.crate ];
+              money = [ money-desktop.crate ];
             }));
             # The fleet on three NixOS machines (docs/plan-fleet.md §3): an
             # interface down, the service restarted, the server crashed, the
@@ -2044,6 +2046,9 @@
             # money's web client builds for wasm32 and is bound
             # (`.github/screens/app-web.sh` photographs it).
             inherit money-web;
+            # And its desktop window, generated from money/app.toml, builds
+            # (`.github/screens/app-desktop.sh` photographs it).
+            inherit money-desktop;
             # And is a real client: signed in through money-server, synced
             # with another device over its socket, offline and back
             # (money/server/nix/web-sync.nix, in Playwright's Chromium).
@@ -2100,8 +2105,9 @@
             # module that declares itself, and ark-ffi registers each device.
             prebuild = pkgs.runCommand "prebuild-check" { nativeBuildInputs = [ pkgs.python3 ]; } ''
               # The modules, their ports (ark-module's src), each app's
-              # app.toml, and ark-ffi's, which registers the phones' devices.
-              cd ${only ([ "ui/prebuild.py" "ui/theme.py" "ui/theme.toml" "modules" "ui/rust/module/src" "rust/ark-ffi/Cargo.toml" ]
+              # app.toml, ark-ffi's, which registers the phones' devices, and
+              # arkui's, whose features are the desktop's.
+              cd ${only ([ "ui/prebuild.py" "ui/theme.py" "ui/theme.toml" "modules" "ui/rust/module/src" "rust/ark-ffi/Cargo.toml" "ui/rust/arkui/Cargo.toml" ]
                 ++ lib.filter (p: builtins.pathExists (./. + "/${p}"))
                   (lib.concatMap (d: [ "${d}/app.toml" "${d}/icon.svg" ]) arkApps))}
               export ARK_CARGO_METADATA=${cargoMetadata}
@@ -2368,10 +2374,13 @@
                 (iphone "harken" "Harken" { })
                 (iphone "money" "Money" { })
               ];
-              # The desktop windows (`<name>-iced`), published nowhere yet but
-              # photographed beside the phones (app-screens.yaml), each built
-              # by nix at the commit.
-              desktop = map (name: { inherit name; package = "${name}-iced"; key = key self.packages.${pkgs.system}."${name}-iced"; }) [ "harken" "money" ];
+              # The desktop windows (harken's `harken-iced`, money's generated
+              # `money-desktop`), published nowhere yet but photographed beside
+              # the phones (app-screens.yaml), each built by nix at the commit.
+              desktop = map ({ name, package }: { inherit name package; key = key self.packages.${pkgs.system}.${package}; }) [
+                { name = "harken"; package = "harken-iced"; }
+                { name = "money"; package = "money-desktop"; }
+              ];
             };
 
           # A laptop's cargo builds four crates at a time, not one a core:
@@ -2382,7 +2391,7 @@
           #
           # On Linux a shell also has the desktop window's library path
           # (nix/gpu-env.sh, as the launcher does), so `cargo run -p
-          # money-iced` reaches the GPU as `nix run .#money-iced` does.
+          # harken-iced` reaches the GPU as `nix run .#harken-iced` does.
           devShells = let
             cargoJobs = { CARGO_BUILD_JOBS = "4"; }
               // lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux { shellHook = "source ${gpuEnv}"; };

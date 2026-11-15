@@ -12,7 +12,7 @@
 # that server with something in it. Its builds are the
 # artifacts `apk-<app>` (build.yaml), for the iPhone `nix build
 # .#<app>-ios-simulator` at the commit (flake.nix, `iosSimulator`), and for
-# the desktop `nix build .#<app>-iced` at the commit (flake.nix, `icedApp`;
+# the desktop `nix build .#<app>-desktop` (or `<app>-iced`) at the commit (flake.nix, `icedApp`;
 # `publish.desktop` the list), photographed with no window by arkui-shots.
 # The larger screens: Android's tablet and Fold each a job beside each
 # phone's, from the same APK; the iPad on the iPhone's Mac, only for an

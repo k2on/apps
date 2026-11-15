@@ -1824,6 +1824,111 @@ def write_web(root, a, out):
         shutil.copyfile(icon, os.path.join(out, name))
 
 
+# ------------------------------------------------------------- the desktop's window
+
+# An Ark app's desktop entry point is generated, never committed, the
+# browser's page's twin: one crate, `<id>-desktop` (its binary the window),
+# written from app.toml (its name, scheme, accent and version, and of
+# `[ffi]` the app's part of its host, its domain and its demo) that runs the
+# part in a window through arkui's `host` (`DesktopHost`), with arkui's
+# feature for the desktop's device of each module its crate depends on whose
+# module.toml says `[desktop]`. nix/ark-app.nix builds it (`<id>-desktop`,
+# flake.nix's `<id>-desktop`), and a cargo build of the window adds it to
+# the workspace at `<app>/.desktop`.
+
+
+def desktop_features(root, a):
+    """arkui's features for the desktop's devices of the app's modules
+    (module.toml's `[desktop]` `feature`), and `host`."""
+    out = ["host"]
+    for n in module_names(root, a):
+        d = module(root, n).get("desktop")
+        if d and d.get("feature"):
+            out.append(d["feature"])
+    return out
+
+
+def desktop_crates(a):
+    """The crates the window names, by their packages' names: the app's,
+    its domain's, its demo's, and the runtime's."""
+    names = [a["crate"], a["ffi"]["domain"].split("::", 1)[0].replace("_", "-")]
+    if a["ffi"].get("demo"):
+        names.append(a["ffi"]["demo"])
+    return list(dict.fromkeys(names + ["ark", "ark-peer"]))
+
+
+def desktop_main(a):
+    """The window's main.rs."""
+    f = a["ffi"]
+    crate = rust_name(a["crate"])
+    demo = f.get("demo")
+    seed = rust_name(demo) if demo else None
+    return f"""//! {HEADER.format(app=a['dir'])}
+//! {a['name']} on the desktop (ui/docs/app.md, "The Desktop's Window"): its
+//! crate's part of its host ({crate}::{f['app']}) run in a window by arkui's
+//! `DesktopHost`, on its server or (`-demo`) its demo. Never committed.
+
+/// {a['name']} on the desktop: its name, scheme, accent, domain and demo.
+struct Desk;
+
+impl arkui::host::Desktop for Desk {{
+    type App = {crate}::{f['app']};
+    const NAME: &'static str = {json.dumps(a['name'])};
+    const SCHEME: &'static str = {json.dumps(a.get('scheme', a['id']))};
+    const PALETTE: arkui::theme::Palette = arkui::tokens::{a['accent'].upper()};
+    const VERSION: &'static str = {json.dumps(a.get('version', '0.1'))};
+    const MARK: &'static str = include_str!("icon.svg");
+
+    fn domain() -> std::sync::Arc<ark::domain::Domain> {{
+        {f['domain']}()
+    }}
+
+    fn demo(today: &str, now_ms: i64) -> ark_peer::Peer {{
+        {f"{seed}::open({seed}::seeded_disk(today, now_ms))" if seed else 'unreachable!("{} has no demo: {} {}", Self::NAME, today, now_ms)'}
+    }}
+}}
+
+fn main() {{
+    if let Err(e) = arkui::host::run::<Desk>() {{
+        eprintln!("{a['id']}-desktop: {{e}}");
+        std::process::exit(1);
+    }}
+}}
+"""
+
+
+def desktop_cargo(root, a):
+    """The window's Cargo.toml, as a member of the workspace at `<app>/.desktop`."""
+    dirs = workspace_dirs(root)
+    here = os.path.join(a["dir"], ".desktop")
+    rel = lambda c: os.path.relpath(dirs[c], here)
+    deps = "".join(f'{c} = {{ path = "{rel(c)}"{", default-features = false" if c == "ark-peer" else ""} }}\n' for c in desktop_crates(a))
+    feats = ", ".join(json.dumps(f) for f in desktop_features(root, a))
+    return f"""# {HEADER.format(app=a['dir'])}
+[package]
+name = "{a['id']}-desktop"
+version = "0.1.0"
+edition = "2021"
+workspace = "{os.path.relpath('rust', here)}"
+
+[[bin]]
+name = "{a['id']}-desktop"
+path = "main.rs"
+
+[dependencies]
+{deps}# The window, and the desktop's devices of the modules {a['crate']} depends on.
+arkui = {{ path = "{rel('arkui')}", features = [{feats}] }}
+"""
+
+
+def write_desktop(root, a, out):
+    """The window's crate (main.rs, Cargo.toml, its icon) into `out`."""
+    write_file(os.path.join(out, "main.rs"), desktop_main(a))
+    write_file(os.path.join(out, "Cargo.toml"), desktop_cargo(root, a))
+    icon = os.path.join(root, a["dir"], a.get("icon", {}).get("svg", "icon.svg"))
+    shutil.copyfile(icon, os.path.join(out, "icon.svg"))
+
+
 # ------------------------------------------------------------- writing
 
 
@@ -2024,6 +2129,16 @@ def check(root):
                 w = module(root, n).get("web")
                 if w is not None and not all(k in w for k in ("device", "port")):
                     problems.append(f"modules/{n}/module.toml's [web] says no `device` or `port`")
+        # The desktop's window is written from app.toml (`desktop_main`) the
+        # same way, and each module's desktop device is a feature of arkui's.
+        if a.get("crate") and has(a, "desktop"):
+            for k in ("app", "domain"):
+                if k not in a.get("ffi", {}):
+                    problems.append(f"{app}/app.toml has desktop and its [ffi] says no `{k}`, which its window is written from")
+            arkui = load(os.path.join(root, "ui", "rust", "arkui", "Cargo.toml"))
+            for f in desktop_features(root, a):
+                if f not in arkui.get("features", {}):
+                    problems.append(f"ui/rust/arkui/Cargo.toml has no feature {f}, which a module's [desktop] names")
         bg = background(a)
         for k, v in bg.items():
             if k not in BACKGROUND:
@@ -2065,7 +2180,7 @@ def check(root):
         # In a checkout (not nix's copy, which has no git): nothing committed
         # where the generated projects and library are.
         if shutil.which("git") and os.path.exists(os.path.join(root, ".git")):
-            for d in ("ios", "android", "ffi", "web", NATIVE, ".ffi", ".web"):
+            for d in ("ios", "android", "ffi", "web", "iced", NATIVE, ".ffi", ".web", ".desktop"):
                 committed = subprocess.run(["git", "-C", root, "ls-files", f"{app}/{d}"], capture_output=True, text=True).stdout.strip()
                 if committed:
                     problems.append(f"{app}/{d} is committed: an Ark app's native projects, phones' library and page are generated (ui/prebuild.py, nix/ark-app.nix)")
@@ -2169,6 +2284,10 @@ def main(argv):
     wb.add_argument("app")
     wb.add_argument("--root", default=REPO)
     wb.add_argument("--out", help="the directory the page's crate and index.html are written in (the app's .web)")
+    dk = sub.add_parser("desktop")
+    dk.add_argument("app")
+    dk.add_argument("--root", default=REPO)
+    dk.add_argument("--out", help="the directory the window's crate is written in (the app's .desktop)")
     fd = sub.add_parser("fdroid")
     fd.add_argument("app")
     fd.add_argument("--root", default=REPO)
@@ -2208,6 +2327,9 @@ def main(argv):
     elif args.cmd == "web":
         a = app_of(args.root, args.app)
         write_web(args.root, a, args.out or os.path.join(args.root, args.app, ".web"))
+    elif args.cmd == "desktop":
+        a = app_of(args.root, args.app)
+        write_desktop(args.root, a, args.out or os.path.join(args.root, args.app, ".desktop"))
     elif args.cmd == "fdroid":
         text = fdroid_yml(app_of(args.root, args.app))
         if args.out:

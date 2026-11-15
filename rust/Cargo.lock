@@ -537,16 +537,24 @@ dependencies = [
 name = "arkui"
 version = "0.1.0"
 dependencies = [
+ "ark",
  "ark-app",
+ "ark-auth",
+ "ark-clipboard",
  "ark-format",
+ "ark-peer",
  "ark-router",
+ "ark-scanner",
+ "ark-secure-store",
  "arkui-glyphs",
+ "arkui-shots",
  "chrono",
  "iced",
  "iced_accessibility",
  "iced_test",
  "image",
  "raw-window-handle",
+ "serde_json",
  "ureq",
  "wayland-client",
  "wayland-protocols",
@@ -4646,28 +4654,6 @@ dependencies = [
  "ark",
  "serde",
  "serde_json",
-]
-
-[[package]]
-name = "money-iced"
-version = "0.1.0"
-dependencies = [
- "ark",
- "ark-app",
- "ark-auth",
- "ark-clipboard",
- "ark-peer",
- "ark-secure-store",
- "arkui",
- "arkui-shots",
- "iced",
- "iced_test",
- "money-app",
- "money-core",
- "money-seed",
- "money-server",
- "tempfile",
- "tokio",
 ]
 
 [[package]]

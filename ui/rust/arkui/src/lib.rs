@@ -37,6 +37,8 @@ pub mod format;
 pub mod glyphs;
 pub mod hero;
 pub mod history;
+#[cfg(feature = "host")]
+pub mod host;
 pub mod icon;
 pub mod images;
 pub mod later;

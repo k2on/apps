@@ -27,3 +27,10 @@ port = "ark_scanner::Scanner"
 
 [android]
 permissions = []
+
+# The desktop's device (the crate's feature `desktop`), registered by
+# arkui's window (`arkui::host`) under this feature of arkui's, which an
+# app's generated window turns on when its crate depends on this module
+# (ui/prebuild.py's `desktop`).
+[desktop]
+feature = "scanner"

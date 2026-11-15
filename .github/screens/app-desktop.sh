@@ -9,7 +9,8 @@
 #
 #   app-desktop.sh <out> <window> <app> [server URL]
 #
-# <window> is the build (`<app>-iced`, with bin/<app>-iced). Writes
+# <window> is the build (an Ark app's generated `<app>-desktop`, or one
+# written by hand, `<app>-iced`, with its binary of that name under bin/). Writes
 # <out>/device.json, <out>/<theme>/<id>.png and beside each <id>.tree.txt,
 # the texts a step can name. Run from the repository's root.
 set -euo pipefail
@@ -18,8 +19,8 @@ window=$2
 app=$3
 server=${4:-}
 user=$(jq -r '.server.user // empty' "$app/demo/shots.json")
-bin=$(find -L "$window/bin" -maxdepth 1 -name "$app-iced" | head -1)
-[ -n "$bin" ] || { echo "::error::no $app-iced in $window"; exit 1; }
+bin=$(find -L "$window/bin" -maxdepth 1 \( -name "$app-desktop" -o -name "$app-iced" \) | head -1)
+[ -n "$bin" ] || { echo "::error::no $app-desktop or $app-iced in $window"; exit 1; }
 
 # What it is drawn with, pinned by the flake's nixpkgs so that every run
 # draws the same: wgpu on Mesa's lavapipe, Vulkan on the CPU (the runner

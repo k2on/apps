@@ -21,6 +21,20 @@ ark-router = { path = "../router" }
 arkui-glyphs = { path = "../glyphs" }
 # A view laid out once in Rust (`view.rs` draws it), and `#[view]`.
 ark-app = { path = "../app", optional = true }
+# An app hosted in its window (`host`, feature `host`): its replica of its
+# domain and the views it holds, signing in to its server, the login kept
+# in the secure store, and its screenshots taken by a walk inside it.
+ark = { path = "../../../rust/ark", optional = true }
+ark-peer = { path = "../../../rust/ark-peer", default-features = false, optional = true }
+ark-auth = { path = "../../../rust/ark-auth", default-features = false, optional = true }
+ark-secure-store = { path = "../../../modules/ark-secure-store", features = ["desktop"], optional = true }
+arkui-shots = { path = "../shots", optional = true }
+serde_json = { workspace = true, optional = true }
+# The desktop's devices of an app's modules (`host::devices`), each a
+# feature an app's generated entry point turns on when its crate depends
+# on the module (module.toml's `[desktop]`).
+ark-clipboard = { path = "../../../modules/ark-clipboard", features = ["desktop"], optional = true }
+ark-scanner = { path = "../../../modules/ark-scanner", features = ["desktop"], optional = true }
 
 # iced is the desktop's alone: a browser is drawn by Leptos over the DOM
 # (ui/docs/app.md), never by iced in wasm.
@@ -66,3 +80,9 @@ iced_test = { workspace = true }
 [features]
 # `view`: a screen laid out once in Rust (ark-app's `#[view]`), drawn by iced.
 app = ["dep:ark-app"]
+# `host`: an Ark app hosted in its window (`ark_app::window::Windowed`), on
+# its server or its demo: what an app's generated desktop entry point runs.
+host = ["app", "dep:ark", "dep:ark-peer", "dep:ark-auth", "dep:ark-secure-store", "dep:arkui-shots", "dep:serde_json"]
+# The desktop's devices, by their module's name.
+clipboard = ["host", "dep:ark-clipboard"]
+scanner = ["host", "dep:ark-scanner"]

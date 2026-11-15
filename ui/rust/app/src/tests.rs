@@ -255,7 +255,7 @@ fn launch_arguments_are_read_as_pairs() {
     assert_eq!(l.inspector, Some(true));
     assert_eq!(l.appearance.as_deref(), Some("dark"));
     assert_eq!(l.pane, None);
-    assert!(Launch::parse(&["money-iced", "--server", "http://x", "--user", "alex"]).is_empty());
+    assert!(Launch::parse(&["money-desktop", "--server", "http://x", "--user", "alex"]).is_empty());
     let s = Launch::parse(&["-screen", "settings", "-settingsTab", "banks"]);
     assert_eq!((s.screen.as_deref(), s.pane.as_deref()), (Some("settings"), Some("banks")));
 }

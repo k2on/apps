@@ -8,8 +8,9 @@
 #               `<id>-gen`, a main (ui/prebuild.py's `views`, from app.toml's
 #               `[screens]` and `[views]`) linking the app's crate with
 #               ark-ui-gen's command line, which writes its #[view]s as
-#               SwiftUI and Compose; `<id>-ffi`, the phones' library; and
-#               `<id>-web`, the browser's page (`webSrc`).
+#               SwiftUI and Compose; `<id>-ffi`, the phones' library;
+#               `<id>-web`, the browser's page (`webSrc`); and
+#               `<id>-desktop`, the desktop's window (`desktopSrc`).
 #   ui          what the generator writes for the app: <Name>.swift, <Name>.kt.
 #   native      the app's native projects (ui/prebuild.py): ios/ (XcodeGen's
 #               project, the asset catalog, the icon, the entitlements) and
@@ -101,6 +102,36 @@ rec {
       python3 ui/prebuild.py web ${a.dir} --root . --out $out
     '';
   webName = a: "${a.id}-web";
+  # The desktop's window, generated (ui/prebuild.py's `desktop`, from
+  # app.toml, the page's twin): `<id>-desktop`'s main.rs and Cargo.toml, run
+  # by arkui's `DesktopHost` over the app's crate with arkui's feature for
+  # the desktop's device of each module whose module.toml says `[desktop]`,
+  # its icon beside it. Nothing of it is committed; a cargo build adds the
+  # crate to the workspace at `<dir>/.desktop`.
+  desktopSrc = pkgs: cargoMetadata: a:
+    let
+      members = map (m: normal "rust/${m}") (builtins.fromTOML (builtins.readFile (self + "/rust/Cargo.toml"))).workspace.members;
+      files = [ "ui/prebuild.py" "ui/theme.py" "ui/theme.toml" "${a.dir}/app.toml" "${a.dir}/${a.icon.svg or "icon.svg"}" "rust/Cargo.toml" ] ++ map (m: "${m}/Cargo.toml") members;
+      src = lib.cleanSourceWith {
+        src = self;
+        filter = path: _:
+          let p = lib.removePrefix "${toString self}/" (toString path); in
+          lib.elem p files || lib.any (f: lib.hasPrefix "${p}/" f) files
+          || p == "modules" || (lib.hasPrefix "modules/" p && (lib.length (lib.splitString "/" p) == 2 || baseNameOf p == "module.toml"));
+      };
+    in
+    pkgs.runCommand "${a.id}-desktop-src" { nativeBuildInputs = [ pkgs.python3 ]; } ''
+      cd ${src}
+      export ARK_CARGO_METADATA=${cargoMetadata}
+      python3 ui/prebuild.py desktop ${a.dir} --root . --out $out
+    '';
+  desktopName = a: "${a.id}-desktop";
+  # The crates the window names (ui/prebuild.py's `desktop_crates`).
+  desktopCrates = a: lib.unique ([ a.crate (lib.replaceStrings [ "_" ] [ "-" ] (lib.head (lib.splitString "::" a.ffi.domain))) ]
+    ++ lib.optional (a.ffi ? demo) a.ffi.demo
+    ++ [ "ark" "ark-peer" ]);
+  # arkui's features for the desktop's devices (module.toml's `[desktop]`).
+  desktopFeatures = a: [ "host" ] ++ map (m: m.toml.desktop.feature) (lib.filter (m: (m.toml.desktop or { }) ? feature) (modulesOf a));
   # The crates the page names (ui/prebuild.py's `web_crates`): the app's,
   # its domain's, its demo's and the runtime's.
   webCrates = a: lib.unique ([ a.crate (lib.replaceStrings [ "_" ] [ "-" ] (lib.head (lib.splitString "::" a.ffi.domain))) ]
@@ -187,6 +218,18 @@ rec {
         ] ++ map (m: { name = m; packageId = m; features = [ "web" ]; target = { target, features }: ("wasm32" == target."arch" or null); }) (webModules a);
         features = { default = [ "csr" ]; csr = [ "arkui-web/csr" ]; };
       };
+    } // lib.optionalAttrs (a ? crate && a ? ffi && lib.elem "desktop" (a.platforms or [ ])) {
+      "${desktopName a}" = {
+        crateName = desktopName a;
+        version = "0.1.0";
+        edition = "2021";
+        src = desktopSrc pkgs cargoMetadata a;
+        crateBin = [{ name = desktopName a; path = "main.rs"; requiredFeatures = [ ]; }];
+        dependencies = map (c: { name = c; packageId = c; } // lib.optionalAttrs (c == "ark-peer") { usesDefaultFeatures = false; }) (desktopCrates a) ++ [
+          { name = "arkui"; packageId = "arkui"; features = desktopFeatures a; }
+        ];
+        features = { };
+      };
     } // lib.optionalAttrs (a ? crate) {
       "${a.id}-gen" = {
         crateName = "${a.id}-gen";
@@ -202,43 +245,6 @@ rec {
         features = { };
       };
     };
-
-  # The app's entry point that draws the app's own mark and is not
-  # generated yet: its desktop (`iced/`) reads its icon.svg as cargo finds
-  # it, beside its crate (`include_str!("../../icon.svg")`). It is built
-  # from the app's directory with only that crate, the icon and app.toml in
-  # it, the crate its workspace member, rather than from the crate's own
-  # directory, which has no icon. The browser's is generated (`webSrc`),
-  # its icon written beside it.
-  entrySources = crates: dir:
-    let
-      a = read dir;
-      root = "${self}/${dir}";
-      icon = a.icon.svg or "icon.svg";
-      entry = sub: lib.mapAttrs
-        (_: c: c // {
-          src = lib.cleanSourceWith {
-            src = self + "/${dir}";
-            filter = path: _:
-              let p = toString path; in
-              p == "${root}/${icon}" || p == "${root}/app.toml" || p == "${root}/${sub}" || lib.hasPrefix "${root}/${sub}/" p;
-          };
-          workspace_member = sub;
-        })
-        (lib.filterAttrs (_: c: c ? src && toString (c.src.origSrc or c.src) == "${root}/${sub}") crates);
-    in
-    entry "iced";
-
-  # What else of the app's directory an entry point's build holds beside
-  # its crate (`entrySources`): app.toml and the icon, by their paths in
-  # the repository; none for a member that is not an Ark app's entry point.
-  # For a build that takes the crate's tree by its path (flake.nix's
-  # `crateTests`), so the icon is where `include_str!` looks for it.
-  entryFiles = apps: member:
-    let dir = dirOf member; in
-    if lib.elem dir apps && baseNameOf member == "iced"
-    then [ "${dir}/app.toml" "${dir}/${(read dir).icon.svg or "icon.svg"}" ]
-    else [ ];
 
   # The app's packages: `build` is flake.nix's `crate` (a crate of the
   # workspace, or of `crates`, for the host); `only` its source filter.
