@@ -31,9 +31,13 @@ An ark app's committed shape is `app.toml`, `icon.svg`, `core/`, `app/`,
 `server/` and `demo/`, and the one Android debug key its app.toml names.
 Nothing native of an app is committed: its phones' shell is the app
 library's (ArkApp's and ark-app-android's `ArkShell`), drawn from app.toml's
-`[shell]` names and its Rust views; its theme, glyphs and marks are arkui's.
+`[shell]` names and its Rust views; its theme, glyphs and marks are arkui's;
+its page and its desktop window are generated from app.toml too (`.web/`,
+`.desktop/`: arkui-web's and arkui's hosts over its `Windowed`).
 Its `bridge/`, `views/`, `native/`, `iced/` and `web/` are being removed
-and must not grow (money has none of them but `iced/`, the desktop's): a
+and must not grow (money has none of them: its folder is app.toml,
+icon.svg, core/, app/, server/, demo/, README.md, .gitignore and the
+debug key; harken still has its own): a
 screen goes in `app/` as a `#[view]`, what the app's host does with what
 its screens ask (routing between runtimes, its month, its bank, its
 session's facts; a route is one of the shell's places on every host) in

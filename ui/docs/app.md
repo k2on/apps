@@ -126,7 +126,7 @@ Each platform has one place and drives the one loop:
 |---|---|---|
 | iPhone, iPad, Mac, Android | ark-ffi's `PhonePlace` (the session's views over the process's peer, the process's modules, the login, the link) | ark-ffi's `Hosted<P>`, the `HostApp` under `ArkHost`; one UniFFI object per screen (`ark_ffi::hosted_screen!`; one the phone runs for as long as it shows it, `beside`) |
 | Browser | arkui-web's `WebPlace` (the page's replica and store; `Seen` to read) | `arkui_web::host::WebHost<W>`, over the app's `Windowed` |
-| Desktop | not yet: the iced window still carries its own requests (`money/iced/src/sections.rs`) | |
+| Desktop | arkui's `DeskPlace` (the replica on this machine's disk and the views it holds, the desktop's devices, the login in the Secret Service) | `arkui::host::DesktopHost<W>`, over the app's `Windowed` |
 | Tests | `money/app/src/host/tests.rs`'s place over the demo household | `Hosting` |
 
 On the phones an app names no code of its own: its library is generated
@@ -148,7 +148,8 @@ in a tab of its own (`opens`), its appearance and its address (`address`).
 One message type reaches every screen (`Windowed::Msg`, money's
 `MoneyMsg`), taken inside the loop (`take`); a `ShellAsk` the toolkit's
 shell would carry out is the part's own in a window (`native`: Settings
-shown is its state there). The desktop's window is to be hosted the same way.
+shown is its state there). The desktop's window is hosted the same way
+("The Desktop's Window", below).
 
 ### The Phones' Library
 
@@ -414,8 +415,10 @@ the activity puts a module's page at its root (ark-camera's
 that comes later (the camera's) wakes the app's host, which drains its
 runtimes. `checks.prebuild` holds that no app.toml lists modules, that
 every module's crate declares itself, and that ark-ffi has a feature for
-each device a module's `[phone]` registers. The desktop registers its own (the
-`Queued` clipboard in `money/iced/src/overview.rs`).
+each device a module's `[phone]` registers. The desktop's devices are
+arkui's features, named by a module's `[desktop]` (`feature`), which an
+app's generated window turns on (`arkui::host`'s `devices`: ark-clipboard's
+`Queued`, ark-scanner's `Chosen`; the secure store always).
 
 The iPhone typecheck (`checks.money-ios-typecheck`, ui/swift/typecheck.sh)
 compiles the app's modules' Swift and what of the app library Linux can
@@ -596,8 +599,9 @@ it last looked. Each shell exposes them:
   app's runtimes); a
   driver waits for `document.documentElement.dataset.arkIdle === "1"`.
 - **The desktop**: the window owns its runtimes in process; a driver
-  (arkui-shots, iced_test) asks the window's `App::is_idle()` and
-  `App::version()` (money/iced/src/sections.rs), over its three runtimes.
+  (arkui-shots) asks `DesktopHost::is_idle()` and `version()` (arkui's
+  `host`, over `Hosting::idle`/`version`, signed in and the server's data
+  here).
 
 **Ports not yet typed.** The peer's disk (`ark_peer::disk::Disk`) is
 synchronous; an async `Disk` port, so a browser's IndexedDB and a
@@ -923,7 +927,7 @@ text with a figure in it is the app's (`money_app::words`), and
 ark-format's UniFFI exports are an adapter's (ark-format-ffi, namespace
 `ark_format`); ark-module is the runtime's, and the modules money asks
 are ports of it; a view is drawn by the adapter that draws it
-(`arkui::view::element(accounts::view(&page))` in money/iced,
+(`arkui::view` by arkui's host,
 `arkui_web::render(…)` by arkui-web's host) and recorded for the phones by the
 generator's main ui/prebuild.py writes. The allowlist is empty.
 
@@ -1127,8 +1131,8 @@ resources in `revelation/native/android`.
   tab's page sits in (`LocalTabFrame`), set once by the app library's
   shell. Nothing is an app's own: a row's mark is its glyph and chart slot
   (`MarkTile`), a glyph is ArkUI's by its Lucide name.
-- **A hand-written screen beside a generated one** — none of money's on
-  the phones; the desktop's window still draws its own pages (money/iced).
+- **A hand-written screen beside a generated one** — none of money's, on
+  any platform: the desktop's window is money-app's views too.
 
 ## Rules
 
@@ -1150,8 +1154,9 @@ resources in `revelation/native/android`.
   menu's tests drive it in iced's simulator: every item runs its own
   message, the keys move and run, a press outside closes it), money-app
   (Accounts over the demo household with the fakes, Reconcile, the amount
-  in cents, the row's menu in order), money-iced and harken-iced with
-  `demo`, money-ffi (`--no-default-features`: the session's day).
+  in cents, the row's menu in order), arkui with `host`, `clipboard` and
+  `scanner` (`arkui-host`), harken-iced with `demo`, the generated
+  money-desktop built (`checks.money-desktop`), money-ffi (`--no-default-features`: the session's day).
 - nix: `checks.theme`, `checks.prebuild`, `checks.money-native`,
   `checks.money-ios-typecheck` (now with the listed modules' Swift, and
   the screens' glue: three name clashes it found are fixed — the UniFFI
@@ -1593,41 +1598,55 @@ ui/docs/apps/money.md for money):
    Browser's Modes" says what it lacks.
 
 
-### The Desktop's Own Pages, Moved
+### The Desktop's Window
 
-money/iced is still the window's own pages (about 9,000 lines with its
-tests): it hosts the shell (`sections.rs`) and the Accounts page
-(`overview.rs`) from Rust, and draws everything else itself. It goes the
-way the phones' screens went: each behaviour another app could use
-becomes a shared part, in arkui (iced) and in arkui-web, with its
-SwiftUI and Compose beside it where a phone has it, its numbers in
-`ui/theme.toml`; then each page is the shared `#[view]` money-app already
-has, drawn by `arkui::view`, and the window's own page goes. The desktop
-works at every step: a page moves only once the view draws everything
-the window's own page did, and the window's tests (`money/iced/src/
-tests.rs`, in iced's simulator) are moved onto the view's before its page
-is deleted.
+money/iced is gone: the desktop draws money's shared views as every other
+platform does. Its entry point is generated from app.toml (ui/prebuild.py's
+`desktop`, the page's twin: `<app>/.desktop`'s main.rs and Cargo.toml,
+never committed, built by nix/ark-app.nix's `desktopSrc` as
+`<id>-desktop`; `nix run .#money-desktop`), and is `arkui::host::run::<W>()`
+over a `Desktop` of app.toml's name, scheme, accent, version, mark, domain
+and demo. arkui's `host` (feature `host`) is the browser's host over iced:
 
-**What becomes shared** (each a part with a message of the app's, never
-a closure; the app's update decides what it means):
+- **The place** (`DeskPlace`): the app's replica of its domain in its data
+  directory (`$XDG_DATA_HOME/<scheme>/<server>`), read on a thread at
+  launch while the window says so; the views it holds; the desktop's
+  devices (`devices`); who is signed in where. `-demo [day]` is the demo's
+  household, as the Mac's `-demo` is.
+- **Signing in** (`live`): `--server` (a dev server on this machine by
+  default) and `--user`; the machine every shell walks, the system's
+  browser back on a loopback port, the login kept in the Secret Service;
+  the session shown once the server's data is here, as the page's.
+- **The window**: `Windowed::window` drawn by `arkui::view::shell`, each
+  name it hosts its `hosted` view, `over` above it, `settings` in its
+  place under a bar with Done (a Mac's Settings window is a window of its
+  own; here it is the window's place, as before).
+- **The keys** (`keys`): the existing layer, not a new one. The app's
+  commands (`Windowed::commands`) by their shortcuts and in the command box
+  (`arkui::command`, `:` or Ctrl-K, a group per menu); `arkui::shell::
+  Keyboard`'s vim layer over the rows a view draws (`arkui::view::cursor`,
+  arkui-web's `row_drawn` twin): `j`/`k`, counts, `gg`/`G`, `Enter`, `/`
+  and `n`/`N`, `h`/`l` and `Tab` between panes, the sidebar's cursor the
+  section shown, `?` the keys panel (`arkui::which`).
+- **Its screenshots** (`walk`): arkui-shots' `run_walk` hands each step
+  that names an element by its id to the window, which takes it against
+  its views (`ark_app::shots`), as the phones' walks are; keys and waits
+  stay the driver's. money's `desktop.shots` are such a walk.
 
-| Behaviour | Today | Shared as |
-|---|---|---|
-| Keyboard navigation: `j`/`k`, counts, `gg`/`G`, `/`, `Enter`, `Esc` over rows | `main.rs`'s keys over `arkui::vim` | a list's or a table's `keyboard()` modifier (`arkui::vim::Grid` under it), the row under the cursor its `selected`; arkui-web the same over the DOM's keys; `.focusable()`/`onKeyPress` and Compose's `onKeyEvent` on a hardware keyboard |
-| Drag to reorder a category or a group, and onto another group | `view.rs` over `arkui::reorder` | the existing `reorder` part on `card_section`, its drop a message (`MoveCategory`, `MoveGroup`), as the phones' Reorder already is |
-| A formula field: terms of a filter and a factor, what it gives as typed | `formula.rs` | `formula_field(terms, total, on_change)` over a record money-app works out (`FormulaForm`): rows of a picker and a number field, the figure beside; the parsing and the sum stay money-core's |
-| A register's filter as chips | `filter.rs` | `filter_bar(chips)`: chips with a menu each and "Save as Filter…", the conditions money-core's `Filter`, the chips' words money-app's |
-| A receipt drawn as its paper, and a photo dropped | `receipt.rs` | the receipt is money-app's `receipts::view` (the phones' already); the drop is `arkui::files`' and the page's input, a `Command` the scanner's module answers |
-| Settings' banks and stores | `banks.rs`, `stores.rs` | the shell's Settings panes (`money_settings`), the stores' a pane of its own over money-core's `setup` calls |
+**What money/iced had that the shared views do not yet**, each to come
+back as a shared part with a message of the app's (never a closure), on
+every toolkit where it applies, its numbers in `ui/theme.toml`:
 
-**The order the pages move**, each its own green commit: Insights
-(already a view everywhere else); the register (`register::view`, with
-the filter bar); Transactions; the budget with the reorder and the
-keyboard; the inspector's formula; the receipt form; Settings' banks
-and stores. Then `sections.rs` hosts only views, the window is
-`ark_app::host::Hosting<Money>` over an iced place as the browser's is,
-and `main.rs` is a generated entry point (`arkui::run` over the app's
-crate, as the phones' library is generated) with money/iced gone.
+| Behaviour | Shared as |
+|---|---|
+| Drag to reorder a category or a group, and onto another group | the existing `arkui::reorder` on `card_section`, its drop a message (`MoveCategory`, `MoveGroup`), as the phones' Reorder already is |
+| A formula field: terms of a filter and a factor, what it gives as typed | `formula_field(terms, total, on_change)` over a record money-app works out; the parsing and the sum money-core's |
+| A register's filter as chips, "Save as Filter…" | `filter_bar(chips)`, the conditions money-core's `Filter`, the words money-app's |
+| The category dropdown under a cell (YNAB's) | the search picker already drawn under its field (`arkui::search_picker`) |
+| Visual mode, the budget's bindings (`cc`, `cg`, `rc`, `rg`, `J`/`K`, `{`/`}`) | a list's bound keys as the app's commands, with the selection a view's |
+| A receipt's paper on the desktop, a photo dropped with no scan asked | `receipts::view` is the phones' already; a drop with nothing waiting a `Windowed` message |
+| Settings' stores pane | a pane of money's `money_settings` over money-core's `setup` calls |
+| The appearance a launch or Settings asks (`Windowed::appearance`) | the window's theme over the system's |
 
 ### What Is Left of money's Own Native and Web Code
 
@@ -1656,5 +1675,5 @@ crate, as the phones' library is generated) with money/iced gone.
   hand (the budget's empty inspector, the household's foot, Settings as a
   modal) is money-app's views (`money_app::window`) and arkui-web's
   `parts::settings_window`; and its entry point and index.html are
-  generated from app.toml ("The Browser's Page"). The desktop's window is
-  to be hosted over the same `Windowed`.
+  generated from app.toml ("The Browser's Page").
+- **The desktop** — done: money/iced is gone ("The Desktop's Window").

@@ -65,7 +65,7 @@ detail), `money_shell` (the four sections, each `toolbar` over
 `MoneyShellView`, `MoneySettingsView`, `MoneyCommands` (Swift) and
 `MoneyShell`, `MoneySettings`, `moneyCommands` (Kotlin); run on the phones
 through money-ffi's `ShellApp`; drawn on the desktop by
-`arkui::view::shell` (money/iced/src/sections.rs).
+`arkui::view::shell`, hosted by arkui's `host` over money-app's window.
 
 The inspectors are Rust's (`money/app/src/shell/inspect.rs`, the views
 `category_inspector` and `transaction_inspector`): the shell holds the

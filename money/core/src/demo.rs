@@ -1,5 +1,5 @@
 //! The demo's household: three months of a family's money, up to today —
-//! what the demo window (`money/iced`), the phones' demo and previews
+//! what the desktop's demo (`money-desktop -demo`), the phones' demo and previews
 //! (money-app's `ffi`, `money_demo`) and a seeded server (`money-seed`,
 //! src/bin) open on. It is behind the core's `demo` feature
 //! (`docs/seed.md`), so a client or a server carries none of it unless it

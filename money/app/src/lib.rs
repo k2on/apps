@@ -2,9 +2,9 @@
 //! that change it and its update, in Rust, run by `ark_app::Runtime` on
 //! every platform — the phones behind their generated library (`money-ffi`,
 //! ui/prebuild.py's `ffi`, which writes the UniFFI twins of these records
-//! and messages), the iced
-//! window (money/iced) and the browser (arkui-web's host over
-//! [`window`], its entry point generated from app.toml).
+//! and messages), the desktop's window (arkui's host) and the browser
+//! (arkui-web's host), each over [`window`] with its entry point
+//! generated from app.toml.
 //!
 //! The screens moved here: Accounts ([`accounts`]) — the shelves of
 //! accounts and what the household is worth, Add Account, renaming,

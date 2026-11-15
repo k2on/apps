@@ -17,17 +17,18 @@ core/           the domain, in plain Rust (spec/AUTHORING.md): src/schema.rs,
                 transactions.rs; plaid.rs, the bank import; receipts.rs and
                 stores.rs, the stores' receipts; migrations.rs
 app/            money as an Ark app: the screens' state, messages, update and
-                #[view]s, drawn by iced and the browser and generated as
-                SwiftUI and Compose; its part of every host (src/host.rs)
+                #[view]s, drawn by iced on the desktop and Leptos in the
+                browser and generated as SwiftUI and Compose; its part of
+                every host (src/host.rs)
 server/         money-server: the hub, sign-in, a web directory if given one,
                 the bank importer (src/importer.rs, Plaid over src/plaid.rs);
                 nix/module.nix is services.money
 demo/           the demo's household on a peer and a disk (`money-seed DATA`),
                 the screenshots' shots.json and server.sh
-iced/           the desktop client, on arkui and ark-peer: signed in to a
-                server, or (--features demo) a seeded household on a peer
-                that is its own authority (going: ui/docs/app.md, "The
-                Desktop's Own Pages, Moved")
+README.md       this
+.gitignore      what is generated here and never committed: .native/ (the
+                phones' projects), .ffi/ (their library), .web/ (the page)
+                and .desktop/ (the window, `nix run .#money-desktop`)
 debug.keystore  the one key every Android build signs with (below)
 ```
 
@@ -158,7 +159,7 @@ beside what the bank says was paid:
   or the payee's last). All one category is just that category. The split
   is written again when the receipt is matched or an item is filed.
 
-**Settings set the stores up** (`iced/src/stores.rs`, answered by
+**Settings set the stores up** (answered by
 `server/src/setup.rs`), and nothing they are told is part of the budget.
 They are calls of the server's own over the sync socket
 (`domain/src/setup.rs`, ark-peer's `Config::calls`), not intents: a `Call`
@@ -343,7 +344,7 @@ end-to-end check walked Actual through, using the same mock answers.
 
 ```
 MONEY_DEV_AUTH=1 cargo run -p money-server        # from rust/; 127.0.0.1:8788
-cargo run -p money-iced -- --server http://127.0.0.1:8788 --user alice
+nix run .#money-desktop -- --server http://127.0.0.1:8788 --user alice
 nix build .#money-server                          # what services.money runs
 ```
 
@@ -484,18 +485,16 @@ and their accounts' choices live now.
 
 ## The window on a server
 
-`money-iced` without features is the household's client, as harken-iced
-is (`iced/src/live.rs`): it opens this device's replica of the server's
-budget (`--server`), signs in as
-above, remembers the login per server, and pumps the socket when it
-rings. **Sync** there is `banks.sync`. **Settings**, as harken has them
-(the account button at the top right: its menu opens Settings and signs
-out; `#settings`), has two sections. **Banks** (also reached by **Connect
-a Bank** on All Accounts, and **Banks need a look** there when one does)
-lists each connection with how its last import went (a dim line), Reconnect (only when its login ran out), Add accounts and Disconnect, and each of its accounts
-with one control for what it feeds, a menu: a new account of its kind (the cursor on the account another login to the bank feeds from the same last digits, when there is one), every account here, or
-nothing (`iced/src/banks.rs`); **Account** says who is signed in where,
-with Sign out (`iced/src/settings.rs`). Connecting opens Plaid's page as soon as
+The desktop window (`money-desktop`, generated from app.toml: arkui's
+`DesktopHost` over money-app's window, the same views every platform
+draws) is the household's client: it opens this device's replica of the
+server's budget (`--server`), signs in as above, keeps the login per
+server in the desktop's keyring, and pumps the socket when it rings.
+**Sync** there is `banks.sync`. **Settings** (the account at the
+sidebar's foot) is money-app's panes: **Banks** (also reached by **Connect
+a Bank** on Accounts) lists each connection with how its last import went,
+Reconnect, Add accounts and Disconnect, and what each of its accounts
+feeds; **Household** says who is signed in where, with Sign Out. Connecting opens Plaid's page as soon as
 the server answers, in the system's browser, with the page's link in
 Settings too. The browser client (`money-web`, generated from app.toml:
 arkui-web's `WebHost` over money-app's window, Leptos over the DOM) runs
@@ -505,7 +504,7 @@ the same shell, signed in to the server that serves it and synced
 ## The demo
 
 ```
-cargo run -p money-iced --features demo     # the window, from rust/
+nix run .#money-desktop -- -demo             # the window, on the demo's household
 ```
 
 It opens on a seeded household: three months up to today, two people
@@ -556,7 +555,7 @@ import's phases, the accounts a server names and does not follow, the
 tree, splits, receipts, charges and their adapters, the migration of
 groups into the tree (from the schema a server stands on, and one older),
 and every view against a fresh evaluation (`domain/tests/`); the demo's
-seed, and every button the tests press (`iced/src/tests.rs`). The server
+seed, and every screen's update (`app/src/*/tests.rs`). The server
 in the process on a real port (`server/tests/`): signing in through the
 routes and syncing on the socket, a phone's code sent back to
 `money://` and exchanged, a forged token turned away, nobody signed in
@@ -573,13 +572,10 @@ a page given up on or left to expire, a login given again in update
 mode, a bank disconnected, a `banks.json` written by hand (token and
 cursor alone, or the cursor in `importer.json`) importing only what is
 new, and a copy of the data directory imported from on a fresh server.
-The live window signs in to
-a server in the process; its Sync lands as an ask, and its Settings (from the account menu)
-connects, opens the page the server answers with once, chooses, and asks
-to reconnect and disconnect
-(`iced/src/tests.rs`). `services.money` is evaluated under its
-configurations (`checks.money-module`). The desktop demo window has been
-opened under Xvfb and each page looked at.
+The browser's page signs in to a server and syncs with another device
+(`checks.money-web-sync`). `services.money` is evaluated under its
+configurations (`checks.money-module`). The desktop window is photographed
+by its walk (app-screens' desktop job).
 **What is not:** real Plaid (sandbox or production); real
 `amazon-orders` against Amazon, and Target's and Costco's JSON as their
 sites serve it today; the phones built against the regenerated types; a real OpenID

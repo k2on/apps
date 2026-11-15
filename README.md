@@ -146,7 +146,7 @@ One command holds all of it:
                       #   type-checked on Linux against the library
     nix build .#harken-server   # or harken-iced, harken-domain,
                                 # ark, vectors, trace-corpus
-    nix run .#money-iced        # money's desktop window
+    nix run .#money-desktop     # money's desktop window, generated from app.toml
     nix build .#harken-apk      # the kernel for three ABIs and the APK over it
     nix build .#revelation-apk  # Revelation's APK
     nix build .#fdroid-repo     # every APK as the stable F-Droid repository,
@@ -167,7 +167,7 @@ the seen part ends.
 
 ## The desktop window and the GPU
 
-`nix run .#money-iced` (and `harken-iced`) says on stderr, first thing,
+`nix run .#money-desktop` (and `harken-iced`) says on stderr, first thing,
 what it will draw with: `renderer: wgpu (Vulkan, Apple M2 (G14G), integrated
 GPU)`, or `renderer: tiny-skia (CPU) — no GPU adapter: <why>`, the why being
 what refused iced's device or which driver library would not load and what
@@ -197,6 +197,6 @@ What is automatic and what is not:
   [nixGL](https://github.com/nix-community/nixGL), which supplies a Mesa (or
   NVIDIA) userspace from nixpkgs:
 
-      nix run --impure github:nix-community/nixGL -- nix run .#money-iced
+      nix run --impure github:nix-community/nixGL -- nix run .#money-desktop
       # Vulkan only, Intel or AMD:
-      nix run --impure github:nix-community/nixGL#nixVulkanIntel -- nix run .#money-iced
+      nix run --impure github:nix-community/nixGL#nixVulkanIntel -- nix run .#money-desktop

@@ -435,8 +435,8 @@ build, the same driver, the same shots.json, light and dark.
 
 ## The desktop
 
-The desktop windows are iced apps (`harken/iced`, `money/iced`, over
-`ui/rust/arkui`), so there is no emulator to run them in and no accessibility
+The desktop windows are iced apps (`harken/iced`, and money's generated
+from its app.toml over arkui's `host`, both over `ui/rust/arkui`), so there is no emulator to run them in and no accessibility
 tree to drive them by; what there is, is iced's own headless runtime.
 `ui/rust/shots` is that, for any app: the app's `main` hands it the same
 `iced::application(...)` it would run, when `ARK_SHOTS` names its
@@ -470,6 +470,15 @@ draws is different, and the hook only captures.
   where a widget clips it, so every album cover spills out of its card. A
   shot is taken once nothing has happened for two seconds, at 1440×900 at
   twice the pixels, light and then dark from the same screen.
+- **A walk inside the app, for an Ark app.** money's window is arkui's
+  `host` over its views, which hands arkui-shots its walk (`run_walk`):
+  a step that names an element by its id (`{"tap": "tab:budget"}`,
+  `await`, `type`, `press`) is taken against the views on the screen
+  (`ark_app::shots`), as the phones' walks are, and each shot's tree.txt
+  lists those ids; a key (`{"key": "j"}`) and a wait are the driver's, as
+  a hand's. Its shot is taken at its ready signal (signed in, the
+  server's data here, its runtimes idle at one version). harken's window
+  still clicks what a text says.
 
 To take one app's by hand: start its server (`app-server.sh`), build its
 window (`nix build .#harken-iced`), and run `app-desktop.sh <out> result
