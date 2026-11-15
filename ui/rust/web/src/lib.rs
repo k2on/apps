@@ -177,6 +177,7 @@ pub fn send<M: 'static>(m: M) {
         }
     }
     BUSY.with(|b| b.set(false));
+    follow_address();
     redraw();
 }
 
@@ -367,6 +368,84 @@ pub trait WebApp: 'static {
     fn dry_run(&mut self, _on: bool) {}
 }
 
+thread_local! {
+    /// Where the page's app is, as the address that brings it back there
+    /// (`WebApp::route`): what the browser's address follows.
+    static ROUTE: RefCell<Option<Rc<dyn Fn() -> Address>>> = const { RefCell::new(None) };
+    /// The page is arriving where its address says (a load, back or
+    /// forward): what the app moves to meanwhile replaces the entry.
+    static ARRIVING: Cell<bool> = const { Cell::new(false) };
+    /// A press or a key since the address last followed the app: a move it
+    /// makes is the person's, a new entry in the history.
+    static GESTURE: Cell<bool> = const { Cell::new(false) };
+}
+
+/// The query keys that are the page's own, not the app's (ui/docs/app.md,
+/// "Addresses"): kept in the address whatever the app's place, so a load
+/// of it comes back the same (`?demo&today=…`, a screenshot's).
+const STICKY: [&str; 5] = ["demo", "today", "shots", "theme", "reduce-motion"];
+
+/// The browser's address made the app's (`WebApp::route`), under the
+/// site's base, with the page's own keys ([`STICKY`]) kept: a new entry in
+/// the history for a move the person made to a new place (a press, a key),
+/// and the same entry replaced for a refinement (what is typed in a field,
+/// a move the app made on its own, the page arriving where its address
+/// says). Back and forward are `popstate`, which [`run`] and [`hydrate`]
+/// answer by bringing the app where the address says.
+fn follow_address() {
+    if !cfg!(target_arch = "wasm32") {
+        return;
+    }
+    let Some(route) = ROUTE.with(|r| r.borrow().clone()) else { return };
+    let mut to = route();
+    let here = address();
+    for key in STICKY {
+        if let Some((k, v)) = here.query.iter().find(|(k, _)| k == key) {
+            if to.get(k).is_none() {
+                to.query.push((k.clone(), v.clone()));
+            }
+        }
+    }
+    let gesture = GESTURE.with(|g| g.replace(false));
+    if to == here {
+        return;
+    }
+    let typing = web_sys::window()
+        .and_then(|w| w.document())
+        .and_then(|d| d.active_element())
+        .is_some_and(|el| matches!(el.tag_name().as_str(), "INPUT" | "TEXTAREA"));
+    let push = gesture && !ARRIVING.with(|a| a.get()) && (to.path != here.path || !typing);
+    let url = to.url_under(&page_base());
+    let Some(history) = web_sys::window().and_then(|w| w.history().ok()) else {
+        return;
+    };
+    let _ = match push {
+        true => history.push_state_with_url(&wasm_bindgen::JsValue::NULL, "", Some(&url)),
+        false => history.replace_state_with_url(&wasm_bindgen::JsValue::NULL, "", Some(&url)),
+    };
+}
+
+/// A press or a key on the page: what the app moves to next is the
+/// person's ([`follow_address`]).
+fn listen_for_gestures() {
+    use wasm_bindgen::closure::Closure;
+    let Some(w) = web_sys::window() else { return };
+    let on = Closure::<dyn FnMut(web_sys::Event)>::new(|_: web_sys::Event| GESTURE.with(|g| g.set(true)));
+    for kind in ["pointerdown", "keydown", "click"] {
+        let _ = w.add_event_listener_with_callback_and_bool(kind, on.as_ref().unchecked_ref(), true);
+    }
+    on.forget();
+}
+
+/// `f` with the page arriving where its address says: what the app moves
+/// to meanwhile replaces the history's entry.
+fn arriving<R>(f: impl FnOnce() -> R) -> R {
+    let was = ARRIVING.with(|a| a.replace(true));
+    let r = f();
+    ARRIVING.with(|a| a.set(was));
+    r
+}
+
 /// The page's address's query `name`, or else what the page was written
 /// with (`page::args`): a page written as HTML reads the same arguments in
 /// the browser as it was written with.
@@ -457,6 +536,7 @@ pub fn run<A: WebApp>(app: A, accent: &str, css: &str) {
     }
     let app = install(app);
     keys::listen::<A>(app.clone());
+    listen_for_gestures();
     let version = RwSignal::new(0u64);
     VERSION.with(|v| v.set(Some(version)));
     leptos::mount::mount_to_body(move || {
@@ -466,7 +546,7 @@ pub fn run<A: WebApp>(app: A, accent: &str, css: &str) {
         }
     });
     // What the address asks for, after the first draw.
-    arrive_here(&app);
+    arriving(|| arrive_here(&app));
     // And again whenever the address moves in place (the browser's back
     // and forward, or a screenshot's driver walking its shots in one page,
     // ui/docs/shots.md): the app put back where it opens and the page's own
@@ -497,7 +577,7 @@ pub fn run<A: WebApp>(app: A, accent: &str, css: &str) {
                 w.scroll_to_with_x_and_y(0.0, 0.0);
             }
             redraw();
-            arrive_here(&app);
+            arriving(|| arrive_here(&app));
         });
         if let Some(w) = web_sys::window() {
             let _ = w.add_event_listener_with_callback("popstate", moved.as_ref().unchecked_ref());
@@ -552,6 +632,10 @@ fn install<A: WebApp>(app: A) -> Rc<RefCell<A>> {
         let app = app.clone();
         *v.borrow_mut() = Some(Rc::new(move || app.borrow().view()));
     });
+    ROUTE.with(|r| {
+        let app = app.clone();
+        *r.borrow_mut() = Some(Rc::new(move || app.borrow().route()));
+    });
     UI.with(|u| *u.borrow_mut() = Ui::default());
     QUEUE.with(|q| q.borrow_mut().clear());
     BUSY.with(|b| b.set(false));
@@ -577,6 +661,7 @@ pub fn hydrate<A: WebApp>(app: A) {
     let _ = root.set_attribute("data-ark-js", "");
     let app = install(app);
     keys::listen::<A>(app.clone());
+    listen_for_gestures();
     // A static page was written at its path alone, a server's at its whole
     // address: the first draw is the written one, and a static page's query
     // is taken once the page is the module's.
@@ -635,9 +720,11 @@ pub fn hydrate<A: WebApp>(app: A) {
         page::set_width(None);
         if here != written {
             let arrive: Vec<A::Msg> = app.borrow_mut().arrive(&here);
-            for m in arrive {
-                send(m);
-            }
+            arriving(|| {
+                for m in arrive {
+                    send(m);
+                }
+            });
         }
         redraw();
     });
