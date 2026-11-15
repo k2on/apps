@@ -906,17 +906,180 @@ app.toml with every key) is compiled: its Kotlin by
 `packages.aarch64-darwin.ark-app-fixture-ios` (mac-compile.yaml). Neither
 money nor harken declares any.
 
-**harken, later.** harken is not an Ark app yet (no app.toml). To adopt
-the library it needs: an app.toml (`[ffi] host`, `[screens]`, `[apple]
-scene`, `[android] root`); its part of its host in harken/app (a
-`HostedApp`: its screens' runtimes and what one asks of another) and a
-`PhoneApp` in harken/ffi (its replica's open, its demo) exporting a
-`HarkenHost` with `host()` and `welcome()`, as `MoneyHost` does; its first run drawn as the
-generated `WelcomeView` over `WelcomeApp` in place of its own onboarding
-(OnboardingViews.swift, OnboardingScreens.kt); and its process player's
-work (`ArkMedia`, `BackgroundWork`) kept as it is, the player being its
-module's. Its Kotlin package (`dev.harken.ffi`) is app.toml's `[ffi]
-kotlin`.
+**harken** is being moved onto the library: "harken's Port", below, is
+the plan and where it stands.
+
+## harken's Port
+
+harken is ported the way money was: its committed shape becomes
+`app.toml`, `icon.svg`, `core/`, `app/`, `server/`, `demo/`, its README
+and `.gitignore` (and the debug key app.toml names), every screen a
+`#[view]` in harken-app, its host logic a `HostedApp`, the phones on the
+shared shell, the browser and the desktop generated, and harken/ios,
+harken/android, harken/iced, harken/ffi and harken/player gone. Each step
+is pushed to main on its own and keeps harken building and working: the
+old clients stay until the generated ones replace them, and are deleted
+in the same commit that replaces them.
+
+### Where Each Directory Goes
+
+| Today | Becomes |
+|---|---|
+| `harken/domain` (harken-domain) | `harken/core`, the same crate and name: the domain, pure (layers.toml's core) |
+| `harken/player` (harken-player) | split: the reconciler's decisions, its typed memory and the presses (`press.rs`, `reconcile.rs`'s rules, `memory.rs`'s values, `Listening`) into `harken_domain::player`, pure over the session and what a sound said; what drives a peer (`Player`, `config.rs`, the rows it keeps) into the adapters that need it — the server's Home Assistant speakers (`harken/server`) and the app's host through its place (below) |
+| `harken/app` (routes, first-run words) | harken-app: every screen's state, messages, update, page record and `#[view]`; `host::Harken` (its `HostedApp` and `Windowed`); `words` (lengths, counts, "played from") |
+| `harken/ffi` (hand-written bridge, `HarkenSession`, `Player`, the `Hall`) | generated (`[ffi]`): `harken-ffi` from app.toml like `money-ffi`; the Hall moves to the server's tests (`harken-server`'s `hall`), which already hold the same hub |
+| `harken/ios`, `harken/android` | gone: the app library's `ArkShell` from `[shell]`, the generated views, the modules' Swift and Kotlin |
+| `harken/iced` | gone: the generated window (`arkui::host::run`), its keys and its walk |
+| `harken/demo` | stays: harken-seed, the catalogue, the covers, `shots.json` (rewritten as an in-app walk by ids), `server.sh` |
+| `harken/server` | stays, unchanged on the wire (Servers Already Deployed) |
+| `harken/iced/icon.svg` | `harken/icon.svg` |
+
+### Screens and Behaviours
+
+Each of harken's screens today (SwiftUI, Compose, iced), the runtime and
+view it becomes, and the shared parts it is drawn with; **bold** is a
+shared part that is not in ArkUI yet and is added there, on every toolkit,
+before harken uses it (ui/docs/primitives.md lists the components).
+
+| Screen today | Runtime (`[screens]`) | Drawn with |
+|---|---|---|
+| The shell: Home, Library and Search tabs (`Shell.swift`, `HarkenApp.kt`, iced's sidebar and its sections) | `shell::HarkenShell` | `adaptive_tabs` and `section_tab` (Library's kinds as children: Playlists, Albums, Artists, Songs, Podcasts, Sermons), `searchable`, `Tabs::account`, `hosted`; the player's **now-playing accessory** below |
+| Home: last played, recently added, playlists, albums (`HomeView`, `HomeScreen.kt`) | `home::Home` | **media row** on a card (last played, with a round play), **artwork shelf** of **artwork tiles** (a `scroll_across`), `card_section` headers with an action (See All) |
+| Library: the chips, playlists, albums grid, artists, songs, podcasts and sermons (`LibraryView`, `LibraryScreen.kt`) | `library::Library` | `chip_row`/`chip`, `list_row` (New Playlist, a playlist), **artwork grid** of **artwork tiles** (round for a person), **media row** (a song), `empty_state` |
+| Search: songs, albums, artists, recent searches (`SearchView`, `SearchScreen.kt`) | `search::Search` | `searchable`, **artwork shelf**, **media row**, `list_row` for a recent search, `empty_state` |
+| Album, artist, work, recording, show and playlist pages (`Pages.swift`, `Pages.kt`, iced's `view.rs`) | `page::Page` (one runtime, its route the page shown; a phone's stack holds one page record per pushed route) | **media header** (artwork beside a title stack, **play/shuffle pair** under it), **media row** (tracks, episodes with a `meter` of how far), a work's heading (a `card_section` header), **figure with label** (a record's small print), the person's banner (`HeroBanner`, already ArkUI's) |
+| The now-playing bar and the full player (`PlayerViews.swift`, `PlayerScreens.kt`, iced's `player.rs`) | `player::Player` | **now-playing accessory** (the bar on glass over the tab bar that grows into the full player: SwiftUI's `tabViewBottomAccessory` and zoom, Compose's `ExpandingCard`, iced's bar at the window's foot, the browser's), **artwork** at the player's size, **title stack**, **scrubber** (a drag, its position counted from a **clock** record so it moves with no message), **transport controls**, **progress hairline** (`meter` on a clock), the volume (`VolumeSlider`, made a part) |
+| Queue, transcript, devices (`QueueSheet`, `TranscriptSheet`, `DevicesSheet`; `Sheets.kt`, `PlayerSheet.kt`) | `player::Player`'s sheets | `form_sheet`, **media row** (queue rows, reorder through `card_section`'s existing reorder), `list_row` with a glyph (a device, a group), the transcript's lines (a `vstack` of `text`, the line said now in the accent, moved by the clock) |
+| Add to playlist, new playlist, follow a show (`Sheets.swift`, `Sheets.kt`) | `sheets::Sheets` (raised by any screen, as money's) | `form_sheet`, `name_field` (the domain's sentence under it), `list_row` with a check, the podcast directory's results as **media rows** |
+| Onboarding (`OnboardingViews.swift`, `onboarding/`) | none: the shared first run (`ark_app::welcome`, `harken_app::welcome::copy`) | the generated `WelcomeView` / `WelcomeScreen` |
+| Settings, diagnostics (`SettingsView.swift`, `SettingsScreen.kt`) | the shell's `harken_settings` view (`[views] settings`) | `settings_panes`, `list_row`, **figure with label** (diagnostics' numbers), the version tapped seven times a message of the shell's |
+| CarPlay / Android Auto browse tree (`Car.kt`) | none drawn: the host answers the media player's `Browse` | `set_children` from the held views (root: Playlists, Albums, Artists, Podcasts, Sermons), `PlayItem` a `start` |
+
+**Behaviours** and where each lives:
+
+- *Tapping a cover opens its page, zooming out of it*: a route (`Route`),
+  a pushed page on the section's stack; the zoom is the toolkit's push
+  from the tapped **artwork tile** (SwiftUI's `matchedTransitionSource`
+  and `.zoom`, Compose's `Transitions` from the tile's bounds), a part's
+  own business, never the app's.
+- *A song's menu* (play next, add to queue, add to playlist, go to album or
+  artist): `ListRow::menu`, already ArkUI's, on the **media row**.
+- *The bar's sideways swipe skips*: the accessory's own gesture (Compose's
+  `Momentum`, `Springs.released`; SwiftUI's drag), sending the app's
+  `Next`/`Previous`; reduced motion a fade.
+- *The position moves with no message*: the scrubber, the hairline and the
+  transcript read a **clock** (`at_ms`, `since_ms`, `playing`, `length_ms`)
+  and count it as they draw (SwiftUI's `TimelineView`, Compose's
+  `withFrameMillis`, iced's frame subscription while playing, the
+  browser's `requestAnimationFrame`); a drag sends `Seek { at_ms }` once,
+  on release, and `Scrub` as it goes (the session's ephemeral scrub).
+- *The listening session* (devices, the queue, who is the output, the
+  clock): read through the place as a view of its own (`HarkenView::Listening`:
+  the account's live part, a view the peer answers from its volatile
+  tables as `harken_listening` does), and every press a live call sent as
+  a change (`HarkenChange::Press`). **A view over a peer's live part**
+  (`ark::views` and ark-peer's `Peer::view` over volatile tables) is the
+  one kernel piece this needs.
+- *This device's own player*: the host is the reconciler's driver. It
+  holds the reconciler's memory (state, not rows a screen reads), asks the
+  media player module (`ark_media_player`: `load`, `play`, `seek`,
+  `set_now_playing`, `set_controls`), and takes its events (`MediaEvent`)
+  through the module's listener as a message of its own (a `Waker`-woken
+  `Inbox`, as the camera's answer is); `Remote` commands are presses,
+  `Browse` is answered from the views. The plays it counts are changes.
+  On every platform the same code: AVPlayer, Media3, rodio and MPRIS, the
+  page's `<audio>` and Media Session.
+- *Background playback*: off unless app.toml says so. harken's says
+  `[background] playback = true`, a new key that gates ark-media-player's
+  `audio` background mode and its foreground service (an app that depends
+  on the player without it plays only while it shows). While it plays the
+  process's runtime is held online (`ArkProcess.work()`), as now.
+- *Android Auto and the car*: `ArkMediaService`'s library over the browse
+  tree; harken's subclass (`Car.kt`: search, the remote's volume, covers
+  through a `content://` provider) becomes the module's own: **search**
+  (`MediaEvent::Search { query }`, answered by `set_children`),
+  **remote volume** (`set_volume_remote(level, max)`, `Remote { Volume }`)
+  and **artwork through a provider** (`ArkArtworkProvider`), each generic.
+  CarPlay's templates stay not built (the module's README).
+- *Follow a podcast from the directory*: the search goes from the device
+  to the directory (Apple's), never through the server; a **fetch** port
+  (`ark_module::fetch`: a GET's body, URLSession, HttpURLConnection, ureq,
+  the browser's `fetch`) carries it; the feed's address is then
+  `subscribe`, as now.
+- *Recent searches*, kept on the device only: a durable local row of the
+  domain (ark's local instance, as the plays the reconciler counts are).
+- *Covers*: `/media/<key>/cover?size=` as today; ArkUI's cover loaders
+  (`CoverLoader`, `Covers`) behind the **artwork** part, the derived
+  square of its seed while none has come, a screenshot waiting on it
+  (`Ready`).
+- *Diagnostics*: the shell's (`Session`'s facts: version, pending, the
+  peer's numbers through the place).
+
+### Shared Parts to Add (ArkUI, every toolkit)
+
+Laid out once, in `ark_app::view`, of the primitives where nothing native
+is needed, and as native parts where a gesture, a decoder or a timeline
+is; their motion from `ui/theme.toml`'s `[motion]` through `Springs`/
+`Press`/`arkui::motion`, presses `Press.Give` (artwork, tiles) and
+`Press.Highlight` (rows), haptics `SensoryFeedback` on a change:
+
+| Part | API | Kind |
+|---|---|---|
+| a pressable primitive | `pressable(content, tap, Press::Give \| Highlight)` | primitive (a `Button` with `.press`/`.pressRow`, `Modifier.pressable`, an iced button, a `<button>`) |
+| artwork | `artwork(url, seed, label).size(ArtSize::Row \| Tile \| Header \| Player).round()` | native leaf (the cover loaders, the derived square, `Ready`) |
+| artwork tile | `artwork_tile(art, title, caption, tap)` | primitives |
+| artwork shelf, artwork grid | `artwork_shelf(tiles)`, `artwork_grid(tiles)` | a sideways scroll; the grid a lazy native container |
+| media row | `media_row(art, title).under(..).trailing(..).playing(..).menu(..).on_tap(..)` | primitives in a row's press |
+| media header | `media_header(art, title_stack, play, shuffle)` | primitives |
+| play/shuffle pair | `play_shuffle(play, shuffle)` | two `wide_button`s |
+| transport controls | `transport(playing, can_back, can_forward, shuffle, repeat, msgs…)` | primitives of glyph buttons |
+| clock | `Clock { at_ms, since_ms, playing, length_ms }` | a record the timeline parts count |
+| scrubber | `scrubber(clock, scrub, seek)` | native (a drag with a `Selection` haptic at its ends) |
+| progress hairline | `hairline(clock)` | native leaf over the clock |
+| figure with label | `figure_label(label, figure)` | primitives |
+| now-playing accessory | `Tabs::accessory(bar, full, open, close)` | the shell's, native (the bar on glass, the expanding card) |
+| volume | `volume(level, change)` | native (`VolumeSlider`) |
+
+### Generated Targets and the Old Clients
+
+- app.toml: `[screens]` above, `[shell]` (screen `shell`, settings
+  `settings`, over `sheets`, the hosted names), `[ffi]` (`host =
+  "HarkenHost"`, `app = "host::Harken"`, `route = "routes::Route"`,
+  `domain = "harken_domain::shared"`, `demo = "harken-seed"`), `[web]
+  modes = ["spa"]` (harken-server serves it as money-server does), its
+  `[background] playback = true`, its Android `keystore` (harken's
+  committed debug key, kept), its accent and icon.
+- flake.nix: `arkApps` gains harken; its hand-written `harkenFfi`,
+  `harkenIos`, `harken` androidApp and `harken-iced` give way to `arkOf.harken`'s.
+- The old clients go in the commit that adds their generated twin: the
+  phones' native trees with the generated phones; harken/iced with the
+  generated window; harken/ffi with the generated library (its `Hall`
+  first moved to harken-server's tests).
+
+### Screenshots
+
+harken goes back into app-screens (the `apps` list's "back once ported")
+with `demo/shots.json` an in-app walk by ids (`tab:home`, `tab:library`,
+`library.row:…`, `player.open`, `player.devices`), on the iPhone, the iPad
+in both orientations, Android's phone, tablet and Fold, the desktop and the
+browser, in both themes, as money's — only once its walk passes on main.
+
+### Servers
+
+The clients stay compatible with the deployed harken server (77da9807):
+no request is added (the directory goes to Apple from the device), the
+schema is `tests/deployed.json`'s, `push` stays off. If a client request
+changes, `.github/compat-check.sh`'s harken part grows with it.
+
+### Where It Stands
+
+1. The plan: this section.
+2. Shared parts: under way (ui/docs/primitives.md says which are built).
+3. harken-app's screens and host, the domain in core/, the player split:
+   not started.
+4. Generated targets, the old clients deleted: not started.
+5. Screenshots: not started.
 
 ## Layers
 
