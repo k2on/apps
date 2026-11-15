@@ -20,8 +20,10 @@ use crate::search::{Search, SearchMsg};
 use crate::shell::{HarkenShell, ShellMsg};
 use crate::{HarkenRequest, Route};
 
+pub mod car;
 pub mod listen;
 
+use car::Car;
 use listen::Listen;
 
 /// harken's runtimes over one session.
@@ -34,6 +36,8 @@ pub struct Harken {
     pub player: Screen<Player>,
     /// This device's player: the reconciler and its sound.
     pub listen: Listen,
+    /// What a car browses.
+    pub car: Car,
     /// What was asked that no runtime takes yet (the sheets'), in order.
     pub waiting: Vec<HarkenRequest>,
     /// Why the last press was not taken, while it is the last.
@@ -88,6 +92,7 @@ impl HostedApp for Harken {
             page: Screen::new(),
             player: Screen::new(),
             listen: Listen::open(session, cx),
+            car: Car::default(),
             waiting: vec![],
             refused: None,
         };
@@ -116,9 +121,11 @@ impl HostedApp for Harken {
     }
 
     /// The listening session, and every song: what a press and a play are
-    /// read against.
+    /// read against; and what a car has browsed.
     fn holds(&self) -> Vec<HarkenView> {
-        vec![HarkenView::Listening, listen::songs()]
+        let mut all = vec![HarkenView::Listening, listen::songs()];
+        all.extend(self.car.held.iter().cloned());
+        all
     }
 
     /// A route a screen opened: a section's own index is that section (an
@@ -191,9 +198,14 @@ impl HostedApp for Harken {
         self.tell(cx);
     }
 
-    /// The store moved, or the sound did: the sound made to agree.
+    /// The store moved, or the sound did: the sound made to agree, and
+    /// what a car asked answered.
     fn moved(&mut self, cx: &mut Cx<'_, Harken>) {
         self.listen.step(cx);
+        let server = cx.place.session().server;
+        for (parent, items) in self.car.step(self.listen.asks(), &server, cx) {
+            self.listen.children(parent, items);
+        }
         self.tell(cx);
     }
 

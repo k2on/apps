@@ -134,13 +134,17 @@ background component: the app declares none for it.
 
 Declared in `module.toml`:
 
-- iPhone, iPad: `UIBackgroundModes = [audio]`, to keep playing locked and
-  in the background.
-- Android: `FOREGROUND_SERVICE` and `FOREGROUND_SERVICE_MEDIA_PLAYBACK` for
-  the service in the foreground while it plays, `WAKE_LOCK` for the network
-  wake lock; the service itself (`dev.arkui.modules.ArkMediaService`,
-  exported, `foregroundServiceType="mediaPlayback"`, the three library and
-  session actions) and Media3's two libraries. The media notification asks
+- Only for an app whose app.toml says `[background] playback = true`
+  (`[ios.playback]`, `[android.playback]`, `foreground-when`): on the
+  iPhone and iPad `UIBackgroundModes = [audio]`, to keep playing locked
+  and in the background; on Android `FOREGROUND_SERVICE` and
+  `FOREGROUND_SERVICE_MEDIA_PLAYBACK`, the service's
+  `foregroundServiceType="mediaPlayback"` and the manifest's
+  `dev.arkui.playback`, which `ArkMediaService` reads before it goes into
+  the foreground. Without it the player plays only while the app shows.
+- Android, always: `WAKE_LOCK` for the network wake lock; the service
+  itself (`dev.arkui.modules.ArkMediaService`, exported, the three
+  library and session actions) and Media3's two libraries. The media notification asks
   for `POST_NOTIFICATIONS` on Android 13 and later, which is the app's to
   ask; without it the sound still plays.
 - Linux: none; the session bus is the user's.

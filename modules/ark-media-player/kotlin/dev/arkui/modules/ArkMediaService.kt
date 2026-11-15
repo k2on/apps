@@ -59,6 +59,23 @@ open class ArkMediaService : MediaLibraryService() {
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaLibrarySession? = session
 
+    /**
+     * Whether the app declared `[background] playback = true` (the manifest's `dev.arkui.playback`):
+     * only then is the service declared a foreground one, so only then does it go into the
+     * foreground while it plays. Without it the notification is still shown, and the sound plays
+     * only while the app does.
+     */
+    private val playback: Boolean by lazy {
+        runCatching {
+            packageManager.getApplicationInfo(packageName, android.content.pm.PackageManager.GET_META_DATA)
+                .metaData?.getBoolean("dev.arkui.playback", false) ?: false
+        }.getOrDefault(false)
+    }
+
+    override fun onUpdateNotification(session: MediaSession, startInForegroundRequired: Boolean) {
+        super.onUpdateNotification(session, startInForegroundRequired && playback)
+    }
+
     // Swiped away from the recents while nothing plays: nothing to keep.
     override fun onTaskRemoved(rootIntent: Intent?) {
         val p = ArkMedia.exo

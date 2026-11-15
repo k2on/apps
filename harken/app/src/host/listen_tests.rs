@@ -247,3 +247,36 @@ fn the_accessory_and_the_volume_follow_the_player() {
     let p = h.app().player.page(&place, NOW);
     assert_eq!((p.now.volume, p.now.muted), (30, true));
 }
+
+/// A car browses the library through the media player: the root is the
+/// library's kinds; Albums is held and answered at the next step; an
+/// album's tracks carry where they were found, and choosing one plays the
+/// album from it. Falsified by answering a branch before its view is held
+/// (no albums), or a choice played from the top.
+#[test]
+fn a_car_browses_the_library_and_plays_from_it() {
+    use ark_app::modules::media_player::{MediaEvent, ROOT};
+    let fake = Fake::new();
+    let (mut h, mut place) = hosted(alone(&fake));
+    assert_eq!(fake.browse(ROOT), None, "asked, not answered yet");
+    h.moved(&mut place);
+    let root = fake.browse(ROOT).expect("the root answered");
+    let ids: Vec<&str> = root.iter().map(|i| i.id.as_str()).collect();
+    assert_eq!(ids, ["playlists", "albums", "artists", "podcasts", "sermons"]);
+    assert_eq!(fake.browse("albums"), None);
+    h.moved(&mut place);
+    h.moved(&mut place);
+    let albums = fake.browse("albums").expect("albums answered once held");
+    assert!(!albums.is_empty() && albums.iter().all(|a| a.browsable), "{albums:?}");
+    let album = albums[0].id.clone();
+    assert_eq!(fake.browse(&album), None);
+    h.moved(&mut place);
+    h.moved(&mut place);
+    let tracks = fake.browse(&album).expect("an album's tracks");
+    assert!(tracks.len() >= 2 && tracks.iter().all(|t| t.playable && !t.browsable), "{tracks:?}");
+    fake.take();
+    fake.hear(MediaEvent::PlayItem { id: tracks[1].id.clone() });
+    h.moved(&mut place);
+    let p = h.app().player.page(&place, NOW);
+    assert_eq!(p.now.title, tracks[1].title, "{p:?}");
+}

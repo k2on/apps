@@ -298,6 +298,11 @@ BACKGROUND = {
     # iPhone: the Notification Service Extension (push's words swapped for
     # the device's own). Needs push.
     "service-extension": bool,
+    # Sound that plays on with the app away and the screen locked: what a
+    # module says under its `[ios.playback]` and `[android.playback]` (the
+    # media player's `audio` mode, its foreground service). Without it an
+    # app's player plays only while it shows.
+    "playback": bool,
 }
 
 UNIFIEDPUSH = ["org.unifiedpush.android.connector.NEW_ENDPOINT", "org.unifiedpush.android.connector.REGISTRATION_FAILED",
@@ -348,6 +353,8 @@ def apple_info(root, a, bundle):
         for k, v in ios.get("info", {}).items():
             info.setdefault(k, v)
         modes += [x for x in ios.get("background-modes", []) if x not in modes]
+        if background(a).get("playback"):
+            modes += [x for x in ios.get("playback", {}).get("background-modes", []) if x not in modes]
     info.update(a["apple"].get("info", {}))
     bg = background(a)
     if bg.get("sync"):
@@ -759,6 +766,8 @@ def android_manifest(root, a):
     for _, m in modules_of(root, a):
         ma = m.get("android", {})
         perms += [p for p in ma.get("permissions", []) if p not in perms]
+        if background(a).get("playback"):
+            perms += [p for p in ma.get("playback", {}).get("permissions", []) if p not in perms]
         services += ma.get("services", [])
         receivers += ma.get("receivers", [])
         meta += ma.get("meta-data", [])
@@ -791,7 +800,10 @@ def android_manifest(root, a):
     extra = ""
     for s in services:
         actions = "".join(f'\n                <action android:name="{x}" />' for x in s.get("actions", []))
-        fg = f' android:foregroundServiceType="{s["foreground"]}"' if s.get("foreground") else ""
+        # A service in the foreground only for what the app declared
+        # (`foreground-when`, a `[background]` key: playback).
+        fg_on = s.get("foreground") and ("foreground-when" not in s or background(a).get(s["foreground-when"]) is True)
+        fg = f' android:foregroundServiceType="{s["foreground"]}"' if fg_on else ""
         extra += f'''
         <service android:name="{s["name"]}" android:exported="{str(s.get("exported", False)).lower()}"{fg}>
             <intent-filter>{actions}
@@ -813,6 +825,10 @@ def android_manifest(root, a):
     if bg.get("boot"):
         acts = '\n                <action android:name="android.intent.action.BOOT_COMPLETED" />'
         extra += f'\n        <receiver android:name="dev.arkui.modules.ArkBootReceiver" android:exported="true">\n            <intent-filter>{acts}\n            </intent-filter>\n        </receiver>'
+    if bg.get("playback"):
+        # What a media service reads to go into the foreground while it
+        # plays (ark-media-player's ArkMediaService).
+        extra += '\n        <meta-data android:name="dev.arkui.playback" android:value="true" />'
     if bg.get("push"):
         # The UnifiedPush receiver: exported, as a distributor is another app.
         acts = "".join(f'\n                <action android:name="{x}" />' for x in UNIFIEDPUSH)
@@ -2304,6 +2320,8 @@ def check(root):
 BACKGROUND_MARKS = ["ArkSyncJob", "ArkBootReceiver", "ArkPushReceiver", "BOOT_COMPLETED", "BIND_JOB_SERVICE",
                     "fetch", "remote-notification", "BGTaskSchedulerPermittedIdentifiers", "aps-environment",
                     "application-groups", "app-extension", "usernotifications",
+                    # `playback`'s: the media player's mode and service.
+                    "audio", "FOREGROUND_SERVICE_MEDIA_PLAYBACK", "dev.arkui.playback", "mediaPlayback",
                     # The app library's hookup (ui/swift's ArkApp, ui/kotlin/app).
                     "ArkAppDelegate", "backgroundHooks", "PhoneBackground", "PhoneNotifications", "ArkNotices"]
 
@@ -2335,6 +2353,8 @@ def selftest(root):
             if re.search(r"\b" + re.escape(mark) + r"\b", text):
                 problems.append(f"{app} declares no [background], and its projects say {mark}")
     fixture = background_fixture(root)
+    # With the media player too, whose playback `[background]` gates.
+    fixture["modules"] = fixture["modules"] + ["ark-media-player"]
     text = projects_text(root, fixture)
     for mark in BACKGROUND_MARKS:
         if mark not in text:
@@ -2348,7 +2368,7 @@ def background_fixture(root):
     library's build to compile."""
     fixture = app_of(root, "money")
     fixture["modules"] = module_names(root, fixture) + ["ark-notifications", "ark-background"]
-    fixture["background"] = {"sync": "30m", "push": True, "boot": True, "service-extension": True}
+    fixture["background"] = {"sync": "30m", "push": True, "boot": True, "service-extension": True, "playback": True}
     return fixture
 
 

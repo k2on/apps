@@ -163,6 +163,18 @@ impl Listen {
         }
     }
 
+    /// What a car or a watch asked since the last step.
+    pub fn asks(&self) -> Vec<ark_app::modules::media_player::MediaEvent> {
+        self.sound.as_ref().map(|o| o.take_asks()).unwrap_or_default()
+    }
+
+    /// A branch of the browse tree answered.
+    pub fn children(&self, parent: String, items: Vec<ark_app::modules::media_player::BrowseItem>) {
+        if let Some(o) = &self.sound {
+            o.port().set_children(parent, items)
+        }
+    }
+
     /// A volume press: the output's group while this device stands in the
     /// session, its own sound alone.
     pub fn loud(&self, change: Change, cx: &Cx<'_, Harken>) -> Press {

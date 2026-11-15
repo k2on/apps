@@ -77,26 +77,32 @@ pub struct RecordPage {
     pub empty: bool,
 }
 
+/// The tracks' view of a record's route: an album's, a person's, a
+/// playlist's or a show's; none for any other.
+pub fn tracks_of(route: &Route) -> Option<HarkenView> {
+    let none = [0; 16];
+    Some(match route {
+        Route::Album { key, .. } => HarkenView::Album {
+            playlist: none,
+            id: key.clone(),
+        },
+        Route::Artist { name } => HarkenView::Artist {
+            playlist: none,
+            name: name.clone(),
+        },
+        Route::Playlist { id, .. } => HarkenView::Playlist { id: key_of(id)? },
+        Route::Show { key, .. } => HarkenView::Show {
+            playlist: none,
+            id: key.clone(),
+        },
+        _ => return None,
+    })
+}
+
 impl State {
     /// The tracks' view of the page's route.
     fn tracks(&self) -> Option<HarkenView> {
-        let none = [0; 16];
-        Some(match self.route.as_ref()? {
-            Route::Album { key, .. } => HarkenView::Album {
-                playlist: none,
-                id: key.clone(),
-            },
-            Route::Artist { name } => HarkenView::Artist {
-                playlist: none,
-                name: name.clone(),
-            },
-            Route::Playlist { id, .. } => HarkenView::Playlist { id: key_of(id)? },
-            Route::Show { key, .. } => HarkenView::Show {
-                playlist: none,
-                id: key.clone(),
-            },
-            _ => return None,
-        })
+        tracks_of(self.route.as_ref()?)
     }
 
     /// The view its header is read from.

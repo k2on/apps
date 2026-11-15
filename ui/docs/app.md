@@ -701,6 +701,7 @@ sync = "30m"               # a periodic Woken::Sync (needs ark-background)
 push = true                # Woken::Push (needs ark-notifications)
 boot = true                # Android: Woken::Boot when the device starts
 service-extension = true   # iPhone: the Notification Service Extension (needs push)
+playback = true            # sound on with the app away: the media player's audio mode and foreground service
 ```
 
 **One runtime, woken.** The OS may start the process with no screen: a
@@ -1122,8 +1123,15 @@ changes, `.github/compat-check.sh`'s harken part grows with it.
    `player` (the full player, with the volume: the group's while joined,
    this device's own alone), up while something plays (the host tells the
    shell), grown and put back by the shell, its swipe a skip; the
-   reconciler and the sound read one clock, the sound's. Next: the car's
-   browse tree, then the sheets and Settings.
+   reconciler and the sound read one clock, the sound's. A car browses
+   through the module (`host::car`: the library's kinds, their records,
+   a record's tracks, each held before it is read and answered at the
+   next step; a track's id `t|<route>|<n>|<id>` plays its list from
+   there; an add queues). `[background] playback` is a key of app.toml
+   (ui/prebuild.py gates the media player's `audio` mode, its
+   foreground service and `dev.arkui.playback`, which `ArkMediaService`
+   reads); harken's app.toml says it once it is written (step 4). Next:
+   the sheets and Settings.
 4. Generated targets, the old clients deleted: not started.
 5. Screenshots: not started.
 
