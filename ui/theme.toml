@@ -146,7 +146,8 @@ dark = ["#5FD394", "#7FB2F0", "#F0B85A", "#B9A0F5", "#F29AC6", "#4FCDC9"]
 # harken's gold. Bright leaf gold on the dark page; on white it deepens to
 # an old gold, since text in it has to read there.
 [accent.gold]
-colorsets = ["harken/ios/Harken/Assets.xcassets/AccentColor.colorset"]
+# An Ark app's colorset is written by ui/prebuild.py, into its generated project.
+colorsets = []
 art = "gold"
 light.accent = "#7A5B10"
 light.on-accent = "#FFFFFF"

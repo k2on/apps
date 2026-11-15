@@ -1075,7 +1075,7 @@ which were under harken/android, are nix/fdroid's.
 
 ### Screenshots
 
-harken goes back into app-screens (the `apps` list's "back once ported")
+harken is back in app-screens (it was left out until ported)
 with `demo/shots.json` an in-app walk by ids (`tab:home`, `tab:library`,
 `library.row:…`, `player.open`, `player.devices`), on the iPhone, the iPad
 in both orientations, Android's phone, tablet and Fold, the desktop and the
@@ -1087,6 +1087,11 @@ The clients stay compatible with the deployed harken server (77da9807):
 no request is added (the directory goes to Apple from the device), the
 schema is `tests/deployed.json`'s, `push` stays off. If a client request
 changes, `.github/compat-check.sh`'s harken part grows with it.
+The generated clients' first run, sign-in and sync are new to that
+server, so the check walks harken's phone host against it as money's
+(harken-app's tests/deployed.rs: the first run, the dev sign-in, the
+server's Favorites synced, a playlist confirmed and seen on a second
+device), beside harken-peer's walk; both pass against 77da9807.
 
 ### Where It Stands
 
@@ -1184,7 +1189,15 @@ changes, `.github/compat-check.sh`'s harken part grows with it.
    generated hosts read, or a `HostedApp` hook every host turns into an
    `ark_peer::Live`. The queue, the transcript and the groups' picker
    the iced window drew are not views yet.
-5. Screenshots: not started. The open issue it waited on is found and
+5. Screenshots: harken/demo/shots.json is an in-app walk by ids (the
+   first run — harken's now opens on Welcome to Harken, as money's on
+   its page — Home, Search, Library, Albums, an album, the player grown
+   from the now-playing bar by `shell.open-player` and paused, Settings
+   from who is signed in), the same list on the phones and the larger
+   screens, the desktop's the same walk, and the Mac's and the browser's
+   screens by their launch arguments (`-screen albums` and the library's
+   other kinds are a launch's); app-screens' `which` no longer leaves
+   harken out. The open issue it waited on is found and
    fixed: a hub opened on `harken_seed::seeded_disk` (a log standing at
    its start on a snapshot of rows) took a device at cursor 0 for one
    that had it all, and the device took the fill's first part at seq 0

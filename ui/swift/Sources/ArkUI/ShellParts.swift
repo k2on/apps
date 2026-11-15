@@ -471,6 +471,16 @@ public enum BarPlacement {
     }
 }
 
+/// A toolbar with no items of its own (a `toolbar(title, content, ())` in
+/// Rust, harken's sections): the generated view writes `items: { }`, which
+/// SwiftUI's builder has no block for. An item group of nothing, which
+/// draws nothing.
+extension ToolbarContentBuilder {
+    public static func buildBlock() -> ToolbarItemGroup<EmptyView> {
+        ToolbarItemGroup(placement: .automatic) { EmptyView() }
+    }
+}
+
 /// A section's title and toolbar over its content (in the section's
 /// navigation stack, `SectionTab`'s).
 public struct WithToolbar<Content: View, Items: ToolbarContent>: View {

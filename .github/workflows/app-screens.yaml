@@ -242,8 +242,8 @@ jobs:
               lists
             } | tee -a "$GITHUB_OUTPUT"
           }
-          # harken and revelation come back to the screenshots once ported to Ark apps.
-          shots() { [ -f "$1/demo/shots.json" ] && ! grep -qxE 'harken|revelation' <<< "$1"; }
+          # revelation comes back to the screenshots once ported to an Ark app.
+          shots() { [ -f "$1/demo/shots.json" ] && ! grep -qxE 'revelation' <<< "$1"; }
           # An app whose shots.json has the desktop's shots.
           desktop() { shots "$1" && jq -e '.desktop.shots | length > 0' "$1/demo/shots.json" > /dev/null; }
           iphones() { for a in $(jq -r '.ios[]' "$RUNNER_TEMP/apps.json"); do if shots "$a"; then echo "$a"; fi; done; }
@@ -451,8 +451,8 @@ jobs:
         run: |
           refs=()
           for f in */demo/server.sh; do
-            # harken and revelation come back to the screenshots once ported to Ark apps.
-            grep -qxE 'harken|revelation' <<< "${f%%/*}" && continue
+            # revelation comes back to the screenshots once ported to an Ark app.
+            grep -qxE 'revelation' <<< "${f%%/*}" && continue
             while read -r p; do refs+=(".#$p"); done < <(grep -o '\.#[A-Za-z0-9_-]*' "$f" | cut -c3- | sort -u)
           done
           # A commit from before `screens-crates` has none to build.

@@ -72,7 +72,7 @@ echo "money's deployed server: $(curl -sf "$money/healthz" | grep '^domain')"
 # harken: the old server, empty, with dev auth; two of this build's peers.
 mkdir -p "$work/harken"
 harken=http://127.0.0.1:$(port)
-HARKEN_DEV_AUTH=1 HARKEN_DATA="$work/harken/data" \
+HARKEN_DEV_AUTH=1 ARK_DEV_USER=alex HARKEN_DATA="$work/harken/data" \
   "$harken_server/bin/harken-server" "${harken#http://}" > "$work/harken/server.log" 2>&1 &
 pids+=($!)
 up "$harken" "$work/harken/server.log"
