@@ -474,6 +474,9 @@ fn draw<'a, M: Clone + 'static>(v: View<M>, ctx: &mut Ctx<'a, '_, M>) -> Element
         }
     }
     let base: Element<'a, M> = match body.len() {
+        // Nothing but what goes over (a window's sheets alone): the window's
+        // whole size, since a stack's layers are laid out in its first's.
+        0 => Space::new().width(Length::Fill).height(Length::Fill).into(),
         1 => body.pop().unwrap_or_else(|| Space::new().into()),
         _ => column(body).spacing(8).into(),
     };
