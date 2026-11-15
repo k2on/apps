@@ -337,6 +337,16 @@ rec {
       # File a bug if you depend on any for non-debug work!
       debug = internal.debugCrate { inherit packageId; };
     };
+    "devices-core" = rec {
+      packageId = "devices-core";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "devices-core";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
     "harken-app" = rec {
       packageId = "harken-app";
       build = internal.buildRustCrateWithFeatures {
@@ -6953,6 +6963,30 @@ rec {
         features = {
           "zeroize-on-drop" = [ "zeroize" ];
         };
+      };
+      "devices-core" = rec {
+        crateName = "devices-core";
+        version = "0.1.0";
+        edition = "2021";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../devices/core; };
+        libName = "devices_core";
+        dependencies = [
+          {
+            name = "ark";
+            packageId = "ark";
+          }
+          {
+            name = "serde";
+            packageId = "serde";
+            features = [ "derive" ];
+          }
+          {
+            name = "serde_json";
+            packageId = "serde_json";
+            features = [ "raw_value" ];
+          }
+        ];
+
       };
       "digest" = rec {
         crateName = "digest";

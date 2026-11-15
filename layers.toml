@@ -18,7 +18,7 @@ external = ["serde", "serde_json", "sha2", "memcomparable", "postcard", "proc-ma
 [layers.core]
 # The domains: what a household's budget and a listener's library are, and
 # their rules. Nothing of how they are drawn, stored, routed or carried.
-crates = ["money-core", "harken-domain"]
+crates = ["money-core", "harken-domain", "devices-core"]
 uses = ["kernel"]
 external = ["serde", "serde_json"]
 
