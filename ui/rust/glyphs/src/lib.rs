@@ -404,6 +404,7 @@ pub fn named(name: &str) -> Option<&'static [u8]> {
         "building-2" | "landmark" => BANK,
         "piggy-bank" => PIGGY,
         "house" => HOME,
+        "library" => LIBRARY,
         "panel-right" => PANEL_RIGHT,
         "wand-sparkles" => WAND,
         "refresh-cw" => SYNC,

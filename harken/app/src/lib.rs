@@ -9,8 +9,12 @@
 //! search, the sheets, the shell and the host's part follow
 //! (ui/docs/app.md, "Where It Stands").
 
+pub mod home;
+pub mod host;
 pub mod library;
+pub mod page;
 pub mod routes;
+pub mod shell;
 pub mod welcome;
 pub mod words;
 

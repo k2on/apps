@@ -504,6 +504,7 @@ public enum ArkGlyphs {
         switch name {
         case "chevron-left": return "chevron.left"
         case "pause": return "pause.fill"
+        case "library": return "square.stack.fill"
         case "skip-back": return "backward.fill"
         case "skip-forward": return "forward.fill"
         case "shuffle": return "shuffle"

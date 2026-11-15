@@ -330,6 +330,9 @@ public object ArkGlyphs {
     /** `speaker`, Lucide's: a speaker in the house. */
     public val Speaker: ImageVector = glyph("speaker", rect(4f, 2f, 16f, 20f), "M12 6h.01", circle(12f, 14f, 4f), "M12 14h.01")
 
+    /** `library`, Lucide's: everything, a library. */
+    public val Library: ImageVector = glyph("library", rect(3f, 3f, 8f, 18f), "M7 3v18", "M20.4 18.9c.2.5-.1 1.1-.6 1.3l-1.9.7c-.5.2-1.1-.1-1.3-.6L11.1 5.1c-.2-.5.1-1.1.6-1.3l1.9-.7c.5-.2 1.1.1 1.3.6Z")
+
     /** Every glyph here by its Lucide name, the name the other toolkits know it by. */
     private val byName: Map<String, ImageVector> by lazy {
         listOf(
@@ -338,7 +341,7 @@ public object ArkGlyphs {
             PanelRight, Wand, Sync, Filter, Mail, Chart, Rows, Inbox, Alert, Clock, Dollar, Banknote, Target, Arrows, Users, House,
             Landmark, Card, Trending, Eye, EyeOff, ArrowUp, ArrowDown, Trash, Lock, Receipt, Crosshair, Folder,
             ScanLine, Picture, Keyboard, CircleMinus, Choose, Unchosen, Layers, Link,
-            Pause, SkipBack, SkipForward, Shuffle, Repeat, Play, Music, ListMusic, Disc, MicVocal, Podcast, BookOpen, ListPlus, ListStart, ListEnd, Speaker,
+            Pause, SkipBack, SkipForward, Shuffle, Repeat, Play, Music, ListMusic, Disc, MicVocal, Podcast, BookOpen, ListPlus, ListStart, ListEnd, Speaker, Library,
         )
             .associateBy { it.name } + ("ellipsis-vertical" to More)
     }

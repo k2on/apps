@@ -1080,8 +1080,14 @@ changes, `.github/compat-check.sh`'s harken part grows with it.
    timeline (scrubber and hairline) and figure with label are built on
    every toolkit (ui/docs/primitives.md); the now-playing accessory and
    the volume are next.
-3. harken-app's screens and host, the domain in core/, the player split:
-   not started.
+3. harken-app's screens and host: the domain is in core/ (with
+   `HarkenChange`); Home, Library, a record's page (album, artist,
+   playlist, show) and the shell (Home and Library, a page pushed over
+   either) are `#[view]`s over their runtimes, and `host::Harken` is their
+   `HostedApp` (a route a page pushed over the section it came from, an
+   index the library's way), tested over the demo library. Next: the
+   player as the host's own runtime over the media player module and a
+   view of the live session (below), search, the sheets, Settings.
 4. Generated targets, the old clients deleted: not started.
 5. Screenshots: not started.
 
