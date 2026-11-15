@@ -283,6 +283,13 @@ pub fn every_policy(_: &Ctx, _: &Db<Devices>, _: ()) -> Result<Plan<Devices, Pol
     Ok(scan::<Devices, Policy>())
 }
 
+/// Every assignment the connection holds (an admin's: everyone's): what the
+/// server's config holds its own against.
+#[view("policies.assignments")]
+pub fn every_assignment(_: &Ctx, _: &Db<Devices>, _: ()) -> Result<Plan<Devices, Assignment>, Refusal> {
+    Ok(scan::<Devices, Assignment>())
+}
+
 /// What every phone the connection holds last reported.
 #[view("reports.every")]
 pub fn every_report(_: &Ctx, _: &Db<Devices>, _: ()) -> Result<Plan<Devices, Report>, Refusal> {
@@ -313,7 +320,7 @@ pub fn feed() -> Scope<Devices> {
 /// Every function, registered by its name.
 pub fn domain() -> Domain {
     ark::register!(Domain::new::<Devices>("devices", VERSION);
-        set_policy, remove_policy, assign, report, assigned, every_policy, every_report, own_report, feed)
+        set_policy, remove_policy, assign, report, assigned, every_policy, every_assignment, every_report, own_report, feed)
     .with(ark::auth::register::<Devices>)
 }
 

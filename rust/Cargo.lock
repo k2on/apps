@@ -2073,6 +2073,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "devices-server"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "ark",
+ "ark-auth",
+ "ark-peer",
+ "ark-push",
+ "devices-core",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "digest"
 version = "0.10.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"

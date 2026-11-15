@@ -60,6 +60,7 @@ crates = [
   "ark-ui-gen", "arkui", "arkui-glyphs", "arkui-web", "arkui-serve", "arkui-shots",
   "money-iced", "money-server", "money-seed",
   "harken-server", "harken-player", "harken-iced", "harken-seed", "harken-ffi",
+  "devices-server",
 ]
 uses = ["kernel", "core", "runtime", "modules", "app"]
 external = ["*"]

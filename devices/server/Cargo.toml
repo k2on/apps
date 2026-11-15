@@ -1,0 +1,28 @@
+[package]
+name = "devices-server"
+version = "0.1.0"
+workspace = "../../rust"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "devices' server: ark-peer's hub over devices' domain, signed in to through the household's OpenID provider, holding the policies and assignments the household's config declares."
+
+[lib]
+name = "devices_server"
+path = "src/lib.rs"
+
+[[bin]]
+name = "devices-server"
+path = "src/main.rs"
+
+[dependencies]
+ark = { path = "../../rust/ark" }
+devices-core = { path = "../core" }
+ark-peer = { path = "../../rust/ark-peer", features = ["server"] }
+ark-auth = { path = "../../rust/ark-auth" }
+# The wake a policy change sends the phones not connected: UnifiedPush's,
+# sealed to each (no Apple key: devices is Android's).
+ark-push = { path = "../../rust/ark-push", features = ["send"] }
+anyhow = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync", "time", "signal"] }
+serde = { workspace = true }
+serde_json = { workspace = true }

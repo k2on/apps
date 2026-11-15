@@ -357,6 +357,16 @@ rec {
       # File a bug if you depend on any for non-debug work!
       debug = internal.debugCrate { inherit packageId; };
     };
+    "devices-server" = rec {
+      packageId = "devices-server";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "devices-server";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
     "harken-app" = rec {
       packageId = "harken-app";
       build = internal.buildRustCrateWithFeatures {
@@ -7043,6 +7053,64 @@ rec {
             name = "serde_json";
             packageId = "serde_json";
             features = [ "raw_value" ];
+          }
+        ];
+
+      };
+      "devices-server" = rec {
+        crateName = "devices-server";
+        version = "0.1.0";
+        edition = "2021";
+        crateBin = [
+          {
+            name = "devices-server";
+            path = "src/main.rs";
+            requiredFeatures = [ ];
+          }
+        ];
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../devices/server; };
+        libName = "devices_server";
+        dependencies = [
+          {
+            name = "anyhow";
+            packageId = "anyhow";
+          }
+          {
+            name = "ark";
+            packageId = "ark";
+          }
+          {
+            name = "ark-auth";
+            packageId = "ark-auth";
+          }
+          {
+            name = "ark-peer";
+            packageId = "ark-peer";
+            features = [ "server" ];
+          }
+          {
+            name = "ark-push";
+            packageId = "ark-push";
+            features = [ "send" ];
+          }
+          {
+            name = "devices-core";
+            packageId = "devices-core";
+          }
+          {
+            name = "serde";
+            packageId = "serde";
+            features = [ "derive" ];
+          }
+          {
+            name = "serde_json";
+            packageId = "serde_json";
+            features = [ "raw_value" ];
+          }
+          {
+            name = "tokio";
+            packageId = "tokio";
+            features = [ "rt-multi-thread" "macros" "net" "sync" "time" "signal" ];
           }
         ];
 
