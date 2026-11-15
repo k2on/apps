@@ -337,6 +337,16 @@ rec {
       # File a bug if you depend on any for non-debug work!
       debug = internal.debugCrate { inherit packageId; };
     };
+    "devices-app" = rec {
+      packageId = "devices-app";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "devices-app";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
     "devices-core" = rec {
       packageId = "devices-core";
       build = internal.buildRustCrateWithFeatures {
@@ -6963,6 +6973,55 @@ rec {
         features = {
           "zeroize-on-drop" = [ "zeroize" ];
         };
+      };
+      "devices-app" = rec {
+        crateName = "devices-app";
+        version = "0.1.0";
+        edition = "2021";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../devices/app; };
+        libName = "devices_app";
+        dependencies = [
+          {
+            name = "ark";
+            packageId = "ark";
+          }
+          {
+            name = "ark-app";
+            packageId = "ark-app";
+          }
+          {
+            name = "ark-background";
+            packageId = "ark-background";
+          }
+          {
+            name = "ark-dpc";
+            packageId = "ark-dpc";
+          }
+          {
+            name = "ark-notifications";
+            packageId = "ark-notifications";
+          }
+          {
+            name = "ark-router";
+            packageId = "ark-router";
+          }
+          {
+            name = "ark-secure-store";
+            packageId = "ark-secure-store";
+          }
+          {
+            name = "devices-core";
+            packageId = "devices-core";
+          }
+        ];
+        devDependencies = [
+          {
+            name = "ark-peer";
+            packageId = "ark-peer";
+            usesDefaultFeatures = false;
+          }
+        ];
+
       };
       "devices-core" = rec {
         crateName = "devices-core";

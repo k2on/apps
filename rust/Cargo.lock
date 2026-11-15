@@ -2049,6 +2049,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "devices-app"
+version = "0.1.0"
+dependencies = [
+ "ark",
+ "ark-app",
+ "ark-background",
+ "ark-dpc",
+ "ark-notifications",
+ "ark-peer",
+ "ark-router",
+ "ark-secure-store",
+ "devices-core",
+]
+
+[[package]]
 name = "devices-core"
 version = "0.1.0"
 dependencies = [

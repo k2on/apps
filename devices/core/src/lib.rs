@@ -342,10 +342,11 @@ impl ViewKey for DevicesView {
     fn open(&self) -> Option<Opening> {
         let none = ().to_bytes();
         Some(match self {
-            DevicesView::Assigned => Opening::of::<Policy>("assigned", none),
-            DevicesView::Policies => Opening::of::<Policy>("every_policy", none),
-            DevicesView::Reports => Opening::of::<Report>("every_report", none),
-            DevicesView::Own => Opening::of::<Report>("own_report", none),
+            // By the views' full names: `every` is two views' last name.
+            DevicesView::Assigned => Opening::of::<Policy>("policies.assigned", none),
+            DevicesView::Policies => Opening::of::<Policy>("policies.every", none),
+            DevicesView::Reports => Opening::of::<Report>("reports.every", none),
+            DevicesView::Own => Opening::of::<Report>("reports.own", none),
         })
     }
 }

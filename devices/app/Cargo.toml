@@ -1,0 +1,30 @@
+[package]
+name = "devices-app"
+version = "0.1.0"
+workspace = "../../rust"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "devices as an Ark app (ui/docs/app.md): a phone held to its household's policy as its device owner — woken by the OS, it syncs, reads the phone, makes what the policy asks and reports what it found — and the screen that says so; run by ark-app, drawn natively."
+
+[lib]
+name = "devices_app"
+path = "src/lib.rs"
+
+[dependencies]
+ark = { path = "../../rust/ark" }
+ark-app = { path = "../../ui/rust/app" }
+devices-core = { path = "../core" }
+# Where devices can be, spelled as paths (`src/routes.rs`).
+ark-router = { path = "../../ui/rust/router" }
+# The device modules its update asks through their ports (ark_app::modules):
+# depending on one is what takes it on (ui/docs/app.md, How an App Opts In).
+# The device owner's powers; the periodic sync and the push that wake it.
+ark-dpc = { path = "../../modules/ark-dpc" }
+ark-background = { path = "../../modules/ark-background" }
+ark-notifications = { path = "../../modules/ark-notifications" }
+# The login kept in the keystore.
+ark-secure-store = { path = "../../modules/ark-secure-store" }
+
+[dev-dependencies]
+# The tests' store, a peer's, over devices' domain in memory.
+ark-peer = { path = "../../rust/ark-peer", default-features = false }

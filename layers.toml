@@ -47,7 +47,7 @@ external = ["*"]
 [layers.app]
 # An app: its screens' state, messages, update and page records; where it
 # can be (its routes); the device modules it asks.
-crates = ["money-app", "harken-app"]
+crates = ["money-app", "harken-app", "devices-app"]
 uses = ["kernel", "core", "runtime", "modules"]
 external = ["serde_json"]
 
