@@ -92,3 +92,40 @@ fn the_shells_view_records_both_sections() {
     let (h, place) = hosted();
     let _ = crate::shell::view::harken_shell::view(&h.app().shell.page(&place, NOW));
 }
+
+/// A song's Add to Playlist raises the sheets' playlists for it, and the
+/// shows' Follow raises the follow sheet of the kind shown. Falsified by
+/// the host keeping the ask (as it did before the sheets were a runtime).
+#[test]
+fn a_screens_sheet_is_raised_by_the_host() {
+    let (mut h, mut place) = hosted();
+    h.send::<Library>(LibraryMsg::Show { kind: "songs".into() }, &mut place);
+    let song = h.app().library.page(&place, NOW).songs[0].id.clone();
+    h.send::<Library>(LibraryMsg::AddTo { id: song }, &mut place);
+    let p = h.app().sheets.page(&place, NOW);
+    assert!(p.adding && !p.playlists.is_empty(), "{p:?}");
+    h.send::<crate::sheets::Sheets>(SheetsMsg::Dismiss, &mut place);
+    h.send::<Library>(LibraryMsg::Show { kind: "sermons".into() }, &mut place);
+    h.send::<Library>(LibraryMsg::Follow, &mut place);
+    let f = h.app().sheets.page(&place, NOW).following.expect("the follow sheet");
+    assert_eq!(f.title, "Follow a Series");
+}
+
+/// Settings says the session as the host reads it: the demo's library on
+/// this device alone, no device of a session; its panes chosen by title.
+/// Falsified by the host not telling the shell (the facts empty).
+#[test]
+fn settings_say_the_session() {
+    let (mut h, mut place) = hosted();
+    let p = h.app().shell.page(&place, NOW);
+    assert_eq!(
+        (p.pane.as_str(), p.facts.link.as_str(), p.facts.device.as_str()),
+        ("General", "On This Device", "None")
+    );
+    assert!(!p.facts.on_server);
+    h.send::<HarkenShell>(ShellMsg::Pane { title: "Diagnostics".into() }, &mut place);
+    let p = h.app().shell.page(&place, NOW);
+    assert_eq!(p.pane, "Diagnostics");
+    let _ = crate::shell::view::harken_settings::view(&p);
+    let _ = crate::shell::view::harken_settings::record();
+}

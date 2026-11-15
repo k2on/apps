@@ -28,6 +28,55 @@ pub struct State {
     pub playing: bool,
     /// The bar has grown into the full player.
     pub player_open: bool,
+    /// Settings' pane shown, by its title; none is General.
+    pub pane: String,
+    /// What the session says of itself, for Settings and the diagnostics.
+    pub facts: Facts,
+}
+
+/// What Settings and the diagnostics say of the session, as the host's
+/// session says it.
+#[derive(Clone, Debug, Default, PartialEq, ark::twin::Twin)]
+pub struct Facts {
+    /// The server, as shown; empty alone.
+    pub server: String,
+    /// "Connected", "Offline", "Connecting", or "On This Device" alone.
+    pub link: String,
+    pub version: String,
+    /// Changes made here not yet synced, counted.
+    pub pending: String,
+    /// This device as the session names it; "None" alone.
+    pub device: String,
+    /// Connections opened, counted.
+    pub connections: String,
+    /// A server is there to say.
+    pub on_server: bool,
+}
+
+impl Facts {
+    /// The facts of `s`.
+    pub fn of(s: &ark_app::host::Session) -> Facts {
+        let link = match (s.demo, s.linked) {
+            (true, _) => "On This Device",
+            (false, Some(true)) => "Connected",
+            (false, Some(false)) => "Offline",
+            (false, None) => "Connecting",
+        };
+        Facts {
+            server: s
+                .server
+                .trim_start_matches("https://")
+                .trim_start_matches("http://")
+                .trim_end_matches('/')
+                .into(),
+            link: link.into(),
+            version: s.version.clone(),
+            pending: s.pending.to_string(),
+            device: if s.device.is_empty() { "None".into() } else { s.device.clone() },
+            connections: s.epoch.to_string(),
+            on_server: !s.demo,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, ark::twin::Twin)]
@@ -53,6 +102,14 @@ pub enum ShellMsg {
     Skip {
         by: i64,
     },
+    /// Settings' pane of this title.
+    Pane {
+        title: String,
+    },
+    /// What the session says of itself now, as the host reads it.
+    Facts {
+        facts: Facts,
+    },
 }
 
 /// Everything the shell shows of its own.
@@ -63,6 +120,8 @@ pub struct ShellPage {
     pub page_title: String,
     pub playing: bool,
     pub player_open: bool,
+    pub pane: String,
+    pub facts: Facts,
 }
 
 impl App for HarkenShell {
@@ -112,6 +171,14 @@ impl App for HarkenShell {
                 vec![]
             }
             ShellMsg::Skip { by } => vec![Command::Request(HarkenRequest::Skip { by })],
+            ShellMsg::Pane { title } => {
+                s.pane = title;
+                vec![]
+            }
+            ShellMsg::Facts { facts } => {
+                s.facts = facts;
+                vec![]
+            }
         }
     }
 
@@ -122,6 +189,8 @@ impl App for HarkenShell {
             page_title: s.pushed.clone().unwrap_or_default(),
             playing: s.playing,
             player_open: s.player_open,
+            pane: if s.pane.is_empty() { "General".into() } else { s.pane.clone() },
+            facts: s.facts.clone(),
         }
     }
 }

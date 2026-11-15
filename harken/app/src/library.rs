@@ -95,6 +95,8 @@ pub enum LibraryMsg {
     },
     SavePlaylist,
     Dismiss,
+    /// Follow a show of the kind shown.
+    Follow,
 }
 
 /// A chip of the six.
@@ -152,6 +154,8 @@ pub struct LibraryPage {
     pub on_artists: bool,
     pub on_songs: bool,
     pub on_shows: bool,
+    /// The row that follows a show of the kind shown: "Follow a Podcast".
+    pub follow: String,
     pub playlists: Vec<PlaylistItem>,
     pub albums: Vec<ArtTile>,
     pub artists: Vec<ArtTile>,
@@ -265,6 +269,10 @@ impl App for Library {
             }
             LibraryMsg::Queue { id, next } => vec![Command::Request(HarkenRequest::Queue { track: id, next })],
             LibraryMsg::AddTo { id } => vec![Command::Request(HarkenRequest::AddTo { track: id })],
+            LibraryMsg::Follow => {
+                let kind = if s.kind() == "sermons" { "sermon" } else { "podcast" };
+                vec![Command::Request(HarkenRequest::Follow { kind: kind.into() })]
+            }
             LibraryMsg::NewPlaylist => {
                 s.naming = Some(String::new());
                 s.refused = None;
@@ -311,6 +319,7 @@ impl App for Library {
             on_artists: kind == "artists",
             on_songs: kind == "songs",
             on_shows: kind == "podcasts" || kind == "sermons",
+            follow: if kind == "sermons" { "Follow a Series" } else { "Follow a Podcast" }.into(),
             playlists: vec![],
             albums: vec![],
             artists: vec![],

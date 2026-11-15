@@ -60,14 +60,17 @@ pub fn library(p: &LibraryPage) -> View<LibraryMsg> {
                 })
             },
             if p.on_shows {
-                artwork_grid(for s in p.shows {
-                    artwork_tile(
-                        artwork(s.art, s.seed, s.title).size(ArtSize::Fill),
-                        s.title,
-                        s.caption,
-                        LibraryMsg::OpenShow { key: s.key, title: s.title },
-                    )
-                })
+                (
+                    card_section(list_row(p.follow).glyph("circle-plus").accent().on_tap(LibraryMsg::Follow)),
+                    artwork_grid(for s in p.shows {
+                        artwork_tile(
+                            artwork(s.art, s.seed, s.title).size(ArtSize::Fill),
+                            s.title,
+                            s.caption,
+                            LibraryMsg::OpenShow { key: s.key, title: s.title },
+                        )
+                    }),
+                )
             },
             if p.empty {
                 card_section(empty_state(p.empty_glyph, p.empty_title, p.empty_text))

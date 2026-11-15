@@ -1130,8 +1130,17 @@ changes, `.github/compat-check.sh`'s harken part grows with it.
    there; an add queues). `[background] playback` is a key of app.toml
    (ui/prebuild.py gates the media player's `audio` mode, its
    foreground service and `dev.arkui.playback`, which `ArkMediaService`
-   reads); harken's app.toml says it once it is written (step 4). Next:
-   the sheets and Settings.
+   reads); harken's app.toml says it once it is written (step 4). The
+   sheets are a runtime (`sheets::Sheets`, raised by the host: a
+   track's playlists, each pressed to put it on or take it off;
+   following a show by its feed's address, from Library's podcasts and
+   sermons), and Settings is the shell's (`harken_settings`: General,
+   the server and its link and the version; Diagnostics, what waits to
+   sync, this device, the connections, the host telling the shell its
+   session's facts). Next: the podcast directory's search (a fetch
+   port, not built: following is by address until then) and recent
+   searches as a durable local row (which needs a place's local
+   instance, not built).
 4. Generated targets, the old clients deleted: not started.
 5. Screenshots: not started.
 

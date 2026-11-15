@@ -17,6 +17,7 @@ use crate::library::{Library, LibraryMsg};
 use crate::page::{Page, PageMsg};
 use crate::player::{Player, PlayerMsg};
 use crate::search::{Search, SearchMsg};
+use crate::sheets::{Sheets, SheetsMsg};
 use crate::shell::{HarkenShell, ShellMsg};
 use crate::{HarkenRequest, Route};
 
@@ -34,12 +35,11 @@ pub struct Harken {
     pub search: Screen<Search>,
     pub page: Screen<Page>,
     pub player: Screen<Player>,
+    pub sheets: Screen<Sheets>,
     /// This device's player: the reconciler and its sound.
     pub listen: Listen,
     /// What a car browses.
     pub car: Car,
-    /// What was asked that no runtime takes yet (the sheets'), in order.
-    pub waiting: Vec<HarkenRequest>,
     /// Why the last press was not taken, while it is the last.
     pub refused: Option<String>,
 }
@@ -91,9 +91,9 @@ impl HostedApp for Harken {
             search: Screen::new(),
             page: Screen::new(),
             player: Screen::new(),
+            sheets: Screen::new(),
             listen: Listen::open(session, cx),
             car: Car::default(),
-            waiting: vec![],
             refused: None,
         };
         let server = session.server.clone();
@@ -113,11 +113,20 @@ impl HostedApp for Harken {
             &mut self.search,
             &mut self.page,
             &mut self.player,
+            &mut self.sheets,
         ]
     }
 
     fn screens_ref(&self) -> Vec<&dyn Running<Harken>> {
-        vec![&self.shell, &self.home, &self.library, &self.search, &self.page, &self.player]
+        vec![
+            &self.shell,
+            &self.home,
+            &self.library,
+            &self.search,
+            &self.page,
+            &self.player,
+            &self.sheets,
+        ]
     }
 
     /// The listening session, and every song: what a press and a play are
@@ -191,7 +200,8 @@ impl HostedApp for Harken {
             HarkenRequest::Transfer { to } => Press::Transfer { to },
             HarkenRequest::Volume { level } => self.listen.loud(Change::To { level }, cx),
             HarkenRequest::Mute { muted } => self.listen.loud(Change::Mute { muted }, cx),
-            r @ HarkenRequest::AddTo { .. } => return self.waiting.push(r),
+            HarkenRequest::AddTo { track } => return self.sheets.send(SheetsMsg::AddTo { track }, cx),
+            HarkenRequest::Follow { kind } => return self.sheets.send(SheetsMsg::Follow { kind }, cx),
         };
         self.refused = self.listen.press(press, cx);
         self.listen.step(cx);
@@ -244,6 +254,10 @@ impl Harken {
                 cx,
             );
         }
+        let facts = crate::shell::Facts::of(&s);
+        if self.shell.state().facts != facts {
+            self.shell.send(ShellMsg::Facts { facts }, cx);
+        }
         let playing = self.player.page(&*cx.place, cx.now_ms).has;
         if self.shell.state().playing != playing {
             self.shell.send(ShellMsg::Playing { on: playing }, cx);
@@ -264,7 +278,7 @@ macro_rules! has {
     )*};
 }
 
-has!(HarkenShell => shell, Home => home, Library => library, Search => search, Page => page, Player => player);
+has!(HarkenShell => shell, Home => home, Library => library, Search => search, Page => page, Player => player, Sheets => sheets);
 
 #[cfg(test)]
 mod tests;

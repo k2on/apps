@@ -6,7 +6,8 @@
 //!
 //! The screens moved here so far are the library's: Home ([`home`]),
 //! Library ([`library`]), Search ([`search`]) and a record's page
-//! ([`page`]), under the shell ([`shell`]), and the player ([`player`]),
+//! ([`page`]), under the shell ([`shell`]), the player ([`player`]) and
+//! the sheets any of them raises ([`sheets`]),
 //! run by the host's part ([`host`]), which drives this device's own sound
 //! ([`sound`], the media player module). The sheets and Settings follow
 //! (ui/docs/app.md, "Where It Stands").
@@ -18,6 +19,7 @@ pub mod page;
 pub mod player;
 pub mod routes;
 pub mod search;
+pub mod sheets;
 pub mod shell;
 pub mod sound;
 pub mod welcome;
@@ -51,6 +53,10 @@ pub enum HarkenRequest {
     /// A track's playlists, to put it on one or take it off (a sheet).
     AddTo {
         track: String,
+    },
+    /// Follow a show (`podcast`, `sermon`) by its feed (a sheet).
+    Follow {
+        kind: String,
     },
     /// Pause what sounds, else play.
     Toggle,

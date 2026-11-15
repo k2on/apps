@@ -61,6 +61,19 @@ impl<A: App<Key = HarkenView, Change = HarkenChange, Route = Route, Request = Ha
         }
     }
 
+    /// The first song of the demo's library, its id's hex.
+    pub fn first_song(&mut self) -> String {
+        let all = HarkenView::Library { playlist: [0; 16] };
+        self.hold(vec![all.clone()]);
+        let rows: Vec<harken_domain::LibraryEntry> = self
+            .store
+            .rows::<Vec<u8>>(&all)
+            .iter()
+            .filter_map(|b| <harken_domain::LibraryEntry as ark::format::Encode>::from_bytes(b).ok())
+            .collect();
+        rows.iter().find(|e| e.kind != "episode").expect("a song").id.hex()
+    }
+
     /// The screen's record as it is now.
     pub fn page(&mut self, rt: &mut Runtime<A>) -> A::Screen {
         self.hold(rt.holds());
