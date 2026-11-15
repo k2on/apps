@@ -455,6 +455,19 @@ pub fn named(name: &str) -> Option<&'static [u8]> {
         "circle-minus" => CIRCLE_MINUS,
         "chevrons-up-down" => CHOOSE,
         "circle-help" => UNCHOSEN,
+        "pause" => PAUSE,
+        "skip-back" => PREVIOUS,
+        "skip-forward" => NEXT,
+        "shuffle" => SHUFFLE,
+        "list-music" => PLAYLIST,
+        "disc-3" => ALBUM,
+        "mic-vocal" => ARTIST,
+        "podcast" => SHOW,
+        "book-open" => PULPIT,
+        "list-plus" => ADD_TO,
+        "list-start" => ADD_TO,
+        "list-end" => LIST,
+        "speaker" => SPEAKER,
         _ => return None,
     })
 }
@@ -509,6 +522,6 @@ mod named_tests {
             mark,
             r##"<svg viewBox="0 0 108 108"><g fill="currentColor"><path d="M5 5h1z"/></g></svg>"##
         );
-        assert!(named("disc-3").is_none());
+        assert!(named("disc-4").is_none());
     }
 }

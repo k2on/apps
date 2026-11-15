@@ -19,6 +19,7 @@ use ark::prelude::scope;
 
 pub mod browse;
 pub mod catalogue;
+pub mod changes;
 pub mod devices;
 pub mod downloads;
 pub mod groups;
@@ -37,6 +38,7 @@ pub mod types;
 pub mod views;
 
 pub use ark::row::Id;
+pub use changes::HarkenChange;
 pub use schema::*;
 pub use types::*;
 pub use views::HarkenView;

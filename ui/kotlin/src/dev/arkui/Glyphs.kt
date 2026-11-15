@@ -282,6 +282,54 @@ public object ArkGlyphs {
     /** `link`, Lucide's: a link to another thing (a bank). */
     public val Link: ImageVector = glyph("link", "M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71", "M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71")
 
+    /** `pause`, Lucide's: a sound held. */
+    public val Pause: ImageVector = glyph("pause", rect(14f, 3f, 5f, 18f), rect(5f, 3f, 5f, 18f))
+
+    /** `skip-back`, Lucide's: the track before. */
+    public val SkipBack: ImageVector = glyph("skip-back", "M17.971 4.285A2 2 0 0 1 21 6v12a2 2 0 0 1-3.029 1.715l-9.997-5.998a2 2 0 0 1-.003-3.432z", "M3 20V4")
+
+    /** `skip-forward`, Lucide's: the next track. */
+    public val SkipForward: ImageVector = glyph("skip-forward", "M21 4v16", "M6.029 4.285A2 2 0 0 0 3 6v12a2 2 0 0 0 3.029 1.715l9.997-5.998a2 2 0 0 0 .003-3.432z")
+
+    /** `shuffle`, Lucide's: played in no order. */
+    public val Shuffle: ImageVector = glyph("shuffle", "m18 14 4 4-4 4", "m18 2 4 4-4 4", "M2 18h1.973a4 4 0 0 0 3.3-1.7l5.454-8.6a4 4 0 0 1 3.3-1.7H22", "M2 6h1.972a4 4 0 0 1 3.6 2.2", "M22 18h-6.041a4 4 0 0 1-3.3-1.8l-.359-.45")
+
+    /** `repeat`, Lucide's: played again. */
+    public val Repeat: ImageVector = glyph("repeat", "m17 2 4 4-4 4", "M3 11v-1a4 4 0 0 1 4-4h14", "m7 22-4-4 4-4", "M21 13v1a4 4 0 0 1-4 4H3")
+
+    /** `play`, Lucide's: a sound started. */
+    public val Play: ImageVector = glyph("play", "M5 5a2 2 0 0 1 3.008-1.728l11.997 6.998a2 2 0 0 1 .003 3.458l-12 7A2 2 0 0 1 5 19z")
+
+    /** `music`, Lucide's: a song. */
+    public val Music: ImageVector = glyph("music", "M9 18V5l12-2v13", circle(6f, 18f, 3f), circle(18f, 16f, 3f))
+
+    /** `list-music`, Lucide's: a playlist. */
+    public val ListMusic: ImageVector = glyph("list-music", "M16 5H3", "M11 12H3", "M11 19H3", "M21 16V5", circle(18f, 16f, 3f))
+
+    /** `disc-3`, Lucide's: an album. */
+    public val Disc: ImageVector = glyph("disc-3", circle(12f, 12f, 10f), "M6 12c0-1.7.7-3.2 1.8-4.2", circle(12f, 12f, 2f), "M18 12c0 1.7-.7 3.2-1.8 4.2")
+
+    /** `mic-vocal`, Lucide's: somebody who made something. */
+    public val MicVocal: ImageVector = glyph("mic-vocal", "M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2", circle(12f, 7f, 4f))
+
+    /** `podcast`, Lucide's: a podcast. */
+    public val Podcast: ImageVector = glyph("podcast", "M12 19v3", "M19 10v2a7 7 0 0 1-14 0v-2", rect(9f, 2f, 6f, 13f))
+
+    /** `book-open`, Lucide's: a series of sermons. */
+    public val BookOpen: ImageVector = glyph("book-open", "M3 8l18-4", "M5 7.6V10h14V5.6", "M8 10l1 9h6l1-9", "M6 21h12")
+
+    /** `list-plus`, Lucide's: put on a list. */
+    public val ListPlus: ImageVector = glyph("list-plus", "M16 5H3", "M11 12H3", "M16 19H3", "M18 9v6", "M21 12h-6")
+
+    /** `list-start`, Lucide's: played next. */
+    public val ListStart: ImageVector = glyph("list-start", "M16 5H3", "M11 12H3", "M16 19H3", "M18 9v6", "M21 12h-6")
+
+    /** `list-end`, Lucide's: played last. */
+    public val ListEnd: ImageVector = glyph("list-end", "M3 12h.01", "M3 18h.01", "M3 6h.01", "M8 12h13", "M8 18h13", "M8 6h13")
+
+    /** `speaker`, Lucide's: a speaker in the house. */
+    public val Speaker: ImageVector = glyph("speaker", rect(4f, 2f, 16f, 20f), "M12 6h.01", circle(12f, 14f, 4f), "M12 14h.01")
+
     /** Every glyph here by its Lucide name, the name the other toolkits know it by. */
     private val byName: Map<String, ImageVector> by lazy {
         listOf(
@@ -290,6 +338,7 @@ public object ArkGlyphs {
             PanelRight, Wand, Sync, Filter, Mail, Chart, Rows, Inbox, Alert, Clock, Dollar, Banknote, Target, Arrows, Users, House,
             Landmark, Card, Trending, Eye, EyeOff, ArrowUp, ArrowDown, Trash, Lock, Receipt, Crosshair, Folder,
             ScanLine, Picture, Keyboard, CircleMinus, Choose, Unchosen, Layers, Link,
+            Pause, SkipBack, SkipForward, Shuffle, Repeat, Play, Music, ListMusic, Disc, MicVocal, Podcast, BookOpen, ListPlus, ListStart, ListEnd, Speaker,
         )
             .associateBy { it.name } + ("ellipsis-vertical" to More)
     }

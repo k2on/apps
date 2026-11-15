@@ -4,7 +4,7 @@ version = "0.1.0"
 workspace = "../../rust"
 edition.workspace = true
 license.workspace = true
-description = "harken as an app over its domain: where it can be (its routes, one path each, on every shell). What its screens read moves here as they move into Rust."
+description = "harken as an Ark app (ui/docs/app.md, harken's Port): its screens' state, messages, update and views in Rust, run by ark-app on every platform, and where it can be (its routes)."
 
 [lib]
 name = "harken_app"
@@ -12,7 +12,13 @@ path = "src/lib.rs"
 
 [dependencies]
 ark = { path = "../../rust/ark" }
+ark-app = { path = "../../ui/rust/app" }
+ark-format = { path = "../../rust/ark-format" }
+harken-domain = { path = "../core" }
 # Its routes, spelled as paths (`src/routes.rs`).
 ark-router = { path = "../../ui/rust/router" }
-# Its first run's words, on the pages every app shares (`src/welcome.rs`).
-ark-app = { path = "../../ui/rust/app" }
+
+[dev-dependencies]
+# The tests' store, a peer's, over the demo's library.
+ark-peer = { path = "../../rust/ark-peer", default-features = false }
+harken-seed = { path = "../demo", default-features = false }

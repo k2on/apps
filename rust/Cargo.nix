@@ -9870,8 +9870,28 @@ rec {
             packageId = "ark-app";
           }
           {
+            name = "ark-format";
+            packageId = "ark-format";
+          }
+          {
             name = "ark-router";
             packageId = "ark-router";
+          }
+          {
+            name = "harken-domain";
+            packageId = "harken-domain";
+          }
+        ];
+        devDependencies = [
+          {
+            name = "ark-peer";
+            packageId = "ark-peer";
+            usesDefaultFeatures = false;
+          }
+          {
+            name = "harken-seed";
+            packageId = "harken-seed";
+            usesDefaultFeatures = false;
           }
         ];
 

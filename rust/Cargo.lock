@@ -2992,7 +2992,11 @@ version = "0.1.0"
 dependencies = [
  "ark",
  "ark-app",
+ "ark-format",
+ "ark-peer",
  "ark-router",
+ "harken-domain",
+ "harken-seed",
 ]
 
 [[package]]
