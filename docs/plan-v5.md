@@ -380,7 +380,7 @@ rust/ark-auth/      dev sign-in and OpenID Connect
 rust/ark-explorer/  the admin page (its routes behind `server`) and the explorer
                     over a replica
 ui/rust/arkui/         the iced components
-harken/domain/      harken's domain, a crate of plain Rust
+harken/core/      harken's domain, a crate of plain Rust
 harken/server/, harken/iced/, harken/ffi/ (with android/ and ios/)
 spec/               README.md, RUNNERS.md, AUTHORING.md and vectors/
 ```
@@ -503,17 +503,17 @@ Budget: **≤ 1,300**.
 ### A1 — authoring macros, harken's domain
 
 Owns: `rust/ark5-macros/src/{lib.rs, mutator.rs, query.rs, scope.rs,
-live.rs, lower.rs}`, `harken/domain5/**`, `spec5/AUTHORING.md`.
+live.rs, lower.rs}`, `harken/core5/**`, `spec5/AUTHORING.md`.
 
 Builds §1.12. The lowering from `syn` to `Expr` is one module; each
 attribute is a thin entry. The accepted subset is a table in
 `AUTHORING.md`, and every row has a test that it lowers and a `trybuild`
 test that the nearest thing outside it is refused with a message naming
-it. harken's domain is ported function for function; `harken/domain/tests/
+it. harken's domain is ported function for function; `harken/core/tests/
 {converge,read_model,views,listening}.rs` are ported as its tests, so the
 domain is held to what it was.
 
-Budget: macros **≤ 1,500**; `harken/domain5` reported, not budgeted
+Budget: macros **≤ 1,500**; `harken/core5` reported, not budgeted
 (it is harken's, and its line count beside v4's 3,711 is the
 ergonomics result).
 
@@ -543,7 +543,7 @@ Budget: client **≤ 1,200**, server **≤ 1,200**, dev **≤ 1,500**.
 ### M1 — measurement
 
 Owns: `rust/ark5/tests/perf.rs`, `rust/ark5-server/tests/perf.rs`,
-`harken/domain5/tests/perf.rs`, `docs/perf/**`, and Part 3's table in
+`harken/core5/tests/perf.rs`, `docs/perf/**`, and Part 3's table in
 this document.
 
 Builds the harnesses Part 3 names, runs both versions, writes the
@@ -580,7 +580,7 @@ separately. Generated Unicode tables are excluded from both.
 
 The tables below were recorded by harnesses that printed every shape and
 asserted nothing (`tests/perf.rs` in `rust/ark`, `rust/ark-peer` — once
-`ark-server` — and `harken/domain`, each shape a v4 one: a local mutation,
+`ark-server` — and `harken/core`, each shape a v4 one: a local mutation,
 the round trip, offline pending, initial sync, the rebase, fan-out, frames,
 harken's mutations, views at 1k/4k/16k rows). T3 replaced them, and they
 are in the history up to its commit. What is measured now is held: each
@@ -770,7 +770,7 @@ whole workspace on the host (cargo's `feature-unification`), so `-p` runs
 reuse the layers. The wasm pages share one dependency layer; each Android
 ABI has its own, and the iOS targets one. Measured on this machine with
 `--max-jobs 1`, `nix build` of `checks.{rust,ffi,traces,versions}` after a
-comment added to `harken/domain/src/lib.rs`, dependencies already built:
+comment added to `harken/core/src/lib.rs`, dependencies already built:
 `Compiling ark ` 8 → 2 lines (`Compiling` of any crate 2,142 → 27), 1,731 s
 → 399 s. From nothing but the fetched crates the new layers take 1,006 s.
 
@@ -797,7 +797,7 @@ in its closure, and compiling its host part compiles no `wgpu`, `winit`
 or `iced` crate (the old `arkdb-deps` it waited on compiled 22).
 
 Measured with `--max-jobs 1`, a comment added to
-`harken/domain/src/schema.rs`, the layers below already built:
+`harken/core/src/schema.rs`, the layers below already built:
 
 | | before | after |
 |---|---:|---:|
@@ -1606,7 +1606,7 @@ failed; a/b/c/`add_song` ≤1.04×. A refused device write is retried, not lost.
 Not verified: the browser build drawn (it compiles again); wss.
 
 **A4** (`dc97b35`…): **the domain is written in ArkLang; the builders go.**
-`harken/domain` is eleven hand-written files, 1,834 lines of ArkLang (311
+`harken/core` is eleven hand-written files, 1,834 lines of ArkLang (311
 of comments) against the builders' 3,149 of Rust; all 127 functions hold
 their pre-A3 pins, names aside (`port.rs`: none moved), and every file is
 its forms printed (`text.rs`). A function keeps its binders' names, so a
@@ -1615,7 +1615,7 @@ renamed local is a new hash. Added: `(?? o.f d)`, `(?. o f)`, `(as (row t)
 `build_dir`/`load`, `arkc` (74). `ark::gen` (395: generator ~190, `Id`,
 `Call`, `fits`, prefix reading) writes types and stubs; both apps generate
 theirs in `build.rs`. Deleted `ark::author`, four derives, harken's domain
-Rust: `ark` 9,766→9,487, `ark-macros` 453→74, `harken/domain` 3,149→237.
+Rust: `ark` 9,766→9,487, `ark-macros` 453→74, `harken/core` 3,149→237.
 `sexp.rs` is 1,629, not ≤900: the declarations' spelling holds the pins.
 Every vector family but `hash/` re-derived, every state and answer held;
 fuzz 1,000, 0 failed. Not verified: the browser build; a grown row in an
@@ -1673,9 +1673,9 @@ re-run; a fresh `Join` calls `on` for key partners only.
 
 **R1** (`8bda5c3`…): v5 has the canonical names and v4 is gone.
 `rust/ark5*` → `rust/ark`, `ark-macros`, `ark-client`, `ark-server`,
-`ark-dev`; `harken/domain5` → `harken/domain` (crate `harken-domain`);
+`ark-dev`; `harken/core5` → `harken/core` (crate `harken-domain`);
 `spec5` → `spec`; v4's `rust/ark`, `ark-client`, `ark-server`,
-`harken/domain` and `spec` deleted. The attribute macros and `Domain` are
+`harken/core` and `spec` deleted. The attribute macros and `Domain` are
 re-exported at `ark`'s root, since `use ark::author::{self as ark}` would
 now name itself. The join test that timed out in debug is a debug-build
 timing: in release, alternating, start-with-server to converged took
@@ -1701,7 +1701,7 @@ flake's toolchain (1.98) found one lint 1.97 does not
 (`result_large_err` in `ark-server::admin`), fixed. Sizes after
 (`docs/perf/loc-r1.txt`): `ark` 7,790 source (5,447 less the Unicode
 tables), `ark-macros` 1,236, `ark-client` 793, `ark-server` 1,031,
-`ark-dev` 1,462 + 86 bin, `harken/domain` 2,583; 36,388 source,
+`ark-dev` 1,462 + 86 bin, `harken/core` 2,583; 36,388 source,
 3,492 bin and 21,126 test lines across every crate. Not verified: the
 browser build drawn on v5; the CI workflow as patched; the phones (frozen).
 
@@ -1733,7 +1733,7 @@ refusal, stores by space). 179 tests across the six v5 crates.
 `fleet-seed-7` through the real hub and client reaches K1's pin; 123
 traces of 41 fleet sessions replay; the fuzzer ran 10,000 sessions
 with traces replayed (746,771 ops, 141,787 entries, 0 failed) and a
-second 10,000 without; `harken/domain5` is green with no `#[ignore]`
+second 10,000 without; `harken/core5` is green with no `#[ignore]`
 for D1. The fuzzer found and D1 fixed five kernel faults, each now a
 test and a `rebase/fleet-fuzz-seed-N` vector: a refused intent used a
 `local` while alone; a gap inside a joined chain held its tail; a
@@ -1766,7 +1766,7 @@ being rustc's to resolve, and nothing in it is a second execution
 path. The demo written with `#[ark::mutator]` hashes byte for byte as
 `tests/demo.rs` builds it. 22 lowering tests, one per row of
 `spec5/AUTHORING.md`'s subset; 33 `trybuild` compile-fail cases.
-`harken/domain5` is **2,583 source lines against v4's 3,711** (70%),
+`harken/core5` is **2,583 source lines against v4's 3,711** (70%),
 every function through the checker, with `read_model`, `listening`,
 `views` and `converge` ported (144 tests across the three crates).
 Decisions now part of the design: an expression is an `Ex<T>` of its

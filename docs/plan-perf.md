@@ -1,7 +1,7 @@
 # The performance pass: what grows, and what is decided about each
 
 `rust/ark/tests/perf.rs`, `rust/ark-server/tests/perf.rs` and
-`harken/domain/tests/perf.rs` (commit `612bc71`) measure every path at two
+`harken/core/tests/perf.rs` (commit `612bc71`) measure every path at two
 or three sizes. This document is the ranking of what they found and the
 design of each fix; the code is written from it. A finding is *real growth*
 when the per-operation cost rises with the data where the operation touches
@@ -42,7 +42,7 @@ rows, cut). `view::read` calls it for a bare plan whose order is by columns.
 
 The domain declares the indexes the reads need — `playlist_item`
 `(playlist_id, pos)`, `media` `(file)` and `(pos)`, `playlist` `(pos)` and
-`(user_id, pos)` — in `harken/domain/src/schema.rs`. A non-unique index is
+`(user_id, pos)` — in `harken/core/src/schema.rs`. A non-unique index is
 additive under `compat` and changes no row; the mutators' closure hashes do
 not move (pinned by `every_mutator_hashes_as_it_did_at_spec_v3`); the module
 hash does, and `harken.ark` is regenerated. Loading an older snapshot
@@ -127,7 +127,7 @@ settle and are unaffected.
 Guard: a counting `MemoryStore::clone` shows zero copies across a rebase
 with pending; `Peer::take_changes` after a rebase is `Applied` and the
 views' contract holds through it (`rust/ark-client` and
-`harken/domain/tests/views.rs` already churn through rebases — they must
+`harken/core/tests/views.rs` already churn through rebases — they must
 now never see `Rebuilt` from a rebase, and a test asserts it); the alone
 peer applies once per intent (count applies).
 
@@ -471,7 +471,7 @@ unbounded range each fail it), orders no index holds answering `None`
 the window and two that take rows out of it (asking the base without
 leaving out written keys brings the removed row back), a prefix read in
 key order (without the sort it comes back by position), and a table
-emptied equal to one never written. `harken/domain/tests/perf.rs`
+emptied equal to one never written. `harken/core/tests/perf.rs`
 `a_mutation_examines_the_rows_it_needs_not_the_library`, with the suite:
 at 8,000, `add_song` of a new file examines 1 row and 14 gets (16,000
 rows before), `add_to_playlist` onto a playlist of 7,999 1 row and 7 gets
@@ -594,7 +594,7 @@ vector (`cargo test -p ark --test vectors`) and
 `every_procedure_agrees_with_the_interpreter` pass unchanged.
 
 **Before and after**, release builds on the shared VM,
-`harken/domain/tests/perf.rs`: before at `ed5852b`, after at `209cbb5`
+`harken/core/tests/perf.rs`: before at `ed5852b`, after at `209cbb5`
 (the interpreted `create_playlist` rows at `2b4731a`, before R6's
 `932a47e` changed that mutation, and run back to back with the old
 `eval.rs` swapped in):
@@ -727,7 +727,7 @@ panic); an ordered read walks only its span, three rows examined each way
 outside the range merge exactly (not leaving written keys out of the
 base's answer: the row moved out comes back). `view.rs`: a filter's
 bounds become one span per column, the tightest, exclusive at a tie (no
-tie rule: inclusive). `harken/domain`: `keys::tests` holds
+tie rule: inclusive). `harken/core`: `keys::tests` holds
 `playlist_name` over the siblings to the old body over a thousand names,
 a hundred of them numbered with gaps (a range ending at `name (`:
 "Favorites (1)"); `perf.rs` counts alice's 102nd "Favorites" among a
@@ -1259,7 +1259,7 @@ re-evaluation of a child whose numbers moved, and by not subtracting a
 row that leaves its group, each "the view is not a fresh hydrate" within
 the first steps. Green unchanged: `rust/ark/tests/views.rs`,
 `plans.rs`, `toggle.rs` (the library toggle still two reads),
-`vectors.rs`, `harken/domain/tests/views.rs`, and the workspace.
+`vectors.rs`, `harken/core/tests/views.rs`, and the workspace.
 
 **The rows.** Before at `df66ab2`, after at `a0cf539` (the harness row)
 and `2b9e99b`'s `view.rs` over `df66ab2` (`bench_views`), release, one

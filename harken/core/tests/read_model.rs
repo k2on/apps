@@ -1,5 +1,5 @@
 //! The read model, against rows the domain's own functions wrote:
-//! `harken/domain/tests/read_model.rs`, assertion for assertion. Each test
+//! `harken/core/tests/read_model.rs`, assertion for assertion. Each test
 //! was falsified once by breaking the function it names; the doc comment
 //! says how.
 // A test reads its fixtures and times itself: the kernel's and the core's

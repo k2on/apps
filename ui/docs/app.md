@@ -925,7 +925,7 @@ in the same commit that replaces them.
 
 | Today | Becomes |
 |---|---|
-| `harken/domain` (harken-domain) | `harken/core`, the same crate and name: the domain, pure (layers.toml's core) |
+| `harken/core` (harken-domain) | `harken/core`, the same crate and name: the domain, pure (layers.toml's core) |
 | `harken/player` (harken-player) | split: the reconciler's decisions, its typed memory and the presses (`press.rs`, `reconcile.rs`'s rules, `memory.rs`'s values, `Listening`) into `harken_domain::player`, pure over the session and what a sound said; what drives a peer (`Player`, `config.rs`, the rows it keeps) into the adapters that need it — the server's Home Assistant speakers (`harken/server`) and the app's host through its place (below) |
 | `harken/app` (routes, first-run words) | harken-app: every screen's state, messages, update, page record and `#[view]`; `host::Harken` (its `HostedApp` and `Windowed`); `words` (lengths, counts, "played from") |
 | `harken/ffi` (hand-written bridge, `HarkenSession`, `Player`, the `Hall`) | generated (`[ffi]`): `harken-ffi` from app.toml like `money-ffi`; the Hall moves to the server's tests (`harken-server`'s `hall`), which already hold the same hub |

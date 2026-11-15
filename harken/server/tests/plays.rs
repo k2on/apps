@@ -6,7 +6,7 @@
 //! When a play counts (thirty seconds or half the track), that it counts
 //! once, and that only the device making the sound authors it are the
 //! reconciler's, and tested there (`harken-iced`'s `listening` tests); the
-//! rows and the two queries are `harken/domain/tests/agreement.rs`'s.
+//! rows and the two queries are `harken/core/tests/agreement.rs`'s.
 
 mod common;
 

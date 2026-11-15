@@ -1,4 +1,4 @@
-//! The domain against a simulated fleet (`harken/domain/tests/
+//! The domain against a simulated fleet (`harken/core/tests/
 //! converge.rs`): one authority and clients, every one the one peer
 //! machine (§1.7), over the simulator's seeded network that reorders,
 //! duplicates and drops — no sockets, no threads, no sleeps, and a seed

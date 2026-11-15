@@ -4,7 +4,7 @@
 //! Assistant bridge stands in for, and a Home Assistant that answers over
 //! HTTP.
 //!
-//! The session's rules are transition tests in `harken/domain/tests/
+//! The session's rules are transition tests in `harken/core/tests/
 //! listening.rs`, and the bridge's are unit tests beside it. This is the
 //! plumbing above both, which neither can see and which is where a device
 //! goes missing without any rule being wrong — a speaker that never stood,

@@ -80,7 +80,7 @@
       channelsOf = pkgs: import ./nix/channels.nix { inherit lib pkgs self; };
       arkApps = [ "money" "revelation" ];
 
-      rustDirs = [ "rust" "ui/rust" "modules" "harken/domain" "harken/app" "harken/player" "harken/server" "harken/iced" "harken/ffi" "money/core" "money/demo" "money/app" "money/server" "harken/demo" ];
+      rustDirs = [ "rust" "ui/rust" "modules" "harken/core" "harken/app" "harken/player" "harken/server" "harken/iced" "harken/ffi" "money/core" "money/demo" "money/app" "money/server" "harken/demo" ];
       # The typed Kotlin and Swift `arkdb gen` writes, which harken/ffi's
       # tests hold to its domain (`tests/gen.rs`).
       genDirs = [
@@ -1764,11 +1764,11 @@
           money-macos = iosApp (moneyIos // { kind = "macos"; });
           harken-ios-archive = iosApp (harkenIos // { kind = "archive"; });
 
-          # harken's domain (harken/domain: plain Rust, §1.16) built, and
+          # harken's domain (harken/core: plain Rust, §1.16) built, and
           # its schema's hash held to the one its tests pin.
           harken-domain = crateTests {
             name = "harken-domain";
-            crates = [ { packageId = "harken-domain"; member = "harken/domain"; } ];
+            crates = [ { packageId = "harken-domain"; member = "harken/core"; } ];
             targets = [ "port" ];
             args = "the_schema_hash_is_pinned";
           };
@@ -2216,7 +2216,7 @@
             # The workspace formatted as each crate's rustfmt.toml says.
             fmt = rustfmtCheck "arkdb" (only (rustDirs ++ [ "ui/rustfmt.toml" ]));
             # harken's domain crate builds, and its schema's hash is the one
-            # pinned (harken/domain/tests/port.rs).
+            # pinned (harken/core/tests/port.rs).
             inherit harken-domain;
             # The bridge (§1.16, N3): ark-ffi and harken/ffi build natively,
             # their tests drive the whole surface in the process (a server in

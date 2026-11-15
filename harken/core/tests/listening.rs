@@ -1,4 +1,4 @@
-//! The listening session's rules, as transitions: `harken/domain/tests/
+//! The listening session's rules, as transitions: `harken/core/tests/
 //! listening.rs`, case for case, the transitions run as the machine runs
 //! them over a store holding the session's volatile tables (§1.9) — what
 //! the volatile machine does with each entry.

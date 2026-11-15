@@ -196,7 +196,7 @@ and screens come when sharing is a feature somebody asked for.
 - `rust/ark-server`: the roles option and the scanner's identity.
 - `rust/ark-auth`: roles on `Login`/`Account`; dev auth takes them from
   the name (`alice:library`), said loudly.
-- `harken/domain`: the rules on ten tables, one line each.
+- `harken/core`: the rules on ten tables, one line each.
 - The fuzzer: two accounts, rules on the generated schema, a check that
   no peer ever holds a row its rule forbids and that every peer's
   partition digest agrees; the fleet: a scenario with two accounts and a

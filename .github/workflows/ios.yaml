@@ -79,7 +79,7 @@ on:
     paths: &paths
       - "harken/ios/**"
       - "harken/ffi/**"
-      - "harken/domain/**"
+      - "harken/core/**"
       - "harken/player/**"
       - "money/app.toml"
       - "money/icon.svg"

@@ -24,7 +24,7 @@ cli = ["dep:ureq", "dep:png", "dep:sha2"]
 
 [dependencies]
 ark = { path = "../../rust/ark" }
-harken-domain = { path = "../../harken/domain" }
+harken-domain = { path = "../../harken/core" }
 ark-peer = { path = "../../rust/ark-peer", default-features = false }
 # A cover from the catalogue's address, as harken-iced fetches one.
 ureq = { version = "2", default-features = false, features = ["tls"], optional = true }

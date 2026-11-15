@@ -15,7 +15,7 @@ are **read-only references**: nothing is ever committed there.
 
 ## What "all of harken" means here
 
-- **The domain**: every table of `harken/domain/schema.sql` (media, album,
+- **The domain**: every table of `harken/core/schema.sql` (media, album,
   person, work, movement, recording, credit, song, playlist, playlist_item),
   every mutation of `domain/src/functions.rs` (`add_song`, `describe_work`,
   `describe_recording`, `describe_person`, `credit_recording`,
@@ -93,9 +93,9 @@ coordinator (the main session) first.
   and the generic parts of `main.rs` (panels, menus, pickers, submenus,
   table rows/cells/headings, card grids, text fitting, overlays/backdrops,
   focus), made domain-free, with tests (the old ones ported). Owns `ui/rust/arkui/`.
-- **B — the domain**: `harken/domain/` rewritten as all of harken's domain;
+- **B — the domain**: `harken/core/` rewritten as all of harken's domain;
   whatever `rust/ark/src/authoring/` needs to express it; its tests (the old
-  `read_model.rs`, `converge.rs`, the agreement test). Owns `harken/domain/`,
+  `read_model.rs`, `converge.rs`, the agreement test). Owns `harken/core/`,
   `rust/ark/src/authoring/`. Deletes `harken/desktop/` and `harken/web/`
   (replaced by `harken/iced`) and keeps `harken/server` compiling with the
   smallest edit that does it.
@@ -112,7 +112,7 @@ coordinator (the main session) first.
   desktop and wasm; the demo; its tests (the old ones ported).
 - **E — `harken/server`**: on `ark-server` and `ark-auth`; scanner (lofty),
   listening desk, Home Assistant bridge, NixOS module; its tests.
-- **F — the phones**: `harken/domain/gen/{swift,kotlin}` reprinted, the iOS
+- **F — the phones**: `harken/core/gen/{swift,kotlin}` reprinted, the iOS
   bridge and the Android model on the new tables; Swift and Kotlin suites
   green; `nix build .#harken-apk`.
 

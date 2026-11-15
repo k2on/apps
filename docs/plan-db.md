@@ -465,7 +465,7 @@ one needing a wipe.
 
 **Not done, and not verified.** harken's natives are not run against the
 interpreter here: `arkc` cannot depend on harken, and a session over
-harken's module would have to live in `harken/domain/tests/`, which is
+harken's module would have to live in `harken/core/tests/`, which is
 not this item's (`agreement.rs` there holds them on fixed cases).
 `checks.fuzz-smoke` fails on the tree until finding 1 is fixed (it is
 seed 1's first case). `nix flake check` itself was not run here; the
@@ -486,7 +486,7 @@ refusing replay asks for facts), each falsified once. Finding 3 went to
 D4. `checks.fuzz-smoke` passes (`nix build .#checks.x86_64-linux.fuzz-smoke`).
 Ten minutes more, two processes, wipes on: 61,232 cases, 122,336
 sessions, 11,065,173 ops, 272,349 restarts, nothing but the sums.
-`harken/domain/tests/fuzz.rs` holds harken's natives to the interpreter
+`harken/core/tests/fuzz.rs` holds harken's natives to the interpreter
 under forty of these sessions (falsified by a `create_playlist` that
 reads a host counter).
 
@@ -742,7 +742,7 @@ read as the scan, the overlay, the wire round trip, the verifier, `compat`,
 and the churn contract over three `Has` plans and three needles (reading an
 `or` through its first branch breaks it).
 
-**The trigram index's cost per row**, `harken/domain/tests/perf.rs`
+**The trigram index's cost per row**, `harken/core/tests/perf.rs`
 `perf_search`, release, the shared VM: over 8,000 media with harken's two
 text indexes, 14.66 postings a row (its title's trigrams and its
 creator's), and a put costs 13.0 µs a row with them against 5.5 µs without.

@@ -1,7 +1,7 @@
 //! The harken library, in iced — on the desktop and in a browser.
 //!
 //! One client among several: the phones are the others. They all run the
-//! same domain — `harken/domain`'s module, its functions run by ArkDB v5's
+//! same domain — `harken/core`'s module, its functions run by ArkDB v5's
 //! interpreter (`docs/plan-v5.md` §1.4) and called through the bindings
 //! `build.rs` generates ([`domain`]) — and none of them contains a line of
 //! domain logic.

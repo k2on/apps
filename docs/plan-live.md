@@ -13,7 +13,7 @@ real time, starting with harken's listening session.
 Harken's listening session works today on the web and the desktop and not at
 all on the phone. The reason is where it was written: the rules are a
 hand-written `Desk` in `harken/server`, the protocol is hand-written types in
-`harken/domain/src/listening.rs` decoded by hand, and each client carries its
+`harken/core/src/listening.rs` decoded by hand, and each client carries its
 own copy of the client half (`harken/iced/src/listening.rs`). A phone would
 need a fourth copy, in Kotlin, and a fifth in Swift, each of which could
 disagree with the others about what a press means.
@@ -511,7 +511,7 @@ orders on one `applied` — and `Printed` in both, falsified by printing
 ## Landed: phase 2
 
 Harken's session in the domain (step 2 of the order of work), in
-`harken/domain`, `harken/server` and `harken/iced`. The hand-written
+`harken/core`, `harken/server` and `harken/iced`. The hand-written
 protocol (`harken_domain::listening`'s frames), the server's `Desk` and its
 `Watch`, and the clients' copy of the client half are gone; the session is
 a live state, the server holds no rule of it, and the desktop and the web
@@ -567,7 +567,7 @@ track  = { album, creator, duration_ms, file, id: Id<media>, title }
   `on_join` takes nothing.
 
 Every case `harken/server/tests/listening.rs` held the `Desk` to is a test
-of these transitions in `harken/domain/tests/listening.rs`, run by the
+of these transitions in `harken/core/tests/listening.rs`, run by the
 engine's own sans-io server (`ark::live::state::Desk`) twice over — once
 running the domain's Rust, once interpreting its emit — and the two held
 to the same frames and the same state after every step.
@@ -629,7 +629,7 @@ picker keeps 23c40a0: no stop row, this device the default while nothing
 plays; an away output is drawn and not a target.
 
 **Tested**, each test falsified once, and the doc comment beside each says
-how. `harken/domain/tests/listening.rs`, every case the `Desk` was held
+how. `harken/core/tests/listening.rs`, every case the `Desk` was held
 to and the new ones, on two desks at once: the sound staying with a device
 whose socket went and coming back to it paused, arriving taking nothing,
 a command as a state change, only a press that means a sound taking it
@@ -946,7 +946,7 @@ the screen off.
 ## Volume and groups
 
 Each device's volume, and speakers joined into one group, as the session
-holds them (`harken/domain`, `harken/server`, `harken/iced`, and the phone,
+holds them (`harken/core`, `harken/server`, `harken/iced`, and the phone,
 `harken/android`, below). Like every other part of the session, it is
 state: anybody changes it, the device obeys it, and what was done on the
 device itself is said back as the device's own transition.
@@ -1148,7 +1148,7 @@ with a volume, and a remote for every other device's.
 ### Tested
 
 Each falsified once; the doc comment beside each says how. In
-`harken/domain/tests/listening.rs`, on the native and the interpreted desk
+`harken/core/tests/listening.rs`, on the native and the interpreted desk
 at once: nothing has a volume until it says so; a volume set, nudged,
 clamped and muted, and moved unmutes; a report is the caller's own and
 ordered; a speaker joins only its own family and only while here; a group

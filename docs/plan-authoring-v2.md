@@ -58,7 +58,7 @@ regenerated at spec version 2:
 - `Print.hs`: the diagnostic form knows every new node.
 - `app/Vectors.hs`: regenerated; new `eval/checks.json` and
   `eval/form-check.json`; every rebase/fleet/view assertion still holds.
-- `harken/domain/src/{schema,library,playlists,module}.rs`: the canonical
+- `harken/core/src/{schema,library,playlists,module}.rs`: the canonical
   Rust text, already in the derived-names form (§6).
 
 Not done: `Ark.Gen` is **removed from `ark-spec.cabal`** and the `gen`
@@ -113,7 +113,7 @@ One module, `Ark.Gen`, exporting `Target (..)`, `printSchema`,
 [(FilePath, Text)]`, and `restrict`. It writes AUTHORING §2.5 and §6
 exactly. Work from the canonical files, which are the acceptance test:
 
-- Rust must reproduce `harken/domain/src/{schema,library,playlists,module}.rs`
+- Rust must reproduce `harken/core/src/{schema,library,playlists,module}.rs`
   byte for byte after comment-only lines are removed, and Appendix B's
   demo from `Ark.Demo.demoModule`.
 - Swift and Kotlin follow the same layout in their spellings (§2.1–2.5,
@@ -124,7 +124,7 @@ exactly. Work from the canonical files, which are the acceptance test:
 Layout rules the Rust files already exhibit (write them once as helpers):
 
 - A method chain goes on one line when the whole statement fits in 150
-  columns (`rustfmt` `max_width = 150`, see `harken/domain/rustfmt.toml`);
+  columns (`rustfmt` `max_width = 150`, see `harken/core/rustfmt.toml`);
   otherwise it breaks before every `.` with one extra indent, the
   receiver alone on the first line (`db.track` then `.insert(…)` then
   `.on(…)`; `db` then `.playlist_item` then `.filter(…)` … when the
@@ -155,9 +155,9 @@ Put `Ark.Gen` back in `ark-spec.cabal`. Then:
     cd spec && nix develop ..#spec -c cabal run -v0 arkc -- demo /tmp/d.ark
     cabal run -v0 arkc -- gen rust /tmp/d.ark /tmp/gen-rust
     # compare by eye with AUTHORING.md Appendix B, then
-    cabal run -v0 arkc -- roundtrip rust harken/domain/harken.ark harken/domain/src
+    cabal run -v0 arkc -- roundtrip rust harken/core/harken.ark harken/core/src
 
-`harken/domain/harken.ark` is the OLD module (spec 1) — regenerate it from
+`harken/core/harken.ark` is the OLD module (spec 1) — regenerate it from
 the Rust agent's `module().emit()` once that builds (it is what the Rust
 agent's `harken-domain` binary writes); until then hand-check the demo
 only. Falsify the roundtrip once: change one name in a canonical file
@@ -196,9 +196,9 @@ verify. Then, in this order:
 1. `nix flake check` must be made green:
    - `flake.nix`: `harken-domain` builds the Rust agent's binary, runs
      `module().emit()` to `harken.ark`, then `arkc verify` and
-     `arkc roundtrip rust harken.ark harken/domain/src`; the Swift and
+     `arkc roundtrip rust harken.ark harken/core/src`; the Swift and
      Kotlin roundtrips run against the files the agents authored
-     (`swift/…/HarkenDomain/*.swift`, `kotlin/…/harken/domain/*.kt` —
+     (`swift/…/HarkenDomain/*.swift`, `kotlin/…/harken/core/*.kt` —
      take the paths from their reports). Drop every `gen … --only` use.
    - `check-vectors` unchanged. The three runtimes' conformance tests
      must pass the regenerated vectors, including `eval/checks.json`
@@ -206,7 +206,7 @@ verify. Then, in this order:
      to `module/demo.json`'s bytes (§5 check 1) and `Native` against the
      eval vectors (§5 check 3).
    - `packages.harken-web` and the two workflows from the Web agent.
-2. `harken.ark` committed fresh; `harken/domain/gen/` and `gen-check`
+2. `harken.ark` committed fresh; `harken/core/gen/` and `gen-check`
    deleted (nothing is generated for a runtime any more).
 3. `README.md` and `harken/README.md`: the module/procedure story, the
    Pages URL `https://k2on.github.io/apps/harken/`, the APK workflow.
@@ -222,7 +222,7 @@ line each:
 
 - Rust (`a14c0d139945f55dc`): `rust/ark` IR v2 + `ark::authoring`
   (Native/Emit behind one API), `ark-builder`/`gen` deleted,
-  `harken/domain` compiling as the canonical files, server and desktop
+  `harken/core` compiling as the canonical files, server and desktop
   on `module().procedures()`, an agreement test Native vs the eval vectors.
 - Swift (`a32e8bac8ccc257e9`): `swift/` IR v2 + `ArkAuthoring` module,
   harken's domain authored in Swift, the iOS app on it.
@@ -233,7 +233,7 @@ line each:
   TS UI), `packages.harken-web` and `devShells.harken-web` in `flake.nix`,
   the two workflows. Verified end to end in headless Chromium against the
   pre-rewrite engine (alone, against a server, offline and back). Left for
-  step 5: regenerate `harken/domain/harken.ark` once the Rust domain
+  step 5: regenerate `harken/core/harken.ark` once the Rust domain
   builds, then `cargo test -p harken-web` and `nix build .#harken-web`;
   `harken/desktop/src/peer.rs` needs `natives: BTreeMap::new()` on the
   `Authority` it builds, as `harken/web/src/lib.rs` now has. Neither

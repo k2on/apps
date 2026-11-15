@@ -5,7 +5,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 count() { cat "$@" 2>/dev/null | grep -vE '^\s*$|^\s*//' | wc -l; }
-dirs=("$@"); [ ${#dirs[@]} -eq 0 ] && dirs=(rust/*/ harken/domain)
+dirs=("$@"); [ ${#dirs[@]} -eq 0 ] && dirs=(rust/*/ harken/core)
 printf "%-16s %8s %8s %8s %8s\n" crate src bins tests total
 for d in "${dirs[@]}"; do
   d=${d%/}; [ -f "$d/Cargo.toml" ] || continue

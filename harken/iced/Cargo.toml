@@ -14,7 +14,7 @@ demo = ["dep:harken-seed"]
 
 [dependencies]
 ark = { path = "../../rust/ark" }
-harken-domain = { path = "../domain" }
+harken-domain = { path = "../core" }
 # Where harken can be: its routes.
 harken-app = { path = "../app" }
 # The demo's library (`harken/demo`), with the `demo` feature only.

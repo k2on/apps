@@ -1,4 +1,4 @@
-//! Every harken query, maintained (§1.10): `harken/domain/tests/views.rs`,
+//! Every harken query, maintained (§1.10): `harken/core/tests/views.rs`,
 //! one test per query, held to V1's contract — after every change the
 //! view's answer is a fresh run of its plan's and its
 //! patches splice the list a screen holds into the new one.

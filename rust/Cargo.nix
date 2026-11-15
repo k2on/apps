@@ -9880,7 +9880,7 @@ rec {
         crateName = "harken-domain";
         version = "0.1.0";
         edition = "2021";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../harken/domain; };
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../harken/core; };
         libName = "harken_domain";
         dependencies = [
           {
