@@ -511,6 +511,24 @@ impl Peer {
         Ok(ark::hash::hex(&id.0))
     }
 
+    /// A change an app sends, its typed change's function and its input's
+    /// bytes: an intent on the log as [`Peer::mutate_encoded`] makes one,
+    /// or a call on the live space for a live function
+    /// (`ark_peer::Peer::change`).
+    pub fn change_encoded(&self, name: &str, input: Vec<u8>) -> Result<(), Refusal> {
+        let _call = tracing::debug_span!(target: "ark", "ffi", call = "change", name = %name).entered();
+        self.shared.act(|s| {
+            if s.peer.open_span().is_some() {
+                return s.peer.change(name, input);
+            }
+            s.peer.begin(name);
+            let out = s.peer.change(name, input);
+            s.peer.end();
+            out
+        })?;
+        Ok(())
+    }
+
     /// An intent of the function `name` on its input's bytes (the value
     /// format), as [`Peer::mutate`] makes one of JSON: what an app's typed
     /// change (money's `MoneyChange`) is sent as, no JSON on the way.

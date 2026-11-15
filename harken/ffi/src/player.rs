@@ -1,6 +1,6 @@
 //! A phone's player (S3b): harken's one reconciler (`harken-player`) run
 //! here, over the phone's own peer, against this phone's own player — a
-//! queue over the phone's media player (`harken_player::MediaSound` over
+//! queue over the phone's media player (`harken_app::sound::MediaSound` over
 //! `ark-media-player`'s `NativeMediaPlayer`: AVPlayer on an iPhone, Media3
 //! on Android). The phone attaches its media player ([`Player::attach`])
 //! and steps whenever it is told to ([`PlayerShell::wake`]), and draws the
@@ -18,9 +18,9 @@ use std::sync::{Arc, Mutex};
 use ark_ffi::Peer;
 use ark_media_player::phone::NativeMediaPlayer;
 use ark_media_player::{MediaControls, MediaEvent, NowPlaying};
+use harken_app::sound::{remote_press, MediaSound, Repeat};
 use harken_domain::player::{Press, Sound, NOT_PART};
 use harken_domain::{Active, Id, Media, Output, Track};
-use harken_player::{remote_press, MediaSound, Repeat};
 use serde_json::{json, Value};
 
 /// How far an episode's skips go, in seconds: back a little, on a little more.
@@ -54,7 +54,7 @@ pub trait PlayerShell: Send + Sync {
 /// The shell's volume as the player's knob.
 struct Knob(Arc<dyn PlayerShell>);
 
-impl harken_player::Knob for Knob {
+impl harken_app::sound::Knob for Knob {
     fn volume(&self) -> Option<harken_domain::player::Vol> {
         self.0.volume().map(|v| harken_domain::player::Vol {
             level: v.level,
@@ -108,7 +108,7 @@ impl Player {
         *self.shell.lock().unwrap_or_else(|e| e.into_inner()) = shell.clone();
         *self.gate.shell.lock().unwrap_or_else(|e| e.into_inner()) = shell.clone();
         let gate = self.gate.clone();
-        let knob = shell.clone().map(|sh| Arc::new(Knob(sh)) as Arc<dyn harken_player::Knob>);
+        let knob = shell.clone().map(|sh| Arc::new(Knob(sh)) as Arc<dyn harken_app::sound::Knob>);
         let sound = media.map(|m| {
             let s = MediaSound::new(ark_media_player::phone::port(m), &server, move |ms| gate.wake(ms), ark_peer::now_ms);
             match knob {

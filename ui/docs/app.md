@@ -88,12 +88,16 @@ app's, the same on every platform, and written once in its app crate
 (`money_app::host::Money`). A host is two halves:
 
 - **The place** (`ark_app::host::Place`), the platform's: the views its
-  store holds (read, held, released), the time, a change sent to its
-  peer, its device modules and what wakes it when one answers later, a
-  file fetched or kept, a sentence said, the server dialled, who is
-  signed in where (`Session`: the demo, the day, the login, the server as
-  shown, the link, what is pending, the version, and whether this host can
-  sign out or add a device), and two facts of its toolkit: whether it
+  store holds (read, held, released), the time (and the clock itself, for
+  a module's listener to read on its own thread), a change sent to its
+  peer (an intent on the log, or a call on the live space for a live
+  function: `Peer::change`), its device modules and what wakes it when
+  one answers later, a file fetched or kept, a sentence said, the server
+  dialled, who is signed in where (`Session`: the demo, the day, the
+  login, the server as shown, the link, what is pending, this device as
+  the live space names it and how many connections have opened, the
+  version, and whether this host can sign out or add a device), and two
+  facts of its toolkit: whether it
   draws between messages (SwiftUI, Compose) and whether a page opened goes
   on a section's stack (a phone) or is one of the window's places (the
   browser, the desktop). Object-safe, and handed in by reference for each
@@ -442,7 +446,7 @@ library, so its Kotlin package is `uniffi.ark_<name>`.
 **MediaPlayer** is one sound at a time, what the system shows of it, its
 controls as events (`Remote`) the app decides, and a browse tree for a car
 or a watch (modules/ark-media-player/README.md); harken's player is a queue
-over it (harken-player's `MediaSound`).
+over it (harken-app's `MediaSound`).
 
 #### How an App Opts In
 
@@ -1102,8 +1106,19 @@ changes, `.github/compat-check.sh`'s harken part grows with it.
    `harken_domain::player`, pure; harken-player keeps only adapters
    (`Player` over a peer, keeping `Loaded` on a durable local instance,
    `MediaSound`, `config`), and the server's speakers count in memory.
-   Next: the player as the host's own runtime over the media player
-   module, the sheets, Settings.
+   The player is a runtime (`player::Player`: what plays, from the live
+   view while this device stands in the session and from its own sound
+   while alone; the full player a `#[view]` of the shared parts) and
+   the host drives this device's sound (`host::listen`): the domain's
+   reconciler over `sound::MediaSound` (moved here from harken-player),
+   the media player module through its port, its answers and every
+   press `HarkenChange`s the place sends (the live transitions among
+   them, `HarkenChange::of` reading one by name), a play a press of the
+   session while joined and of the sound while alone, and the system's
+   controls pressed the same way. Tested over a hub (joined) and the
+   module's fake (alone). Next: the now-playing accessory in the shared
+   shell and the volume part (the full player drawn in it), the car's
+   browse tree, then the sheets and Settings.
 4. Generated targets, the old clients deleted: not started.
 5. Screenshots: not started.
 

@@ -42,7 +42,7 @@ fn hub() -> Peer {
 }
 
 fn device(token: &str, name: &str, live: bool) -> Peer {
-    let mut c = Config::new(Module::of(&domain()));
+    let mut c = Config::of(Arc::new(domain()));
     if live {
         c.live = Some(ark_peer::Live {
             device: Some(name.as_bytes().to_vec()),
@@ -176,4 +176,27 @@ fn no_live_machine_is_no_rows_and_no_refusal() {
     assert_eq!(s.refusal(), None);
     assert_eq!(Key::Present.open().map(|o| o.space()), Some(Space::Volatile));
     assert_eq!(Key::Logged.open().map(|o| o.space()), Some(Space::Durable));
+}
+
+/// A change an app sends is sent where its function is: a live one as a
+/// call on the live space, any other as an intent on the log. Falsified by
+/// `Peer::change` sending every change as an intent: the rename was
+/// refused, the room's function being none of the log's.
+#[test]
+fn a_change_goes_to_its_functions_space() {
+    use ark::format::Encode;
+    let mut hub = hub();
+    let mut a = device("u0@a", "phone", true);
+    let ca = join(&mut hub, &mut a);
+    carry(&mut hub, &mut [(&mut a, ca)], vec![]);
+    let rename = arkdb::demo::Rename { name: "kitchen".into() };
+    a.change("room.rename", rename.to_bytes()).unwrap();
+    let playlist = arkdb::demo::CreatePlaylist { name: "mix".into() };
+    a.change("demo.create_playlist", playlist.to_bytes()).unwrap();
+    assert_eq!(a.pending_len(), 1, "the playlist is an intent on the log");
+    carry(&mut hub, &mut [(&mut a, ca)], vec![]);
+    let mut s = Store::<Key>::new();
+    s.hold(&mut a, Key::Present);
+    assert_eq!(names(&s, &Key::Present), ["kitchen"]);
+    assert_eq!(a.pending_len(), 0);
 }

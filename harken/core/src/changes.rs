@@ -4,8 +4,10 @@
 //! ([`HarkenChange::name`]) and carries its input, which crosses to the
 //! peer as its bytes ([`HarkenChange::input`]); its refinements are asked
 //! of it before it is sent ([`HarkenChange::problem`]), in the words a form
-//! says under its field. The listening session's transitions are not here:
-//! they are the live space's, never the log's.
+//! says under its field. The listening session's transitions are here too:
+//! a peer sends a function of the live space's as a call on it, never as an
+//! intent on the log (`ark_peer::Peer::change`); a play the reconciler
+//! counts, and where an episode has got to, are the log's.
 
 use ark::format::Encode;
 use ark::row::Input;
@@ -44,6 +46,16 @@ macro_rules! changes {
                 }
             }
 
+            /// The change `name` (a function's full name) of `input`'s
+            /// bytes; none for a function that is not one, or bytes that
+            /// do not read as its input.
+            pub fn of(name: &str, input: &[u8]) -> Option<HarkenChange> {
+                match name {
+                    $( $name => <$t>::from_bytes(input).ok().map(HarkenChange::$v), )*
+                    _ => None,
+                }
+            }
+
             /// One of each, every input its default.
             pub fn every() -> Vec<HarkenChange> {
                 vec![$( HarkenChange::$v(<$t>::default()), )*]
@@ -69,4 +81,42 @@ changes! {
     Subscribe(Subscribe) = "library.subscribe",
     /// A feed followed no more.
     Unsubscribe(Unsubscribe) = "library.unsubscribe",
+    /// A play the reconciler counted.
+    RecordPlay(RecordPlay) = "listening.record_play",
+    /// Where an episode has got to, for its listener.
+    ReportProgress(ReportProgress) = "library.report_progress",
+    // The listening session's presses, live calls.
+    /// A queue played, from one of its tracks.
+    Start(Start) = "listening.start",
+    Play(()) = "listening.play",
+    Pause(()) = "listening.pause",
+    Stop(()) = "listening.stop",
+    Seek(Seek) = "listening.seek",
+    Skip(Skip) = "listening.skip",
+    Jump(Jump) = "listening.jump",
+    Enqueue(Enqueue) = "listening.enqueue",
+    Remove(Remove) = "listening.remove",
+    Move(Move) = "listening.move",
+    ClearUpcoming(()) = "listening.clear_upcoming",
+    /// Where this device's scrubber is being dragged to (ephemeral).
+    Scrub(Scrub) = "listening.scrub",
+    /// The sound handed to another device.
+    Transfer(Transfer) = "listening.transfer",
+    Join(Member) = "listening.join",
+    Unjoin(Member) = "listening.unjoin",
+    SetVolume(SetVolume) = "listening.set_volume",
+    NudgeVolume(NudgeVolume) = "listening.nudge_volume",
+    SetMute(SetMute) = "listening.set_mute",
+    SetGroupVolume(GroupVolume) = "listening.set_group_volume",
+    NudgeGroupVolume(GroupNudge) = "listening.nudge_group_volume",
+    SetGroupMute(GroupMute) = "listening.set_group_mute",
+    // What the output's reconciler says of its player, live calls.
+    Equip(Equip) = "listening.equip",
+    ReportVolume(ReportVolume) = "listening.report_volume",
+    ReportGroup(ReportGroup) = "listening.report_group",
+    Started(At) = "listening.started",
+    Advance(Advance) = "listening.advance",
+    Stalled(At) = "listening.stalled",
+    ReportPosition(Report) = "listening.report_position",
+    Release(()) = "listening.release",
 }

@@ -19,13 +19,16 @@
 //! [`remote_press`] says which press each is.
 //!
 //! Everything it is told by the player arrives on the player's own thread;
-//! the shell is told to step ([`MediaSound::new`]'s `wake`) whenever
-//! something moved and when a play would count.
+//! its driver is told to step ([`MediaSound::new`]'s `wake`) whenever
+//! something moved and when a play would count — at once where the driver
+//! keeps a timer, and otherwise at the first position the player says once
+//! that moment has come (a player says where it is as it plays, which is
+//! when a play is counted).
 
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex, MutexGuard};
 
-use ark_module::media_player::{MediaControls, MediaEvent, MediaListener, MediaPlayer, NowPlaying, RemoteCommand, RouteChange};
+use ark_app::modules::media_player::{MediaControls, MediaEvent, MediaListener, MediaPlayer, NowPlaying, RemoteCommand, RouteChange};
 use harken_domain::{Id, Media, Track};
 
 use harken_domain::player::{Change, Event, Heard, Level, Place, Press, Sound, Vol};
@@ -79,6 +82,9 @@ struct Local {
     failed: Option<String>,
     /// What the system was last shown, so a step that changes nothing tells it nothing.
     shown: Option<(Option<NowPlaying>, MediaControls, i64)>,
+    /// When a step was asked for (the clock's): woken at the first position
+    /// said after it.
+    due: Option<i64>,
 }
 
 impl Local {
@@ -198,8 +204,12 @@ impl MediaListener for Hears {
                 }
                 MediaEvent::Position { at_ms } => {
                     (l.ms, l.read_at) = (at_ms, now);
-                    // Said often: the reconciler reads it when it looks.
-                    return;
+                    // Said often: the reconciler reads it when it looks,
+                    // unless a step it asked for is due.
+                    if l.due.is_none_or(|d| now < d) {
+                        return;
+                    }
+                    l.due = None;
                 }
                 MediaEvent::Playing => {
                     l.read_at = now;
@@ -256,7 +266,7 @@ impl MediaSound {
     /// The player `port`, playing the tracks of the server at `server`;
     /// `wake` told to step again in so many milliseconds whenever something
     /// moved (0) or a play will count, `clock` the server's clock as this
-    /// device reads it (`ark_peer::now_ms`).
+    /// device reads it (the place's, `ark_app::host::Place::clock`).
     pub fn new(
         port: Arc<dyn MediaPlayer>,
         server: &str,
@@ -634,6 +644,11 @@ impl Sound for MediaSound {
     }
 
     fn wake_in(&mut self, ms: i64) {
+        let at = (self.s.clock)() + ms;
+        {
+            let mut l = self.s.local();
+            l.due = Some(l.due.map_or(at, |d| d.min(at)));
+        }
         (self.s.wake)(ms)
     }
 

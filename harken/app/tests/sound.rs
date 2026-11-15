@@ -10,10 +10,10 @@ use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use ark_media_player::{Fake, MediaControls, MediaEvent, MediaPlayer, NowPlaying, RemoteCommand, RouteChange};
+use harken_app::sound::{remote_press, Knob, MediaSound, Repeat};
 use harken_domain::host::{Kind, Listening};
 use harken_domain::player::{Press, Reconciler, Say, Sound, View};
 use harken_domain::*;
-use harken_player::{remote_press, MediaSound, Repeat};
 
 const ME: &str = "phone";
 const NOW: i64 = 1_700_000_000_000;
@@ -503,7 +503,7 @@ fn a_paused_player_is_idle() {
 /// A phone's media stream, faked: a level and a mute.
 struct Stream(Mutex<Option<harken_domain::player::Vol>>);
 
-impl harken_player::Knob for Stream {
+impl Knob for Stream {
     fn volume(&self) -> Option<harken_domain::player::Vol> {
         *self.0.lock().unwrap()
     }

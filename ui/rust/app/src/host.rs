@@ -46,6 +46,12 @@ pub struct Session {
     pub linked: Option<bool>,
     /// Changes made here not yet synced.
     pub pending: i64,
+    /// This device as its account's live space names it (its login's
+    /// session); empty for a device on its own and the demo.
+    pub device: String,
+    /// How many connections to the server have opened: a new one is a
+    /// live space that has heard nothing of this device yet.
+    pub epoch: i64,
     /// The app's version, as the platform says it (`0.1 (12)`).
     pub version: String,
     /// This host can sign out or leave the demo.
@@ -79,12 +85,22 @@ impl ViewKey for Nothing {
 /// ([`Hosting::moved`]) on its own thread.
 pub type Waker = Arc<dyn Fn() + Send + Sync>;
 
+/// The device's clock, for what reads it on a thread of its own (a module's
+/// listener): milliseconds since the epoch.
+pub type Clock = Arc<dyn Fn() -> i64 + Send + Sync>;
+
 /// The platform's half of a host: what every app's part is run over.
 pub trait Place<K: ViewKey, C> {
     /// `f` of the views the store holds, as they are now.
     fn read(&self, f: &mut dyn FnMut(&dyn Views<K>));
     /// The device's clock, in milliseconds since the epoch.
     fn now_ms(&self) -> i64;
+    /// The same clock, to read later and elsewhere; a place that does not
+    /// say (a test's) is a clock stopped where it is now.
+    fn clock(&self) -> Clock {
+        let now = self.now_ms();
+        Arc::new(move || now)
+    }
     /// `change` sent to the peer: taken, or the domain's sentence for why not.
     fn send(&mut self, change: C) -> Result<(), String>;
     /// `key` held once more: its views opened the first time.

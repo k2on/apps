@@ -79,14 +79,11 @@ fn a_tile_tapped_in_the_library_pushes_its_page_over_the_library() {
 }
 
 #[test]
-fn an_index_route_is_the_library_its_way_and_a_play_is_kept_for_the_player() {
+fn an_index_route_is_the_library_its_way() {
     let (mut h, mut place) = hosted();
     h.send::<Home>(HomeMsg::SeeAll { kind: "albums".into() }, &mut place);
     assert_eq!(h.app().shell.page(&place, NOW).section, "library");
     assert!(h.app().library.page(&place, NOW).on_albums);
-    let new = h.app().home.page(&place, NOW).newest[0].key.clone();
-    h.send::<Home>(HomeMsg::PlayNew { id: new }, &mut place);
-    assert!(matches!(h.app().played.as_slice(), [HarkenRequest::Play { at: 0, .. }]));
 }
 
 #[test]

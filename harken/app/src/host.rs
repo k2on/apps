@@ -1,20 +1,28 @@
 //! harken's part of its host (`ark_app::host`), once for every platform:
 //! over a session it runs every screen's runtime — the shell, Home,
-//! Library, Search and the page a route shows — and carries out what each asks of
-//! the app ([`HarkenRequest`]): a route is a page pushed over the section
-//! it was opened from; a play is the player's, which keeps what it was
-//! asked until it is a runtime of the host's own (ui/docs/app.md,
-//! "harken's Port").
+//! Library, Search, the page a route shows and the player — and carries
+//! out what each asks of the app ([`HarkenRequest`]): a route is a page
+//! pushed over the section it was opened from; a play, and every press of
+//! the player, is this device's player's ([`listen`]): a live call while
+//! it stands in the session, its own sound while it is alone, the sound
+//! made to agree with the session whenever the store or the sound moved
+//! (ui/docs/app.md, "harken's Port").
 
 use ark_app::host::{Cx, Has, HostedApp, Link, Running, Screen, Session};
+use harken_domain::player::Press;
 use harken_domain::{HarkenChange, HarkenView};
 
 use crate::home::{Home, HomeMsg};
 use crate::library::{Library, LibraryMsg};
 use crate::page::{Page, PageMsg};
+use crate::player::{Player, PlayerMsg};
 use crate::search::{Search, SearchMsg};
 use crate::shell::{HarkenShell, ShellMsg};
 use crate::{HarkenRequest, Route};
+
+pub mod listen;
+
+use listen::Listen;
 
 /// harken's runtimes over one session.
 pub struct Harken {
@@ -23,8 +31,27 @@ pub struct Harken {
     pub library: Screen<Library>,
     pub search: Screen<Search>,
     pub page: Screen<Page>,
-    /// What was asked of the player, in order, until it is the host's.
-    pub played: Vec<HarkenRequest>,
+    pub player: Screen<Player>,
+    /// This device's player: the reconciler and its sound.
+    pub listen: Listen,
+    /// What was asked that no runtime takes yet (the sheets'), in order.
+    pub waiting: Vec<HarkenRequest>,
+    /// Why the last press was not taken, while it is the last.
+    pub refused: Option<String>,
+}
+
+/// `n` tracks' order shuffled from `seed`: a permutation, the same for one
+/// seed (the moment it was pressed).
+fn shuffled(n: usize, seed: i64) -> Vec<usize> {
+    let mut order: Vec<usize> = (0..n).collect();
+    let mut x = seed as u64 | 1;
+    for i in (1..n).rev() {
+        x ^= x << 13;
+        x ^= x >> 7;
+        x ^= x << 17;
+        order.swap(i, (x % (i as u64 + 1)) as usize);
+    }
+    order
 }
 
 /// The title a route's page is pushed under.
@@ -59,22 +86,39 @@ impl HostedApp for Harken {
             library: Screen::new(),
             search: Screen::new(),
             page: Screen::new(),
-            played: vec![],
+            player: Screen::new(),
+            listen: Listen::open(session, cx),
+            waiting: vec![],
+            refused: None,
         };
         let server = session.server.clone();
         h.home.send(HomeMsg::Server { server: server.clone() }, cx);
         h.library.send(LibraryMsg::Server { server: server.clone() }, cx);
         h.search.send(SearchMsg::Server { server: server.clone() }, cx);
         h.page.send(PageMsg::Server { server }, cx);
+        h.tell(cx);
         h
     }
 
     fn screens(&mut self) -> Vec<&mut dyn Running<Harken>> {
-        vec![&mut self.shell, &mut self.home, &mut self.library, &mut self.search, &mut self.page]
+        vec![
+            &mut self.shell,
+            &mut self.home,
+            &mut self.library,
+            &mut self.search,
+            &mut self.page,
+            &mut self.player,
+        ]
     }
 
     fn screens_ref(&self) -> Vec<&dyn Running<Harken>> {
-        vec![&self.shell, &self.home, &self.library, &self.search, &self.page]
+        vec![&self.shell, &self.home, &self.library, &self.search, &self.page, &self.player]
+    }
+
+    /// The listening session, and every song: what a press and a play are
+    /// read against.
+    fn holds(&self) -> Vec<HarkenView> {
+        vec![HarkenView::Listening, listen::songs()]
     }
 
     /// A route a screen opened: a section's own index is that section (an
@@ -105,8 +149,50 @@ impl HostedApp for Harken {
         }
     }
 
-    fn request(&mut self, r: HarkenRequest, _: &mut Cx<'_, Harken>) {
-        self.played.push(r)
+    fn request(&mut self, r: HarkenRequest, cx: &mut Cx<'_, Harken>) {
+        let press = match r {
+            HarkenRequest::Play { tracks, at, from, shuffle } => {
+                let mut queue = Listen::tracks(&tracks, cx);
+                let mut at = at.clamp(0, queue.len().saturating_sub(1) as i64);
+                if shuffle {
+                    let order = shuffled(queue.len(), cx.now_ms);
+                    queue = order.into_iter().map(|i| queue[i].clone()).collect();
+                    at = 0;
+                }
+                if queue.is_empty() {
+                    return;
+                }
+                Press::Start {
+                    queue,
+                    at,
+                    position_ms: 0,
+                    from,
+                    shuffled: shuffle,
+                }
+            }
+            HarkenRequest::Queue { track, next } => {
+                let tracks = Listen::tracks(&[track], cx);
+                match next {
+                    true => Press::Next { tracks },
+                    false => Press::Append { tracks },
+                }
+            }
+            HarkenRequest::Toggle => Press::Toggle,
+            HarkenRequest::Skip { by } => Press::Skip { by },
+            HarkenRequest::Seek { at_ms } => Press::Seek { ms: at_ms },
+            HarkenRequest::Scrub { at_ms } => Press::Scrub { at_ms: Some(at_ms) },
+            HarkenRequest::Transfer { to } => Press::Transfer { to },
+            r @ HarkenRequest::AddTo { .. } => return self.waiting.push(r),
+        };
+        self.refused = self.listen.press(press, cx);
+        self.listen.step(cx);
+        self.tell(cx);
+    }
+
+    /// The store moved, or the sound did: the sound made to agree.
+    fn moved(&mut self, cx: &mut Cx<'_, Harken>) {
+        self.listen.step(cx);
+        self.tell(cx);
     }
 
     fn link(&mut self, link: Link, cx: &mut Cx<'_, Harken>) {
@@ -117,6 +203,33 @@ impl HostedApp for Harken {
     }
 
     fn launched(&mut self, _: Vec<String>, _: &mut Cx<'_, Harken>) {}
+}
+
+impl Harken {
+    /// The player told what it draws from that the views do not hold: who
+    /// and where this device is, and what plays here alone — each only
+    /// when it moved.
+    fn tell(&mut self, cx: &mut Cx<'_, Harken>) {
+        let s = cx.place.session();
+        let linked = s.linked == Some(true);
+        let st = self.player.state();
+        if (st.server.as_str(), st.device.as_str(), st.linked) != (s.server.as_str(), s.device.as_str(), linked) {
+            let msg = PlayerMsg::Session {
+                server: s.server.clone(),
+                device: s.device.clone(),
+                linked,
+            };
+            self.player.send(msg, cx);
+        }
+        if self.player.state().own != self.listen.own {
+            self.player.send(
+                PlayerMsg::Own {
+                    own: self.listen.own.clone(),
+                },
+                cx,
+            );
+        }
+    }
 }
 
 macro_rules! has {
@@ -132,7 +245,10 @@ macro_rules! has {
     )*};
 }
 
-has!(HarkenShell => shell, Home => home, Library => library, Search => search, Page => page);
+has!(HarkenShell => shell, Home => home, Library => library, Search => search, Page => page, Player => player);
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod listen_tests;

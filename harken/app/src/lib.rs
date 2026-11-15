@@ -6,17 +6,20 @@
 //!
 //! The screens moved here so far are the library's: Home ([`home`]),
 //! Library ([`library`]), Search ([`search`]) and a record's page
-//! ([`page`]), under the shell ([`shell`]) and run by the host's part
-//! ([`host`]). The player, the sheets and Settings follow
+//! ([`page`]), under the shell ([`shell`]), and the player ([`player`]),
+//! run by the host's part ([`host`]), which drives this device's own sound
+//! ([`sound`], the media player module). The sheets and Settings follow
 //! (ui/docs/app.md, "Where It Stands").
 
 pub mod home;
 pub mod host;
 pub mod library;
 pub mod page;
+pub mod player;
 pub mod routes;
 pub mod search;
 pub mod shell;
+pub mod sound;
 pub mod welcome;
 pub mod words;
 
@@ -27,8 +30,9 @@ pub use harken_domain::{HarkenChange, HarkenView};
 pub use routes::Route;
 
 /// What harken's screens ask of their host that is neither a change, a
-/// route nor a device module (`ark_app::App::Request`): the player's, until
-/// it is the host's own runtime.
+/// route nor a device module (`ark_app::App::Request`): the player's, each
+/// a press the host makes — of the session while this device stands in it,
+/// of its own sound while it is alone — and the sheets'.
 #[derive(Clone, Debug, PartialEq, ark::twin::Twin)]
 pub enum HarkenRequest {
     /// Play a list from one of its tracks (`at`, 0 the first), said as
@@ -40,9 +44,31 @@ pub enum HarkenRequest {
         shuffle: bool,
     },
     /// One track next, or at the end of what is queued.
-    Queue { track: String, next: bool },
+    Queue {
+        track: String,
+        next: bool,
+    },
     /// A track's playlists, to put it on one or take it off (a sheet).
-    AddTo { track: String },
+    AddTo {
+        track: String,
+    },
+    /// Pause what sounds, else play.
+    Toggle,
+    /// On (1) or back (-1) a track.
+    Skip {
+        by: i64,
+    },
+    Seek {
+        at_ms: i64,
+    },
+    /// The scrubber held at `at_ms`, for the other devices to show.
+    Scrub {
+        at_ms: i64,
+    },
+    /// The sound handed to another device.
+    Transfer {
+        to: String,
+    },
 }
 
 /// A row id as harken's views take it: its sixteen bytes from its hex;

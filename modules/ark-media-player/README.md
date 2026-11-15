@@ -10,7 +10,7 @@ sought, at a rate and a volume; what the system shows of it (the lock
 screen, the notification, Control Center, a headset, the desktop's
 widgets, a car's and a watch's now-playing) and which of its controls it
 offers; and a browse tree a car or a watch reads. Nothing in it is any
-app's: harken's player (harken-player's `MediaSound`, a queue and the
+app's: harken's player (harken-app's `MediaSound`, a queue and the
 listening session's reconciler) is one app over it.
 
 ## API

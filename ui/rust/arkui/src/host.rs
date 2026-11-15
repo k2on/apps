@@ -190,9 +190,13 @@ impl<W: Desktop> Place<ViewKey<W>, Change<W>> for DeskPlace<'_, W> {
     fn now_ms(&self) -> i64 {
         clock(self.today, self.demo)
     }
+    /// The machine's own, demo or not: what a sound is timed by.
+    fn clock(&self) -> ark_app::host::Clock {
+        std::sync::Arc::new(ark_peer::now_ms)
+    }
     fn send(&mut self, change: Change<W>) -> Result<(), String> {
         let (name, input) = App::<W>::encode(&change);
-        let r = self.peer.mutate_bytes(name, input).map(|_| ());
+        let r = self.peer.change(name, input);
         self.store.settle(self.peer);
         r
     }

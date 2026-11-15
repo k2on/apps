@@ -189,6 +189,8 @@ pub fn session_of<W: Desktop>(peer: &Peer, live: Option<&Live>, today: &str) -> 
         server: ark_auth::onboarding::display(&live.server),
         linked: Some(status.linked),
         pending: status.pending as i64,
+        device: peer.me().session.clone(),
+        epoch: status.epoch as i64,
         version,
         leaves: live.login.is_some(),
         // A code for another device is the phones' to make.

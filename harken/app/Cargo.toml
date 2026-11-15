@@ -17,6 +17,10 @@ ark-format = { path = "../../rust/ark-format" }
 harken-domain = { path = "../core" }
 # Its routes, spelled as paths (`src/routes.rs`).
 ark-router = { path = "../../ui/rust/router" }
+# This device's own player (`src/sound.rs`): the media player module, taken
+# on by depending on it (its port's fake by default; a platform's behind
+# its feature, chosen by whoever builds the app).
+ark-media-player = { path = "../../modules/ark-media-player" }
 
 [dev-dependencies]
 # The tests' store, a peer's, over the demo's library.

@@ -219,6 +219,8 @@ fn session_of<W: WebHosted>(peer: Option<&Peer>, live: Option<&Live>, visitor: O
         server: ark_auth::onboarding::display(&live.server),
         linked: Some(status.linked),
         pending: status.pending as i64,
+        device: peer.me().session.clone(),
+        epoch: status.epoch as i64,
         leaves: live.login.is_some(),
         // The browser makes no code for another device.
         adds_devices: false,
@@ -252,6 +254,10 @@ impl<W: WebHosted> Place<Key<W>, Change<W>> for WebPlace<'_, W> {
     fn now_ms(&self) -> i64 {
         clock(&self.here.today)
     }
+    /// The page's own, demo or not: what a sound is timed by.
+    fn clock(&self) -> ark_app::host::Clock {
+        std::sync::Arc::new(ark_peer::now_ms)
+    }
     fn send(&mut self, change: Change<W>) -> Result<(), String> {
         *self.changes += 1;
         if self.dry {
@@ -261,7 +267,7 @@ impl<W: WebHosted> Place<Key<W>, Change<W>> for WebPlace<'_, W> {
             return Err("this page has no data to change".into());
         };
         let (name, input) = App::<W>::encode(&change);
-        let r = peer.mutate_bytes(name, input).map(|_| ());
+        let r = peer.change(name, input);
         self.store.settle(peer);
         if let Err(why) = &r {
             *self.refused = Some(why.clone());

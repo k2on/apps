@@ -68,7 +68,7 @@ The player itself is ark-media-player's `PhoneMediaPlayer`
 (modules/ark-media-player/swift, compiled into the app: AVPlayer, the
 audio session, interruptions and route changes, the lock screen, Control
 Center and a headset), which the FFI's `Player` plays this phone's own
-queue on (harken-player's `MediaSound`, in Rust) and shows what plays to.
+queue on (harken-app's `MediaSound`, in Rust) and shows what plays to.
 
 Apple's — written, not compiled here: **`Covers`** (disk and memory caches,
 ImageIO), and the screens: `Shell` (tabs, accessory, sheets, zoom),

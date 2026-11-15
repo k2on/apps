@@ -9874,6 +9874,10 @@ rec {
             packageId = "ark-format";
           }
           {
+            name = "ark-media-player";
+            packageId = "ark-media-player";
+          }
+          {
             name = "ark-router";
             packageId = "ark-router";
           }
@@ -10125,10 +10129,6 @@ rec {
             packageId = "ark";
           }
           {
-            name = "ark-module";
-            packageId = "ark-module";
-          }
-          {
             name = "ark-peer";
             packageId = "ark-peer";
             usesDefaultFeatures = false;
@@ -10146,12 +10146,6 @@ rec {
             name = "serde_json";
             packageId = "serde_json";
             features = [ "raw_value" ];
-          }
-        ];
-        devDependencies = [
-          {
-            name = "ark-media-player";
-            packageId = "ark-media-player";
           }
         ];
 

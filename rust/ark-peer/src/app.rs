@@ -258,6 +258,21 @@ impl Peer {
         Ok(id)
     }
 
+    /// A change an app sends, its typed change encoded: an intent on the
+    /// log ([`Peer::mutate_bytes`]), or — a function of the live space's
+    /// (`#[live]`: harken's presses) — a call on it ([`Peer::call`]); the
+    /// preview's refusal said.
+    pub fn change(&mut self, name: &str, input: Vec<u8>) -> Result<(), String> {
+        let live = self.config.live.as_ref().and_then(|l| l.module.domain.as_deref());
+        let is_live = live
+            .and_then(|d| d.get(d.binding(name)?))
+            .is_some_and(|f| f.kind == ark::domain::Kind::Live);
+        match is_live {
+            true => self.call(name, input),
+            false => self.mutate_bytes(name, input).map(|_| ()),
+        }
+    }
+
     /// A call on the live space (§1.9) by a name of its module's domain (or
     /// the log's): an ephemeral one through the relay, any other at once;
     /// the preview's refusal said.

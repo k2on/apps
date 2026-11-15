@@ -82,16 +82,17 @@ fn push_appends_its_table_and_one_intent() {
     assert_eq!(added, [ark::auth::PUSH]);
 }
 
-/// Every change a screen sends (`HarkenChange`) is a mutator the deployed
-/// server registers by that name: falsified by a change named for a
-/// function there is not (`playlists.create`).
+/// Every change a screen sends (`HarkenChange`) is a function the deployed
+/// server registers by that name, of the kind it is sent as — a mutator, or
+/// a live transition: falsified by a change named for a function there is
+/// not (`playlists.create`).
 #[test]
 #[cfg(not(feature = "push"))]
 fn every_change_a_screen_sends_is_a_deployed_mutator() {
     let was = deployed();
     for c in harken_domain::HarkenChange::every() {
         let f = was.get(c.name()).unwrap_or_else(|| panic!("{} is not the deployed server's", c.name()));
-        assert_eq!(f.kind, Kind::Mutator, "{} is not a mutator", c.name());
+        assert!(matches!(f.kind, Kind::Mutator | Kind::Live), "{} is neither a mutator nor live", c.name());
     }
     assert_eq!(
         harken_domain::HarkenChange::CreatePlaylist(Default::default()).problem().as_deref(),

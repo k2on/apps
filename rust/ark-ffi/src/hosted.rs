@@ -119,9 +119,12 @@ impl<P: PhoneApp> Place<Key<P>, Change<P>> for PhonePlace<P> {
     fn now_ms(&self) -> i64 {
         ark_peer::now_ms()
     }
+    fn clock(&self) -> ark_app::host::Clock {
+        std::sync::Arc::new(ark_peer::now_ms)
+    }
     fn send(&mut self, change: Change<P>) -> Result<(), String> {
         let (name, input) = <P::App as HostedApp>::encode(&change);
-        match self.session.send(|p| p.mutate_encoded(name, input)) {
+        match self.session.send(|p| p.change_encoded(name, input).map(|()| String::new())) {
             Ok(_) => Ok(()),
             Err(Refusal::Refused { why }) => Err(why),
         }
@@ -180,6 +183,8 @@ impl<P: PhoneApp> Place<Key<P>, Change<P>> for PhonePlace<P> {
             email: l.email,
             linked: Some(st.linked),
             pending: st.pending as i64,
+            device: if demo { String::new() } else { peer.with(|p| p.me().session.clone()) },
+            epoch: st.epoch as i64,
             version: self.handle.version(),
             leaves: true,
             adds_devices: !demo,
