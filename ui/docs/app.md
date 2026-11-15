@@ -651,9 +651,10 @@ service-extension = true   # iPhone: the Notification Service Extension (needs p
 **One runtime, woken.** The OS may start the process with no screen: a
 periodic sync, a push, a button on a notice, the device started. Each is
 a message into the process's one runtime — `ark_app::Woken` (`Sync`,
-`Push`, `Action { notice, action }`, `Boot`), which the app takes as its
+`Push`, `Action { notice, action }`, `Boot`, and `Enrolled` when a device
+owner's app has just been made one: ark-dpc's admin), which the app takes as its
 own (`App::woken`) and answers with commands like any other. The
-component the OS woke (Android's `ArkSyncJob`, `ArkBootReceiver`,
+component the OS woke (Android's `ArkSyncJob`, `ArkBootReceiver`, `ArkDpcAdmin`,
 `ArkPushReceiver`, `ArkNoticeReceiver`; the iPhone's `BGAppRefreshTask`
 and the app delegate's remote-notification callback) calls
 `ArkProcess::wake(reason, budget, done)` and finishes when it is told:

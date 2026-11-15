@@ -31,6 +31,7 @@ pub mod phone {
         AlwaysOnVpn { app: Option<String>, lockdown: bool },
         Restriction { name: String, on: bool },
         UninstallBlocked { app: String, blocked: bool },
+        UserControlDisabled { app: String, disabled: bool },
         Permission { app: String, permission: String, grant: Grant },
         CameraDisabled { disabled: bool },
         ScreenCaptureDisabled { disabled: bool },
@@ -69,6 +70,7 @@ pub mod phone {
         pub lockdown: bool,
         pub restrictions: Vec<String>,
         pub uninstall_blocked: Vec<String>,
+        pub user_control_disabled: Vec<String>,
         pub permissions: Vec<PermissionState>,
         pub camera_disabled: bool,
         pub screen_capture_disabled: bool,
@@ -213,6 +215,7 @@ impl Dpc for Fake {
             }
             Change::Restriction { name, on } => set(&mut s.restrictions, &name, on),
             Change::UninstallBlocked { app, blocked } => set(&mut s.uninstall_blocked, &app, blocked),
+            Change::UserControlDisabled { app, disabled } => set(&mut s.user_control_disabled, &app, disabled),
             Change::Permission { app, permission, grant } => {
                 s.permissions.retain(|p| !(p.app == app && p.permission == permission));
                 s.permissions.push(PermissionState { app, permission, grant });
@@ -233,6 +236,7 @@ impl Dpc for Fake {
         }
         let mut seen = s.clone();
         seen.uninstall_blocked.retain(|a| asked.apps.contains(a));
+        seen.user_control_disabled.retain(|a| asked.apps.contains(a));
         // A permission asked of that no change has set is the person's.
         seen.permissions = asked
             .permissions
@@ -268,6 +272,7 @@ mod tests {
             vpn: tailscale(true),
             restrictions: [("no_config_vpn".to_string(), true), ("no_factory_reset".to_string(), true)].into(),
             uninstall_blocked: [("com.tailscale.ipn".to_string(), true)].into(),
+            user_control_disabled: BTreeMap::new(),
             permissions: BTreeMap::from([(
                 PermissionOf {
                     app: "io.heckel.ntfy".into(),
@@ -344,6 +349,32 @@ mod tests {
         assert_eq!(fake.state().always_on_vpn, None);
         assert!(!fake.state().lockdown);
         assert_eq!(fake.state().restrictions, vec!["no_config_vpn"]);
+    }
+
+    /// The force-stop guard: the apps named kept out of the person's reach,
+    /// read back as such for the apps asked, and let go when the policy
+    /// says `false`. An app named in both maps is asked of once. Falsified
+    /// by `asked` naming only the uninstall map's apps: the guard was
+    /// planned again on every reconcile.
+    #[test]
+    fn the_force_stop_guard_is_planned_read_and_let_go() {
+        let fake = Fake::new();
+        let mut m = Modules::new();
+        fake.register(&mut m);
+        let mut p = base();
+        p.user_control_disabled = [("us.koon.devices".to_string(), true), ("com.tailscale.ipn".to_string(), true)].into();
+        let a = asked(&p);
+        assert_eq!(a.apps, vec!["com.tailscale.ipn", "us.koon.devices"]);
+        assert_eq!(reconcile(&m, &p).len(), 7, "the five of base, and two guards");
+        assert_eq!(fake.state().user_control_disabled, vec!["com.tailscale.ipn", "us.koon.devices"]);
+        assert!(reconcile(&m, &p).is_empty());
+        p.user_control_disabled.insert("us.koon.devices".into(), false);
+        assert_eq!(
+            reconcile(&m, &p),
+            vec![Ok(())],
+            "one change: the app's own guard let go, Tailscale's kept"
+        );
+        assert_eq!(fake.state().user_control_disabled, vec!["com.tailscale.ipn"]);
     }
 
     #[test]

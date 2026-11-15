@@ -39,6 +39,11 @@ pub enum Change {
     Restriction { name: String, on: bool },
     /// Whether `app` can be uninstalled.
     UninstallBlocked { app: String, blocked: bool },
+    /// Whether the person can force-stop `app` or clear its data (Android
+    /// 11 and later, `setUserControlDisabledPackages`): a force stop would
+    /// cancel the app's own jobs, so a device owner keeps itself, its VPN
+    /// and its push distributor out of reach.
+    UserControlDisabled { app: String, disabled: bool },
     /// What `app` is given of `permission`.
     Permission { app: String, permission: String, grant: Grant },
     /// The cameras, every app's.
@@ -66,7 +71,7 @@ pub struct PermissionOf {
 }
 
 /// What a read looks at besides what is the device's: the apps whose
-/// uninstall it says, the permissions whose grant.
+/// uninstall and user control it says, the permissions whose grant.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Asked {
     pub apps: Vec<String>,
@@ -94,6 +99,8 @@ pub struct State {
     pub restrictions: Vec<String>,
     /// Of the apps asked, those that cannot be uninstalled.
     pub uninstall_blocked: Vec<String>,
+    /// Of the apps asked, those the person cannot force-stop or clear.
+    pub user_control_disabled: Vec<String>,
     /// Of the permissions asked, each one's grant.
     pub permissions: Vec<PermissionState>,
     pub camera_disabled: bool,
@@ -166,6 +173,9 @@ pub struct Policy {
     pub restrictions: BTreeMap<String, bool>,
     /// Apps by package: whether each cannot be uninstalled.
     pub uninstall_blocked: BTreeMap<String, bool>,
+    /// Apps by package: whether the person cannot force-stop each or clear
+    /// its data.
+    pub user_control_disabled: BTreeMap<String, bool>,
     /// Permissions and what each app is given of them.
     pub permissions: BTreeMap<PermissionOf, Grant>,
     pub camera_disabled: Option<bool>,
@@ -174,8 +184,16 @@ pub struct Policy {
 
 /// What a read must look at for [`plan`] to see what `policy` names.
 pub fn asked(policy: &Policy) -> Asked {
+    let mut apps: Vec<String> = policy
+        .uninstall_blocked
+        .keys()
+        .chain(policy.user_control_disabled.keys())
+        .cloned()
+        .collect();
+    apps.sort();
+    apps.dedup();
     Asked {
-        apps: policy.uninstall_blocked.keys().cloned().collect(),
+        apps,
         permissions: policy.permissions.keys().cloned().collect(),
     }
 }
@@ -215,6 +233,14 @@ pub fn plan(policy: &Policy, state: &State) -> Vec<Change> {
             changes.push(Change::UninstallBlocked {
                 app: app.clone(),
                 blocked: *blocked,
+            });
+        }
+    }
+    for (app, disabled) in &policy.user_control_disabled {
+        if state.user_control_disabled.contains(app) != *disabled {
+            changes.push(Change::UserControlDisabled {
+                app: app.clone(),
+                disabled: *disabled,
             });
         }
     }

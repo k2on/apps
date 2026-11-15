@@ -43,6 +43,7 @@ pub enum WakeReason {
     Push,
     Action { notice: String, action: String },
     Boot,
+    Enrolled,
 }
 
 impl From<WakeReason> for Woken {
@@ -52,6 +53,7 @@ impl From<WakeReason> for Woken {
             WakeReason::Push => Woken::Push,
             WakeReason::Action { notice, action } => Woken::Action { notice, action },
             WakeReason::Boot => Woken::Boot,
+            WakeReason::Enrolled => Woken::Enrolled,
         }
     }
 }

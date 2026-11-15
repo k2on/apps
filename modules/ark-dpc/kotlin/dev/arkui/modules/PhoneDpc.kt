@@ -31,6 +31,14 @@ class PhoneDpc(context: Context) : Dpc {
                 is Change.Restriction ->
                     if (change.on) dpm.addUserRestriction(admin, change.name) else dpm.clearUserRestriction(admin, change.name)
                 is Change.UninstallBlocked -> dpm.setUninstallBlocked(admin, change.app, change.blocked)
+                is Change.UserControlDisabled -> {
+                    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+                        throw DpcException.Failed("keeping an app from being force-stopped needs Android 11")
+                    }
+                    val now = dpm.getUserControlDisabledPackages(admin).toMutableSet()
+                    if (change.disabled) now.add(change.app) else now.remove(change.app)
+                    dpm.setUserControlDisabledPackages(admin, now.toList())
+                }
                 is Change.Permission ->
                     // False when the app or the permission is not one, or the permission is not a
                     // runtime one the owner may decide.
@@ -57,6 +65,7 @@ class PhoneDpc(context: Context) : Dpc {
                 lockdown = false,
                 restrictions = emptyList(),
                 uninstallBlocked = emptyList(),
+                userControlDisabled = emptyList(),
                 permissions = emptyList(),
                 cameraDisabled = false,
                 screenCaptureDisabled = false,
@@ -72,6 +81,10 @@ class PhoneDpc(context: Context) : Dpc {
                 lockdown = Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && dpm.isAlwaysOnVpnLockdownEnabled(admin),
                 restrictions = restrictions,
                 uninstallBlocked = asked.apps.filter { dpm.isUninstallBlocked(admin, it) },
+                userControlDisabled =
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                        dpm.getUserControlDisabledPackages(admin).let { held -> asked.apps.filter { it in held } }
+                    } else emptyList(),
                 permissions = asked.permissions.map {
                     PermissionState(it.app, it.permission, grantOf(dpm.getPermissionGrantState(admin, it.app, it.permission)))
                 },

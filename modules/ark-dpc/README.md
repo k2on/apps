@@ -104,9 +104,11 @@ owner can do more of it in the background than any other app:
    fallback.
 3. **What the system tells a device owner anyway**: its admin's
    `onEnabled` and `onProfileProvisioningComplete` (the first run, right
-   after `dpm set-device-owner`), `ACTION_MY_PACKAGE_REPLACED` (after its
-   own update), `BOOT_COMPLETED`, and `onSystemUpdatePending`. Each is one
-   more reason to run the work now.
+   after `dpm set-device-owner`) are a wake of their own: `ArkDpcAdmin`
+   calls `ArkProcess.wake(Enrolled, …)`, so the app's update
+   (`Woken::Enrolled`) holds the phone to its policy at once. `BOOT_COMPLETED`
+   is ark-background's (`[background] boot`); `ACTION_MY_PACKAGE_REPLACED`
+   and `onSystemUpdatePending` are more reasons it could run the work.
 4. **Exemptions it has**: a device owner may start a foreground service
    from the background (Android 12's restriction does not apply to it),
    and an active admin is out of App Standby's buckets, so its work is not
@@ -119,10 +121,12 @@ owner can do more of it in the background than any other app:
    phone) or a fetch of a signed file (the phone checks the server's
    signature with a key it was given at enrollment). Either way it applies
    the last good policy while offline.
-6. **What it keeps running**: `setUserControlDisabledPackages` (Android 11)
-   keeps the person from force-stopping or clearing the data of the app,
-   the VPN and the push distributor; `setUninstallBlocked` keeps them
-   installed. The next change this module would add is that one.
+6. **What it keeps running**: `Change::UserControlDisabled`
+   (`setUserControlDisabledPackages`, Android 11) keeps the person from
+   force-stopping or clearing the data of the app, the VPN and the push
+   distributor — a force stop would cancel its jobs — and
+   `Change::UninstallBlocked` keeps them installed. A policy names each in
+   `user_control_disabled` and `uninstall_blocked`.
 7. **A foreground service holding the sync socket**, only if seconds matter
    more than the battery; UnifiedPush gives the same with one shared
    connection, and is the default.

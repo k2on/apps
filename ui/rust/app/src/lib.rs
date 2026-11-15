@@ -105,6 +105,10 @@ pub enum Woken {
     Action { notice: String, action: String },
     /// The device started (Android, app.toml's `[background] boot`).
     Boot,
+    /// The app was just made the device's owner (Android: ark-dpc's admin,
+    /// told by `dpm set-device-owner` or a provisioning): its first chance
+    /// to hold the phone to its policy, with no screen.
+    Enrolled,
 }
 
 /// What an update and a screen read besides the state: the views the store
