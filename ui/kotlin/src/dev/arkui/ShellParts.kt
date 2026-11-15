@@ -16,6 +16,7 @@
 package dev.arkui
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.layout.asPaddingValues
@@ -299,6 +300,7 @@ public fun AdaptiveTabs(
  * back gesture settles it is said ([onOpen], [onClose]) so the app's state follows the card. The
  * bar and the full player each draw their own cover: nothing travels between them but the card.
  */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun NowPlayingCard(
     spec: ExpandingCardSpec,
