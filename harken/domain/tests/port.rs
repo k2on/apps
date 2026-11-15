@@ -334,16 +334,88 @@ fn step(r: &mut Rng, s: &Store) -> Step {
 }
 
 /// The schema's hash (its bytes', postcard; `edd9a961…` its JSON's when
-/// a build could write values as JSON).
-// Moved deliberately from `b0f869fb…` when the `push` table was appended.
-const SCHEMA: &str = "ed311a6435219885a933f3d0493631e484b0343f6acc9d977330313d6a398199";
+/// a build could write values as JSON). Without the push table (the
+/// `push` feature, off by default): the schema the deployed servers serve.
+#[cfg(not(feature = "push"))]
+const SCHEMA: &str = "b0f869fb912d16806b2340366f5b5f865e1ebfa4b6fd852050f1c0c35602249c";
 
 /// Per seed, the state after 400 steps and the transcript's hash, as the
-/// value format writes them (postcard, N4). Moved deliberately when the
+/// value format writes them (postcard, N4).
+#[cfg(not(feature = "push"))]
+const PINS: [(u64, &str, &str); 12] = [
+    (
+        1,
+        "ddb40130e6bb64f67f83ed19045e1ae429bc1be6adacb4522d8f1934ac868957",
+        "c39435227a435e82df402c4419101c403ba86efec3f39bc9a185a834da925e03",
+    ),
+    (
+        2,
+        "fb0cae3eb3e23fbe05e24a665b926715a63a2ac71bc13c60d44d9d49816c710d",
+        "009a29a6e832cca82e8712ae16c7b369b871df41d541b7555f87cabaaf85093c",
+    ),
+    (
+        3,
+        "9ab57014d03333c09065ee49f231afa429df6683bb283d1fa186fe25d035c9fb",
+        "f9c4028ef2e24e57f7ccc8229642bcd9ab287cbac2978265573432054e3f88df",
+    ),
+    (
+        4,
+        "7b974edfa92fe1ba475526e8489ee00ff1230005dd873f4eff8325bd9800d459",
+        "475d8345d0458376d682662e80c3118b3ebd941da4573700a9e0236943aca606",
+    ),
+    (
+        5,
+        "4ec1962ff49c3e51c45811b951baf8c32cc7b647aa5cda9215c356bb480c5095",
+        "61dcae305906e9ae6f921dd419c4cb15657aeeea24f54bbc356dc8dc53ad246e",
+    ),
+    (
+        6,
+        "e9b1b2c28ef18e46fa67662962dc483242fcfd7571c952c4043d171aaa7d08e2",
+        "2df93ce155369cb33501394944481951fa08185aedbc62d77a17e192bd1fff50",
+    ),
+    (
+        7,
+        "642b50a654b9468c232651f439ed9371ed24cfce82d8e84ffe9ed41f1ac478b4",
+        "9cae73812ef85b3b775f6930a1dedbab08325bfcf70c89e68cea27f33ac77df4",
+    ),
+    (
+        8,
+        "20971f16633bc12c5eeb2d78ee532b233162f3248eec3c2c8d469571d7d0a169",
+        "63bdfab94bc874022ad7468b92fb6dc81b3c21ce250d6b1b37621666ac771fbc",
+    ),
+    (
+        9,
+        "fc7289984c604b1f59fbc464175dcca0ac2bb389add8eb1c3a73232844ff6a5a",
+        "a383e864fccef8601627999ad325499bc28ea988707966ac76b0ae25da5a3315",
+    ),
+    (
+        10,
+        "04d16261e621af38a4147036efedbd64f21f6dc1f9d4f492bc98fd974b86a9e4",
+        "55045fd7d5b231c5605de927cca833e86923c3b9903777646c677ddadae748f0",
+    ),
+    (
+        11,
+        "eff14a7c62805b0df723d0cba7b01d483620f9278514cab79d1be4459d1c2b3d",
+        "3f972266ab9803c5fbd88b71704a6962089070ae9c3ead635114c4a1b26dcb80",
+    ),
+    (
+        12,
+        "dcd4714f86d627b57204d3b5c07a904ecbba6147340597c3219685a852407cd3",
+        "fae2eb0a914c84a2f3211aadfc7f0628d12af9c7768ee5702b46d7a8dfaeebd2",
+    ),
+];
+
+/// With the `push` feature: the push table appended.
+// Moved deliberately from `b0f869fb…` when the `push` table was appended.
+#[cfg(feature = "push")]
+const SCHEMA: &str = "ed311a6435219885a933f3d0493631e484b0343f6acc9d977330313d6a398199";
+
+/// The pins with the push table appended. Moved deliberately when the
 /// `push` table (`ark::auth::Push`, where each session's device is woken)
 /// was appended: the state hash, which the transcript holds after every
 /// step, is over every table, an empty one too; the steps and what each
 /// said are as before.
+#[cfg(feature = "push")]
 const PINS: [(u64, &str, &str); 12] = [
     (
         1,

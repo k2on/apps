@@ -10,7 +10,7 @@ ark = { path = "../ark" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 ark-auth = { path = "../ark-auth", default-features = false }
-# A server's push to its people's devices (`settings::Apns`, the `server`
+# A server's push to its people's devices (`settings::Apns`, the `push`
 # feature's): the sender, configured.
 ark-push = { path = "../ark-push", features = ["send"], optional = true }
 # What a peer does, as events and spans (docs/plan-observe.md): emitted
@@ -22,7 +22,11 @@ tracing-subscriber = { version = "0.3", default-features = false, features = ["r
 # never links.
 [features]
 default = ["server"]
-server = ["ark-auth/server", "dep:ark-push", "dep:anyhow", "dep:axum", "dep:tokio", "dep:tower-http"]
+server = ["ark-auth/server", "dep:anyhow", "dep:axum", "dep:tokio", "dep:tower-http"]
+# The hub's wakes (`push`, `Server::push`, `settings::Apns::sender`): off
+# by default, as the push table is (`ark::auth`'s docs; docs/releasing.md
+# says what turns it on again).
+push = ["server", "dep:ark-push"]
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 # `wss://` natively: rustls with ring and Mozilla's roots, the TLS the
@@ -42,3 +46,8 @@ web-sys = { version = "0.3", features = ["WebSocket", "MessageEvent", "CloseEven
 [dev-dependencies]
 tempfile = "3"
 arkdb = { path = "../arkdb" }
+
+# The hub's wakes, with the push table they read: only with `push`.
+[[test]]
+name = "push"
+required-features = ["push"]

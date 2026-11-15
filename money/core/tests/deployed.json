@@ -1,0 +1,6307 @@
+{
+  "schema": {
+    "tables": [
+      {
+        "name": "account",
+        "columns": [
+          {
+            "name": "id",
+            "ty": {
+              "Id": "account"
+            },
+            "default": null
+          },
+          {
+            "name": "name",
+            "ty": "Text",
+            "default": null
+          },
+          {
+            "name": "kind",
+            "ty": "Text",
+            "default": null
+          },
+          {
+            "name": "on_budget",
+            "ty": "Bool",
+            "default": null
+          },
+          {
+            "name": "closed",
+            "ty": "Bool",
+            "default": null
+          },
+          {
+            "name": "pos",
+            "ty": "Int",
+            "default": null
+          },
+          {
+            "name": "note",
+            "ty": "Text",
+            "default": null
+          },
+          {
+            "name": "created_ms",
+            "ty": "Int",
+            "default": null
+          },
+          {
+            "name": "user_id",
+            "ty": "Text",
+            "default": null
+          }
+        ],
+        "key": 1,
+        "indexes": [
+          {
+            "columns": [
+              5
+            ],
+            "unique": false
+          }
+        ],
+        "refs": [],
+        "space": "durable"
+      },
+      {
+        "name": "category",
+        "columns": [
+          {
+            "name": "id",
+            "ty": {
+              "Id": "category"
+            },
+            "default": null
+          },
+          {
+            "name": "parent_id",
+            "ty": {
+              "Option": {
+                "Id": "category"
+              }
+            },
+            "default": null
+          },
+          {
+            "name": "name",
+            "ty": "Text",
+            "default": null
+          },
+          {
+            "name": "pos",
+            "ty": "Int",
+            "default": null
+          },
+          {
+            "name": "hidden",
+            "ty": "Bool",
+            "default": null
+          },
+          {
+            "name": "income",
+            "ty": "Bool",
+            "default": null
+          },
+          {
+            "name": "target",
+            "ty": "Int",
+            "default": null
+          },
+          {
+            "name": "note",
+            "ty": "Text",
+            "default": null
+          },
+          {
+            "name": "created_ms",
+            "ty": "Int",
+            "default": null
+          },
+          {
+            "name": "user_id",
+            "ty": "Text",
+            "default": null
+          }
+        ],
+        "key": 1,
+        "indexes": [
+          {
+            "columns": [
+              1,
+              3
+            ],
+            "unique": false
+          },
+          {
+            "columns": [
+              3
+            ],
+            "unique": false
+          }
+        ],
+        "refs": [
+          {
+            "column": 1,
+            "table": "category"
+          }
+        ],
+        "space": "durable"
+      },
+      {
+        "name": "assigned",
+        "columns": [
+          {
+            "name": "month",
+            "ty": "Text",
+            "default": null
+          },
+          {
+            "name": "category_id",
+            "ty": {
+              "Id": "category"
+            },
+            "default": null
+          },
+          {
+            "name": "amount",
+            "ty": "Int",
+            "default": null
+          },
+          {
+            "name": "at_ms",
+            "ty": "Int",
+            "default": null
+          },
+          {
+            "name": "user_id",
+            "ty": "Text",
+            "default": null
+          }
+        ],
+        "key": 2,
+        "indexes": [
+          {
+            "columns": [
+              1,
+              0
+            ],
+            "unique": false
+          }
+        ],
+        "refs": [
+          {
+            "column": 1,
+            "table": "category"
+          }
+        ],
+        "space": "durable"
+      },
+      {
+        "name": "txn",
+        "columns": [
+          {
+            "name": "id",
+            "ty": {
+              "Id": "txn"
+            },
+            "default": null
+          },
+          {
+            "name": "account_id",
+            "ty": {
+              "Id": "account"
+            },
+            "default": null
+          },
+          {
+            "name": "date",
+            "ty": "Text",
+            "default": null
+          },
+          {
+            "name": "payee",
+            "ty": "Text",
+            "default": null
+          },
+          {
+            "name": "category_id",
+            "ty": {
+              "Option": {
+                "Id": "category"
+              }
+            },
+            "default": null
+          },
+          {
+            "name": "memo",
+            "ty": "Text",
+            "default": null
+          },
+          {
+            "name": "amount",
+            "ty": "Int",
+            "default": null
+          },
+          {
+            "name": "cleared",
+            "ty": {
+              "Sum": [
+                "Cleared",
+                [
+                  [
+                    "Uncleared",
+                    []
+                  ],
+                  [
+                    "Cleared",
+                    []
+                  ],
+                  [
+                    "Reconciled",
+                    []
+                  ]
+                ]
+              ]
+            },
+            "default": null
+          },
+          {
+            "name": "approved",
+            "ty": "Bool",
+            "default": null
+          },
+          {
+            "name": "transfer_account",
+            "ty": {
+              "Option": {
+                "Id": "account"
+              }
+            },
+            "default": null
+          },
+          {
+            "name": "transfer_id",
+            "ty": {
+              "Option": {
+                "Id": "txn"
+              }
+            },
+            "default": null
+          },
+          {
+            "name": "imported_id",
+            "ty": {
+              "Option": "Text"
+            },
+            "default": null
+          },
+          {
+            "name": "imported_payee",
+            "ty": "Text",
+            "default": null
+          },
+          {
+            "name": "created_ms",
+            "ty": "Int",
+            "default": null
+          },
+          {
+            "name": "user_id",
+            "ty": "Text",
+            "default": null
+          },
+          {
+            "name": "imported_by",
+            "ty": "Text",
+            "default": ""
+          },
+          {
+            "name": "split",
+            "ty": "Bool",
+            "default": false
+          }
+        ],
+        "key": 1,
+        "indexes": [
+          {
+            "columns": [
+              1,
+              2
+            ],
+            "unique": false
+          },
+          {
+            "columns": [
+              4,
+              2
+            ],
+            "unique": false
+          },
+          {
+            "columns": [
+              2
+            ],
+            "unique": false
+          },
+          {
+            "columns": [
+              3,
+              2
+            ],
+            "unique": false
+          },
+          {
+            "columns": [
+              11
+            ],
+            "unique": false
+          }
+        ],
+        "refs": [
+          {
+            "column": 1,
+            "table": "account"
+          },
+          {
+            "column": 4,
+            "table": "category"
+          },
+          {
+            "column": 9,
+            "table": "account"
+          }
+        ],
+        "space": "durable"
+      },
+      {
+        "name": "bank",
+        "columns": [
+          {
+            "name": "name",
+            "ty": "Text",
+            "default": null
+          },
+          {
+            "name": "institution",
+            "ty": "Text",
+            "default": null
+          },
+          {
+            "name": "cursor",
+            "ty": "Text",
+            "default": null
+          },
+          {
+            "name": "synced_ms",
+            "ty": "Int",
+            "default": null
+          },
+          {
+            "name": "added",
+            "ty": "Int",
+            "default": null
+          },
+          {
+            "name": "updated",
+            "ty": "Int",
+            "default": null
+          },
+          {
+            "name": "deleted",
+            "ty": "Int",
+            "default": null
+          },
+          {
+            "name": "locked",
+            "ty": "Int",
+            "default": null
+          },
+          {
+            "name": "user_id",
+            "ty": "Text",
+            "default": null
+          },
+          {
+            "name": "error_code",
+            "ty": "Text",
+            "default": ""
+          },
+          {
+            "name": "error",
+            "ty": "Text",
+            "default": ""
+          },
+          {
+            "name": "failed_ms",
+            "ty": "Int",
+            "default": 0
+          },
+          {
+            "name": "repull",
+            "ty": "Bool",
+            "default": false
+          },
+          {
+            "name": "institution_id",
+            "ty": "Text",
+            "default": ""
+          },
+          {
+            "name": "fresh",
+            "ty": "Bool",
+            "default": false
+          },
+          {
+            "name": "adding",
+            "ty": "Bool",
+            "default": false
+          },
+          {
+            "name": "replaced_by",
+            "ty": "Text",
+            "default": ""
+          }
+        ],
+        "key": 1,
+        "indexes": [],
+        "refs": [],
+        "space": "durable"
+      },
+      {
+        "name": "linked",
+        "columns": [
+          {
+            "name": "plaid_account_id",
+            "ty": "Text",
+            "default": null
+          },
+          {
+            "name": "bank",
+            "ty": "Text",
+            "default": null
+          },
+          {
+            "name": "account_id",
+            "ty": {
+              "Option": {
+                "Id": "account"
+              }
+            },
+            "default": null
+          },
+          {
+            "name": "name",
+            "ty": "Text",
+            "default": null
+          },
+          {
+            "name": "mask",
+            "ty": "Text",
+            "default": null
+          },
+          {
+            "name": "kind",
+            "ty": "Text",
+            "default": null
+          },
+          {
+            "name": "balance",
+            "ty": {
+              "Option": "Int"
+            },
+            "default": null
+          },
+          {
+            "name": "ignored",
+            "ty": "Bool",
+            "default": null
+          },
+          {
+            "name": "subtype",
+            "ty": "Text",
+            "default": ""
+          },
+          {
+            "name": "seen",
+            "ty": "Text",
+            "default": ""
+          },
+          {
+            "name": "since",
+            "ty": "Text",
+            "default": ""
+          },
+          {
+            "name": "opening",
+            "ty": "Bool",
+            "default": false
+          },
+          {
+            "name": "seam",
+            "ty": "Bool",
+            "default": false
+          }
+        ],
+        "key": 1,
+        "indexes": [
+          {
+            "columns": [
+              2
+            ],
+            "unique": false
+          }
+        ],
+        "refs": [
+          {
+            "column": 1,
+            "table": "bank"
+          },
+          {
+            "column": 2,
+            "table": "account"
+          }
+        ],
+        "space": "durable"
+      },
+      {
+        "name": "asked",
+        "columns": [
+          {
+            "name": "user_id",
+            "ty": "Text",
+            "default": null
+          },
+          {
+            "name": "asked_ms",
+            "ty": "Int",
+            "default": null
+          }
+        ],
+        "key": 1,
+        "indexes": [],
+        "refs": [],
+        "space": "durable"
+      },
+      {
+        "name": "sign_in",
+        "columns": [
+          {
+            "name": "id",
+            "ty": "Text",
+            "default": null
+          },
+          {
+            "name": "user",
+            "ty": "Text",
+            "default": null
+          },
+          {
+            "name": "name",
+            "ty": "Text",
+            "default": null
+          },
+          {
+            "name": "email",
+            "ty": "Text",
+            "default": null
+          },
+          {
+            "name": "device",
+            "ty": "Text",
+            "default": null
+          },
+          {
+            "name": "issued_ms",
+            "ty": "Int",
+            "default": null
+          },
+          {
+            "name": "expires_ms",
+            "ty": "Int",
+            "default": null
+          },
+          {
+            "name": "revoked",
+            "ty": "Bool",
+            "default": null
+          },
+          {
+            "name": "roles",
+            "ty": {
+              "List": "Text"
+            },
+            "default": null
+          },
+          {
+            "name": "picture",
+            "ty": "Text",
+            "default": ""
+          }
+        ],
+        "key": 1,
+        "indexes": [
+          {
+            "columns": [
+              1
+            ],
+            "unique": false
+          }
+        ],
+        "refs": [],
+        "space": "durable"
+      },
+      {
+        "name": "role",
+        "columns": [
+          {
+            "name": "user",
+            "ty": "Text",
+            "default": null
+          },
+          {
+            "name": "role",
+            "ty": "Text",
+            "default": null
+          }
+        ],
+        "key": 2,
+        "indexes": [],
+        "refs": [],
+        "space": "durable"
+      },
+      {
+        "name": "bank_ask",
+        "columns": [
+          {
+            "name": "id",
+            "ty": {
+              "Id": "bank_ask"
+            },
+            "default": null
+          },
+          {
+            "name": "what",
+            "ty": "Text",
+            "default": null
+          },
+          {
+            "name": "bank",
+            "ty": "Text",
+            "default": null
+          },
+          {
+            "name": "institution",
+            "ty": "Text",
+            "default": null
+          },
+          {
+            "name": "state",
+            "ty": {
+              "Sum": [
+                "AskState",
+                [
+                  [
+                    "Asked",
+                    []
+                  ],
+                  [
+                    "Waiting",
+                    []
+                  ],
+                  [
+                    "Done",
+                    []
+                  ],
+                  [
+                    "Failed",
+                    []
+                  ],
+                  [
+                    "Expired",
+                    []
+                  ]
+                ]
+              ]
+            },
+            "default": null
+          },
+          {
+            "name": "url",
+            "ty": "Text",
+            "default": null
+          },
+          {
+            "name": "message",
+            "ty": "Text",
+            "default": null
+          },
+          {
+            "name": "expires_ms",
+            "ty": "Int",
+            "default": null
+          },
+          {
+            "name": "asked_ms",
+            "ty": "Int",
+            "default": null
+          },
+          {
+            "name": "answered_ms",
+            "ty": "Int",
+            "default": null
+          },
+          {
+            "name": "user_id",
+            "ty": "Text",
+            "default": null
+          }
+        ],
+        "key": 1,
+        "indexes": [],
+        "refs": [],
+        "space": "durable"
+      },
+      {
+        "name": "rule",
+        "columns": [
+          {
+            "name": "from",
+            "ty": "Text",
+            "default": null
+          },
+          {
+            "name": "category_id",
+            "ty": {
+              "Id": "category"
+            },
+            "default": null
+          },
+          {
+            "name": "manual",
+            "ty": "Bool",
+            "default": null
+          },
+          {
+            "name": "matching",
+            "ty": "Text",
+            "default": null
+          },
+          {
+            "name": "accounts",
+            "ty": {
+              "List": {
+                "Id": "account"
+              }
+            },
+            "default": null
+          },
+          {
+            "name": "times",
+            "ty": "Int",
+            "default": null
+          },
+          {
+            "name": "per",
+            "ty": "Int",
+            "default": null
+          },
+          {
+            "name": "at_ms",
+            "ty": "Int",
+            "default": null
+          },
+          {
+            "name": "user_id",
+            "ty": "Text",
+            "default": null
+          }
+        ],
+        "key": 2,
+        "indexes": [
+          {
+            "columns": [
+              1,
+              0
+            ],
+            "unique": false
+          }
+        ],
+        "refs": [
+          {
+            "column": 1,
+            "table": "category"
+          }
+        ],
+        "space": "durable"
+      },
+      {
+        "name": "saved_filter",
+        "columns": [
+          {
+            "name": "id",
+            "ty": {
+              "Id": "saved_filter"
+            },
+            "default": null
+          },
+          {
+            "name": "name",
+            "ty": "Text",
+            "default": null
+          },
+          {
+            "name": "pos",
+            "ty": "Int",
+            "default": null
+          },
+          {
+            "name": "filter",
+            "ty": {
+              "Record": [
+                "Filter",
+                [
+                  [
+                    "accounts",
+                    {
+                      "List": {
+                        "Id": "account"
+                      }
+                    }
+                  ],
+                  [
+                    "on_budget",
+                    "Bool"
+                  ],
+                  [
+                    "text",
+                    "Text"
+                  ],
+                  [
+                    "categories",
+                    {
+                      "List": {
+                        "Option": {
+                          "Id": "category"
+                        }
+                      }
+                    }
+                  ],
+                  [
+                    "direction",
+                    {
+                      "Sum": [
+                        "Direction",
+                        [
+                          [
+                            "Either",
+                            []
+                          ],
+                          [
+                            "In",
+                            []
+                          ],
+                          [
+                            "Out",
+                            []
+                          ]
+                        ]
+                      ]
+                    }
+                  ],
+                  [
+                    "no_transfers",
+                    "Bool"
+                  ],
+                  [
+                    "needs_look",
+                    "Bool"
+                  ],
+                  [
+                    "from",
+                    {
+                      "Option": "Text"
+                    }
+                  ],
+                  [
+                    "through",
+                    {
+                      "Option": "Text"
+                    }
+                  ]
+                ]
+              ]
+            },
+            "default": null
+          },
+          {
+            "name": "created_ms",
+            "ty": "Int",
+            "default": null
+          },
+          {
+            "name": "user_id",
+            "ty": "Text",
+            "default": null
+          }
+        ],
+        "key": 1,
+        "indexes": [
+          {
+            "columns": [
+              2
+            ],
+            "unique": false
+          }
+        ],
+        "refs": [],
+        "space": "durable"
+      },
+      {
+        "name": "formula",
+        "columns": [
+          {
+            "name": "from",
+            "ty": "Text",
+            "default": null
+          },
+          {
+            "name": "category_id",
+            "ty": {
+              "Id": "category"
+            },
+            "default": null
+          },
+          {
+            "name": "manual",
+            "ty": "Bool",
+            "default": null
+          },
+          {
+            "name": "terms",
+            "ty": {
+              "List": {
+                "Record": [
+                  "Term",
+                  [
+                    [
+                      "filter_id",
+                      {
+                        "Id": "saved_filter"
+                      }
+                    ],
+                    [
+                      "times",
+                      "Int"
+                    ],
+                    [
+                      "per",
+                      "Int"
+                    ]
+                  ]
+                ]
+              }
+            },
+            "default": null
+          },
+          {
+            "name": "said",
+            "ty": "Text",
+            "default": null
+          },
+          {
+            "name": "at_ms",
+            "ty": "Int",
+            "default": null
+          },
+          {
+            "name": "user_id",
+            "ty": "Text",
+            "default": null
+          }
+        ],
+        "key": 2,
+        "indexes": [
+          {
+            "columns": [
+              1,
+              0
+            ],
+            "unique": false
+          }
+        ],
+        "refs": [
+          {
+            "column": 1,
+            "table": "category"
+          }
+        ],
+        "space": "durable"
+      },
+      {
+        "name": "split",
+        "columns": [
+          {
+            "name": "txn_id",
+            "ty": {
+              "Id": "txn"
+            },
+            "default": null
+          },
+          {
+            "name": "line",
+            "ty": "Int",
+            "default": null
+          },
+          {
+            "name": "category_id",
+            "ty": {
+              "Option": {
+                "Id": "category"
+              }
+            },
+            "default": null
+          },
+          {
+            "name": "date",
+            "ty": "Text",
+            "default": null
+          },
+          {
+            "name": "amount",
+            "ty": "Int",
+            "default": null
+          },
+          {
+            "name": "memo",
+            "ty": "Text",
+            "default": null
+          }
+        ],
+        "key": 2,
+        "indexes": [
+          {
+            "columns": [
+              0
+            ],
+            "unique": false
+          },
+          {
+            "columns": [
+              2,
+              3
+            ],
+            "unique": false
+          }
+        ],
+        "refs": [
+          {
+            "column": 0,
+            "table": "txn"
+          },
+          {
+            "column": 2,
+            "table": "category"
+          }
+        ],
+        "space": "durable"
+      },
+      {
+        "name": "receipt",
+        "columns": [
+          {
+            "name": "id",
+            "ty": "Text",
+            "default": null
+          },
+          {
+            "name": "store",
+            "ty": "Text",
+            "default": null
+          },
+          {
+            "name": "date",
+            "ty": "Text",
+            "default": null
+          },
+          {
+            "name": "place",
+            "ty": "Text",
+            "default": null
+          },
+          {
+            "name": "total",
+            "ty": "Int",
+            "default": null
+          },
+          {
+            "name": "txn_id",
+            "ty": {
+              "Option": {
+                "Id": "txn"
+              }
+            },
+            "default": null
+          },
+          {
+            "name": "imported_ms",
+            "ty": "Int",
+            "default": null
+          },
+          {
+            "name": "user_id",
+            "ty": "Text",
+            "default": null
+          }
+        ],
+        "key": 1,
+        "indexes": [
+          {
+            "columns": [
+              1,
+              2
+            ],
+            "unique": false
+          },
+          {
+            "columns": [
+              5
+            ],
+            "unique": false
+          }
+        ],
+        "refs": [
+          {
+            "column": 5,
+            "table": "txn"
+          }
+        ],
+        "space": "durable"
+      },
+      {
+        "name": "item",
+        "columns": [
+          {
+            "name": "receipt_id",
+            "ty": "Text",
+            "default": null
+          },
+          {
+            "name": "line",
+            "ty": "Int",
+            "default": null
+          },
+          {
+            "name": "name",
+            "ty": "Text",
+            "default": null
+          },
+          {
+            "name": "sku",
+            "ty": "Text",
+            "default": null
+          },
+          {
+            "name": "same",
+            "ty": "Text",
+            "default": null
+          },
+          {
+            "name": "quantity",
+            "ty": "Int",
+            "default": null
+          },
+          {
+            "name": "unit",
+            "ty": "Text",
+            "default": null
+          },
+          {
+            "name": "amount",
+            "ty": "Int",
+            "default": null
+          },
+          {
+            "name": "category_id",
+            "ty": {
+              "Option": {
+                "Id": "category"
+              }
+            },
+            "default": null
+          }
+        ],
+        "key": 2,
+        "indexes": [
+          {
+            "columns": [
+              0
+            ],
+            "unique": false
+          },
+          {
+            "columns": [
+              8
+            ],
+            "unique": false
+          },
+          {
+            "columns": [
+              4
+            ],
+            "unique": false
+          }
+        ],
+        "refs": [
+          {
+            "column": 0,
+            "table": "receipt"
+          },
+          {
+            "column": 8,
+            "table": "category"
+          }
+        ],
+        "space": "durable"
+      },
+      {
+        "name": "charge",
+        "columns": [
+          {
+            "name": "id",
+            "ty": "Text",
+            "default": null
+          },
+          {
+            "name": "receipt_id",
+            "ty": "Text",
+            "default": null
+          },
+          {
+            "name": "date",
+            "ty": "Text",
+            "default": null
+          },
+          {
+            "name": "amount",
+            "ty": "Int",
+            "default": null
+          },
+          {
+            "name": "card",
+            "ty": "Text",
+            "default": null
+          },
+          {
+            "name": "txn_id",
+            "ty": {
+              "Option": {
+                "Id": "txn"
+              }
+            },
+            "default": null
+          },
+          {
+            "name": "user_id",
+            "ty": "Text",
+            "default": null
+          }
+        ],
+        "key": 1,
+        "indexes": [
+          {
+            "columns": [
+              1
+            ],
+            "unique": false
+          },
+          {
+            "columns": [
+              5
+            ],
+            "unique": false
+          },
+          {
+            "columns": [
+              2
+            ],
+            "unique": false
+          }
+        ],
+        "refs": [
+          {
+            "column": 5,
+            "table": "txn"
+          }
+        ],
+        "space": "durable"
+      },
+      {
+        "name": "photo",
+        "columns": [
+          {
+            "name": "id",
+            "ty": {
+              "Id": "photo"
+            },
+            "default": null
+          },
+          {
+            "name": "file",
+            "ty": {
+              "Record": [
+                "FileRef",
+                [
+                  [
+                    "hash",
+                    "Text"
+                  ],
+                  [
+                    "size",
+                    "Int"
+                  ],
+                  [
+                    "media",
+                    "Text"
+                  ]
+                ]
+              ]
+            },
+            "default": null
+          },
+          {
+            "name": "txn_id",
+            "ty": {
+              "Option": {
+                "Id": "txn"
+              }
+            },
+            "default": null
+          },
+          {
+            "name": "taken_ms",
+            "ty": "Int",
+            "default": null
+          },
+          {
+            "name": "user_id",
+            "ty": "Text",
+            "default": null
+          },
+          {
+            "name": "state",
+            "ty": {
+              "Sum": [
+                "JobPhotoRead",
+                [
+                  [
+                    "Pending",
+                    [
+                      [
+                        "due_ms",
+                        "Int"
+                      ]
+                    ]
+                  ],
+                  [
+                    "Claimed",
+                    [
+                      [
+                        "by",
+                        "Text"
+                      ],
+                      [
+                        "at_ms",
+                        "Int"
+                      ]
+                    ]
+                  ],
+                  [
+                    "Done",
+                    [
+                      [
+                        "value",
+                        {
+                          "Record": [
+                            "PhotoRead",
+                            [
+                              [
+                                "receipt_id",
+                                "Text"
+                              ],
+                              [
+                                "state",
+                                "Text"
+                              ],
+                              [
+                                "changed",
+                                {
+                                  "List": "Text"
+                                }
+                              ]
+                            ]
+                          ]
+                        }
+                      ]
+                    ]
+                  ],
+                  [
+                    "Failed",
+                    [
+                      [
+                        "why",
+                        "Text"
+                      ],
+                      [
+                        "retry_ms",
+                        "Int"
+                      ]
+                    ]
+                  ],
+                  [
+                    "Cancelled",
+                    []
+                  ]
+                ]
+              ]
+            },
+            "default": null
+          }
+        ],
+        "key": 1,
+        "indexes": [
+          {
+            "columns": [
+              2
+            ],
+            "unique": false
+          }
+        ],
+        "refs": [
+          {
+            "column": 2,
+            "table": "txn"
+          }
+        ],
+        "space": "durable"
+      }
+    ]
+  },
+  "functions": [
+    {
+      "name": "accounts.accounts",
+      "kind": "View",
+      "input": "Unit",
+      "output": {
+        "Record": [
+          "AccountLine",
+          [
+            [
+              "id",
+              {
+                "Id": "account"
+              }
+            ],
+            [
+              "name",
+              "Text"
+            ],
+            [
+              "kind",
+              "Text"
+            ],
+            [
+              "on_budget",
+              "Bool"
+            ],
+            [
+              "closed",
+              "Bool"
+            ],
+            [
+              "pos",
+              "Int"
+            ],
+            [
+              "balance",
+              "Int"
+            ],
+            [
+              "cleared",
+              "Int"
+            ],
+            [
+              "uncleared",
+              "Int"
+            ],
+            [
+              "bank",
+              "Text"
+            ],
+            [
+              "mask",
+              "Text"
+            ],
+            [
+              "bank_balance",
+              {
+                "Option": "Int"
+              }
+            ],
+            [
+              "unapproved",
+              "Int"
+            ]
+          ]
+        ]
+      },
+      "checks": []
+    },
+    {
+      "name": "accounts.close_account",
+      "kind": "Mutator",
+      "input": {
+        "Record": [
+          "CloseAccount",
+          [
+            [
+              "id",
+              {
+                "Id": "account"
+              }
+            ],
+            [
+              "closed",
+              "Bool"
+            ]
+          ]
+        ]
+      },
+      "output": null,
+      "checks": []
+    },
+    {
+      "name": "accounts.open_account",
+      "kind": "Mutator",
+      "input": {
+        "Record": [
+          "OpenAccount",
+          [
+            [
+              "name",
+              "Text"
+            ],
+            [
+              "kind",
+              "Text"
+            ],
+            [
+              "on_budget",
+              "Bool"
+            ],
+            [
+              "balance",
+              "Int"
+            ],
+            [
+              "date",
+              "Text"
+            ]
+          ]
+        ]
+      },
+      "output": null,
+      "checks": [
+        [
+          "name",
+          [
+            "trimmed",
+            "non-empty (“an account needs a name”)",
+            "max 80 chars"
+          ]
+        ],
+        [
+          "kind",
+          [
+            "checking, savings, cash, credit, loan or investment"
+          ]
+        ],
+        [
+          "date",
+          [
+            "a day, as 2026-10-26"
+          ]
+        ]
+      ]
+    },
+    {
+      "name": "accounts.rename_account",
+      "kind": "Mutator",
+      "input": {
+        "Record": [
+          "RenameAccount",
+          [
+            [
+              "id",
+              {
+                "Id": "account"
+              }
+            ],
+            [
+              "name",
+              "Text"
+            ]
+          ]
+        ]
+      },
+      "output": null,
+      "checks": [
+        [
+          "name",
+          [
+            "trimmed",
+            "non-empty (“an account needs a name”)",
+            "max 80 chars"
+          ]
+        ]
+      ]
+    },
+    {
+      "name": "banks.add_accounts",
+      "kind": "Mutator",
+      "input": {
+        "Record": [
+          "BankName",
+          [
+            [
+              "bank",
+              "Text"
+            ]
+          ]
+        ]
+      },
+      "output": null,
+      "checks": [
+        [
+          "bank",
+          [
+            "trimmed",
+            "non-empty (“which bank?”)"
+          ]
+        ]
+      ]
+    },
+    {
+      "name": "banks.answer",
+      "kind": "Mutator",
+      "input": {
+        "Record": [
+          "Answer",
+          [
+            [
+              "id",
+              {
+                "Id": "bank_ask"
+              }
+            ],
+            [
+              "state",
+              {
+                "Sum": [
+                  "AskState",
+                  [
+                    [
+                      "Asked",
+                      []
+                    ],
+                    [
+                      "Waiting",
+                      []
+                    ],
+                    [
+                      "Done",
+                      []
+                    ],
+                    [
+                      "Failed",
+                      []
+                    ],
+                    [
+                      "Expired",
+                      []
+                    ]
+                  ]
+                ]
+              }
+            ],
+            [
+              "bank",
+              "Text"
+            ],
+            [
+              "institution",
+              "Text"
+            ],
+            [
+              "url",
+              "Text"
+            ],
+            [
+              "message",
+              "Text"
+            ],
+            [
+              "expires_ms",
+              "Int"
+            ]
+          ]
+        ]
+      },
+      "output": null,
+      "checks": []
+    },
+    {
+      "name": "banks.asks",
+      "kind": "View",
+      "input": "Unit",
+      "output": {
+        "Record": [
+          "AskLine",
+          [
+            [
+              "id",
+              {
+                "Id": "bank_ask"
+              }
+            ],
+            [
+              "what",
+              "Text"
+            ],
+            [
+              "bank",
+              "Text"
+            ],
+            [
+              "institution",
+              "Text"
+            ],
+            [
+              "state",
+              {
+                "Sum": [
+                  "AskState",
+                  [
+                    [
+                      "Asked",
+                      []
+                    ],
+                    [
+                      "Waiting",
+                      []
+                    ],
+                    [
+                      "Done",
+                      []
+                    ],
+                    [
+                      "Failed",
+                      []
+                    ],
+                    [
+                      "Expired",
+                      []
+                    ]
+                  ]
+                ]
+              }
+            ],
+            [
+              "url",
+              "Text"
+            ],
+            [
+              "message",
+              "Text"
+            ],
+            [
+              "expires_ms",
+              "Int"
+            ],
+            [
+              "asked_ms",
+              "Int"
+            ],
+            [
+              "answered_ms",
+              "Int"
+            ]
+          ]
+        ]
+      },
+      "checks": []
+    },
+    {
+      "name": "banks.banks",
+      "kind": "View",
+      "input": "Unit",
+      "output": {
+        "Record": [
+          "BankLine",
+          [
+            [
+              "name",
+              "Text"
+            ],
+            [
+              "institution",
+              "Text"
+            ],
+            [
+              "synced_ms",
+              "Int"
+            ],
+            [
+              "added",
+              "Int"
+            ],
+            [
+              "updated",
+              "Int"
+            ],
+            [
+              "deleted",
+              "Int"
+            ],
+            [
+              "locked",
+              "Int"
+            ],
+            [
+              "accounts",
+              "Int"
+            ],
+            [
+              "error_code",
+              "Text"
+            ],
+            [
+              "error",
+              "Text"
+            ],
+            [
+              "failed_ms",
+              "Int"
+            ],
+            [
+              "needs_login",
+              "Bool"
+            ],
+            [
+              "waiting",
+              "Int"
+            ]
+          ]
+        ]
+      },
+      "checks": []
+    },
+    {
+      "name": "banks.connect",
+      "kind": "Mutator",
+      "input": "Unit",
+      "output": null,
+      "checks": []
+    },
+    {
+      "name": "banks.disconnect",
+      "kind": "Mutator",
+      "input": {
+        "Record": [
+          "BankName",
+          [
+            [
+              "bank",
+              "Text"
+            ]
+          ]
+        ]
+      },
+      "output": null,
+      "checks": [
+        [
+          "bank",
+          [
+            "trimmed",
+            "non-empty (“which bank?”)"
+          ]
+        ]
+      ]
+    },
+    {
+      "name": "banks.failed",
+      "kind": "Mutator",
+      "input": {
+        "Record": [
+          "BankFailed",
+          [
+            [
+              "bank",
+              "Text"
+            ],
+            [
+              "institution",
+              "Text"
+            ],
+            [
+              "error_code",
+              "Text"
+            ],
+            [
+              "error",
+              "Text"
+            ]
+          ]
+        ]
+      },
+      "output": null,
+      "checks": [
+        [
+          "bank",
+          [
+            "trimmed",
+            "non-empty (“a bank needs a name”)"
+          ]
+        ]
+      ]
+    },
+    {
+      "name": "banks.ignore",
+      "kind": "Mutator",
+      "input": {
+        "Record": [
+          "IgnoreLinked",
+          [
+            [
+              "plaid_account_id",
+              "Text"
+            ],
+            [
+              "ignored",
+              "Bool"
+            ]
+          ]
+        ]
+      },
+      "output": null,
+      "checks": []
+    },
+    {
+      "name": "banks.import",
+      "kind": "Mutator",
+      "input": {
+        "Record": [
+          "Import",
+          [
+            [
+              "bank",
+              "Text"
+            ],
+            [
+              "institution",
+              "Text"
+            ],
+            [
+              "cursor",
+              "Text"
+            ],
+            [
+              "accounts",
+              {
+                "List": {
+                  "Record": [
+                    "BankAccount",
+                    [
+                      [
+                        "plaid_account_id",
+                        "Text"
+                      ],
+                      [
+                        "name",
+                        "Text"
+                      ],
+                      [
+                        "mask",
+                        "Text"
+                      ],
+                      [
+                        "kind",
+                        "Text"
+                      ],
+                      [
+                        "subtype",
+                        "Text"
+                      ],
+                      [
+                        "balance",
+                        {
+                          "Option": "Int"
+                        }
+                      ],
+                      [
+                        "called",
+                        "Text"
+                      ],
+                      [
+                        "ignored",
+                        "Bool"
+                      ]
+                    ]
+                  ]
+                }
+              }
+            ],
+            [
+              "upserts",
+              {
+                "List": {
+                  "Record": [
+                    "BankTxn",
+                    [
+                      [
+                        "transaction_id",
+                        "Text"
+                      ],
+                      [
+                        "plaid_account_id",
+                        "Text"
+                      ],
+                      [
+                        "pending_transaction_id",
+                        {
+                          "Option": "Text"
+                        }
+                      ],
+                      [
+                        "date",
+                        "Text"
+                      ],
+                      [
+                        "amount",
+                        "Int"
+                      ],
+                      [
+                        "payee",
+                        "Text"
+                      ],
+                      [
+                        "imported_payee",
+                        "Text"
+                      ],
+                      [
+                        "pending",
+                        "Bool"
+                      ]
+                    ]
+                  ]
+                }
+              }
+            ],
+            [
+              "removed",
+              {
+                "List": {
+                  "Record": [
+                    "BankRemoved",
+                    [
+                      [
+                        "transaction_id",
+                        "Text"
+                      ],
+                      [
+                        "plaid_account_id",
+                        "Text"
+                      ]
+                    ]
+                  ]
+                }
+              }
+            ],
+            [
+              "choose",
+              "Bool"
+            ],
+            [
+              "from_start",
+              "Bool"
+            ],
+            [
+              "institution_id",
+              {
+                "Option": "Text"
+              }
+            ]
+          ]
+        ]
+      },
+      "output": null,
+      "checks": [
+        [
+          "bank",
+          [
+            "trimmed",
+            "non-empty (“a bank needs a name”)"
+          ]
+        ]
+      ]
+    },
+    {
+      "name": "banks.link",
+      "kind": "Mutator",
+      "input": {
+        "Record": [
+          "LinkAccount",
+          [
+            [
+              "plaid_account_id",
+              "Text"
+            ],
+            [
+              "account_id",
+              {
+                "Id": "account"
+              }
+            ]
+          ]
+        ]
+      },
+      "output": null,
+      "checks": []
+    },
+    {
+      "name": "banks.linked",
+      "kind": "View",
+      "input": "Unit",
+      "output": {
+        "Record": [
+          "LinkedLine",
+          [
+            [
+              "plaid_account_id",
+              "Text"
+            ],
+            [
+              "bank",
+              "Text"
+            ],
+            [
+              "account_id",
+              {
+                "Option": {
+                  "Id": "account"
+                }
+              }
+            ],
+            [
+              "account",
+              "Text"
+            ],
+            [
+              "name",
+              "Text"
+            ],
+            [
+              "mask",
+              "Text"
+            ],
+            [
+              "kind",
+              "Text"
+            ],
+            [
+              "balance",
+              {
+                "Option": "Int"
+              }
+            ],
+            [
+              "ignored",
+              "Bool"
+            ],
+            [
+              "subtype",
+              "Text"
+            ],
+            [
+              "waiting",
+              "Bool"
+            ],
+            [
+              "opens_as",
+              "Text"
+            ]
+          ]
+        ]
+      },
+      "checks": []
+    },
+    {
+      "name": "banks.open",
+      "kind": "Mutator",
+      "input": {
+        "Record": [
+          "OpenLinked",
+          [
+            [
+              "plaid_account_id",
+              "Text"
+            ],
+            [
+              "name",
+              "Text"
+            ]
+          ]
+        ]
+      },
+      "output": null,
+      "checks": [
+        [
+          "name",
+          [
+            "trimmed",
+            "max 80 chars"
+          ]
+        ]
+      ]
+    },
+    {
+      "name": "banks.reconnect",
+      "kind": "Mutator",
+      "input": {
+        "Record": [
+          "BankName",
+          [
+            [
+              "bank",
+              "Text"
+            ]
+          ]
+        ]
+      },
+      "output": null,
+      "checks": [
+        [
+          "bank",
+          [
+            "trimmed",
+            "non-empty (“which bank?”)"
+          ]
+        ]
+      ]
+    },
+    {
+      "name": "banks.retired",
+      "kind": "Mutator",
+      "input": {
+        "Record": [
+          "BankName",
+          [
+            [
+              "bank",
+              "Text"
+            ]
+          ]
+        ]
+      },
+      "output": null,
+      "checks": [
+        [
+          "bank",
+          [
+            "trimmed",
+            "non-empty (“which bank?”)"
+          ]
+        ]
+      ]
+    },
+    {
+      "name": "banks.sync",
+      "kind": "Mutator",
+      "input": "Unit",
+      "output": null,
+      "checks": []
+    },
+    {
+      "name": "budget.assign",
+      "kind": "Mutator",
+      "input": {
+        "Record": [
+          "Assign",
+          [
+            [
+              "month",
+              "Text"
+            ],
+            [
+              "category_id",
+              {
+                "Id": "category"
+              }
+            ],
+            [
+              "amount",
+              "Int"
+            ]
+          ]
+        ]
+      },
+      "output": null,
+      "checks": [
+        [
+          "month",
+          [
+            "a month, as 2026-10"
+          ]
+        ]
+      ]
+    },
+    {
+      "name": "budget.auto_assign",
+      "kind": "Mutator",
+      "input": {
+        "Record": [
+          "AutoAssign",
+          [
+            [
+              "month",
+              "Text"
+            ],
+            [
+              "how",
+              {
+                "Sum": [
+                  "Auto",
+                  [
+                    [
+                      "LastMonth",
+                      []
+                    ],
+                    [
+                      "Underfunded",
+                      []
+                    ],
+                    [
+                      "Reset",
+                      []
+                    ]
+                  ]
+                ]
+              }
+            ],
+            [
+              "only",
+              {
+                "List": {
+                  "Id": "category"
+                }
+              }
+            ]
+          ]
+        ]
+      },
+      "output": null,
+      "checks": [
+        [
+          "month",
+          [
+            "a month, as 2026-10"
+          ]
+        ]
+      ]
+    },
+    {
+      "name": "budget.groups",
+      "kind": "View",
+      "input": "Unit",
+      "output": {
+        "Record": [
+          "GroupLine",
+          [
+            [
+              "id",
+              {
+                "Id": "category"
+              }
+            ],
+            [
+              "name",
+              "Text"
+            ],
+            [
+              "pos",
+              "Int"
+            ],
+            [
+              "hidden",
+              "Bool"
+            ]
+          ]
+        ]
+      },
+      "checks": []
+    },
+    {
+      "name": "budget.month",
+      "kind": "View",
+      "input": {
+        "Record": [
+          "Month",
+          [
+            [
+              "month",
+              "Text"
+            ]
+          ]
+        ]
+      },
+      "output": {
+        "Record": [
+          "BudgetLine",
+          [
+            [
+              "category_id",
+              {
+                "Id": "category"
+              }
+            ],
+            [
+              "group_id",
+              {
+                "Id": "category"
+              }
+            ],
+            [
+              "group",
+              "Text"
+            ],
+            [
+              "group_pos",
+              "Int"
+            ],
+            [
+              "name",
+              "Text"
+            ],
+            [
+              "pos",
+              "Int"
+            ],
+            [
+              "hidden",
+              "Bool"
+            ],
+            [
+              "target",
+              "Int"
+            ],
+            [
+              "assigned",
+              "Int"
+            ],
+            [
+              "activity",
+              "Int"
+            ],
+            [
+              "available",
+              "Int"
+            ],
+            [
+              "carried",
+              "Int"
+            ],
+            [
+              "assigned_last_month",
+              "Int"
+            ],
+            [
+              "spent_last_month",
+              "Int"
+            ],
+            [
+              "average_spent",
+              "Int"
+            ],
+            [
+              "card",
+              {
+                "Option": {
+                  "Id": "account"
+                }
+              }
+            ],
+            [
+              "debt",
+              "Int"
+            ],
+            [
+              "underfunded",
+              "Int"
+            ],
+            [
+              "credit_overspent",
+              "Int"
+            ],
+            [
+              "rule",
+              "Text"
+            ],
+            [
+              "ruled",
+              "Bool"
+            ]
+          ]
+        ]
+      },
+      "checks": [
+        [
+          "month",
+          [
+            "a month, as 2026-10"
+          ]
+        ]
+      ]
+    },
+    {
+      "name": "budget.move_money",
+      "kind": "Mutator",
+      "input": {
+        "Record": [
+          "MoveMoney",
+          [
+            [
+              "month",
+              "Text"
+            ],
+            [
+              "from",
+              {
+                "Option": {
+                  "Id": "category"
+                }
+              }
+            ],
+            [
+              "to",
+              {
+                "Option": {
+                  "Id": "category"
+                }
+              }
+            ],
+            [
+              "amount",
+              "Int"
+            ]
+          ]
+        ]
+      },
+      "output": null,
+      "checks": [
+        [
+          "month",
+          [
+            "a month, as 2026-10"
+          ]
+        ],
+        [
+          "amount",
+          [
+            "move something"
+          ]
+        ]
+      ]
+    },
+    {
+      "name": "budget.setup",
+      "kind": "Mutator",
+      "input": "Unit",
+      "output": null,
+      "checks": []
+    },
+    {
+      "name": "budget.spending",
+      "kind": "View",
+      "input": {
+        "Record": [
+          "Month",
+          [
+            [
+              "month",
+              "Text"
+            ]
+          ]
+        ]
+      },
+      "output": {
+        "Record": [
+          "SpendingLine",
+          [
+            [
+              "group_id",
+              {
+                "Id": "category"
+              }
+            ],
+            [
+              "group",
+              "Text"
+            ],
+            [
+              "pos",
+              "Int"
+            ],
+            [
+              "spent",
+              "Int"
+            ]
+          ]
+        ]
+      },
+      "checks": [
+        [
+          "month",
+          [
+            "a month, as 2026-10"
+          ]
+        ]
+      ]
+    },
+    {
+      "name": "budget.summary",
+      "kind": "View",
+      "input": {
+        "Record": [
+          "Month",
+          [
+            [
+              "month",
+              "Text"
+            ]
+          ]
+        ]
+      },
+      "output": {
+        "Record": [
+          "Summary",
+          [
+            [
+              "month",
+              "Text"
+            ],
+            [
+              "ready_to_assign",
+              "Int"
+            ],
+            [
+              "income",
+              "Int"
+            ],
+            [
+              "assigned",
+              "Int"
+            ],
+            [
+              "activity",
+              "Int"
+            ],
+            [
+              "available",
+              "Int"
+            ],
+            [
+              "overspent_last_month",
+              "Int"
+            ],
+            [
+              "overspent",
+              "Int"
+            ],
+            [
+              "underfunded",
+              "Int"
+            ]
+          ]
+        ]
+      },
+      "checks": [
+        [
+          "month",
+          [
+            "a month, as 2026-10"
+          ]
+        ]
+      ]
+    },
+    {
+      "name": "categories.add_category",
+      "kind": "Mutator",
+      "input": {
+        "Record": [
+          "AddCategory",
+          [
+            [
+              "group_id",
+              {
+                "Id": "category"
+              }
+            ],
+            [
+              "name",
+              "Text"
+            ]
+          ]
+        ]
+      },
+      "output": null,
+      "checks": [
+        [
+          "name",
+          [
+            "trimmed",
+            "non-empty (“a category needs a name”)",
+            "max 80 chars"
+          ]
+        ]
+      ]
+    },
+    {
+      "name": "categories.add_group",
+      "kind": "Mutator",
+      "input": {
+        "Record": [
+          "AddGroup",
+          [
+            [
+              "name",
+              "Text"
+            ]
+          ]
+        ]
+      },
+      "output": null,
+      "checks": [
+        [
+          "name",
+          [
+            "trimmed",
+            "non-empty (“a group needs a name”)",
+            "max 80 chars"
+          ]
+        ]
+      ]
+    },
+    {
+      "name": "categories.add_subcategory",
+      "kind": "Mutator",
+      "input": {
+        "Record": [
+          "AddSubcategory",
+          [
+            [
+              "parent_id",
+              {
+                "Id": "category"
+              }
+            ],
+            [
+              "name",
+              "Text"
+            ]
+          ]
+        ]
+      },
+      "output": null,
+      "checks": [
+        [
+          "name",
+          [
+            "trimmed",
+            "non-empty (“a category needs a name”)",
+            "max 80 chars"
+          ]
+        ]
+      ]
+    },
+    {
+      "name": "categories.clear_formula",
+      "kind": "Mutator",
+      "input": {
+        "Record": [
+          "ClearFormula",
+          [
+            [
+              "category_id",
+              {
+                "Id": "category"
+              }
+            ],
+            [
+              "from",
+              {
+                "Option": "Text"
+              }
+            ]
+          ]
+        ]
+      },
+      "output": null,
+      "checks": [
+        [
+          "from",
+          [
+            "a month, as 2026-10"
+          ]
+        ]
+      ]
+    },
+    {
+      "name": "categories.delete_category",
+      "kind": "Mutator",
+      "input": {
+        "Record": [
+          "DeleteCategory",
+          [
+            [
+              "id",
+              {
+                "Id": "category"
+              }
+            ],
+            [
+              "move_to",
+              {
+                "Option": {
+                  "Id": "category"
+                }
+              }
+            ]
+          ]
+        ]
+      },
+      "output": null,
+      "checks": []
+    },
+    {
+      "name": "categories.delete_group",
+      "kind": "Mutator",
+      "input": {
+        "Record": [
+          "DeleteGroup",
+          [
+            [
+              "id",
+              {
+                "Id": "category"
+              }
+            ],
+            [
+              "move_to",
+              {
+                "Option": {
+                  "Id": "category"
+                }
+              }
+            ]
+          ]
+        ]
+      },
+      "output": null,
+      "checks": []
+    },
+    {
+      "name": "categories.formulas",
+      "kind": "View",
+      "input": {
+        "Record": [
+          "Month",
+          [
+            [
+              "month",
+              "Text"
+            ]
+          ]
+        ]
+      },
+      "output": {
+        "Record": [
+          "FormulaLine",
+          [
+            [
+              "category_id",
+              {
+                "Id": "category"
+              }
+            ],
+            [
+              "from",
+              "Text"
+            ],
+            [
+              "terms",
+              {
+                "List": {
+                  "Record": [
+                    "TermLine",
+                    [
+                      [
+                        "filter_id",
+                        {
+                          "Id": "saved_filter"
+                        }
+                      ],
+                      [
+                        "name",
+                        "Text"
+                      ],
+                      [
+                        "times",
+                        "Int"
+                      ],
+                      [
+                        "per",
+                        "Int"
+                      ],
+                      [
+                        "count",
+                        "Int"
+                      ],
+                      [
+                        "sum",
+                        "Int"
+                      ]
+                    ]
+                  ]
+                }
+              }
+            ],
+            [
+              "text",
+              "Text"
+            ],
+            [
+              "amount",
+              "Int"
+            ]
+          ]
+        ]
+      },
+      "checks": [
+        [
+          "month",
+          [
+            "a month, as 2026-10"
+          ]
+        ]
+      ]
+    },
+    {
+      "name": "categories.hide_category",
+      "kind": "Mutator",
+      "input": {
+        "Record": [
+          "HideCategory",
+          [
+            [
+              "id",
+              {
+                "Id": "category"
+              }
+            ],
+            [
+              "hidden",
+              "Bool"
+            ]
+          ]
+        ]
+      },
+      "output": null,
+      "checks": []
+    },
+    {
+      "name": "categories.hide_group",
+      "kind": "Mutator",
+      "input": {
+        "Record": [
+          "HideGroup",
+          [
+            [
+              "id",
+              {
+                "Id": "category"
+              }
+            ],
+            [
+              "hidden",
+              "Bool"
+            ]
+          ]
+        ]
+      },
+      "output": null,
+      "checks": []
+    },
+    {
+      "name": "categories.move_category",
+      "kind": "Mutator",
+      "input": {
+        "Record": [
+          "MoveCategory",
+          [
+            [
+              "id",
+              {
+                "Id": "category"
+              }
+            ],
+            [
+              "group_id",
+              {
+                "Id": "category"
+              }
+            ],
+            [
+              "before",
+              {
+                "Option": {
+                  "Id": "category"
+                }
+              }
+            ]
+          ]
+        ]
+      },
+      "output": null,
+      "checks": []
+    },
+    {
+      "name": "categories.move_group",
+      "kind": "Mutator",
+      "input": {
+        "Record": [
+          "MoveGroup",
+          [
+            [
+              "id",
+              {
+                "Id": "category"
+              }
+            ],
+            [
+              "before",
+              {
+                "Option": {
+                  "Id": "category"
+                }
+              }
+            ]
+          ]
+        ]
+      },
+      "output": null,
+      "checks": []
+    },
+    {
+      "name": "categories.preview_formula",
+      "kind": "View",
+      "input": {
+        "Record": [
+          "PreviewFormula",
+          [
+            [
+              "month",
+              "Text"
+            ],
+            [
+              "terms",
+              {
+                "List": {
+                  "Record": [
+                    "Term",
+                    [
+                      [
+                        "filter_id",
+                        {
+                          "Id": "saved_filter"
+                        }
+                      ],
+                      [
+                        "times",
+                        "Int"
+                      ],
+                      [
+                        "per",
+                        "Int"
+                      ]
+                    ]
+                  ]
+                }
+              }
+            ]
+          ]
+        ]
+      },
+      "output": {
+        "Record": [
+          "FormulaPreview",
+          [
+            [
+              "month",
+              "Text"
+            ],
+            [
+              "terms",
+              {
+                "List": {
+                  "Record": [
+                    "TermLine",
+                    [
+                      [
+                        "filter_id",
+                        {
+                          "Id": "saved_filter"
+                        }
+                      ],
+                      [
+                        "name",
+                        "Text"
+                      ],
+                      [
+                        "times",
+                        "Int"
+                      ],
+                      [
+                        "per",
+                        "Int"
+                      ],
+                      [
+                        "count",
+                        "Int"
+                      ],
+                      [
+                        "sum",
+                        "Int"
+                      ]
+                    ]
+                  ]
+                }
+              }
+            ],
+            [
+              "text",
+              "Text"
+            ],
+            [
+              "amount",
+              "Int"
+            ]
+          ]
+        ]
+      },
+      "checks": [
+        [
+          "month",
+          [
+            "a month, as 2026-10"
+          ]
+        ]
+      ]
+    },
+    {
+      "name": "categories.rename_category",
+      "kind": "Mutator",
+      "input": {
+        "Record": [
+          "RenameCategory",
+          [
+            [
+              "id",
+              {
+                "Id": "category"
+              }
+            ],
+            [
+              "name",
+              "Text"
+            ]
+          ]
+        ]
+      },
+      "output": null,
+      "checks": [
+        [
+          "name",
+          [
+            "trimmed",
+            "non-empty (“a category needs a name”)",
+            "max 80 chars"
+          ]
+        ]
+      ]
+    },
+    {
+      "name": "categories.rename_group",
+      "kind": "Mutator",
+      "input": {
+        "Record": [
+          "RenameGroup",
+          [
+            [
+              "id",
+              {
+                "Id": "category"
+              }
+            ],
+            [
+              "name",
+              "Text"
+            ]
+          ]
+        ]
+      },
+      "output": null,
+      "checks": [
+        [
+          "name",
+          [
+            "trimmed",
+            "non-empty (“a group needs a name”)",
+            "max 80 chars"
+          ]
+        ]
+      ]
+    },
+    {
+      "name": "categories.set_formula",
+      "kind": "Mutator",
+      "input": {
+        "Record": [
+          "SetFormula",
+          [
+            [
+              "category_id",
+              {
+                "Id": "category"
+              }
+            ],
+            [
+              "from",
+              {
+                "Option": "Text"
+              }
+            ],
+            [
+              "terms",
+              {
+                "List": {
+                  "Record": [
+                    "Term",
+                    [
+                      [
+                        "filter_id",
+                        {
+                          "Id": "saved_filter"
+                        }
+                      ],
+                      [
+                        "times",
+                        "Int"
+                      ],
+                      [
+                        "per",
+                        "Int"
+                      ]
+                    ]
+                  ]
+                }
+              }
+            ]
+          ]
+        ]
+      },
+      "output": null,
+      "checks": [
+        [
+          "from",
+          [
+            "a month, as 2026-10"
+          ]
+        ]
+      ]
+    },
+    {
+      "name": "categories.set_rule",
+      "kind": "Mutator",
+      "input": {
+        "Record": [
+          "SetRule",
+          [
+            [
+              "category_id",
+              {
+                "Id": "category"
+              }
+            ],
+            [
+              "from",
+              {
+                "Option": "Text"
+              }
+            ],
+            [
+              "matching",
+              "Text"
+            ],
+            [
+              "accounts",
+              {
+                "List": {
+                  "Id": "account"
+                }
+              }
+            ],
+            [
+              "times",
+              "Int"
+            ],
+            [
+              "per",
+              "Int"
+            ]
+          ]
+        ]
+      },
+      "output": null,
+      "checks": [
+        [
+          "from",
+          [
+            "a month, as 2026-10"
+          ]
+        ],
+        [
+          "matching",
+          [
+            "trimmed",
+            "non-empty (“a rule matches some text”)",
+            "max 120 chars"
+          ]
+        ],
+        [
+          "times",
+          [
+            "a share is never below nothing"
+          ]
+        ],
+        [
+          "per",
+          [
+            "a share is of something"
+          ]
+        ]
+      ]
+    },
+    {
+      "name": "categories.set_target",
+      "kind": "Mutator",
+      "input": {
+        "Record": [
+          "SetTarget",
+          [
+            [
+              "id",
+              {
+                "Id": "category"
+              }
+            ],
+            [
+              "target",
+              "Int"
+            ]
+          ]
+        ]
+      },
+      "output": null,
+      "checks": [
+        [
+          "target",
+          [
+            "a target is never below nothing"
+          ]
+        ]
+      ]
+    },
+    {
+      "name": "categories.tree",
+      "kind": "View",
+      "input": "Unit",
+      "output": {
+        "Record": [
+          "CategoryNode",
+          [
+            [
+              "id",
+              {
+                "Id": "category"
+              }
+            ],
+            [
+              "parent_id",
+              {
+                "Option": {
+                  "Id": "category"
+                }
+              }
+            ],
+            [
+              "name",
+              "Text"
+            ],
+            [
+              "path",
+              "Text"
+            ],
+            [
+              "depth",
+              "Int"
+            ],
+            [
+              "hidden",
+              "Bool"
+            ],
+            [
+              "income",
+              "Bool"
+            ],
+            [
+              "order",
+              "Text"
+            ]
+          ]
+        ]
+      },
+      "checks": []
+    },
+    {
+      "name": "filters.change_filter",
+      "kind": "Mutator",
+      "input": {
+        "Record": [
+          "ChangeFilter",
+          [
+            [
+              "id",
+              {
+                "Id": "saved_filter"
+              }
+            ],
+            [
+              "filter",
+              {
+                "Record": [
+                  "Filter",
+                  [
+                    [
+                      "accounts",
+                      {
+                        "List": {
+                          "Id": "account"
+                        }
+                      }
+                    ],
+                    [
+                      "on_budget",
+                      "Bool"
+                    ],
+                    [
+                      "text",
+                      "Text"
+                    ],
+                    [
+                      "categories",
+                      {
+                        "List": {
+                          "Option": {
+                            "Id": "category"
+                          }
+                        }
+                      }
+                    ],
+                    [
+                      "direction",
+                      {
+                        "Sum": [
+                          "Direction",
+                          [
+                            [
+                              "Either",
+                              []
+                            ],
+                            [
+                              "In",
+                              []
+                            ],
+                            [
+                              "Out",
+                              []
+                            ]
+                          ]
+                        ]
+                      }
+                    ],
+                    [
+                      "no_transfers",
+                      "Bool"
+                    ],
+                    [
+                      "needs_look",
+                      "Bool"
+                    ],
+                    [
+                      "from",
+                      {
+                        "Option": "Text"
+                      }
+                    ],
+                    [
+                      "through",
+                      {
+                        "Option": "Text"
+                      }
+                    ]
+                  ]
+                ]
+              }
+            ]
+          ]
+        ]
+      },
+      "output": null,
+      "checks": []
+    },
+    {
+      "name": "filters.delete_filter",
+      "kind": "Mutator",
+      "input": {
+        "Record": [
+          "FilterId",
+          [
+            [
+              "id",
+              {
+                "Id": "saved_filter"
+              }
+            ]
+          ]
+        ]
+      },
+      "output": null,
+      "checks": []
+    },
+    {
+      "name": "filters.move_filter",
+      "kind": "Mutator",
+      "input": {
+        "Record": [
+          "MoveFilter",
+          [
+            [
+              "id",
+              {
+                "Id": "saved_filter"
+              }
+            ],
+            [
+              "before",
+              {
+                "Option": {
+                  "Id": "saved_filter"
+                }
+              }
+            ]
+          ]
+        ]
+      },
+      "output": null,
+      "checks": []
+    },
+    {
+      "name": "filters.rename_filter",
+      "kind": "Mutator",
+      "input": {
+        "Record": [
+          "RenameFilter",
+          [
+            [
+              "id",
+              {
+                "Id": "saved_filter"
+              }
+            ],
+            [
+              "name",
+              "Text"
+            ]
+          ]
+        ]
+      },
+      "output": null,
+      "checks": [
+        [
+          "name",
+          [
+            "trimmed",
+            "non-empty (“a filter needs a name”)",
+            "max 80 chars"
+          ]
+        ]
+      ]
+    },
+    {
+      "name": "filters.save_filter",
+      "kind": "Mutator",
+      "input": {
+        "Record": [
+          "SaveFilter",
+          [
+            [
+              "name",
+              "Text"
+            ],
+            [
+              "filter",
+              {
+                "Record": [
+                  "Filter",
+                  [
+                    [
+                      "accounts",
+                      {
+                        "List": {
+                          "Id": "account"
+                        }
+                      }
+                    ],
+                    [
+                      "on_budget",
+                      "Bool"
+                    ],
+                    [
+                      "text",
+                      "Text"
+                    ],
+                    [
+                      "categories",
+                      {
+                        "List": {
+                          "Option": {
+                            "Id": "category"
+                          }
+                        }
+                      }
+                    ],
+                    [
+                      "direction",
+                      {
+                        "Sum": [
+                          "Direction",
+                          [
+                            [
+                              "Either",
+                              []
+                            ],
+                            [
+                              "In",
+                              []
+                            ],
+                            [
+                              "Out",
+                              []
+                            ]
+                          ]
+                        ]
+                      }
+                    ],
+                    [
+                      "no_transfers",
+                      "Bool"
+                    ],
+                    [
+                      "needs_look",
+                      "Bool"
+                    ],
+                    [
+                      "from",
+                      {
+                        "Option": "Text"
+                      }
+                    ],
+                    [
+                      "through",
+                      {
+                        "Option": "Text"
+                      }
+                    ]
+                  ]
+                ]
+              }
+            ]
+          ]
+        ]
+      },
+      "output": null,
+      "checks": [
+        [
+          "name",
+          [
+            "trimmed",
+            "non-empty (“a filter needs a name”)",
+            "max 80 chars"
+          ]
+        ]
+      ]
+    },
+    {
+      "name": "filters.saved",
+      "kind": "View",
+      "input": "Unit",
+      "output": {
+        "Record": [
+          "FilterLine",
+          [
+            [
+              "id",
+              {
+                "Id": "saved_filter"
+              }
+            ],
+            [
+              "name",
+              "Text"
+            ],
+            [
+              "pos",
+              "Int"
+            ],
+            [
+              "filter",
+              {
+                "Record": [
+                  "Filter",
+                  [
+                    [
+                      "accounts",
+                      {
+                        "List": {
+                          "Id": "account"
+                        }
+                      }
+                    ],
+                    [
+                      "on_budget",
+                      "Bool"
+                    ],
+                    [
+                      "text",
+                      "Text"
+                    ],
+                    [
+                      "categories",
+                      {
+                        "List": {
+                          "Option": {
+                            "Id": "category"
+                          }
+                        }
+                      }
+                    ],
+                    [
+                      "direction",
+                      {
+                        "Sum": [
+                          "Direction",
+                          [
+                            [
+                              "Either",
+                              []
+                            ],
+                            [
+                              "In",
+                              []
+                            ],
+                            [
+                              "Out",
+                              []
+                            ]
+                          ]
+                        ]
+                      }
+                    ],
+                    [
+                      "no_transfers",
+                      "Bool"
+                    ],
+                    [
+                      "needs_look",
+                      "Bool"
+                    ],
+                    [
+                      "from",
+                      {
+                        "Option": "Text"
+                      }
+                    ],
+                    [
+                      "through",
+                      {
+                        "Option": "Text"
+                      }
+                    ]
+                  ]
+                ]
+              }
+            ],
+            [
+              "said",
+              "Text"
+            ],
+            [
+              "count",
+              "Int"
+            ],
+            [
+              "total",
+              "Int"
+            ],
+            [
+              "used_by",
+              {
+                "List": "Text"
+              }
+            ]
+          ]
+        ]
+      },
+      "checks": []
+    },
+    {
+      "name": "photo.cancel",
+      "kind": "Mutator",
+      "input": {
+        "Record": [
+          "PhotoCancel",
+          [
+            [
+              "id",
+              {
+                "Id": "photo"
+              }
+            ]
+          ]
+        ]
+      },
+      "output": null,
+      "checks": []
+    },
+    {
+      "name": "photo.claim",
+      "kind": "Mutator",
+      "input": {
+        "Record": [
+          "PhotoClaim",
+          [
+            [
+              "id",
+              {
+                "Id": "photo"
+              }
+            ],
+            [
+              "by",
+              "Text"
+            ]
+          ]
+        ]
+      },
+      "output": null,
+      "checks": []
+    },
+    {
+      "name": "photo.due",
+      "kind": "Query",
+      "input": "Unit",
+      "output": {
+        "Record": [
+          "PhotoDue",
+          [
+            [
+              "rows",
+              {
+                "List": {
+                  "Record": [
+                    "Photo",
+                    [
+                      [
+                        "id",
+                        {
+                          "Id": "photo"
+                        }
+                      ],
+                      [
+                        "file",
+                        {
+                          "Record": [
+                            "FileRef",
+                            [
+                              [
+                                "hash",
+                                "Text"
+                              ],
+                              [
+                                "size",
+                                "Int"
+                              ],
+                              [
+                                "media",
+                                "Text"
+                              ]
+                            ]
+                          ]
+                        }
+                      ],
+                      [
+                        "txn_id",
+                        {
+                          "Option": {
+                            "Id": "txn"
+                          }
+                        }
+                      ],
+                      [
+                        "taken_ms",
+                        "Int"
+                      ],
+                      [
+                        "user_id",
+                        "Text"
+                      ],
+                      [
+                        "state",
+                        {
+                          "Sum": [
+                            "JobPhotoRead",
+                            [
+                              [
+                                "Pending",
+                                [
+                                  [
+                                    "due_ms",
+                                    "Int"
+                                  ]
+                                ]
+                              ],
+                              [
+                                "Claimed",
+                                [
+                                  [
+                                    "by",
+                                    "Text"
+                                  ],
+                                  [
+                                    "at_ms",
+                                    "Int"
+                                  ]
+                                ]
+                              ],
+                              [
+                                "Done",
+                                [
+                                  [
+                                    "value",
+                                    {
+                                      "Record": [
+                                        "PhotoRead",
+                                        [
+                                          [
+                                            "receipt_id",
+                                            "Text"
+                                          ],
+                                          [
+                                            "state",
+                                            "Text"
+                                          ],
+                                          [
+                                            "changed",
+                                            {
+                                              "List": "Text"
+                                            }
+                                          ]
+                                        ]
+                                      ]
+                                    }
+                                  ]
+                                ]
+                              ],
+                              [
+                                "Failed",
+                                [
+                                  [
+                                    "why",
+                                    "Text"
+                                  ],
+                                  [
+                                    "retry_ms",
+                                    "Int"
+                                  ]
+                                ]
+                              ],
+                              [
+                                "Cancelled",
+                                []
+                              ]
+                            ]
+                          ]
+                        }
+                      ]
+                    ]
+                  ]
+                }
+              }
+            ],
+            [
+              "next_ms",
+              {
+                "Option": "Int"
+              }
+            ]
+          ]
+        ]
+      },
+      "checks": []
+    },
+    {
+      "name": "photo.finish",
+      "kind": "Mutator",
+      "input": {
+        "Record": [
+          "PhotoFinish",
+          [
+            [
+              "id",
+              {
+                "Id": "photo"
+              }
+            ],
+            [
+              "by",
+              "Text"
+            ],
+            [
+              "outcome",
+              {
+                "Sum": [
+                  "PhotoOutcome",
+                  [
+                    [
+                      "Ok",
+                      [
+                        [
+                          "value",
+                          {
+                            "Record": [
+                              "PhotoRead",
+                              [
+                                [
+                                  "receipt_id",
+                                  "Text"
+                                ],
+                                [
+                                  "state",
+                                  "Text"
+                                ],
+                                [
+                                  "changed",
+                                  {
+                                    "List": "Text"
+                                  }
+                                ]
+                              ]
+                            ]
+                          }
+                        ]
+                      ]
+                    ],
+                    [
+                      "Err",
+                      [
+                        [
+                          "why",
+                          "Text"
+                        ]
+                      ]
+                    ]
+                  ]
+                ]
+              }
+            ]
+          ]
+        ]
+      },
+      "output": null,
+      "checks": []
+    },
+    {
+      "name": "receipts.add_charges",
+      "kind": "Mutator",
+      "input": {
+        "Record": [
+          "ChargeImport",
+          [
+            [
+              "store",
+              "Text"
+            ],
+            [
+              "charges",
+              {
+                "List": {
+                  "Record": [
+                    "StoreCharge",
+                    [
+                      [
+                        "order_id",
+                        "Text"
+                      ],
+                      [
+                        "date",
+                        "Text"
+                      ],
+                      [
+                        "amount",
+                        "Int"
+                      ],
+                      [
+                        "card",
+                        "Text"
+                      ]
+                    ]
+                  ]
+                }
+              }
+            ]
+          ]
+        ]
+      },
+      "output": null,
+      "checks": [
+        [
+          "store",
+          [
+            "amazon, target or costco"
+          ]
+        ]
+      ]
+    },
+    {
+      "name": "receipts.add_photo",
+      "kind": "Mutator",
+      "input": {
+        "Record": [
+          "AddPhoto",
+          [
+            [
+              "file",
+              {
+                "Record": [
+                  "FileRef",
+                  [
+                    [
+                      "hash",
+                      "Text"
+                    ],
+                    [
+                      "size",
+                      "Int"
+                    ],
+                    [
+                      "media",
+                      "Text"
+                    ]
+                  ]
+                ]
+              }
+            ],
+            [
+              "txn_id",
+              {
+                "Option": {
+                  "Id": "txn"
+                }
+              }
+            ]
+          ]
+        ]
+      },
+      "output": null,
+      "checks": []
+    },
+    {
+      "name": "receipts.add_receipts",
+      "kind": "Mutator",
+      "input": {
+        "Record": [
+          "ReceiptImport",
+          [
+            [
+              "store",
+              "Text"
+            ],
+            [
+              "receipts",
+              {
+                "List": {
+                  "Record": [
+                    "StoreReceipt",
+                    [
+                      [
+                        "order_id",
+                        "Text"
+                      ],
+                      [
+                        "date",
+                        "Text"
+                      ],
+                      [
+                        "place",
+                        "Text"
+                      ],
+                      [
+                        "total",
+                        "Int"
+                      ],
+                      [
+                        "items",
+                        {
+                          "List": {
+                            "Record": [
+                              "StoreItem",
+                              [
+                                [
+                                  "name",
+                                  "Text"
+                                ],
+                                [
+                                  "sku",
+                                  "Text"
+                                ],
+                                [
+                                  "quantity",
+                                  "Int"
+                                ],
+                                [
+                                  "unit",
+                                  "Text"
+                                ],
+                                [
+                                  "amount",
+                                  "Int"
+                                ]
+                              ]
+                            ]
+                          }
+                        }
+                      ]
+                    ]
+                  ]
+                }
+              }
+            ]
+          ]
+        ]
+      },
+      "output": null,
+      "checks": [
+        [
+          "store",
+          [
+            "amazon, target or costco"
+          ]
+        ]
+      ]
+    },
+    {
+      "name": "receipts.candidates",
+      "kind": "View",
+      "input": {
+        "Record": [
+          "PaidFor",
+          [
+            [
+              "receipt_id",
+              "Text"
+            ],
+            [
+              "charge_id",
+              {
+                "Option": "Text"
+              }
+            ]
+          ]
+        ]
+      },
+      "output": {
+        "Record": [
+          "CandidateLine",
+          [
+            [
+              "txn_id",
+              {
+                "Id": "txn"
+              }
+            ],
+            [
+              "date",
+              "Text"
+            ],
+            [
+              "payee",
+              "Text"
+            ],
+            [
+              "account",
+              "Text"
+            ],
+            [
+              "amount",
+              "Int"
+            ],
+            [
+              "off_by",
+              "Int"
+            ],
+            [
+              "days",
+              "Int"
+            ]
+          ]
+        ]
+      },
+      "checks": []
+    },
+    {
+      "name": "receipts.charges",
+      "kind": "View",
+      "input": {
+        "Record": [
+          "OneReceipt",
+          [
+            [
+              "receipt_id",
+              "Text"
+            ]
+          ]
+        ]
+      },
+      "output": {
+        "Record": [
+          "ChargeLine",
+          [
+            [
+              "id",
+              "Text"
+            ],
+            [
+              "receipt_id",
+              "Text"
+            ],
+            [
+              "date",
+              "Text"
+            ],
+            [
+              "amount",
+              "Int"
+            ],
+            [
+              "card",
+              "Text"
+            ],
+            [
+              "txn_id",
+              {
+                "Option": {
+                  "Id": "txn"
+                }
+              }
+            ],
+            [
+              "payee",
+              "Text"
+            ],
+            [
+              "account",
+              "Text"
+            ]
+          ]
+        ]
+      },
+      "checks": []
+    },
+    {
+      "name": "receipts.file_items",
+      "kind": "Mutator",
+      "input": {
+        "Record": [
+          "ClassifyItems",
+          [
+            [
+              "items",
+              {
+                "List": {
+                  "Record": [
+                    "ItemRef",
+                    [
+                      [
+                        "receipt_id",
+                        "Text"
+                      ],
+                      [
+                        "line",
+                        "Int"
+                      ]
+                    ]
+                  ]
+                }
+              }
+            ],
+            [
+              "category_id",
+              {
+                "Option": {
+                  "Id": "category"
+                }
+              }
+            ]
+          ]
+        ]
+      },
+      "output": null,
+      "checks": []
+    },
+    {
+      "name": "receipts.for_txn",
+      "kind": "View",
+      "input": {
+        "Record": [
+          "OneTxn",
+          [
+            [
+              "id",
+              {
+                "Id": "txn"
+              }
+            ]
+          ]
+        ]
+      },
+      "output": {
+        "Record": [
+          "ReceiptLine",
+          [
+            [
+              "id",
+              "Text"
+            ],
+            [
+              "store",
+              "Text"
+            ],
+            [
+              "date",
+              "Text"
+            ],
+            [
+              "place",
+              "Text"
+            ],
+            [
+              "total",
+              "Int"
+            ],
+            [
+              "items",
+              "Int"
+            ],
+            [
+              "filed",
+              "Int"
+            ],
+            [
+              "txn_id",
+              {
+                "Option": {
+                  "Id": "txn"
+                }
+              }
+            ],
+            [
+              "payee",
+              "Text"
+            ],
+            [
+              "account",
+              "Text"
+            ],
+            [
+              "charges",
+              "Int"
+            ],
+            [
+              "charged",
+              "Int"
+            ]
+          ]
+        ]
+      },
+      "checks": []
+    },
+    {
+      "name": "receipts.items",
+      "kind": "View",
+      "input": {
+        "Record": [
+          "ItemsIn",
+          [
+            [
+              "category_id",
+              {
+                "Option": {
+                  "Id": "category"
+                }
+              }
+            ]
+          ]
+        ]
+      },
+      "output": {
+        "Record": [
+          "ItemLine",
+          [
+            [
+              "receipt_id",
+              "Text"
+            ],
+            [
+              "line",
+              "Int"
+            ],
+            [
+              "store",
+              "Text"
+            ],
+            [
+              "date",
+              "Text"
+            ],
+            [
+              "place",
+              "Text"
+            ],
+            [
+              "name",
+              "Text"
+            ],
+            [
+              "sku",
+              "Text"
+            ],
+            [
+              "quantity",
+              "Int"
+            ],
+            [
+              "unit",
+              "Text"
+            ],
+            [
+              "amount",
+              "Int"
+            ],
+            [
+              "unit_price",
+              "Int"
+            ],
+            [
+              "category_id",
+              {
+                "Option": {
+                  "Id": "category"
+                }
+              }
+            ],
+            [
+              "category",
+              "Text"
+            ]
+          ]
+        ]
+      },
+      "checks": []
+    },
+    {
+      "name": "receipts.pay",
+      "kind": "Mutator",
+      "input": {
+        "Record": [
+          "MatchReceipt",
+          [
+            [
+              "receipt_id",
+              "Text"
+            ],
+            [
+              "txn_id",
+              {
+                "Option": {
+                  "Id": "txn"
+                }
+              }
+            ]
+          ]
+        ]
+      },
+      "output": null,
+      "checks": []
+    },
+    {
+      "name": "receipts.pay_charge",
+      "kind": "Mutator",
+      "input": {
+        "Record": [
+          "PayCharge",
+          [
+            [
+              "charge_id",
+              "Text"
+            ],
+            [
+              "txn_id",
+              {
+                "Option": {
+                  "Id": "txn"
+                }
+              }
+            ]
+          ]
+        ]
+      },
+      "output": null,
+      "checks": []
+    },
+    {
+      "name": "receipts.photos",
+      "kind": "View",
+      "input": "Unit",
+      "output": {
+        "Record": [
+          "PhotoLine",
+          [
+            [
+              "id",
+              {
+                "Id": "photo"
+              }
+            ],
+            [
+              "file",
+              {
+                "Record": [
+                  "FileRef",
+                  [
+                    [
+                      "hash",
+                      "Text"
+                    ],
+                    [
+                      "size",
+                      "Int"
+                    ],
+                    [
+                      "media",
+                      "Text"
+                    ]
+                  ]
+                ]
+              }
+            ],
+            [
+              "txn_id",
+              {
+                "Option": {
+                  "Id": "txn"
+                }
+              }
+            ],
+            [
+              "receipt_id",
+              "Text"
+            ],
+            [
+              "taken_ms",
+              "Int"
+            ],
+            [
+              "state",
+              "Text"
+            ],
+            [
+              "why",
+              "Text"
+            ]
+          ]
+        ]
+      },
+      "checks": []
+    },
+    {
+      "name": "receipts.receipt_items",
+      "kind": "View",
+      "input": {
+        "Record": [
+          "OneReceipt",
+          [
+            [
+              "receipt_id",
+              "Text"
+            ]
+          ]
+        ]
+      },
+      "output": {
+        "Record": [
+          "ItemLine",
+          [
+            [
+              "receipt_id",
+              "Text"
+            ],
+            [
+              "line",
+              "Int"
+            ],
+            [
+              "store",
+              "Text"
+            ],
+            [
+              "date",
+              "Text"
+            ],
+            [
+              "place",
+              "Text"
+            ],
+            [
+              "name",
+              "Text"
+            ],
+            [
+              "sku",
+              "Text"
+            ],
+            [
+              "quantity",
+              "Int"
+            ],
+            [
+              "unit",
+              "Text"
+            ],
+            [
+              "amount",
+              "Int"
+            ],
+            [
+              "unit_price",
+              "Int"
+            ],
+            [
+              "category_id",
+              {
+                "Option": {
+                  "Id": "category"
+                }
+              }
+            ],
+            [
+              "category",
+              "Text"
+            ]
+          ]
+        ]
+      },
+      "checks": []
+    },
+    {
+      "name": "receipts.receipts",
+      "kind": "View",
+      "input": "Unit",
+      "output": {
+        "Record": [
+          "ReceiptLine",
+          [
+            [
+              "id",
+              "Text"
+            ],
+            [
+              "store",
+              "Text"
+            ],
+            [
+              "date",
+              "Text"
+            ],
+            [
+              "place",
+              "Text"
+            ],
+            [
+              "total",
+              "Int"
+            ],
+            [
+              "items",
+              "Int"
+            ],
+            [
+              "filed",
+              "Int"
+            ],
+            [
+              "txn_id",
+              {
+                "Option": {
+                  "Id": "txn"
+                }
+              }
+            ],
+            [
+              "payee",
+              "Text"
+            ],
+            [
+              "account",
+              "Text"
+            ],
+            [
+              "charges",
+              "Int"
+            ],
+            [
+              "charged",
+              "Int"
+            ]
+          ]
+        ]
+      },
+      "checks": []
+    },
+    {
+      "name": "receipts.write_receipt",
+      "kind": "Mutator",
+      "input": {
+        "Record": [
+          "WriteReceipt",
+          [
+            [
+              "receipt_id",
+              "Text"
+            ],
+            [
+              "txn_id",
+              {
+                "Option": {
+                  "Id": "txn"
+                }
+              }
+            ],
+            [
+              "place",
+              "Text"
+            ],
+            [
+              "date",
+              "Text"
+            ],
+            [
+              "total",
+              {
+                "Option": "Int"
+              }
+            ],
+            [
+              "items",
+              {
+                "List": {
+                  "Record": [
+                    "StoreItem",
+                    [
+                      [
+                        "name",
+                        "Text"
+                      ],
+                      [
+                        "sku",
+                        "Text"
+                      ],
+                      [
+                        "quantity",
+                        "Int"
+                      ],
+                      [
+                        "unit",
+                        "Text"
+                      ],
+                      [
+                        "amount",
+                        "Int"
+                      ]
+                    ]
+                  ]
+                }
+              }
+            ]
+          ]
+        ]
+      },
+      "output": null,
+      "checks": [
+        [
+          "place",
+          [
+            "trimmed",
+            "max 80 chars"
+          ]
+        ],
+        [
+          "date",
+          [
+            "a day, YYYY-MM-DD"
+          ]
+        ]
+      ]
+    },
+    {
+      "name": "role.grant",
+      "kind": "Mutator",
+      "input": {
+        "Record": [
+          "Grant",
+          [
+            [
+              "user",
+              "Text"
+            ],
+            [
+              "role",
+              "Text"
+            ]
+          ]
+        ]
+      },
+      "output": null,
+      "checks": [
+        [
+          "user",
+          [
+            "trimmed",
+            "non-empty (“a grant needs somebody to grant to”)"
+          ]
+        ],
+        [
+          "role",
+          [
+            "trimmed",
+            "non-empty (“a grant needs a role”)"
+          ]
+        ]
+      ]
+    },
+    {
+      "name": "role.revoke",
+      "kind": "Mutator",
+      "input": {
+        "Record": [
+          "Grant",
+          [
+            [
+              "user",
+              "Text"
+            ],
+            [
+              "role",
+              "Text"
+            ]
+          ]
+        ]
+      },
+      "output": null,
+      "checks": [
+        [
+          "user",
+          [
+            "trimmed",
+            "non-empty (“a grant needs somebody to grant to”)"
+          ]
+        ],
+        [
+          "role",
+          [
+            "trimmed",
+            "non-empty (“a grant needs a role”)"
+          ]
+        ]
+      ]
+    },
+    {
+      "name": "session.current",
+      "kind": "Query",
+      "input": "Unit",
+      "output": {
+        "Option": {
+          "Record": [
+            "SignIn",
+            [
+              [
+                "id",
+                "Text"
+              ],
+              [
+                "user",
+                "Text"
+              ],
+              [
+                "name",
+                "Text"
+              ],
+              [
+                "email",
+                "Text"
+              ],
+              [
+                "device",
+                "Text"
+              ],
+              [
+                "issued_ms",
+                "Int"
+              ],
+              [
+                "expires_ms",
+                "Int"
+              ],
+              [
+                "revoked",
+                "Bool"
+              ],
+              [
+                "roles",
+                {
+                  "List": "Text"
+                }
+              ],
+              [
+                "picture",
+                "Text"
+              ]
+            ]
+          ]
+        }
+      },
+      "checks": []
+    },
+    {
+      "name": "session.feed",
+      "kind": "Scope",
+      "input": "Unit",
+      "output": null,
+      "checks": []
+    },
+    {
+      "name": "session.mine",
+      "kind": "View",
+      "input": "Unit",
+      "output": {
+        "Record": [
+          "SignIn",
+          [
+            [
+              "id",
+              "Text"
+            ],
+            [
+              "user",
+              "Text"
+            ],
+            [
+              "name",
+              "Text"
+            ],
+            [
+              "email",
+              "Text"
+            ],
+            [
+              "device",
+              "Text"
+            ],
+            [
+              "issued_ms",
+              "Int"
+            ],
+            [
+              "expires_ms",
+              "Int"
+            ],
+            [
+              "revoked",
+              "Bool"
+            ],
+            [
+              "roles",
+              {
+                "List": "Text"
+              }
+            ],
+            [
+              "picture",
+              "Text"
+            ]
+          ]
+        ]
+      },
+      "checks": []
+    },
+    {
+      "name": "session.revoke",
+      "kind": "Mutator",
+      "input": {
+        "Record": [
+          "Revoke",
+          [
+            [
+              "id",
+              "Text"
+            ]
+          ]
+        ]
+      },
+      "output": null,
+      "checks": []
+    },
+    {
+      "name": "transactions.add_split",
+      "kind": "Mutator",
+      "input": {
+        "Record": [
+          "AddSplit",
+          [
+            [
+              "account_id",
+              {
+                "Id": "account"
+              }
+            ],
+            [
+              "date",
+              "Text"
+            ],
+            [
+              "payee",
+              "Text"
+            ],
+            [
+              "memo",
+              "Text"
+            ],
+            [
+              "amount",
+              "Int"
+            ],
+            [
+              "cleared",
+              "Bool"
+            ],
+            [
+              "lines",
+              {
+                "List": {
+                  "Record": [
+                    "SplitPart",
+                    [
+                      [
+                        "category_id",
+                        {
+                          "Option": {
+                            "Id": "category"
+                          }
+                        }
+                      ],
+                      [
+                        "amount",
+                        "Int"
+                      ],
+                      [
+                        "memo",
+                        "Text"
+                      ]
+                    ]
+                  ]
+                }
+              }
+            ]
+          ]
+        ]
+      },
+      "output": null,
+      "checks": [
+        [
+          "date",
+          [
+            "a day, as 2026-10-26"
+          ]
+        ],
+        [
+          "payee",
+          [
+            "trimmed",
+            "max 120 chars"
+          ]
+        ],
+        [
+          "memo",
+          [
+            "trimmed",
+            "max 400 chars"
+          ]
+        ]
+      ]
+    },
+    {
+      "name": "transactions.add_transaction",
+      "kind": "Mutator",
+      "input": {
+        "Record": [
+          "AddTransaction",
+          [
+            [
+              "account_id",
+              {
+                "Id": "account"
+              }
+            ],
+            [
+              "date",
+              "Text"
+            ],
+            [
+              "payee",
+              "Text"
+            ],
+            [
+              "category_id",
+              {
+                "Option": {
+                  "Id": "category"
+                }
+              }
+            ],
+            [
+              "memo",
+              "Text"
+            ],
+            [
+              "amount",
+              "Int"
+            ],
+            [
+              "cleared",
+              "Bool"
+            ],
+            [
+              "transfer_to",
+              {
+                "Option": {
+                  "Id": "account"
+                }
+              }
+            ]
+          ]
+        ]
+      },
+      "output": null,
+      "checks": [
+        [
+          "date",
+          [
+            "a day, as 2026-10-26"
+          ]
+        ],
+        [
+          "payee",
+          [
+            "trimmed",
+            "max 120 chars"
+          ]
+        ],
+        [
+          "memo",
+          [
+            "trimmed",
+            "max 400 chars"
+          ]
+        ]
+      ]
+    },
+    {
+      "name": "transactions.approve",
+      "kind": "Mutator",
+      "input": {
+        "Record": [
+          "Txns",
+          [
+            [
+              "ids",
+              {
+                "List": {
+                  "Id": "txn"
+                }
+              }
+            ]
+          ]
+        ]
+      },
+      "output": null,
+      "checks": []
+    },
+    {
+      "name": "transactions.categorize",
+      "kind": "Mutator",
+      "input": {
+        "Record": [
+          "Categorize",
+          [
+            [
+              "ids",
+              {
+                "List": {
+                  "Id": "txn"
+                }
+              }
+            ],
+            [
+              "category_id",
+              {
+                "Option": {
+                  "Id": "category"
+                }
+              }
+            ]
+          ]
+        ]
+      },
+      "output": null,
+      "checks": []
+    },
+    {
+      "name": "transactions.delete_transactions",
+      "kind": "Mutator",
+      "input": {
+        "Record": [
+          "Txns",
+          [
+            [
+              "ids",
+              {
+                "List": {
+                  "Id": "txn"
+                }
+              }
+            ]
+          ]
+        ]
+      },
+      "output": null,
+      "checks": []
+    },
+    {
+      "name": "transactions.edit_transaction",
+      "kind": "Mutator",
+      "input": {
+        "Record": [
+          "EditTransaction",
+          [
+            [
+              "id",
+              {
+                "Id": "txn"
+              }
+            ],
+            [
+              "date",
+              "Text"
+            ],
+            [
+              "payee",
+              "Text"
+            ],
+            [
+              "category_id",
+              {
+                "Option": {
+                  "Id": "category"
+                }
+              }
+            ],
+            [
+              "memo",
+              "Text"
+            ],
+            [
+              "amount",
+              "Int"
+            ],
+            [
+              "transfer_to",
+              {
+                "Option": {
+                  "Id": "account"
+                }
+              }
+            ]
+          ]
+        ]
+      },
+      "output": null,
+      "checks": [
+        [
+          "date",
+          [
+            "a day, as 2026-10-26"
+          ]
+        ],
+        [
+          "payee",
+          [
+            "trimmed",
+            "max 120 chars"
+          ]
+        ],
+        [
+          "memo",
+          [
+            "trimmed",
+            "max 400 chars"
+          ]
+        ]
+      ]
+    },
+    {
+      "name": "transactions.filtered",
+      "kind": "View",
+      "input": {
+        "Record": [
+          "Filtered",
+          [
+            [
+              "saved",
+              {
+                "Option": {
+                  "Id": "saved_filter"
+                }
+              }
+            ],
+            [
+              "filter",
+              {
+                "Record": [
+                  "Filter",
+                  [
+                    [
+                      "accounts",
+                      {
+                        "List": {
+                          "Id": "account"
+                        }
+                      }
+                    ],
+                    [
+                      "on_budget",
+                      "Bool"
+                    ],
+                    [
+                      "text",
+                      "Text"
+                    ],
+                    [
+                      "categories",
+                      {
+                        "List": {
+                          "Option": {
+                            "Id": "category"
+                          }
+                        }
+                      }
+                    ],
+                    [
+                      "direction",
+                      {
+                        "Sum": [
+                          "Direction",
+                          [
+                            [
+                              "Either",
+                              []
+                            ],
+                            [
+                              "In",
+                              []
+                            ],
+                            [
+                              "Out",
+                              []
+                            ]
+                          ]
+                        ]
+                      }
+                    ],
+                    [
+                      "no_transfers",
+                      "Bool"
+                    ],
+                    [
+                      "needs_look",
+                      "Bool"
+                    ],
+                    [
+                      "from",
+                      {
+                        "Option": "Text"
+                      }
+                    ],
+                    [
+                      "through",
+                      {
+                        "Option": "Text"
+                      }
+                    ]
+                  ]
+                ]
+              }
+            ],
+            [
+              "month",
+              {
+                "Option": "Text"
+              }
+            ]
+          ]
+        ]
+      },
+      "output": {
+        "Record": [
+          "TxnLine",
+          [
+            [
+              "id",
+              {
+                "Id": "txn"
+              }
+            ],
+            [
+              "account_id",
+              {
+                "Id": "account"
+              }
+            ],
+            [
+              "account",
+              "Text"
+            ],
+            [
+              "date",
+              "Text"
+            ],
+            [
+              "payee",
+              "Text"
+            ],
+            [
+              "category_id",
+              {
+                "Option": {
+                  "Id": "category"
+                }
+              }
+            ],
+            [
+              "category",
+              "Text"
+            ],
+            [
+              "group",
+              "Text"
+            ],
+            [
+              "memo",
+              "Text"
+            ],
+            [
+              "amount",
+              "Int"
+            ],
+            [
+              "cleared",
+              {
+                "Sum": [
+                  "Cleared",
+                  [
+                    [
+                      "Uncleared",
+                      []
+                    ],
+                    [
+                      "Cleared",
+                      []
+                    ],
+                    [
+                      "Reconciled",
+                      []
+                    ]
+                  ]
+                ]
+              }
+            ],
+            [
+              "approved",
+              "Bool"
+            ],
+            [
+              "transfer",
+              "Bool"
+            ],
+            [
+              "imported",
+              "Bool"
+            ],
+            [
+              "imported_payee",
+              "Text"
+            ],
+            [
+              "created_ms",
+              "Int"
+            ],
+            [
+              "user_id",
+              "Text"
+            ],
+            [
+              "receipt",
+              "Text"
+            ],
+            [
+              "photos",
+              "Int"
+            ]
+          ]
+        ]
+      },
+      "checks": [
+        [
+          "month",
+          [
+            "a month, as 2026-10"
+          ]
+        ]
+      ]
+    },
+    {
+      "name": "transactions.filtered_total",
+      "kind": "View",
+      "input": {
+        "Record": [
+          "Filtered",
+          [
+            [
+              "saved",
+              {
+                "Option": {
+                  "Id": "saved_filter"
+                }
+              }
+            ],
+            [
+              "filter",
+              {
+                "Record": [
+                  "Filter",
+                  [
+                    [
+                      "accounts",
+                      {
+                        "List": {
+                          "Id": "account"
+                        }
+                      }
+                    ],
+                    [
+                      "on_budget",
+                      "Bool"
+                    ],
+                    [
+                      "text",
+                      "Text"
+                    ],
+                    [
+                      "categories",
+                      {
+                        "List": {
+                          "Option": {
+                            "Id": "category"
+                          }
+                        }
+                      }
+                    ],
+                    [
+                      "direction",
+                      {
+                        "Sum": [
+                          "Direction",
+                          [
+                            [
+                              "Either",
+                              []
+                            ],
+                            [
+                              "In",
+                              []
+                            ],
+                            [
+                              "Out",
+                              []
+                            ]
+                          ]
+                        ]
+                      }
+                    ],
+                    [
+                      "no_transfers",
+                      "Bool"
+                    ],
+                    [
+                      "needs_look",
+                      "Bool"
+                    ],
+                    [
+                      "from",
+                      {
+                        "Option": "Text"
+                      }
+                    ],
+                    [
+                      "through",
+                      {
+                        "Option": "Text"
+                      }
+                    ]
+                  ]
+                ]
+              }
+            ],
+            [
+              "month",
+              {
+                "Option": "Text"
+              }
+            ]
+          ]
+        ]
+      },
+      "output": {
+        "Record": [
+          "FilterTotal",
+          [
+            [
+              "count",
+              "Int"
+            ],
+            [
+              "total",
+              "Int"
+            ],
+            [
+              "inflow",
+              "Int"
+            ],
+            [
+              "outflow",
+              "Int"
+            ]
+          ]
+        ]
+      },
+      "checks": [
+        [
+          "month",
+          [
+            "a month, as 2026-10"
+          ]
+        ]
+      ]
+    },
+    {
+      "name": "transactions.inbox",
+      "kind": "View",
+      "input": "Unit",
+      "output": {
+        "Record": [
+          "TxnLine",
+          [
+            [
+              "id",
+              {
+                "Id": "txn"
+              }
+            ],
+            [
+              "account_id",
+              {
+                "Id": "account"
+              }
+            ],
+            [
+              "account",
+              "Text"
+            ],
+            [
+              "date",
+              "Text"
+            ],
+            [
+              "payee",
+              "Text"
+            ],
+            [
+              "category_id",
+              {
+                "Option": {
+                  "Id": "category"
+                }
+              }
+            ],
+            [
+              "category",
+              "Text"
+            ],
+            [
+              "group",
+              "Text"
+            ],
+            [
+              "memo",
+              "Text"
+            ],
+            [
+              "amount",
+              "Int"
+            ],
+            [
+              "cleared",
+              {
+                "Sum": [
+                  "Cleared",
+                  [
+                    [
+                      "Uncleared",
+                      []
+                    ],
+                    [
+                      "Cleared",
+                      []
+                    ],
+                    [
+                      "Reconciled",
+                      []
+                    ]
+                  ]
+                ]
+              }
+            ],
+            [
+              "approved",
+              "Bool"
+            ],
+            [
+              "transfer",
+              "Bool"
+            ],
+            [
+              "imported",
+              "Bool"
+            ],
+            [
+              "imported_payee",
+              "Text"
+            ],
+            [
+              "created_ms",
+              "Int"
+            ],
+            [
+              "user_id",
+              "Text"
+            ],
+            [
+              "receipt",
+              "Text"
+            ],
+            [
+              "photos",
+              "Int"
+            ]
+          ]
+        ]
+      },
+      "checks": []
+    },
+    {
+      "name": "transactions.payees",
+      "kind": "View",
+      "input": "Unit",
+      "output": {
+        "Record": [
+          "PayeeLine",
+          [
+            [
+              "name",
+              "Text"
+            ],
+            [
+              "count",
+              "Int"
+            ],
+            [
+              "category_id",
+              {
+                "Option": {
+                  "Id": "category"
+                }
+              }
+            ]
+          ]
+        ]
+      },
+      "checks": []
+    },
+    {
+      "name": "transactions.reconcile",
+      "kind": "Mutator",
+      "input": {
+        "Record": [
+          "Reconcile",
+          [
+            [
+              "account_id",
+              {
+                "Id": "account"
+              }
+            ],
+            [
+              "balance",
+              "Int"
+            ],
+            [
+              "date",
+              "Text"
+            ]
+          ]
+        ]
+      },
+      "output": null,
+      "checks": [
+        [
+          "date",
+          [
+            "a day, as 2026-10-26"
+          ]
+        ]
+      ]
+    },
+    {
+      "name": "transactions.register",
+      "kind": "View",
+      "input": {
+        "Record": [
+          "Register",
+          [
+            [
+              "account_id",
+              {
+                "Option": {
+                  "Id": "account"
+                }
+              }
+            ]
+          ]
+        ]
+      },
+      "output": {
+        "Record": [
+          "TxnLine",
+          [
+            [
+              "id",
+              {
+                "Id": "txn"
+              }
+            ],
+            [
+              "account_id",
+              {
+                "Id": "account"
+              }
+            ],
+            [
+              "account",
+              "Text"
+            ],
+            [
+              "date",
+              "Text"
+            ],
+            [
+              "payee",
+              "Text"
+            ],
+            [
+              "category_id",
+              {
+                "Option": {
+                  "Id": "category"
+                }
+              }
+            ],
+            [
+              "category",
+              "Text"
+            ],
+            [
+              "group",
+              "Text"
+            ],
+            [
+              "memo",
+              "Text"
+            ],
+            [
+              "amount",
+              "Int"
+            ],
+            [
+              "cleared",
+              {
+                "Sum": [
+                  "Cleared",
+                  [
+                    [
+                      "Uncleared",
+                      []
+                    ],
+                    [
+                      "Cleared",
+                      []
+                    ],
+                    [
+                      "Reconciled",
+                      []
+                    ]
+                  ]
+                ]
+              }
+            ],
+            [
+              "approved",
+              "Bool"
+            ],
+            [
+              "transfer",
+              "Bool"
+            ],
+            [
+              "imported",
+              "Bool"
+            ],
+            [
+              "imported_payee",
+              "Text"
+            ],
+            [
+              "created_ms",
+              "Int"
+            ],
+            [
+              "user_id",
+              "Text"
+            ],
+            [
+              "receipt",
+              "Text"
+            ],
+            [
+              "photos",
+              "Int"
+            ]
+          ]
+        ]
+      },
+      "checks": []
+    },
+    {
+      "name": "transactions.set_cleared",
+      "kind": "Mutator",
+      "input": {
+        "Record": [
+          "SetCleared",
+          [
+            [
+              "id",
+              {
+                "Id": "txn"
+              }
+            ],
+            [
+              "cleared",
+              "Bool"
+            ]
+          ]
+        ]
+      },
+      "output": null,
+      "checks": []
+    },
+    {
+      "name": "transactions.split",
+      "kind": "Mutator",
+      "input": {
+        "Record": [
+          "SplitTxn",
+          [
+            [
+              "id",
+              {
+                "Id": "txn"
+              }
+            ],
+            [
+              "lines",
+              {
+                "List": {
+                  "Record": [
+                    "SplitPart",
+                    [
+                      [
+                        "category_id",
+                        {
+                          "Option": {
+                            "Id": "category"
+                          }
+                        }
+                      ],
+                      [
+                        "amount",
+                        "Int"
+                      ],
+                      [
+                        "memo",
+                        "Text"
+                      ]
+                    ]
+                  ]
+                }
+              }
+            ]
+          ]
+        ]
+      },
+      "output": null,
+      "checks": []
+    },
+    {
+      "name": "transactions.splits",
+      "kind": "View",
+      "input": {
+        "Record": [
+          "OneTxn",
+          [
+            [
+              "id",
+              {
+                "Id": "txn"
+              }
+            ]
+          ]
+        ]
+      },
+      "output": {
+        "Record": [
+          "SplitLine",
+          [
+            [
+              "txn_id",
+              {
+                "Id": "txn"
+              }
+            ],
+            [
+              "line",
+              "Int"
+            ],
+            [
+              "category_id",
+              {
+                "Option": {
+                  "Id": "category"
+                }
+              }
+            ],
+            [
+              "category",
+              "Text"
+            ],
+            [
+              "amount",
+              "Int"
+            ],
+            [
+              "memo",
+              "Text"
+            ]
+          ]
+        ]
+      },
+      "checks": []
+    }
+  ]
+}

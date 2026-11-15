@@ -1274,7 +1274,9 @@ rec {
             usesDefaultFeatures = false;
           }
         ];
-
+        features = {
+        };
+        resolvedDefaultFeatures = [ "push" ];
       };
       "ark-auth" = rec {
         crateName = "ark-auth";
@@ -1592,6 +1594,7 @@ rec {
           {
             name = "ark-push";
             packageId = "ark-push";
+            optional = true;
           }
           {
             name = "ark-router";
@@ -1651,10 +1654,11 @@ rec {
           "clipboard" = [ "dep:ark-clipboard" ];
           "haptics" = [ "dep:ark-haptics" ];
           "model" = [ "scanner" "ark-scanner/model" ];
+          "push" = [ "dep:ark-push" ];
           "scanner" = [ "camera" "dep:ark-scanner" ];
           "share" = [ "dep:ark-share" ];
         };
-        resolvedDefaultFeatures = [ "bindgen" "camera" "clipboard" "haptics" "model" "scanner" "share" ];
+        resolvedDefaultFeatures = [ "bindgen" "camera" "clipboard" "haptics" "model" "push" "scanner" "share" ];
       };
       "ark-format" = rec {
         crateName = "ark-format";
@@ -1950,9 +1954,10 @@ rec {
         ];
         features = {
           "default" = [ "server" ];
-          "server" = [ "ark-auth/server" "dep:ark-push" "dep:anyhow" "dep:axum" "dep:tokio" "dep:tower-http" ];
+          "push" = [ "server" "dep:ark-push" ];
+          "server" = [ "ark-auth/server" "dep:anyhow" "dep:axum" "dep:tokio" "dep:tower-http" ];
         };
-        resolvedDefaultFeatures = [ "default" "server" ];
+        resolvedDefaultFeatures = [ "default" "push" "server" ];
       };
       "ark-push" = rec {
         crateName = "ark-push";
@@ -9907,7 +9912,9 @@ rec {
             packageId = "arkdb";
           }
         ];
-
+        features = {
+        };
+        resolvedDefaultFeatures = [ "push" ];
       };
       "harken-ffi" = rec {
         crateName = "harken-ffi";
@@ -15296,7 +15303,7 @@ rec {
         ];
         features = {
         };
-        resolvedDefaultFeatures = [ "demo" ];
+        resolvedDefaultFeatures = [ "demo" "push" ];
       };
       "money-seed" = rec {
         crateName = "money-seed";

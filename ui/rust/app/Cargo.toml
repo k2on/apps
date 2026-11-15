@@ -15,6 +15,12 @@ ark-module = { path = "../module" }
 # `#[view]`.
 arkui-macros = { path = "../arkui-macros" }
 
+[features]
+# The "Notify Me" setting registers the device for push as well as its
+# background sync (`background`). Off by default: no schema holds the push
+# table (`ark::auth`'s docs; docs/releasing.md says what turns it on again).
+push = []
+
 [dev-dependencies]
 # The tests' store, a peer's.
 ark-peer = { path = "../../../rust/ark-peer", default-features = false }

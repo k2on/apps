@@ -118,8 +118,10 @@ pub struct Apns {
     pub team_id: String,
 }
 
+#[cfg(feature = "push")]
 impl Apns {
-    /// The sender this configures: the key read from its file.
+    /// The sender this configures: the key read from its file (the `push`
+    /// feature's, off by default).
     pub fn sender(apns: Option<&Apns>) -> Result<ark_push::send::Sender> {
         let apns = match apns {
             Some(a) => Some(ark_push::send::Apns::from_file(&a.key_file, &a.key_id, &a.team_id).map_err(|e| anyhow!(e))?),
@@ -380,7 +382,10 @@ mod tests {
             })
         );
         assert!(read(&[("APP_APNS_KEY_ID", "ABC123"), ("APP_APNS_TEAM_ID", "TEAM")]).is_err());
-        assert!(Apns::sender(all.apns.as_ref()).is_err(), "no key at that path");
-        assert!(Apns::sender(None).is_ok());
+        #[cfg(feature = "push")]
+        {
+            assert!(Apns::sender(all.apns.as_ref()).is_err(), "no key at that path");
+            assert!(Apns::sender(None).is_ok());
+        }
     }
 }

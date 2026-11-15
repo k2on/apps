@@ -444,9 +444,16 @@ pub struct Harken {
     pub cue: Cue,
     pub voice: Voice,
     pub voice_name: VoiceName,
-    /// Where each session's device is woken (`ark::auth::Push`): appended,
-    /// so rows written before it read as they are.
+    /// Where each session's device is woken (`ark::auth::Push`): only with
+    /// the `push` feature, off by default — the servers deployed before it
+    /// serve the schema without it, and a client's schema is theirs
+    /// (ui/docs/app.md, Servers Already Deployed). Appended when it comes
+    /// back, so rows written before it read as they are.
+    #[cfg(feature = "push")]
     pub push: ark::auth::Push,
 }
 
+#[cfg(not(feature = "push"))]
 ark::auth_tables!(Harken);
+#[cfg(feature = "push")]
+ark::auth_tables!(Harken, push);

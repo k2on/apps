@@ -55,7 +55,8 @@ pub struct Server {
     pub layers: Vec<Layer>,
     pub keepalive: Duration,
     /// Who is woken when the app's rows change and they are not connected
-    /// ([`Server::push`]).
+    /// ([`Server::push`]; the `push` feature's, off by default).
+    #[cfg(feature = "push")]
     pub push: Option<(Arc<dyn ark_push::PushSender>, ark_push::Wake)>,
 }
 
@@ -87,6 +88,7 @@ impl Server {
             routes: Router::new(),
             layers: vec![],
             keepalive: Duration::from_secs(20),
+            #[cfg(feature = "push")]
             push: None,
         }
     }
@@ -95,6 +97,7 @@ impl Server {
     /// the app's rows change, with `wake` (`crate::push`): a wake and
     /// nothing of the rows. Only with sign-in ([`Server::auth`]): a device
     /// is woken by its session's push row.
+    #[cfg(feature = "push")]
     pub fn push(mut self, sender: Arc<dyn ark_push::PushSender>, wake: ark_push::Wake) -> Self {
         self.push = Some((sender, wake));
         self
@@ -143,9 +146,11 @@ impl Server {
         let slot = Arc::new(std::sync::OnceLock::new());
         let watch = self.auth.as_ref().map(|a| {
             let mut closes = a.watcher();
+            #[cfg(feature = "push")]
             let mut pusher = self.push.take().map(|(s, w)| crate::push::Pusher::start(s, w, slot.clone()));
             Box::new(
                 move |store: &ark::store::Store, changes: Option<&[ark::store::Change]>, open: &[ark::peer::Who], now: i64| {
+                    #[cfg(feature = "push")]
                     if let Some(p) = pusher.as_mut() {
                         p.seen(store, changes, open, now)
                     }

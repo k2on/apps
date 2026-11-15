@@ -24,7 +24,7 @@ pub struct App {
     pub push: ark_auth::Push,
 }
 
-ark_auth::install!(App);
+ark_auth::install!(App, push);
 
 fn all<R>(_: &Ctx, _: &R) -> bool {
     true

@@ -13,6 +13,9 @@
 //!   (its endpoint becomes the session's push row, `ArkProcess::notices`)
 //!   and the sync scheduled (`background::set`);
 //! - off: unregistered (the push row taken away) and the sync stopped;
+//! - without the `push` feature (off by default: no schema holds the push
+//!   table, `ark::auth`'s docs), the sync alone: the device is never
+//!   registered for push, so nothing hands out an endpoint;
 //! - at launch ([`NotifyMsg::Load`]): what was set before read back from
 //!   the device, and, if on, registered again (an endpoint may change).
 //!
@@ -24,6 +27,10 @@ use crate::modules::{background, notifications};
 use crate::view;
 use crate::view::{switch_row, View};
 use crate::{Answer, App, Command};
+
+/// Whether the device is registered for push when the setting is on (the
+/// `push` feature, off by default).
+pub const PUSH: bool = cfg!(feature = "push");
 
 /// What the setting holds: whether it is on, and why not when the person
 /// was asked and said no.
@@ -63,7 +70,13 @@ fn allowed<A: NotifyApp>(a: Answer<bool>) -> A::Msg {
 /// `msg` taken into `s`: what is to be asked of the device. `every_s` is
 /// how often the app syncs in the background once on.
 pub fn update<A: NotifyApp>(s: &mut Notify, msg: NotifyMsg, every_s: u32) -> Vec<Command<A>> {
-    let on = |every: u32| vec![Command::ask(notifications::register_push()), Command::ask(background::set(Some(every)))];
+    let on = |every: u32| {
+        let mut asks = vec![Command::ask(background::set(Some(every)))];
+        if PUSH {
+            asks.insert(0, Command::ask(notifications::register_push()));
+        }
+        asks
+    };
     match msg {
         NotifyMsg::Load => vec![Command::ask_then(background::wanted(), loaded::<A>)],
         NotifyMsg::Loaded(Ok(Some(_))) => {
@@ -85,7 +98,11 @@ pub fn update<A: NotifyApp>(s: &mut Notify, msg: NotifyMsg, every_s: u32) -> Vec
         }
         NotifyMsg::Turn(false) => {
             (s.on, s.refused) = (false, false);
-            vec![Command::ask(notifications::unregister_push()), Command::ask(background::set(None))]
+            let mut asks = vec![Command::ask(background::set(None))];
+            if PUSH {
+                asks.insert(0, Command::ask(notifications::unregister_push()));
+            }
+            asks
         }
     }
 }

@@ -529,10 +529,11 @@ mod notify_me {
         assert!(!rt.state().on && !notices.registered() && sync.every().is_none());
         assert!(rt.screen(&d).note.contains("Settings"));
 
-        // Yes: registered for push, the sync scheduled.
+        // Yes: registered for push (only with `push`, off by default), the
+        // sync scheduled.
         notices.allow(true);
         step(&mut rt, &mut d, NotifyMsg::Turn(true));
-        assert!(rt.state().on && notices.registered());
+        assert!(rt.state().on && notices.registered() == background::PUSH);
         assert_eq!(sync.every(), Some(1800));
 
         // The next launch reads it back, on.

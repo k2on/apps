@@ -130,11 +130,21 @@ impl ArkProcess {
     /// The device's push endpoint (`ark_push::Endpoint`'s JSON, as the
     /// notifications handed it) written as this session's push row
     /// (`session.push`) over the runtime's own connection; empty, taken
-    /// away. Nothing while the runtime is not open.
+    /// away. Nothing while the runtime is not open, and nothing at all
+    /// without the `push` feature (off by default): no schema holds the
+    /// push table then, and the server would hold the intent forever.
     pub fn push_endpoint(&self, endpoint: String) -> Result<(), crate::Refusal> {
-        let Some(peer) = self.peer() else { return Ok(()) };
-        let input = serde_json::json!({ "endpoint": endpoint }).to_string();
-        peer.mutate(ark::auth::PUSH.into(), input).map(drop)
+        #[cfg(feature = "push")]
+        {
+            let Some(peer) = self.peer() else { return Ok(()) };
+            let input = serde_json::json!({ "endpoint": endpoint }).to_string();
+            peer.mutate(ark::auth::PUSH.into(), input).map(drop)
+        }
+        #[cfg(not(feature = "push"))]
+        {
+            let _ = endpoint;
+            Ok(())
+        }
     }
 
     /// What the notifications are to tell the process: a push or a
@@ -154,11 +164,18 @@ impl NotificationListener for Notices {
         let reason = match event {
             NotificationEvent::Pushed => Woken::Push,
             NotificationEvent::Action { notice, action } => Woken::Action { notice, action },
+            #[cfg(feature = "push")]
             NotificationEvent::Registered { endpoint } => {
                 let e = ark_push::Endpoint::from(endpoint).to_json();
                 if let Err(why) = self.0.push_endpoint(e) {
                     tracing::warn!(why = ?why, "the push endpoint was not written");
                 }
+                return;
+            }
+            // Push is off (the `push` feature): the endpoint is nobody's.
+            #[cfg(not(feature = "push"))]
+            NotificationEvent::Registered { .. } => {
+                tracing::debug!("a push endpoint, and push is off: not written");
                 return;
             }
             // Turned off: the session's push row taken away.

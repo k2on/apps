@@ -20,8 +20,17 @@
 //! connection holds only its person's sign-ins and roles.
 //!
 //! The functions are written once over any schema holding the two tables
-//! ([`AuthTables`], which [`install!`] implements) and registered by
-//! [`register`].
+//! ([`AuthTables`], which [`auth_tables!`](crate::auth_tables) implements)
+//! and registered by [`register`].
+//!
+//! **The push table is off.** [`Push`] (where a session's device is woken)
+//! is a third table a schema holds only when its app turns push on
+//! (`auth_tables!(App, push)`, behind the app's own `push` feature, off by
+//! default): the servers the owner runs were built before it, and a client
+//! whose schema held it would not be the schema they serve. Off, the
+//! schema is the two tables, `session.push` is not registered, and nothing
+//! reads or writes a push row. Turned on again, the table is appended,
+//! empty, as a schema grows (§1.2): no migration step.
 
 use crate::db::Tab;
 use crate::prelude::*;
@@ -72,7 +81,8 @@ pub struct Role {
 }
 
 /// Where one session's device is woken (ui/docs/app.md, Background And
-/// Notifications): its push endpoint, as the device's push adapter wrote it
+/// Notifications) — only in a schema that turned push on
+/// ([`AuthTables::PUSH`]): its push endpoint, as the device's push adapter wrote it
 /// (`ark_push::Endpoint`'s JSON: an APNs token, a UnifiedPush endpoint and
 /// its keys), kept by the session it was handed under. Written by the
 /// device itself over its signed-in connection ([`set_push`]), taken away
@@ -124,22 +134,47 @@ pub struct Grant {
     pub role: String,
 }
 
-/// A schema holding the two tables: their handles.
+/// A schema holding the two tables: their handles; and the push table's,
+/// when the schema holds one too.
 pub trait AuthTables: Tables + Sized {
+    /// Whether the schema holds the push table ([`Push`]): off unless the
+    /// app turned push on (`auth_tables!(App, push)`).
+    const PUSH: bool = false;
     fn sign_in<'a, 't>(db: &'a Db<'t, Self>) -> &'a Tab<'t, SignIn>;
     fn sign_in_mut<'a, 't>(db: &'a mut Db<'t, Self>) -> &'a mut Tab<'t, SignIn>;
     fn role<'a, 't>(db: &'a Db<'t, Self>) -> &'a Tab<'t, Role>;
     fn role_mut<'a, 't>(db: &'a mut Db<'t, Self>) -> &'a mut Tab<'t, Role>;
-    fn push<'a, 't>(db: &'a Db<'t, Self>) -> &'a Tab<'t, Push>;
-    fn push_mut<'a, 't>(db: &'a mut Db<'t, Self>) -> &'a mut Tab<'t, Push>;
+    /// The push table, when [`AuthTables::PUSH`].
+    fn push<'a, 't>(_db: &'a Db<'t, Self>) -> Option<&'a Tab<'t, Push>> {
+        None
+    }
+    fn push_mut<'a, 't>(_db: &'a mut Db<'t, Self>) -> Option<&'a mut Tab<'t, Push>> {
+        None
+    }
 }
 
-/// `auth_tables!(App)`: [`AuthTables`] for a schema whose tables `sign_in`,
-/// `role` and `push` are [`SignIn`], [`Role`] and [`Push`]. The app registers the functions
-/// with `.with(ark::auth::register::<App>)`.
+/// `auth_tables!(App)`: [`AuthTables`] for a schema whose tables `sign_in`
+/// and `role` are [`SignIn`] and [`Role`]; `auth_tables!(App, push)`, one
+/// that also holds `push`, a [`Push`] (an app's `push` feature, off by
+/// default: see the module's docs). The app registers the functions with
+/// `.with(ark::auth::register::<App>)`.
 #[macro_export]
 macro_rules! auth_tables {
+    ($s:ty, push) => {
+        $crate::auth_tables!(@impl $s;
+            const PUSH: bool = true;
+            fn push<'a, 't>(db: &'a $crate::db::Db<'t, Self>) -> Option<&'a $crate::db::Tab<'t, $crate::auth::Push>> {
+                Some(&db.push)
+            }
+            fn push_mut<'a, 't>(db: &'a mut $crate::db::Db<'t, Self>) -> Option<&'a mut $crate::db::Tab<'t, $crate::auth::Push>> {
+                Some(&mut db.push)
+            }
+        );
+    };
     ($s:ty) => {
+        $crate::auth_tables!(@impl $s;);
+    };
+    (@impl $s:ty; $($push:tt)*) => {
         impl $crate::auth::AuthTables for $s {
             fn sign_in<'a, 't>(db: &'a $crate::db::Db<'t, Self>) -> &'a $crate::db::Tab<'t, $crate::auth::SignIn> {
                 &db.sign_in
@@ -153,24 +188,25 @@ macro_rules! auth_tables {
             fn role_mut<'a, 't>(db: &'a mut $crate::db::Db<'t, Self>) -> &'a mut $crate::db::Tab<'t, $crate::auth::Role> {
                 &mut db.role
             }
-            fn push<'a, 't>(db: &'a $crate::db::Db<'t, Self>) -> &'a $crate::db::Tab<'t, $crate::auth::Push> {
-                &db.push
-            }
-            fn push_mut<'a, 't>(db: &'a mut $crate::db::Db<'t, Self>) -> &'a mut $crate::db::Tab<'t, $crate::auth::Push> {
-                &mut db.push
-            }
+            $($push)*
         }
     };
 }
 
-/// The functions, registered by name.
+/// The functions, registered by name; `session.push` only where the
+/// schema holds the push table ([`AuthTables::PUSH`]), so a client of a
+/// schema without it can never send one.
 pub fn register<S: AuthTables>(d: Domain) -> Domain {
-    d.mutator(REVOKE, revoke::<S>)
+    let d = d
+        .mutator(REVOKE, revoke::<S>)
         .mutator(GRANT, grant::<S>)
         .mutator(UNGRANT, revoke_role::<S>)
-        .mutator(PUSH, set_push::<S>)
         .query(CURRENT, current::<S>)
-        .view(MINE, mine::<S>)
+        .view(MINE, mine::<S>);
+    match S::PUSH {
+        true => d.mutator(PUSH, set_push::<S>),
+        false => d,
+    }
 }
 
 /// Whether a session still proves its person at `now`.
@@ -186,8 +222,10 @@ pub fn revoke<S: AuthTables>(ctx: &Ctx, db: &mut Db<S>, input: Revoke) -> Result
     match S::sign_in(db).get(input.id) {
         Some(s) if s.user == ctx.user() => {
             // Its device is woken no more.
-            if S::push(db).get(s.id.clone()).is_some() {
-                S::push_mut(db).delete(s.id.clone())?;
+            if S::push(db).is_some_and(|p| p.get(s.id.clone()).is_some()) {
+                if let Some(p) = S::push_mut(db) {
+                    p.delete(s.id.clone())?;
+                }
             }
             S::sign_in_mut(db).update(SignIn { revoked: true, ..s })
         }
@@ -208,16 +246,19 @@ pub fn set_push<S: AuthTables>(ctx: &Ctx, db: &mut Db<S>, input: SetPush) -> Res
         Some(s) if s.user != ctx.user() || !live(&s, ctx.now) => return Err(Refusal::new("that session has ended; sign in again")),
         _ => {}
     }
+    let Some(push) = S::push_mut(db) else {
+        return Err(Refusal::new("this app does not wake its devices"));
+    };
     if input.endpoint.trim().is_empty() {
-        return match S::push(db).get(ctx.session.clone()) {
-            Some(_) => S::push_mut(db).delete(ctx.session.clone()),
+        return match push.get(ctx.session.clone()) {
+            Some(_) => push.delete(ctx.session.clone()),
             None => Ok(()),
         };
     }
     if input.endpoint.len() > PUSH_MAX {
         return Err(Refusal::new("that is not a push endpoint"));
     }
-    S::push_mut(db).put(Push {
+    push.put(Push {
         session: ctx.session.clone(),
         user: ctx.user().to_string(),
         endpoint: input.endpoint,
@@ -269,10 +310,14 @@ pub fn mine<S: AuthTables>(ctx: &Ctx, _: &Db<S>, _: ()) -> Result<Plan<S, SignIn
 }
 
 /// `scope` holding, of the sign-ins and the roles, only the connection's
-/// person's (§1.8), and of the push endpoints only the connection's own.
+/// person's (§1.8), and of the push endpoints (where the schema holds
+/// them) only the connection's own.
 pub fn feed<S: AuthTables>(scope: Scope<S>) -> Scope<S> {
-    scope
+    let scope = scope
         .on::<SignIn>(|ctx, s| s.user == ctx.user())
-        .on::<Role>(|ctx, r| r.user == ctx.user())
-        .on::<Push>(|ctx, p| p.session == ctx.session)
+        .on::<Role>(|ctx, r| r.user == ctx.user());
+    match S::PUSH {
+        true => scope.on::<Push>(|ctx, p| p.session == ctx.session),
+        false => scope,
+    }
 }

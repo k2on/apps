@@ -32,7 +32,7 @@ pub struct App {
     pub push: ark_auth::Push,
 }
 
-ark_auth::install!(App);
+ark_auth::install!(App, push);
 
 #[mutator("app.create_playlist")]
 fn create_playlist(ctx: &Ctx, db: &mut Db<App>, input: CreatePlaylist) -> Result<(), Refusal> {

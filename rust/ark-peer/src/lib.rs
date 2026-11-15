@@ -76,7 +76,9 @@ pub mod watched;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub mod handle;
-#[cfg(all(feature = "server", not(target_arch = "wasm32")))]
+/// The hub's wakes: only with the `push` feature, off by default — no
+/// schema holds the push table while it is off (`ark::auth`'s docs).
+#[cfg(all(feature = "push", not(target_arch = "wasm32")))]
 pub mod push;
 #[cfg(all(feature = "server", not(target_arch = "wasm32")))]
 pub mod serve;
