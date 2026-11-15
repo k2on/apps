@@ -88,6 +88,7 @@ MOTION = {
     "flick": "A release at least this fast, a second, was a flick.",
     "deceleration": "How much of its speed a projected release keeps each millisecond.",
     "snappy": "The same, for a release that decides an act: a skip, going back.",
+    "skip": "A sideways swipe at least this share of what was swiped, where it was going, skips.",
     "preview": "The most a back gesture's preview comes, as a share of what it previews.",
     "give": "How much of the gesture brings the preview 63% of the way.",
     "press": "How small a pressed cover or chip gives.",

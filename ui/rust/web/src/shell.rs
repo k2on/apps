@@ -227,133 +227,29 @@ fn shell_part<M: Clone + std::fmt::Debug + 'static>(p: Part<M>, ctx: &mut Ctx<'_
             tabs,
             footer,
             account,
+            accessory,
         } => {
             if let View::Part(Part::Account { name, picture, tap }) = *account {
                 let (name, picture) = (name.get(), picture.get());
                 ctx.account = Some(Rc::new(move || account_button(&name, &picture, tap.clone())));
             }
-            let chosen = selected.get();
-            let mut all = vec![];
-            let mut groups = vec![];
-            tabs_of(*tabs, None, &mut all, &mut groups);
-            let how = sections();
-            // A group's own place, when that is what is chosen.
-            let place = groups.iter().position(|g| g.tag == chosen);
-            match how {
-                Sections::Sidebar => {
-                    let at = all.iter().position(|t| t.tag == chosen).or(match place {
-                        Some(_) => None,
-                        None => Some(0),
-                    });
-                    let mut items: Vec<AnyView> = vec![];
-                    let mut content = View::Empty;
-                    let mut heading = None;
-                    for (i, t) in all.into_iter().enumerate() {
-                        if t.group != heading {
-                            heading = t.group;
-                            match (heading, groups.iter().find(|g| g.first == i)) {
-                                (Some(""), _) | (None, _) => {}
-                                (Some(h), Some(g)) => {
-                                    let tap = select.call(g.tag.to_string());
-                                    items.push(
-                                        crate::wired!(html::button(), crate::tapped(h, &tap))
-                                            .class(if place.is_some_and(|p| groups[p].first == i) {
-                                                "ark-sidebar-heading ark-on"
-                                            } else {
-                                                "ark-sidebar-heading"
-                                            })
-                                            .on(leptos::ev::click, move |_| send(tap.clone()))
-                                            .child(h)
-                                            .into_any(),
-                                    );
-                                }
-                                (Some(h), None) => items.push(html::div().class("ark-sidebar-heading").child(h).into_any()),
-                            }
-                        }
-                        if Some(i) == at {
-                            content = t.content;
-                            crate::drawn(|d| d.sidebar_at = Some(i));
-                        }
-                        let tap = select.call(t.tag.clone());
-                        items.push(in_pane(Pane::Sidebar, || sidebar_item(&t.title, &t.glyph, t.badge, Some(i) == at, tap)));
-                    }
-                    if let Some(p) = place {
-                        content = groups.swap_remove(p).index;
-                    }
-                    let foot = match *footer {
-                        View::Empty => None,
-                        f => Some(html::div().class("ark-sidebar-footer").child(draw(f, ctx))),
-                    };
-                    let side = html::nav()
-                        .class("ark-sidebar")
-                        .attr("aria-label", "Sections")
-                        .attr("data-focused", crate::ui(|u| u.focus == Pane::Sidebar).then_some("true"))
-                        .child((html::div().class("ark-sidebar-places").child(items), foot));
-                    let shown = draw(content, ctx);
-                    html::div()
-                        .class("ark-split-sidebar")
-                        .child((side, html::div().class("ark-shell-main").child(shown)))
-                        .into_any()
+            // The accessory: its bar at the foot of what is shown, or what
+            // it grew into over the whole page.
+            let (bar, full) = match accessory.filter(|a| a.showing.get()) {
+                Some(a) if a.expanded.get() => (None, Some(accessory_full(draw(a.full, ctx), a.close))),
+                Some(a) => {
+                    GROWN.with(|g| g.set(false));
+                    (Some(accessory_bar(draw(a.bar, ctx), a.open)), None)
                 }
-                Sections::TopBar | Sections::BottomBar => {
-                    // The tab shown: a group's when its place or one of its
-                    // sections is chosen, else the chosen tag's parent's.
-                    let exact = all.iter().position(|t| t.tag == chosen);
-                    let in_group = exact.and_then(|i| {
-                        let g = all[i].group?;
-                        groups.iter().position(|p| p.title == g)
-                    });
-                    let on_group = place.or(in_group);
-                    let shown_tag = compact_tag(&chosen).to_string();
-                    let at = match on_group {
-                        Some(_) => exact,
-                        None => Some(all.iter().position(|t| t.tag == shown_tag).unwrap_or(0)),
-                    };
-                    let mut heads = vec![];
-                    let mut content = View::Empty;
-                    for (i, t) in all.into_iter().enumerate() {
-                        if let Some(k) = groups.iter().position(|g| g.first == i) {
-                            let g = &groups[k];
-                            heads.push((g.title.to_string(), g.glyph.to_string(), g.tag.to_string(), None, on_group == Some(k)));
-                        }
-                        if Some(i) == at {
-                            content = t.content;
-                        }
-                        if t.group.is_none() {
-                            heads.push((t.title, t.glyph, t.tag.clone(), t.badge, on_group.is_none() && t.tag == shown_tag));
-                        }
-                    }
-                    match (place, in_group) {
-                        (Some(p), _) => content = groups.swap_remove(p).index,
-                        // A section of a group, pushed over its index.
-                        (None, Some(g)) => {
-                            let back = select.call(groups[g].tag.to_string());
-                            ctx.back = Some(Rc::new(move || send(back.clone())));
-                            ctx.back_label = Some(groups[g].title.to_string());
-                        }
-                        _ => {}
-                    }
-                    if how == Sections::TopBar {
-                        let bar: Vec<AnyView> = heads
-                            .into_iter()
-                            .map(|(title, _, tag, badge, on)| top_tab(title, badge, on, select.call(tag)))
-                            .collect();
-                        ctx.top_tabs = Some(html::div().class("ark-top-tabs").role("tablist").child(bar).into_any());
-                        return draw(content, ctx);
-                    }
-                    let bar: Vec<AnyView> = heads
-                        .into_iter()
-                        .map(|(title, glyph, tag, badge, on)| bottom_tab(title, glyph, badge, on, select.call(tag)))
-                        .collect();
-                    let shown = draw(content, ctx);
-                    html::div()
-                        .class("ark-column ark-fill")
-                        .child((
-                            html::div().class("ark-shell-main").child(shown),
-                            html::nav().class("ark-bottom-tabs").role("tablist").child(bar),
-                        ))
-                        .into_any()
+                None => {
+                    GROWN.with(|g| g.set(false));
+                    (None, None)
                 }
+            };
+            let sections = tab_sections(selected, select, *tabs, *footer, bar, ctx);
+            match full {
+                Some(full) => html::div().class("ark-fill ark-stack").child((sections, full)).into_any(),
+                None => sections,
             }
         }
         Part::SectionTab { content, .. } | Part::SettingsPane { content, .. } => draw(*content, ctx),
@@ -674,6 +570,195 @@ fn account_button<M: Clone + std::fmt::Debug + 'static>(name: &str, picture: &st
         .attr("aria-label", said)
         .on(leptos::ev::click, move |_| send(tap.clone()))
         .child(face)
+        .into_any()
+}
+
+/// The sections of a `Tabs`: a sidebar, a tab bar at the top or one at the
+/// foot by the window's width, with the accessory's `bar` at the foot of
+/// what is shown (over the foot's tab bar when compact).
+fn tab_sections<M: Clone + std::fmt::Debug + 'static>(
+    selected: ark_app::view::Val<String>,
+    select: Input<String, M>,
+    tabs: View<M>,
+    footer: View<M>,
+    bar: Option<AnyView>,
+    ctx: &mut Ctx<'_>,
+) -> AnyView {
+    let chosen = selected.get();
+    let mut all = vec![];
+    let mut groups = vec![];
+    tabs_of(tabs, None, &mut all, &mut groups);
+    let how = sections();
+    // A group's own place, when that is what is chosen.
+    let place = groups.iter().position(|g| g.tag == chosen);
+    match how {
+        Sections::Sidebar => {
+            let at = all.iter().position(|t| t.tag == chosen).or(match place {
+                Some(_) => None,
+                None => Some(0),
+            });
+            let mut items: Vec<AnyView> = vec![];
+            let mut content = View::Empty;
+            let mut heading = None;
+            for (i, t) in all.into_iter().enumerate() {
+                if t.group != heading {
+                    heading = t.group;
+                    match (heading, groups.iter().find(|g| g.first == i)) {
+                        (Some(""), _) | (None, _) => {}
+                        (Some(h), Some(g)) => {
+                            let tap = select.call(g.tag.to_string());
+                            items.push(
+                                crate::wired!(html::button(), crate::tapped(h, &tap))
+                                    .class(if place.is_some_and(|p| groups[p].first == i) {
+                                        "ark-sidebar-heading ark-on"
+                                    } else {
+                                        "ark-sidebar-heading"
+                                    })
+                                    .on(leptos::ev::click, move |_| send(tap.clone()))
+                                    .child(h)
+                                    .into_any(),
+                            );
+                        }
+                        (Some(h), None) => items.push(html::div().class("ark-sidebar-heading").child(h).into_any()),
+                    }
+                }
+                if Some(i) == at {
+                    content = t.content;
+                    crate::drawn(|d| d.sidebar_at = Some(i));
+                }
+                let tap = select.call(t.tag.clone());
+                items.push(in_pane(Pane::Sidebar, || sidebar_item(&t.title, &t.glyph, t.badge, Some(i) == at, tap)));
+            }
+            if let Some(p) = place {
+                content = groups.swap_remove(p).index;
+            }
+            let foot = match footer {
+                View::Empty => None,
+                f => Some(html::div().class("ark-sidebar-footer").child(draw(f, ctx))),
+            };
+            let side = html::nav()
+                .class("ark-sidebar")
+                .attr("aria-label", "Sections")
+                .attr("data-focused", crate::ui(|u| u.focus == Pane::Sidebar).then_some("true"))
+                .child((html::div().class("ark-sidebar-places").child(items), foot));
+            let shown = with_bar(draw(content, ctx), bar);
+            html::div()
+                .class("ark-split-sidebar")
+                .child((side, html::div().class("ark-shell-main").child(shown)))
+                .into_any()
+        }
+        Sections::TopBar | Sections::BottomBar => {
+            // The tab shown: a group's when its place or one of its
+            // sections is chosen, else the chosen tag's parent's.
+            let exact = all.iter().position(|t| t.tag == chosen);
+            let in_group = exact.and_then(|i| {
+                let g = all[i].group?;
+                groups.iter().position(|p| p.title == g)
+            });
+            let on_group = place.or(in_group);
+            let shown_tag = compact_tag(&chosen).to_string();
+            let at = match on_group {
+                Some(_) => exact,
+                None => Some(all.iter().position(|t| t.tag == shown_tag).unwrap_or(0)),
+            };
+            let mut heads = vec![];
+            let mut content = View::Empty;
+            for (i, t) in all.into_iter().enumerate() {
+                if let Some(k) = groups.iter().position(|g| g.first == i) {
+                    let g = &groups[k];
+                    heads.push((g.title.to_string(), g.glyph.to_string(), g.tag.to_string(), None, on_group == Some(k)));
+                }
+                if Some(i) == at {
+                    content = t.content;
+                }
+                if t.group.is_none() {
+                    heads.push((t.title, t.glyph, t.tag.clone(), t.badge, on_group.is_none() && t.tag == shown_tag));
+                }
+            }
+            match (place, in_group) {
+                (Some(p), _) => content = groups.swap_remove(p).index,
+                // A section of a group, pushed over its index.
+                (None, Some(g)) => {
+                    let back = select.call(groups[g].tag.to_string());
+                    ctx.back = Some(Rc::new(move || send(back.clone())));
+                    ctx.back_label = Some(groups[g].title.to_string());
+                }
+                _ => {}
+            }
+            if how == Sections::TopBar {
+                let top: Vec<AnyView> = heads
+                    .into_iter()
+                    .map(|(title, _, tag, badge, on)| top_tab(title, badge, on, select.call(tag)))
+                    .collect();
+                ctx.top_tabs = Some(html::div().class("ark-top-tabs").role("tablist").child(top).into_any());
+                return with_bar(draw(content, ctx), bar);
+            }
+            let tabs: Vec<AnyView> = heads
+                .into_iter()
+                .map(|(title, glyph, tag, badge, on)| bottom_tab(title, glyph, badge, on, select.call(tag)))
+                .collect();
+            let shown = with_bar(draw(content, ctx), bar);
+            html::div()
+                .class("ark-column ark-fill")
+                .child((
+                    html::div().class("ark-shell-main").child(shown),
+                    html::nav().class("ark-bottom-tabs").role("tablist").child(tabs),
+                ))
+                .into_any()
+        }
+    }
+}
+
+thread_local! {
+    /// Whether the accessory was drawn grown the last time: the page is
+    /// drawn anew on every message, and its rise is the opening's alone.
+    static GROWN: Cell<bool> = const { Cell::new(false) };
+}
+
+/// What is shown, with the accessory's bar at its foot while there is one.
+fn with_bar(shown: AnyView, bar: Option<AnyView>) -> AnyView {
+    match bar {
+        Some(bar) => html::div()
+            .class("ark-column ark-fill")
+            .child((html::div().class("ark-shell-main").child(shown), bar))
+            .into_any(),
+        None => shown,
+    }
+}
+
+/// The accessory's bar: on the raised surface, rounded as a card, pressed
+/// as one through a button over all of it (`open`, the desktop's pressed
+/// colour, no give), the buttons on it pressed for themselves.
+fn accessory_bar<M: Clone + std::fmt::Debug + 'static>(bar: AnyView, open: M) -> AnyView {
+    let tap = open.clone();
+    html::div()
+        .class("ark-accessory-bar")
+        .child((
+            crate::wired!(html::button(), crate::tapped("Now Playing", &open))
+                .class("ark-hit ark-accessory-hit")
+                .attr("aria-label", "Now Playing")
+                .on(leptos::ev::click, move |_| send(tap.clone())),
+            html::div().class("ark-accessory-face").child(bar),
+        ))
+        .into_any()
+}
+
+/// What the accessory grew into: the whole page, its close at the leading
+/// end of a bar at its top, what it holds in a readable column. It rises
+/// from the foot on the move spring (`data-motion="rise"`, a fade when
+/// motion is reduced, nothing in a screenshot) on the draw it opened, and
+/// is still on every draw after.
+fn accessory_full<M: Clone + std::fmt::Debug + 'static>(full: AnyView, close: M) -> AnyView {
+    let opened = !GROWN.with(|g| g.replace(true));
+    html::div()
+        .class("ark-accessory-full")
+        .attr("data-motion", if opened { "rise" } else { "none" })
+        .role("dialog")
+        .attr("aria-label", "Now Playing")
+        .child((
+            html::div().class("ark-sheet-bar").child(bar_button("Close", "chevron-down", true, close)),
+            html::div().class("ark-accessory-body").child(full),
+        ))
         .into_any()
 }
 

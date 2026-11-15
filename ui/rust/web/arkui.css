@@ -686,3 +686,19 @@ button.ark-sidebar-heading:hover, button.ark-sidebar-heading.ark-on { color: var
 .ark-scrubber input[type=range] { flex: 1; accent-color: var(--ark-accent); }
 .ark-timeline-gone { min-width: 48px; text-align: end; }
 .ark-timeline-whole { min-width: 48px; }
+
+/* How loud (`Part::Volume`). */
+.ark-volume { display: flex; align-items: center; gap: var(--ark-space-s); width: 100%; }
+.ark-volume input[type=range] { flex: 1; accent-color: var(--ark-accent); }
+.ark-volume.ark-muted input[type=range] { accent-color: var(--ark-quiet); }
+
+/* The now-playing accessory (`Tabs::accessory`): the bar on the raised
+   surface over the foot of what is shown, pressed through a button over all
+   of it, the buttons on it above that; grown, the whole page, rising from
+   the foot on the move spring (Motion, above). */
+.ark-accessory-bar { position: relative; flex: none; margin: 6px 10px; border-radius: var(--ark-card-corner); background: var(--ark-container-high); box-shadow: 0 4px 16px rgb(0 0 0 / 0.12); }
+.ark-accessory-bar:has(> .ark-accessory-hit:active) { background: var(--ark-container-highest); }
+.ark-accessory-face { position: relative; pointer-events: none; }
+.ark-accessory-face button, .ark-accessory-face a, .ark-accessory-face input { pointer-events: auto; }
+.ark-accessory-full { position: absolute; inset: 0; z-index: 40; display: flex; flex-direction: column; background: var(--ark-surface); }
+.ark-accessory-body { flex: 1; overflow-y: auto; padding: var(--ark-space-l) var(--ark-page-margin); width: 100%; max-width: 560px; margin: 0 auto; box-sizing: border-box; }

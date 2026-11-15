@@ -1,9 +1,33 @@
-//! The full player laid out, once: what the now-playing bar grows into.
+//! The player laid out, once: the now-playing bar, and the full player it
+//! grows into (the shell's accessory carries the one into the other).
 
 use ark_app::view;
 use ark_app::view::*;
 
 use super::{PlayerMsg, PlayerPage};
+
+/// What plays, on the bar over the sections: its cover, its title over
+/// what it is by, play or pause and next, how far along it is at its foot.
+/// Pressed, the shell grows it into the full player.
+#[view]
+pub fn now_playing(p: &PlayerPage) -> View<PlayerMsg> {
+    vstack((
+        hstack((
+            artwork(p.now.art, p.now.seed, p.now.title),
+            title_stack(p.now.title).under(p.now.under).plain().one_line(),
+            spacer_min(Space::Xs),
+            glyph_button(p.play_glyph, p.play_label, TextStyle::Title, Ink::Ink, PlayerMsg::Toggle),
+            glyph_button("skip-forward", "Next", TextStyle::Title, Ink::Ink, PlayerMsg::Next),
+        ))
+        .spacing(Space::M)
+        .padding(Edges::Horizontal, Space::M)
+        .fill_width_at(Align::Start),
+        vstack(hairline(p.now.at_ms, p.now.since_ms, p.now.playing, p.now.length_ms)).padding(Edges::Horizontal, Space::L),
+    ))
+    .spacing(Space::Xs)
+    .padding(Edges::Vertical, Space::S)
+    .into()
+}
 
 /// The cover as wide as it is given, what plays under it, the scrubber
 /// counting on from the clock, the controls; where the sound is, a row
@@ -17,6 +41,9 @@ pub fn player(p: &PlayerPage) -> View<PlayerMsg> {
             at_ms,
         }),
         transport(p.play_glyph, p.play_label, PlayerMsg::Toggle, PlayerMsg::Previous, PlayerMsg::Next),
+        if p.has_volume {
+            volume("Volume", p.now.volume, p.now.muted, |level| PlayerMsg::Volume { level }, PlayerMsg::Mute)
+        },
         if p.joined {
             card_section(list_row(p.output).glyph("speaker").pushes().on_tap(PlayerMsg::Devices))
         },

@@ -69,6 +69,14 @@ pub enum HarkenRequest {
     Transfer {
         to: String,
     },
+    /// How loud where it plays: the group's while joined, this device's
+    /// alone.
+    Volume {
+        level: i64,
+    },
+    Mute {
+        muted: bool,
+    },
 }
 
 /// A row id as harken's views take it: its sixteen bytes from its hex;

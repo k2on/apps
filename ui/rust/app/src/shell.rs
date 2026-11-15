@@ -40,6 +40,7 @@ pub fn adaptive_tabs<M: 'static>(selected: impl Into<Val<String>>, select: fn(St
         tabs: tabs.into(),
         footer: View::Empty,
         account: View::Empty,
+        accessory: None,
     }
 }
 
@@ -49,6 +50,34 @@ pub struct Tabs<M> {
     tabs: View<M>,
     footer: View<M>,
     account: View<M>,
+    accessory: Option<Accessory<M>>,
+}
+
+/// What stands over the sections at the foot of the window and grows into
+/// the whole of it ([`Tabs::accessory`]): a bar (the now-playing bar) that
+/// is one thing with the screen it opens (the full player), as SwiftUI's
+/// `tabViewBottomAccessory` zooming into a cover, Compose's
+/// `ExpandingCard`, a bar at the foot of iced's window over a pane, and
+/// the browser's bar over a page that rises from it.
+#[derive(Clone, Debug)]
+pub struct Accessory<M> {
+    /// The bar: drawn over the tab bar when compact, at the foot of what
+    /// is shown otherwise.
+    pub bar: View<M>,
+    /// What it grows into, the whole window's.
+    pub full: View<M>,
+    /// Whether the bar is there at all (something plays); none, always.
+    pub showing: Val<bool>,
+    /// Whether it has grown into `full`.
+    pub expanded: Val<bool>,
+    /// The bar pressed: grow it.
+    pub open: M,
+    /// Put back into the bar: a swipe down, back, Escape, its close.
+    pub close: M,
+    /// The bar's own sideways swipe, to the left and to the right
+    /// (`Momentum` projected at the snappier rate): on, and back.
+    pub next: Option<M>,
+    pub previous: Option<M>,
 }
 
 impl<M> Tabs<M> {
@@ -65,6 +94,50 @@ impl<M> Tabs<M> {
         self.account = account.into();
         self
     }
+
+    /// The now-playing accessory ([`Accessory`]): `bar` over the sections
+    /// at the window's foot, which `open` grows into `full` and `close`
+    /// puts back. It shows while [`Tabs::showing`] and is grown while
+    /// [`Tabs::expanded`]; [`Tabs::skips`] is its sideways swipe. The motion
+    /// is the toolkit's, from the theme's tokens (ui/docs/motion.md: the
+    /// player card).
+    pub fn accessory(mut self, bar: impl Into<View<M>>, full: impl Into<View<M>>, open: M, close: M) -> Self {
+        self.accessory = Some(Accessory {
+            bar: bar.into(),
+            full: full.into(),
+            showing: Val::Is(true),
+            expanded: Val::Is(false),
+            open,
+            close,
+            next: None,
+            previous: None,
+        });
+        self
+    }
+
+    /// Whether the accessory's bar is there at all.
+    pub fn showing(mut self, on: impl Into<Val<bool>>) -> Self {
+        self.held().showing = on.into();
+        self
+    }
+
+    /// Whether the accessory has grown into its whole screen.
+    pub fn expanded(mut self, on: impl Into<Val<bool>>) -> Self {
+        self.held().expanded = on.into();
+        self
+    }
+
+    /// The accessory's bar swiped sideways: `next` to the left, `previous`
+    /// to the right.
+    pub fn skips(mut self, next: M, previous: M) -> Self {
+        let a = self.held();
+        (a.next, a.previous) = (Some(next), Some(previous));
+        self
+    }
+
+    fn held(&mut self) -> &mut Accessory<M> {
+        self.accessory.as_mut().expect("Tabs::accessory first")
+    }
 }
 
 impl<M> From<Tabs<M>> for View<M> {
@@ -75,6 +148,7 @@ impl<M> From<Tabs<M>> for View<M> {
             tabs: Box::new(t.tabs),
             footer: Box::new(t.footer),
             account: Box::new(t.account),
+            accessory: t.accessory.map(Box::new),
         }
         .into()
     }

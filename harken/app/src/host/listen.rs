@@ -15,7 +15,7 @@ use ark::format::Encode;
 use ark_app::host::{Cx, Session};
 use ark_app::modules::media_player::MediaPlayer;
 use harken_domain::host::Listening;
-use harken_domain::player::{Loaded, Press, Reconciler, Say, Sound, View};
+use harken_domain::player::{Change, Level, Loaded, Press, Reconciler, Say, Sound, View};
 use harken_domain::{HarkenChange, HarkenView, LibraryEntry, Track};
 
 use super::Harken;
@@ -126,12 +126,15 @@ impl Listen {
         let Some(sound) = self.sound.as_mut() else { return };
         let s = cx.place.session();
         let l = Listen::listening(cx);
+        // One clock for the whole timeline: the sound's, which the
+        // session's clocks and what plays alone are read against (a demo's
+        // place has a fixed day of its own for its library).
         let v = View {
             me: &s.device,
             joined: Listen::joined(&s, &l),
             epoch: s.epoch,
             listening: &l,
-            now: cx.now_ms,
+            now: (self.clock)(),
         };
         self.core.reconcile(&v, sound, &mut Says { cx });
         self.own = match v.joined {
@@ -158,6 +161,17 @@ impl Listen {
             Some(false) => Some(harken_domain::player::NOT_PART.into()),
             None => Some("nothing here plays".into()),
         }
+    }
+
+    /// A volume press: the output's group while this device stands in the
+    /// session, its own sound alone.
+    pub fn loud(&self, change: Change, cx: &Cx<'_, Harken>) -> Press {
+        let s = cx.place.session();
+        let level = match Listen::joined(&s, &Listen::listening(cx)) {
+            true => Level::Group,
+            false => Level::Here,
+        };
+        Press::Loud { level, change }
     }
 
     /// The tracks a screen named (each its id's hex), as the library has
@@ -200,5 +214,7 @@ fn own(server: &str, sound: &MediaSound, now: i64) -> Option<Playing> {
         length_ms: t.duration_ms,
         can_back: true,
         can_forward: at + 1 < queue.len(),
+        volume: sound.volume().map_or(100, |v| v.level),
+        muted: sound.volume().is_some_and(|v| v.muted),
     })
 }

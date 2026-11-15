@@ -217,3 +217,33 @@ fn joined_a_play_starts_the_session_and_this_device_plays_it() {
     assert!(!h.app().player.page(&place, NOW).now.playing);
     assert!(fake.take().iter().any(|a| a == "pause"));
 }
+
+/// The shell's accessory follows the player: nothing plays, no bar and
+/// nothing to open; a play puts the bar up and it grows into the full
+/// player; the bar's swipe skips through the host. Alone, the volume is
+/// this device's own sound's. Falsified by the host not telling the shell
+/// (the bar never up), or the swipe going nowhere.
+#[test]
+fn the_accessory_and_the_volume_follow_the_player() {
+    let fake = Fake::new();
+    let (mut h, mut place) = hosted(alone(&fake));
+    h.send::<HarkenShell>(ShellMsg::OpenPlayer, &mut place);
+    let shell = h.app().shell.page(&place, NOW);
+    assert!(!shell.playing && !shell.player_open, "{shell:?}");
+    let first = h.app().home.page(&place, NOW).newest[0].key.clone();
+    h.send::<Home>(HomeMsg::PlayNew { id: first }, &mut place);
+    assert!(h.app().shell.page(&place, NOW).playing);
+    h.send::<HarkenShell>(ShellMsg::OpenPlayer, &mut place);
+    assert!(h.app().shell.page(&place, NOW).player_open);
+    h.send::<HarkenShell>(ShellMsg::ClosePlayer, &mut place);
+    assert!(!h.app().shell.page(&place, NOW).player_open);
+    fake.take();
+    h.send::<HarkenShell>(ShellMsg::Skip { by: 1 }, &mut place);
+    assert_eq!(h.app().refused, None);
+    let p = h.app().player.page(&place, NOW);
+    assert!(p.has_volume);
+    h.send::<Player>(PlayerMsg::Volume { level: 30 }, &mut place);
+    h.send::<Player>(PlayerMsg::Mute, &mut place);
+    let p = h.app().player.page(&place, NOW);
+    assert_eq!((p.now.volume, p.now.muted), (30, true));
+}

@@ -1082,8 +1082,9 @@ changes, `.github/compat-check.sh`'s harken part grows with it.
 2. Shared parts: pressable primitives, artwork (with its tile, shelf and
    grid), media row and header, play/shuffle, transport controls, the
    timeline (scrubber and hairline) and figure with label are built on
-   every toolkit (ui/docs/primitives.md); the now-playing accessory and
-   the volume are next.
+   every toolkit (ui/docs/primitives.md), and so are the now-playing
+   accessory (`Tabs::accessory`: the bar over the sections that grows into
+   the whole window) and the volume (`volume`).
 3. harken-app's screens and host: the domain is in core/ (with
    `HarkenChange`); Home, Library, a record's page (album, artist,
    playlist, show), Search and the shell (Home, Library and Search, a
@@ -1116,8 +1117,12 @@ changes, `.github/compat-check.sh`'s harken part grows with it.
    them, `HarkenChange::of` reading one by name), a play a press of the
    session while joined and of the sound while alone, and the system's
    controls pressed the same way. Tested over a hub (joined) and the
-   module's fake (alone). Next: the now-playing accessory in the shared
-   shell and the volume part (the full player drawn in it), the car's
+   module's fake (alone). The player is in the shell: `HarkenShell`'s
+   accessory hosts `player.bar` (the player's `now_playing` view) and
+   `player` (the full player, with the volume: the group's while joined,
+   this device's own alone), up while something plays (the host tells the
+   shell), grown and put back by the shell, its swipe a skip; the
+   reconciler and the sound read one clock, the sound's. Next: the car's
    browse tree, then the sheets and Settings.
 4. Generated targets, the old clients deleted: not started.
 5. Screenshots: not started.

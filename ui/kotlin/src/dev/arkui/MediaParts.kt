@@ -310,3 +310,25 @@ public class UrlCovers private constructor(context: Context) : CoverLoader {
         }
     }
 }
+
+/**
+ * How loud, as `volume` lays it out: [VolumeSlider] over a level 0 to 100, its loudspeaker sending
+ * [onMute]; the level follows the finger and [onChange] is sent once, with where it was let go, as
+ * the scrubber's seek is. A level from elsewhere is sprung to ([VolumeSlider]).
+ */
+@Composable
+public fun VolumePart(level: Long, muted: Boolean, about: String, onChange: (Long) -> Unit, onMute: () -> Unit) {
+    var held by remember { mutableStateOf<Int?>(null) }
+    VolumeSlider(
+        level.coerceIn(0L, 100L).toInt(),
+        muted,
+        onLevel = { held = it },
+        onDone = {
+            held?.let { onChange(it.toLong()) }
+            held = null
+        },
+        onMute = onMute,
+        modifier = Modifier.fillMaxWidth(),
+        about = about,
+    )
+}

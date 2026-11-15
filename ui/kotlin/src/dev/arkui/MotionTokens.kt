@@ -25,6 +25,8 @@ public object MotionTokens {
     public const val DECELERATION: Float = 0.998f
     /** The same, for a release that decides an act: a skip, going back. */
     public const val SNAPPY: Float = 0.99f
+    /** A sideways swipe at least this share of what was swiped, where it was going, skips. */
+    public const val SKIP: Float = 0.25f
     /** The most a back gesture's preview comes, as a share of what it previews. */
     public const val PREVIEW: Float = 0.1f
     /** How much of the gesture brings the preview 63% of the way. */

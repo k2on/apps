@@ -434,6 +434,39 @@ fn part<M: Clone + 'static>(v: View<M>) -> Option<Element<'static, M>> {
                 None => crate::parts::progress_bar(at as f32 / length as f32, crate::parts::Tint::Accent, 2.0),
             }
         }
+        // Its mute, then the bar; iced's slider says where it is dragged as
+        // it goes, so each move is a level, as a scrubber's is a seek.
+        Part::Volume {
+            label,
+            level,
+            muted,
+            change,
+            mute,
+        } => {
+            let muted = muted.get();
+            let glyph = if muted { "volume-x" } else { "volume-2" };
+            let quiet = muted;
+            let speaker = button(icon::tinted(shape(glyph), BAR_GLYPH, move |p| match quiet {
+                true => p.background.base.text.scale_alpha(0.55),
+                false => p.background.base.text,
+            }))
+            .on_press(mute)
+            .padding(6)
+            .style(style::bare);
+            let at = level.get().clamp(0, 100);
+            let done = change.call(at);
+            let _ = label;
+            row![
+                tooltip(speaker, text(if muted { "Unmute" } else { "Mute" }).size(12), tooltip::Position::Top),
+                parts::bar(0.0..=100.0, at as f32, move |v| change.call(v.round() as i64))
+                    .on_release(done)
+                    .width(Length::Fill)
+            ]
+            .spacing(6)
+            .align_y(Alignment::Center)
+            .width(Length::Fill)
+            .into()
+        }
         Part::Paper {
             heading,
             date,
@@ -598,6 +631,136 @@ fn draw<'a, M: Clone + 'static>(v: View<M>, ctx: &mut Ctx<'a, '_, M>) -> Element
     }
 }
 
+/// The sections of a `Tabs`, a sidebar, a tab bar at the top or one at the
+/// foot by the window's width, with the accessory's `bar` at the foot of
+/// what is shown (over the foot's tab bar when compact).
+fn tab_sections<'a, M: Clone + 'static>(
+    selected: Val<String>,
+    select: Input<String, M>,
+    tabs: View<M>,
+    footer: View<M>,
+    bar: Option<Element<'a, M>>,
+    ctx: &mut Ctx<'a, '_, M>,
+) -> Element<'a, M> {
+    let frame = ctx.frame;
+    let chosen = selected.get();
+    let mut all = vec![];
+    tabs_of(tabs, None, &mut all);
+    let how = sections(frame);
+    // Short of a sidebar a child is shown in its parent's tab, which
+    // pushes it (`ark_app::shell::compact_tag`).
+    let shown_tag = match how {
+        Sections::Sidebar => chosen.as_str(),
+        _ => compact_tag(&chosen),
+    };
+    let at = all.iter().position(|t| t.tag == shown_tag).unwrap_or(0);
+    match how {
+        Sections::Sidebar => {
+            let focused = frame.focus == Pane::Sidebar;
+            let mut items = vec![];
+            let mut content = View::Empty;
+            for (i, t) in all.into_iter().enumerate() {
+                if i == at {
+                    content = t.content;
+                }
+                cursor::section_drawn(&select.call(t.tag.clone()), i == at);
+                items.push(sidebar::Item {
+                    glyph: shape(&t.glyph),
+                    label: t.title,
+                    heading: t.group,
+                    trailing: t.badge.map(|n| sidebar::count(n, sidebar::lit(i, at, focused))),
+                    press: select.call(t.tag),
+                });
+            }
+            // The sidebar's foot is the sidebar's: its rows are no
+            // pane's the keys walk (the sidebar's cursor is the section).
+            let foot = match footer {
+                View::Empty => None,
+                f => Some(cursor::in_pane(Pane::Sidebar, || draw(f, ctx))),
+            };
+            let side = sidebar::view_with_footer(items, at, focused, SIDEBAR_WIDTH, SIDEBAR_PAD, "ark-shell-sidebar", foot);
+            let shown = with_bar(draw(content, ctx), bar);
+            row![side, rule::vertical(1).style(style::edge), container(shown).width(Length::Fill)]
+                .height(Length::Fill)
+                .into()
+        }
+        Sections::TopBar | Sections::BottomBar => {
+            // The tab bar has the sections alone: a group's are the
+            // sidebar's (`TabSection` hidden from the tab bar).
+            let mut heads = vec![];
+            let mut content = View::Empty;
+            for (i, t) in all.into_iter().enumerate() {
+                if i == at {
+                    content = t.content;
+                }
+                if t.group.is_none() {
+                    heads.push((t.title, t.glyph, t.tag.clone(), t.badge, t.tag == shown_tag));
+                }
+            }
+            if how == Sections::TopBar {
+                let top = row(heads
+                    .into_iter()
+                    .map(|(title, _, tag, badge, on)| top_tab(title, badge, on, select.call(tag))))
+                .spacing(2)
+                .align_y(Alignment::Center);
+                ctx.top_tabs = Some(container(top).padding(3).style(style::capsule_group).into());
+                return with_bar(draw(content, ctx), bar);
+            }
+            let tabs = row(heads
+                .into_iter()
+                .map(|(title, glyph, tag, badge, on)| bottom_tab(title, glyph, badge, on, select.call(tag))));
+            let shown = with_bar(draw(content, ctx), bar);
+            column![
+                container(shown).height(Length::Fill),
+                rule::horizontal(1).style(style::edge),
+                container(tabs).padding([2, 8]).style(style::surface)
+            ]
+            .into()
+        }
+    }
+}
+
+/// What is shown, with the accessory's bar at its foot while there is one.
+fn with_bar<'a, M: 'a>(shown: Element<'a, M>, bar: Option<Element<'a, M>>) -> Element<'a, M> {
+    match bar {
+        Some(bar) => column![container(shown).height(Length::Fill), bar].into(),
+        None => shown,
+    }
+}
+
+/// The accessory's bar, the desktop's way: on the theme's raised surface,
+/// rounded as a card, pressed as one to grow it (`open`), the pointer's
+/// pressed colour and no give (ui/docs/motion.md, Press Feedback). The
+/// phones' sideways swipe has no pointer's twin: the bar's own buttons
+/// skip.
+fn accessory_bar<'a, M: Clone + 'a>(bar: Element<'a, M>, open: M) -> Element<'a, M> {
+    let pressed = button(bar).on_press(open).padding(0).width(Length::Fill).style(style::bare);
+    container(container(pressed).padding([4, 6]).style(style::card))
+        .padding([6, 10])
+        .width(Length::Fill)
+        .into()
+}
+
+/// What the accessory grew into: the whole window, on the page's ground,
+/// with its close (`close`) at the leading end of a row at its top, and
+/// what it holds in a readable column that scrolls. iced's shell keeps no
+/// spring of its own, so it is there at once, as the desktop's sheets are
+/// (`notice`); the phones and the browser carry it up from the bar.
+fn accessory_full<'a, M: Clone + 'a>(full: Element<'a, M>, close: M) -> Element<'a, M> {
+    let shut = button(icon::tinted(shape("chevron-down"), BAR_GLYPH, |p| p.background.base.text))
+        .on_press(close)
+        .padding(6)
+        .style(style::bare);
+    let head = row![shut].padding([6, 10]).height(TOOLBAR_HEIGHT).align_y(Alignment::Center);
+    let column_of = container(full).max_width(DIALOG + 100.0).padding(PAD);
+    let body = scrollable(container(column_of).center_x(Length::Fill)).height(Length::Fill);
+    container(column![head, body])
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .style(style::page)
+        .into()
+}
+
 /// How the sections are shown at a width.
 #[derive(Clone, Copy, PartialEq)]
 enum Sections {
@@ -628,84 +791,22 @@ fn shell_part<'a, M: Clone + 'static>(p: Part<M>, ctx: &mut Ctx<'a, '_, M>) -> E
             tabs,
             footer,
             account,
+            accessory,
         } => {
             if let View::Part(Part::Account { name, tap, .. }) = *account {
                 ctx.account = Some((name.get(), tap));
             }
-            let chosen = selected.get();
-            let mut all = vec![];
-            tabs_of(*tabs, None, &mut all);
-            let how = sections(frame);
-            // Short of a sidebar a child is shown in its parent's tab, which
-            // pushes it (`ark_app::shell::compact_tag`).
-            let shown_tag = match how {
-                Sections::Sidebar => chosen.as_str(),
-                _ => compact_tag(&chosen),
+            // The accessory: its bar at the foot of what is shown, or what
+            // it grew into over the whole window.
+            let (bar, full) = match accessory.filter(|a| a.showing.get()) {
+                Some(a) if a.expanded.get() => (None, Some(accessory_full(draw(a.full, ctx), a.close))),
+                Some(a) => (Some(accessory_bar(draw(a.bar, ctx), a.open)), None),
+                None => (None, None),
             };
-            let at = all.iter().position(|t| t.tag == shown_tag).unwrap_or(0);
-            match how {
-                Sections::Sidebar => {
-                    let focused = frame.focus == Pane::Sidebar;
-                    let mut items = vec![];
-                    let mut content = View::Empty;
-                    for (i, t) in all.into_iter().enumerate() {
-                        if i == at {
-                            content = t.content;
-                        }
-                        cursor::section_drawn(&select.call(t.tag.clone()), i == at);
-                        items.push(sidebar::Item {
-                            glyph: shape(&t.glyph),
-                            label: t.title,
-                            heading: t.group,
-                            trailing: t.badge.map(|n| sidebar::count(n, sidebar::lit(i, at, focused))),
-                            press: select.call(t.tag),
-                        });
-                    }
-                    // The sidebar's foot is the sidebar's: its rows are no
-                    // pane's the keys walk (the sidebar's cursor is the section).
-                    let foot = match *footer {
-                        View::Empty => None,
-                        f => Some(cursor::in_pane(Pane::Sidebar, || draw(f, ctx))),
-                    };
-                    let side = sidebar::view_with_footer(items, at, focused, SIDEBAR_WIDTH, SIDEBAR_PAD, "ark-shell-sidebar", foot);
-                    let shown = draw(content, ctx);
-                    row![side, rule::vertical(1).style(style::edge), container(shown).width(Length::Fill)]
-                        .height(Length::Fill)
-                        .into()
-                }
-                Sections::TopBar | Sections::BottomBar => {
-                    // The tab bar has the sections alone: a group's are the
-                    // sidebar's (`TabSection` hidden from the tab bar).
-                    let mut heads = vec![];
-                    let mut content = View::Empty;
-                    for (i, t) in all.into_iter().enumerate() {
-                        if i == at {
-                            content = t.content;
-                        }
-                        if t.group.is_none() {
-                            heads.push((t.title, t.glyph, t.tag.clone(), t.badge, t.tag == shown_tag));
-                        }
-                    }
-                    if how == Sections::TopBar {
-                        let bar = row(heads
-                            .into_iter()
-                            .map(|(title, _, tag, badge, on)| top_tab(title, badge, on, select.call(tag))))
-                        .spacing(2)
-                        .align_y(Alignment::Center);
-                        ctx.top_tabs = Some(container(bar).padding(3).style(style::capsule_group).into());
-                        return draw(content, ctx);
-                    }
-                    let bar = row(heads
-                        .into_iter()
-                        .map(|(title, glyph, tag, badge, on)| bottom_tab(title, glyph, badge, on, select.call(tag))));
-                    let shown = draw(content, ctx);
-                    column![
-                        container(shown).height(Length::Fill),
-                        rule::horizontal(1).style(style::edge),
-                        container(bar).padding([2, 8]).style(style::surface)
-                    ]
-                    .into()
-                }
+            let sections = tab_sections(selected, select, *tabs, *footer, bar, ctx);
+            match full {
+                Some(full) => stack![sections, full].into(),
+                None => sections,
             }
         }
         Part::SectionTab { content, .. } | Part::SettingsPane { content, .. } => draw(*content, ctx),

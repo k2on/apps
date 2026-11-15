@@ -107,29 +107,47 @@ public struct HostedScreen: View {
 /// `ToolbarAccount`) the last item of every section's toolbar. A tag
 /// `parent/child` is a child of `parent` (an account of Accounts): a place
 /// of its own in the sidebar; on a compact width the parent's tab, which
-/// pushes it.
-public struct AdaptiveTabs<Tabs: TabContent<String>, Footer: View, Account: View>: View {
+/// pushes it. With an accessory (`bar`, `full`: the now-playing bar and
+/// the full player), the bar stands over the tab bar and zooms into the
+/// whole screen (`expandingCard`) while `expanded`, there only while
+/// `showing`.
+public struct AdaptiveTabs<Tabs: TabContent<String>, Footer: View, Account: View, Bar: View, Full: View>: View {
     let selection: String
     let onSelect: (String) -> Void
     let tabs: Tabs
     let footer: Footer
     let account: Account
+    let accessory: AccessoryWiring?
+    let bar: Bar
+    let full: Full
     #if os(iOS)
     @Environment(\.horizontalSizeClass) private var size
     #endif
 
+    /// The sections with the now-playing accessory.
     public init(
         selection: String,
         onSelect: @escaping (String) -> Void,
+        showing: Bool,
+        expanded: Bool,
+        onOpen: @escaping () -> Void,
+        onClose: @escaping () -> Void,
+        onNext: (() -> Void)? = nil,
+        onPrevious: (() -> Void)? = nil,
         @TabContentBuilder<String> _ tabs: () -> Tabs,
         @ViewBuilder footer: () -> Footer,
-        @ViewBuilder account: () -> Account
+        @ViewBuilder account: () -> Account,
+        @ViewBuilder bar: () -> Bar,
+        @ViewBuilder full: () -> Full
     ) {
         self.selection = selection
         self.onSelect = onSelect
         self.tabs = tabs()
         self.footer = footer()
         self.account = account()
+        self.accessory = AccessoryWiring(showing: showing, expanded: expanded, onOpen: onOpen, onClose: onClose, onNext: onNext, onPrevious: onPrevious)
+        self.bar = bar()
+        self.full = full()
     }
 
     /// Whether an account item was given: the toolbars carry it, and the
@@ -154,13 +172,34 @@ public struct AdaptiveTabs<Tabs: TabContent<String>, Footer: View, Account: View
         TabView(selection: Binding(get: { shown }, set: onSelect)) { tabs }
             .tabViewStyle(.sidebarAdaptable)
             .tabViewSidebarBottomBar { footer }
+            .nowPlaying(accessory, bar: bar, full: full)
             .environment(\.shellFooter, compact && !hasAccount ? AnyView(footer) : nil)
             .environment(\.shellAccount, hasAccount ? AnyView(account) : nil)
             .environment(\.shownSection, shown)
     }
 }
 
-extension AdaptiveTabs where Account == EmptyView {
+extension AdaptiveTabs where Bar == EmptyView, Full == EmptyView {
+    /// The sections, with no accessory.
+    public init(
+        selection: String,
+        onSelect: @escaping (String) -> Void,
+        @TabContentBuilder<String> _ tabs: () -> Tabs,
+        @ViewBuilder footer: () -> Footer,
+        @ViewBuilder account: () -> Account
+    ) {
+        self.selection = selection
+        self.onSelect = onSelect
+        self.tabs = tabs()
+        self.footer = footer()
+        self.account = account()
+        self.accessory = nil
+        self.bar = EmptyView()
+        self.full = EmptyView()
+    }
+}
+
+extension AdaptiveTabs where Account == EmptyView, Bar == EmptyView, Full == EmptyView {
     /// The sections with no account item in their toolbars.
     public init(
         selection: String,
@@ -171,6 +210,122 @@ extension AdaptiveTabs where Account == EmptyView {
         self.init(selection: selection, onSelect: onSelect, tabs, footer: footer, account: { EmptyView() })
     }
 }
+
+/// What the now-playing accessory is told and says (`AdaptiveTabs`): whether
+/// its bar is there and whether it has grown, and what opening it, putting
+/// it back and swiping its bar sideways send.
+public struct AccessoryWiring {
+    let showing: Bool
+    let expanded: Bool
+    let onOpen: () -> Void
+    let onClose: () -> Void
+    let onNext: (() -> Void)?
+    let onPrevious: (() -> Void)?
+}
+
+extension View {
+    /// The now-playing accessory over the sections, when there is one: on
+    /// the iPhone and the iPad the tab view's bottom accessory that zooms
+    /// into the whole screen (`expandingCard`), its bar skipped by a
+    /// sideways swipe; on the Mac the bar at the window's foot, which
+    /// raises the full player as a sheet, the system's.
+    @ViewBuilder
+    func nowPlaying<Bar: View, Full: View>(_ a: AccessoryWiring?, bar: Bar, full: Full) -> some View {
+        if let a {
+            let open = Binding(get: { a.showing && a.expanded }, set: { $0 ? a.onOpen() : a.onClose() })
+            #if os(iOS)
+            self.expandingCard(isPresented: open, isEnabled: a.showing) {
+                SkippingBar(onNext: a.onNext, onPrevious: a.onPrevious) { bar }
+            } expanded: {
+                AccessoryFull(onClose: a.onClose) { full }
+            }
+            #else
+            self.safeAreaInset(edge: .bottom) {
+                if a.showing {
+                    Button(action: a.onOpen) { bar.contentShape(Rectangle()) }
+                        .buttonStyle(.pressRow)
+                        .padding(Space.s)
+                        .background(.bar)
+                }
+            }
+            .sheet(isPresented: open) { AccessoryFull(onClose: a.onClose) { full } }
+            #endif
+        } else {
+            self
+        }
+    }
+}
+
+/// What the accessory grew into: its close, round on glass at the top's
+/// leading end (the swipe down that closes it is the system's too), and
+/// what it holds under it, at the page's margins, scrolling when it is
+/// taller than the screen.
+struct AccessoryFull<Content: View>: View {
+    let onClose: () -> Void
+    @ViewBuilder let content: () -> Content
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Button(action: onClose) { Image(systemName: "chevron.down").frame(width: 24, height: 24) }
+                    .buttonStyle(.glass)
+                    .buttonBorderShape(.circle)
+                    .controlSize(.large)
+                    .accessibilityLabel("Close the player")
+                Spacer()
+            }
+            .padding(.horizontal, Space.page)
+            .padding(.vertical, Space.s)
+            ScrollView {
+                content()
+                    .padding(.horizontal, Space.page)
+                    .padding(.bottom, Space.xl)
+            }
+        }
+    }
+}
+
+#if os(iOS)
+/// The bar, skipped by a sideways drag: it follows the finger one to one
+/// once the drag is more across than down; let go, where it was going —
+/// how far it was pulled and its speed projected at the snappy rate
+/// (`Momentum.snappy`), since it decides an act — past `MotionTokens.skip`
+/// of the bar's width, or as fast as a flick, sends `onNext` (to the left)
+/// or `onPrevious` (to the right); then it springs back from the finger's
+/// speed (`Springs.released`), the momentum's overshoot only when it was
+/// flicked, a fade's settle when motion is reduced. Without either, the
+/// bar alone.
+struct SkippingBar<Content: View>: View {
+    let onNext: (() -> Void)?
+    let onPrevious: (() -> Void)?
+    @ViewBuilder let content: () -> Content
+    @State private var swipe: CGFloat = 0
+    @Environment(\.reducesMotion) private var still
+
+    var body: some View {
+        if let onNext, let onPrevious {
+            GeometryReader { geo in
+                content()
+                    .offset(x: swipe)
+                    .frame(width: geo.size.width, height: geo.size.height)
+                    .contentShape(Rectangle())
+                    .gesture(DragGesture(minimumDistance: 12).onChanged { v in
+                        if abs(v.translation.width) > abs(v.translation.height) { swipe = v.translation.width }
+                    }.onEnded { v in
+                        let wide = CGFloat(MotionTokens.skip) * geo.size.width
+                        let rest = swipe + CGFloat(Momentum.project(Double(v.velocity.width), rate: Momentum.snappy))
+                        if rest < -wide || v.velocity.width < -Springs.thrown { onNext() }
+                        else if rest > wide || v.velocity.width > Springs.thrown { onPrevious() }
+                        let back = still ? Springs.calm : Springs.released(velocity: Double(v.velocity.width), from: Double(swipe), to: 0)
+                        withAnimation(back) { swipe = 0 }
+                    })
+            }
+        } else {
+            content()
+        }
+    }
+}
+#endif
 
 /// Who is signed in, a toolbar's last item (`AdaptiveTabs`' `account`): their
 /// picture (`picture`, a whole URL), or their initial on the accent while

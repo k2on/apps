@@ -80,10 +80,12 @@ new parts, on every toolkit:
 | Transport controls | `transport(play_glyph, play_label, toggle, back, forward).shuffle(tint, tap).repeat(glyph, tint, tap)` | `glyph_button`s (a give round a glyph) spaced across the width |
 | Scrubber, hairline | `scrubber(at_ms, since_ms, playing, length_ms, seek)`, `hairline(..)` | `Part::Timeline`: counted from its clock as it is drawn (`TimelineView`, a ticking state, iced's tick while one plays, an animation frame in the DOM), `seek` once on release (iced: as it is dragged), a `Selection` haptic at either end on the phones |
 | Figure with label | `figure_label(label, figure)` | a quiet caption over a headline, read as one |
+| Volume | `volume(label, level, muted, change, mute)` | `Part::Volume`: `VolumePart` over `VolumeSlider` on the phones (a level from elsewhere sprung to, `change` once on release), iced's slider (a level as it is dragged), the browser's `<input type="range">` (on `change`); its loudspeaker sends `mute` |
+| Now-playing accessory | `adaptive_tabs(..).accessory(bar, full, open, close).showing(on).expanded(on).skips(next, previous)` | the shell's `Part::Tabs` with an `Accessory`: SwiftUI's `expandingCard` (`tabViewBottomAccessory` zooming into a `fullScreenCover`, iOS 26.1's `isEnabled` while nothing plays, the bar swiped by `SkippingBar`; the Mac's bar at the window's foot and a sheet), Compose's `ExpandingCard` over the navigation bar (its settle told back as `open`/`close`), iced's bar at the foot of what is shown and the full window over it, the browser's bar and a page rising from the foot; the full face's close a chevron at its top on every toolkit |
 
-Still to come for harken: the now-playing accessory (the shell's) and
-the volume. ui/rust/gen/tests/snapshots holds what the emitters write for
-all of them (`MediaView.swift`, `MediaScreen.kt`).
+ui/rust/gen/tests/snapshots holds what the emitters write for all of
+them (`MediaView.swift`, `MediaScreen.kt`, `TabsView.swift`,
+`TabsScreen.kt`).
 
 ## The Primitives
 

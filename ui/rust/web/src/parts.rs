@@ -372,6 +372,13 @@ fn drawn<M: Clone + std::fmt::Debug + 'static>(v: View<M>) -> Option<AnyView> {
             length_ms,
             seek,
         } => crate::timeline::timeline(at_ms.get(), since_ms.get(), playing.get(), length_ms.get(), seek),
+        Part::Volume {
+            label,
+            level,
+            muted,
+            change,
+            mute,
+        } => volume(label.get(), level.get(), muted.get(), change, mute),
         Part::Paper {
             heading,
             date,
@@ -1078,6 +1085,36 @@ fn pressed<M: Clone + std::fmt::Debug + 'static>(
             }
         })
         .child(nodes(content))
+        .into_any()
+}
+
+/// How loud (`Part::Volume`): its mute, a button, then an
+/// `<input type="range">` 0 to 100 that sends `change` once it is let go,
+/// as a scrubber's seek; muted, the loudspeaker struck through and the
+/// track quiet.
+fn volume<M: Clone + std::fmt::Debug + 'static>(label: String, level: i64, muted: bool, change: Input<i64, M>, mute: M) -> AnyView {
+    let said = if muted { format!("Unmute {label}") } else { format!("Mute {label}") };
+    let tap = mute.clone();
+    html::div()
+        .class(if muted { "ark-volume ark-muted" } else { "ark-volume" })
+        .child((
+            crate::wired!(html::button(), crate::tapped(&said, &mute))
+                .class("ark-bar-button")
+                .attr("aria-label", said.clone())
+                .attr("title", said)
+                .on(leptos::ev::click, move |_| send(tap.clone()))
+                .child(crate::glyph(if muted { "volume-x" } else { "volume-2" }, 17)),
+            html::input()
+                .attr("type", "range")
+                .attr("min", "0")
+                .attr("max", "100")
+                .attr("aria-label", label)
+                .prop("value", level.clamp(0, 100).to_string())
+                .on(leptos::ev::change, move |e| {
+                    let v = event_target_value(&e).parse::<i64>().unwrap_or(0);
+                    send(change.call(v));
+                }),
+        ))
         .into_any()
 }
 

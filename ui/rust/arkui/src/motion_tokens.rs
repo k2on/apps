@@ -24,6 +24,8 @@ pub const FLICK: f32 = 500.0;
 pub const DECELERATION: f32 = 0.998;
 /// The same, for a release that decides an act: a skip, going back.
 pub const SNAPPY: f32 = 0.99;
+/// A sideways swipe at least this share of what was swiped, where it was going, skips.
+pub const SKIP: f32 = 0.25;
 /// The most a back gesture's preview comes, as a share of what it previews.
 pub const PREVIEW: f32 = 0.1;
 /// How much of the gesture brings the preview 63% of the way.

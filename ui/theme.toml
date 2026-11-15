@@ -253,6 +253,10 @@ flick = 500.0
 # fast one for a release that decides an act (a skip, going back).
 deceleration = 0.998
 snappy = 0.99
+# A sideways swipe skips (the now-playing bar) when where it was going,
+# its pull and the projection of its speed at `snappy`, is past this
+# share of what was swiped.
+skip = 0.25
 # A back gesture's preview: at most this share of what it previews, and
 # this much of the gesture to come 63% of the way.
 preview = 0.1

@@ -1,5 +1,6 @@
 //! The player: what plays, where, and the hand on it — the now-playing
-//! bar and the full player it grows into, every press the host's
+//! bar and the full player it grows into (the shell's accessory, which
+//! says whether it has grown), every press the host's
 //! (`host::Harken`), which sends it to the session as a live call while
 //! this device stands in it, and does it to this device's own sound while
 //! it is alone.
@@ -27,8 +28,8 @@ mod tests;
 /// The player, as `ark_app` runs it.
 pub struct Player;
 
-/// What the player remembers: who and where this device is, whether the
-/// full player shows, and what plays here alone.
+/// What the player remembers: who and where this device is, whether its
+/// devices show, and what plays here alone.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct State {
     /// Where covers are fetched from.
@@ -36,8 +37,6 @@ pub struct State {
     /// This device as the session names it; empty alone.
     pub device: String,
     pub linked: bool,
-    /// The full player shows, over the bar.
-    pub open: bool,
     /// The devices sheet shows.
     pub devices: bool,
     /// What this device plays on its own, while it is not part of the
@@ -61,6 +60,10 @@ pub struct Playing {
     pub length_ms: i64,
     pub can_back: bool,
     pub can_forward: bool,
+    /// How loud it is where it plays, 0 to 100 (the group's while
+    /// joined), and whether that is muted.
+    pub volume: i64,
+    pub muted: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, ark::twin::Twin)]
@@ -91,9 +94,12 @@ pub enum PlayerMsg {
     Transfer {
         to: String,
     },
-    /// The bar grown into the full player, and back.
-    Open,
-    Close,
+    /// The volume let go at this level.
+    Volume {
+        level: i64,
+    },
+    /// The loudspeaker pressed: muted, or not.
+    Mute,
     /// The devices sheet, up and away.
     Devices,
     CloseDevices,
@@ -121,7 +127,8 @@ pub struct PlayerPage {
     pub now: Playing,
     pub play_glyph: String,
     pub play_label: String,
-    pub open: bool,
+    /// Its volume can be turned (`now.volume`).
+    pub has_volume: bool,
     /// Part of the session: other devices can be chosen.
     pub joined: bool,
     /// Where the sound is, said: "This Device", or another's name.
@@ -165,6 +172,8 @@ pub fn playing_of(server: &str, a: &Active, now: i64) -> Playing {
         length_ms: t.duration_ms,
         can_back: true,
         can_forward: (a.at.max(0) as usize) + 1 < a.queue.len(),
+        volume: 0,
+        muted: false,
     }
 }
 
@@ -192,7 +201,7 @@ impl App for Player {
         vec![HarkenView::Listening]
     }
 
-    fn update(s: &mut State, msg: PlayerMsg, _: &Data<'_, HarkenView>) -> Vec<Command<Self>> {
+    fn update(s: &mut State, msg: PlayerMsg, data: &Data<'_, HarkenView>) -> Vec<Command<Self>> {
         let press = |r: HarkenRequest| vec![Command::Request(r)];
         match msg {
             PlayerMsg::Session { server, device, linked } => {
@@ -212,13 +221,10 @@ impl App for Player {
                 s.devices = false;
                 press(HarkenRequest::Transfer { to })
             }
-            PlayerMsg::Open => {
-                s.open = true;
-                vec![]
-            }
-            PlayerMsg::Close => {
-                (s.open, s.devices) = (false, false);
-                vec![]
+            PlayerMsg::Volume { level } => press(HarkenRequest::Volume { level }),
+            PlayerMsg::Mute => {
+                let muted = Player::screen(s, data).now.muted;
+                press(HarkenRequest::Mute { muted: !muted })
             }
             PlayerMsg::Devices => {
                 s.devices = true;
@@ -234,10 +240,19 @@ impl App for Player {
     fn screen(s: &State, data: &Data<'_, HarkenView>) -> PlayerPage {
         let l = listening(data);
         let joined = joined(s, &l);
+        let leader = l.leader().map(str::to_string);
         let now = match (joined, &l.session) {
-            (true, Some(a)) => Some(playing_of(&s.server, a, data.now_ms)),
+            (true, Some(a)) => Some(Playing {
+                volume: leader.as_deref().and_then(|d| l.group_volume(d)).unwrap_or(0),
+                muted: leader.as_deref().is_some_and(|d| l.group_muted(d)),
+                ..playing_of(&s.server, a, data.now_ms)
+            }),
             (true, None) => None,
             (false, _) => s.own.clone(),
+        };
+        let has_volume = match joined {
+            true => leader.as_deref().and_then(|d| l.group_volume(d)).is_some(),
+            false => now.is_some(),
         };
         let output = match (joined, l.leader()) {
             (true, Some(id)) if id != s.device => l.device(id).map_or_else(String::new, |d| d.name.clone()),
@@ -264,7 +279,7 @@ impl App for Player {
             now: now.unwrap_or_default(),
             play_glyph: if playing { "pause" } else { "play" }.into(),
             play_label: if playing { "Pause" } else { "Play" }.into(),
-            open: s.open,
+            has_volume,
             joined,
             output,
             devices_open: s.devices,

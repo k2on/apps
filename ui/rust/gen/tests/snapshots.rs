@@ -12,7 +12,7 @@
 //! After a deliberate change to an emitter:
 //! `ARK_UPDATE_SNAPSHOTS=1 cargo test -p ark-ui-gen --test snapshots`.
 
-use ark_app::shell::{command, command_menu, CommandMenu, MenuPlace};
+use ark_app::shell::{adaptive_tabs, command, command_menu, hosted, section_tab, CommandMenu, MenuPlace};
 use ark_app::view;
 use ark_app::view::*;
 use ark_ui_gen::app::{files, App, Generated, Names};
@@ -67,6 +67,10 @@ pub enum ListMsg {
     Back,
     Forward,
     Seek { at_ms: i64 },
+    Volume { level: i64 },
+    Mute,
+    OpenPlayer,
+    ClosePlayer,
 }
 
 #[view]
@@ -181,6 +185,9 @@ pub struct MediaPage {
     pub since_ms: i64,
     pub playing: bool,
     pub length_ms: i64,
+    pub level: i64,
+    pub muted: bool,
+    pub open: bool,
 }
 
 #[view]
@@ -217,8 +224,23 @@ pub fn media(p: &MediaPage) -> View<ListMsg> {
         scrubber(p.at_ms, p.since_ms, p.playing, p.length_ms, |at_ms| ListMsg::Seek { at_ms }),
         transport(p.play_glyph, p.play_label, ListMsg::Toggle, ListMsg::Back, ListMsg::Forward),
         hairline(p.at_ms, p.since_ms, p.playing, p.length_ms),
-        figure_label("Tracks", p.by),
+        (
+            figure_label("Tracks", p.by),
+            volume("Volume", p.level, p.muted, |level| ListMsg::Volume { level }, ListMsg::Mute),
+        ),
     ))
+}
+
+/// Sections with the now-playing accessory over them: its bar and what it
+/// grows into hosted, shown while something plays, its swipe skipping.
+#[view]
+pub fn tabs(p: &MediaPage) -> View<ListMsg> {
+    adaptive_tabs(p.title, |key| ListMsg::Kind { key }, section_tab("Home", "house", "home", hosted("home")))
+        .accessory(hosted("bar"), hosted("full"), ListMsg::OpenPlayer, ListMsg::ClosePlayer)
+        .showing(p.playing)
+        .expanded(p.open)
+        .skips(ListMsg::Forward, ListMsg::Back)
+        .into()
 }
 
 fn menus() -> Vec<CommandMenu<ListMsg>> {
@@ -259,6 +281,16 @@ fn app() -> App {
                     swift_holder: "MediaScreen",
                     kotlin: "MediaScreen",
                     kotlin_holder: "MediaHolder",
+                    ..names
+                },
+            ),
+            Generated::view(
+                tabs::record,
+                Names {
+                    swift: "TabsView",
+                    swift_holder: "TabsScreen",
+                    kotlin: "TabsScreen",
+                    kotlin_holder: "TabsHolder",
                     ..names
                 },
             ),
@@ -306,6 +338,8 @@ fn the_files_are_named_for_each_language() {
             "CardScreen.kt",
             "MediaView.swift",
             "MediaScreen.kt",
+            "TabsView.swift",
+            "TabsScreen.kt",
             "ThingsCommands.swift",
             "thingsCommands.kt"
         ]

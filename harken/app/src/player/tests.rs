@@ -36,12 +36,31 @@ fn alone_the_player_draws_its_own_sound_and_asks_the_host() {
         d.requests,
         [HarkenRequest::Toggle, HarkenRequest::Skip { by: 1 }, HarkenRequest::Seek { at_ms: 9_000 }]
     );
-    d.run(&mut rt, [PlayerMsg::Open, PlayerMsg::Devices]);
+    d.run(&mut rt, [PlayerMsg::Devices]);
+    assert!(d.page(&mut rt).devices_open);
+    d.run(&mut rt, [PlayerMsg::CloseDevices]);
+    assert!(!d.page(&mut rt).devices_open);
+}
+
+/// Alone, the volume is this device's own, as its sound says it; let go,
+/// a level is asked of the host, and the loudspeaker asks the other way
+/// from what is drawn. Falsified by Mute asking for what already is.
+#[test]
+fn the_volume_is_asked_of_the_host() {
+    let mut rt = Runtime::<Player>::new();
+    let mut d = Demo::<Player>::new();
+    assert!(!d.page(&mut rt).has_volume, "nothing plays: no volume");
+    let quiet = Playing {
+        volume: 40,
+        muted: true,
+        ..own()
+    };
+    d.run(&mut rt, [PlayerMsg::Own { own: Some(quiet) }]);
     let p = d.page(&mut rt);
-    assert!(p.open && p.devices_open);
-    d.run(&mut rt, [PlayerMsg::Close]);
-    let p = d.page(&mut rt);
-    assert!(!p.open && !p.devices_open);
+    assert!(p.has_volume);
+    assert_eq!((p.now.volume, p.now.muted), (40, true));
+    d.run(&mut rt, [PlayerMsg::Volume { level: 70 }, PlayerMsg::Mute]);
+    assert_eq!(d.requests, [HarkenRequest::Volume { level: 70 }, HarkenRequest::Mute { muted: false }]);
 }
 
 #[test]
@@ -51,4 +70,6 @@ fn the_view_draws_and_records() {
     d.run(&mut rt, [PlayerMsg::Own { own: Some(own()) }, PlayerMsg::Devices]);
     let _ = view::player::view(&d.page(&mut rt));
     let _ = view::player::record();
+    let _ = view::now_playing::view(&d.page(&mut rt));
+    let _ = view::now_playing::record();
 }

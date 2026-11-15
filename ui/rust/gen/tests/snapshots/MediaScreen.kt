@@ -133,5 +133,6 @@ fun MediaScreen(screen: MediaHolder) {
             Text("Tracks", style = ArkType.Caption.style, color = ArkInk.quiet)
             Text(p.by, style = ArkType.Headline.style, color = ArkInk.ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
+        VolumePart(p.level, muted = p.muted, about = "Volume", onChange = { screen.send(ListMsg.Volume(level = it)) }, onMute = { screen.send(ListMsg.Mute) })
     }
 }

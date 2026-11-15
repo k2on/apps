@@ -162,6 +162,7 @@ struct MediaView: View {
             }
                 .accessibilityElement(children: .combine)
                 .listRowInsets(EdgeInsets())
+            VolumePart(p.level, muted: p.muted, about: "Volume", onChange: { screen.send(.volume(level: $0)) }, onMute: { screen.send(.mute) })
         }
     }
 }

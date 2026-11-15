@@ -9,7 +9,7 @@
 //! (ui/docs/app.md, "harken's Port").
 
 use ark_app::host::{Cx, Has, HostedApp, Link, Running, Screen, Session};
-use harken_domain::player::Press;
+use harken_domain::player::{Change, Press};
 use harken_domain::{HarkenChange, HarkenView};
 
 use crate::home::{Home, HomeMsg};
@@ -182,6 +182,8 @@ impl HostedApp for Harken {
             HarkenRequest::Seek { at_ms } => Press::Seek { ms: at_ms },
             HarkenRequest::Scrub { at_ms } => Press::Scrub { at_ms: Some(at_ms) },
             HarkenRequest::Transfer { to } => Press::Transfer { to },
+            HarkenRequest::Volume { level } => self.listen.loud(Change::To { level }, cx),
+            HarkenRequest::Mute { muted } => self.listen.loud(Change::Mute { muted }, cx),
             r @ HarkenRequest::AddTo { .. } => return self.waiting.push(r),
         };
         self.refused = self.listen.press(press, cx);
@@ -207,8 +209,9 @@ impl HostedApp for Harken {
 
 impl Harken {
     /// The player told what it draws from that the views do not hold: who
-    /// and where this device is, and what plays here alone — each only
-    /// when it moved.
+    /// and where this device is, and what plays here alone; and the shell
+    /// whether anything plays, for its accessory — each only when it
+    /// moved.
     fn tell(&mut self, cx: &mut Cx<'_, Harken>) {
         let s = cx.place.session();
         let linked = s.linked == Some(true);
@@ -228,6 +231,10 @@ impl Harken {
                 },
                 cx,
             );
+        }
+        let playing = self.player.page(&*cx.place, cx.now_ms).has;
+        if self.shell.state().playing != playing {
+            self.shell.send(ShellMsg::Playing { on: playing }, cx);
         }
     }
 }

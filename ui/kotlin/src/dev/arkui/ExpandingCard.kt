@@ -376,7 +376,7 @@ public data class ExpandingCardSpec(
      * A sideways drag is a skip when where it was going — how far it was pulled, and the
      * projection of its speed at [Springs.SNAPPY] — is past this share of the bar's width.
      */
-    public val wide: Float = 0.25f,
+    public val wide: Float = MotionTokens.SKIP,
     /** How dark what is under the card gets, expanded. */
     public val dim: Float = 0.4f,
     /**

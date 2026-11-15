@@ -37,6 +37,7 @@
 //! a `for`, an `if`, an `if let Some`, a message built from fields. Any
 //! other Rust over the record does not compile.
 
+use crate::shell::Accessory;
 use std::fmt::Debug;
 use std::marker::PhantomData;
 use std::rc::Rc;
@@ -602,6 +603,19 @@ pub enum Part<M> {
         length_ms: Val<i64>,
         seek: Option<Input<i64, M>>,
     },
+    /// How loud, 0 to 100, which a finger drags (`VolumeSlider`): its
+    /// mute at its start (the loudspeaker struck through while `muted`,
+    /// `mute` sent when it is pressed), the track the control; the level
+    /// follows the finger and `change` is sent once, on release, as a
+    /// scrubber's seek is; a level that arrives from elsewhere is sprung
+    /// to on the phones (`Springs.move`). `label` says what is loud.
+    Volume {
+        label: Val<String>,
+        level: Val<i64>,
+        muted: Val<bool>,
+        change: Input<i64, M>,
+        mute: M,
+    },
     /// A slip of paper (a receipt as it was printed): monospace, dark on
     /// white whatever the appearance; its heading bold and the line under
     /// it centred, then a rule, each of `names` with its `figures` against
@@ -632,6 +646,10 @@ pub enum Part<M> {
         /// Who is signed in ([`Part::Account`]): the last item of every
         /// section's toolbar, at every width; empty for none.
         account: Box<View<M>>,
+        /// What stands over the sections at the foot and grows into the
+        /// whole window ([`Accessory`]): the now-playing bar and the full
+        /// player.
+        accessory: Option<Box<Accessory<M>>>,
     },
     /// One section: its title, glyph and tag, a count at its end, what it
     /// shows. A tag `parent/child` is a child of the section tagged
@@ -2384,6 +2402,27 @@ pub fn hairline<M>(
     .into()
 }
 
+/// How loud something is, 0 to 100, which a finger drags ([`Part::Volume`]):
+/// `change` sent once with the level it was let go at, `mute` when its
+/// loudspeaker is pressed; `label` says what is loud ("Volume", a
+/// speaker's name).
+pub fn volume<M: 'static>(
+    label: impl Into<Val<String>>,
+    level: impl Into<Val<i64>>,
+    muted: impl Into<Val<bool>>,
+    change: fn(i64) -> M,
+    mute: M,
+) -> View<M> {
+    Part::Volume {
+        label: label.into(),
+        level: level.into(),
+        muted: muted.into(),
+        change: Input::new(change),
+        mute,
+    }
+    .into()
+}
+
 /// A slip of paper: a receipt as it was printed ([`Part::Paper`]).
 pub fn paper<M>(
     heading: impl Into<Val<String>>,
@@ -2926,6 +2965,23 @@ impl<M> Part<M> {
                     None => c("ClockHairline", Some(G::Val(lit(at_ms))), args, vec![]),
                 }
             }
+            Part::Volume {
+                label,
+                level,
+                muted,
+                change,
+                mute,
+            } => c(
+                "VolumePart",
+                Some(G::Val(lit(level))),
+                vec![
+                    ("muted", G::Val(lit(muted))),
+                    ("about", G::Val(lit(label))),
+                    ("onChange", G::Counted(change)),
+                    ("onMute", G::Act(mute)),
+                ],
+                vec![],
+            ),
             Part::Paper {
                 heading,
                 date,
@@ -3043,12 +3099,26 @@ impl<M> Part<M> {
                 tabs,
                 footer,
                 account,
-            } => c(
-                "AdaptiveTabs",
-                None,
-                vec![("selection", G::Val(lit(selected))), ("onSelect", G::Typed(select))],
-                vec![("", &**tabs), ("footer", &**footer), ("account", &**account)],
-            ),
+                accessory,
+            } => {
+                let mut args = vec![("selection", G::Val(lit(selected))), ("onSelect", G::Typed(select))];
+                let mut slots = vec![("", &**tabs), ("footer", &**footer), ("account", &**account)];
+                // The accessory's, only when there is one: an app without
+                // it writes the sections as before.
+                if let Some(a) = accessory {
+                    args.push(("showing", G::Val(lit(&a.showing))));
+                    args.push(("expanded", G::Val(lit(&a.expanded))));
+                    args.push(("onOpen", G::Act(&a.open)));
+                    args.push(("onClose", G::Act(&a.close)));
+                    if let (Some(n), Some(p)) = (&a.next, &a.previous) {
+                        args.push(("onNext", G::Act(n)));
+                        args.push(("onPrevious", G::Act(p)));
+                    }
+                    slots.push(("bar", &a.bar));
+                    slots.push(("full", &a.full));
+                }
+                c("AdaptiveTabs", None, args, slots)
+            }
             Part::Account { name, picture, tap } => c(
                 "ToolbarAccount",
                 None,
@@ -3549,6 +3619,19 @@ impl<M: 'static> Part<M> {
                 length_ms,
                 seek: seek.map(|s| input(s, f)),
             },
+            Part::Volume {
+                label,
+                level,
+                muted,
+                change,
+                mute,
+            } => Part::Volume {
+                label,
+                level,
+                muted,
+                change: input(change, f),
+                mute: f(mute),
+            },
             Part::Paper {
                 heading,
                 date,
@@ -3592,12 +3675,25 @@ impl<M: 'static> Part<M> {
                 tabs,
                 footer,
                 account,
+                accessory,
             } => Part::Tabs {
                 selected,
                 select: input(select, f),
                 tabs: b(tabs),
                 footer: b(footer),
                 account: b(account),
+                accessory: accessory.map(|a| {
+                    Box::new(Accessory {
+                        bar: a.bar.map_rc(f),
+                        full: a.full.map_rc(f),
+                        showing: a.showing,
+                        expanded: a.expanded,
+                        open: f(a.open),
+                        close: f(a.close),
+                        next: a.next.map(|m| f(m)),
+                        previous: a.previous.map(|m| f(m)),
+                    })
+                }),
             },
             Part::Account { name, picture, tap } => Part::Account { name, picture, tap: f(tap) },
             Part::TabGroup { title, tabs, place } => Part::TabGroup {

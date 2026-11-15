@@ -103,6 +103,59 @@ fn a_tab_and_what_it_shows() {
     assert!(tree(&t).contains("[tab] tab:budget \u{2014} Budget (taps)"), "{}", tree(&t));
 }
 
+/// The now-playing accessory: its bar pressed as one, by what it sends, and
+/// what is on it reached while it stands over the sections; grown, what it
+/// grew into and its close alone, over everything. Falsified by the bar
+/// reached while nothing plays, or a tab reached under the full player.
+#[test]
+fn the_accessory_and_what_it_grows_into() {
+    let sent: Sent = Rc::default();
+    let tabs = |showing: bool, expanded: bool| -> View<Msg> {
+        adaptive_tabs(
+            "budget".to_string(),
+            Msg::Select,
+            section_tab("Budget", "mail", "budget", hosted("budget")),
+        )
+        .accessory(
+            list_row("Bar Song").on_tap(Msg::Open("bar".into())),
+            list_row("Full Song").on_tap(Msg::Open("full".into())),
+            Msg::New,
+            Msg::Cancel,
+        )
+        .showing(showing)
+        .expanded(expanded)
+        .into()
+    };
+    let all = |showing: bool, expanded: bool| {
+        compose(vec![
+            screen("shell", tabs(showing, expanded), &sent),
+            screen("budget", budget(false), &sent),
+        ])
+    };
+    let mut focus = None;
+    let tap = |id: &str| Step::Tap { id: id.into(), text: false };
+    let t = all(false, false);
+    assert_eq!(take(&tap("shell.new"), &t, &mut focus), Took::NotYet, "{}", tree(&t));
+    let t = all(true, false);
+    assert_eq!(take(&tap("shell.row:full-song"), &t, &mut focus), Took::NotYet, "{}", tree(&t));
+    assert_eq!(take(&tap("shell.row:bar-song"), &t, &mut focus), Took::Done);
+    assert_eq!(take(&tap("shell.new"), &t, &mut focus), Took::Done);
+    let t = all(true, true);
+    assert_eq!(take(&tap("tab:budget"), &t, &mut focus), Took::NotYet, "{}", tree(&t));
+    assert_eq!(take(&tap("budget.row:groceries"), &t, &mut focus), Took::NotYet);
+    assert_eq!(take(&tap("shell.row:full-song"), &t, &mut focus), Took::Done);
+    assert_eq!(take(&tap("shell.cancel"), &t, &mut focus), Took::Done);
+    assert_eq!(
+        sent.borrow().clone(),
+        vec![
+            ("shell", Msg::Open("bar".into())),
+            ("shell", Msg::New),
+            ("shell", Msg::Open("full".into())),
+            ("shell", Msg::Cancel),
+        ]
+    );
+}
+
 /// While a dialog is up only what is in it is reached, whichever screen
 /// raised it. Falsified by the row under the dialog tapped.
 #[test]

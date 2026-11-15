@@ -16,6 +16,14 @@
 package dev.arkui
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.systemBars
+import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -177,6 +185,12 @@ public fun compactTag(tag: String): String = tag.substringBefore('/')
  * permanent drawer when expanded (NavigationSuiteScaffold's choice, by the
  * theme's widths). [footer] is the drawer's foot; [account] (a [ToolbarAccount])
  * the last item of every section's toolbar, at every width.
+ *
+ * With an accessory ([bar] and [full]: the now-playing bar and the full player), the bar stands
+ * over the navigation bar (at the screen's foot beside a rail or a drawer) while [showing], and is
+ * one [ExpandingCard] with [full]: a tap sends [onOpen], a drag up or down follows the finger and
+ * says where it settled ([onOpen], [onClose]), the back gesture previews it down, and a sideways
+ * swipe on the bar sends [onNext] (left) or [onPrevious] (right). Where it rests follows [expanded].
  */
 @Composable
 public fun AdaptiveTabs(
@@ -184,8 +198,20 @@ public fun AdaptiveTabs(
     onSelect: (String) -> Unit,
     footer: @Composable () -> Unit = {},
     account: (@Composable () -> Unit)? = null,
+    showing: Boolean = false,
+    expanded: Boolean = false,
+    onOpen: () -> Unit = {},
+    onClose: () -> Unit = {},
+    onNext: () -> Unit = {},
+    onPrevious: () -> Unit = {},
+    bar: (@Composable () -> Unit)? = null,
+    full: (@Composable () -> Unit)? = null,
     tabs: TabsScope.() -> Unit,
 ) {
+    val accessory = bar != null && full != null && showing
+    // Room kept over the navigation bar for the accessory's bar to stand in.
+    val spec = remember { ExpandingCardSpec(glass = true) }
+    val room = spec.bar.fold(0.dp) { a, b -> a + b } + spec.gap * 2
     val items = TabsScope().apply(tabs).tabs
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val size = sizeClassOf(maxWidth)
@@ -211,9 +237,12 @@ public fun AdaptiveTabs(
                 // inset (it padded the status bar's, and the toolbar under it again), and what it
                 // gives the foot is taken, so a section's own scaffold keeps no second one.
                 size == SizeClass.Compact -> Scaffold(contentWindowInsets = WindowInsets(0), bottomBar = {
-                    NavigationBar {
-                        sections.forEach { t ->
-                            NavigationBarItem(selected = t.tag == shown.tag, onClick = { onSelect(t.tag) }, icon = { icon(t) }, label = { Text(t.title) })
+                    Column {
+                        if (accessory) Spacer(Modifier.height(room))
+                        NavigationBar {
+                            sections.forEach { t ->
+                                NavigationBarItem(selected = t.tag == shown.tag, onClick = { onSelect(t.tag) }, icon = { icon(t) }, label = { Text(t.title) })
+                            }
                         }
                     }
                 }) { pad -> Box(Modifier.padding(pad).consumeWindowInsets(pad)) { shown.content() } }
@@ -254,6 +283,85 @@ public fun AdaptiveTabs(
                     }
                 }) { shown.content() }
             }
+            if (accessory && bar != null && full != null) {
+                // Material's navigation bar is 80 dp over the system's own; beside a rail or a
+                // drawer the bar stands on the system's bar alone.
+                val system = WindowInsets.systemBars.asPaddingValues().calculateBottomPadding()
+                val stand = if (size == SizeClass.Compact) 80.dp + system else system
+                NowPlayingCard(spec, stand, expanded, onOpen, onClose, onNext, onPrevious, bar, full)
+            }
+        }
+    }
+}
+
+/**
+ * The accessory as one [ExpandingCard]: where it rests follows [expanded], and where a finger or the
+ * back gesture settles it is said ([onOpen], [onClose]) so the app's state follows the card. The
+ * bar and the full player each draw their own cover: nothing travels between them but the card.
+ */
+@Composable
+private fun NowPlayingCard(
+    spec: ExpandingCardSpec,
+    stand: Dp,
+    expanded: Boolean,
+    onOpen: () -> Unit,
+    onClose: () -> Unit,
+    onNext: () -> Unit,
+    onPrevious: () -> Unit,
+    bar: @Composable () -> Unit,
+    full: @Composable () -> Unit,
+) {
+    val card = rememberExpandingCard()
+    val wanted by rememberUpdatedState(expanded)
+    val opened by rememberUpdatedState(onOpen)
+    val closed by rememberUpdatedState(onClose)
+    LaunchedEffect(card, expanded) { if (expanded) card.open() else card.close() }
+    LaunchedEffect(card) {
+        snapshotFlow { card.drag.settledValue }
+            .collect { face ->
+                when {
+                    face == CardFace.Expanded && !wanted -> opened()
+                    face == CardFace.Collapsed && wanted -> closed()
+                }
+            }
+    }
+    ExpandingCard(
+        card,
+        stand = stand,
+        onOpen = onOpen,
+        collapsed = { m -> Box(m) { bar() } },
+        expanded = { _, m -> AccessoryFull(onClose, m, full) },
+        traveler = { m -> Spacer(m) },
+        onSwipeLeft = onNext,
+        onSwipeRight = onPrevious,
+        openLabel = "Open the player",
+        spec = spec,
+    )
+}
+
+/**
+ * What the accessory grew into: its close, round on glass at the top's start (the back gesture and
+ * a drag down close it too), and what it holds under it at the page's margins, scrolling when it is
+ * taller than the screen. Clear of the status bar and the navigation bar.
+ */
+@Composable
+private fun AccessoryFull(onClose: () -> Unit, modifier: Modifier, content: @Composable () -> Unit) {
+    Column(modifier.windowInsetsPadding(WindowInsets.systemBars)) {
+        Row(Modifier.fillMaxWidth().padding(horizontal = Space.page, vertical = Space.s)) {
+            Box(
+                Modifier.size(Account.Target).glass(GlassShape.Capsule).pressable(onClick = onClose, role = Role.Button),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(ArkGlyphs.Down, contentDescription = "Close the player", modifier = Modifier.size(24.dp))
+            }
+        }
+        Column(
+            Modifier.weight(1f)
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = Space.page)
+                .padding(bottom = Space.xl)
+        ) {
+            content()
         }
     }
 }

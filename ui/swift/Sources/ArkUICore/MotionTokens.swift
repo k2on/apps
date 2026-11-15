@@ -25,6 +25,8 @@ public enum MotionTokens {
     public static let deceleration: Double = 0.998
     /// The same, for a release that decides an act: a skip, going back.
     public static let snappy: Double = 0.99
+    /// A sideways swipe at least this share of what was swiped, where it was going, skips.
+    public static let skip: Double = 0.25
     /// The most a back gesture's preview comes, as a share of what it previews.
     public static let preview: Double = 0.1
     /// How much of the gesture brings the preview 63% of the way.

@@ -354,10 +354,25 @@ impl<M: Clone + Debug + 'static> Walk<M> {
                 tabs,
                 footer,
                 account,
+                accessory,
             } => {
-                self.tabs(tabs, &selected.get(), select, shown, modal);
-                self.view(footer, shown, modal);
-                self.view(account, shown, modal);
+                // The accessory grown is over everything, the sections and
+                // their bar not reached under it.
+                let grown = accessory.as_ref().filter(|a| a.showing.get() && a.expanded.get());
+                let under = shown && grown.is_none();
+                self.tabs(tabs, &selected.get(), select, under, modal);
+                self.view(footer, under, modal);
+                self.view(account, under, modal);
+                if let Some(a) = accessory.as_ref().filter(|a| a.showing.get()) {
+                    // The bar pressed as one, by what it sends, and what is on it.
+                    self.push((under, modal), "Now Playing".into(), Role::Button, Some(&a.open), None, &[]);
+                    self.view(&a.bar, under, modal);
+                }
+                if let Some(a) = grown {
+                    let m = self.modal();
+                    self.push((shown, m), "Close".into(), Role::Button, Some(&a.close), None, &[]);
+                    self.view(&a.full, shown, m);
+                }
             }
             // Met only under `Tabs` ([`Walk::tabs`]); alone, its content.
             P::SectionTab { content, .. } => self.view(content, shown, modal),
@@ -443,6 +458,7 @@ impl<M: Clone + Debug + 'static> Walk<M> {
             P::Tile { .. }
             | P::Artwork { .. }
             | P::Timeline { .. }
+            | P::Volume { .. }
             | P::StatusBadge { .. }
             | P::Meter { .. }
             | P::Choice { .. }

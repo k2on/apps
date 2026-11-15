@@ -297,3 +297,35 @@ public struct ClockHairline: View {
         }
     }
 }
+
+/// How loud, as `volume` lays it out: `VolumeSlider` over a level 0 to
+/// 100, its loudspeaker sending `onMute`; the level follows the finger and
+/// `onChange` is sent once, with where it was let go, as the scrubber's
+/// seek is. A level from elsewhere is sprung to (`VolumeSlider`).
+public struct VolumePart: View {
+    let level: Int64
+    let muted: Bool
+    let about: String
+    let onChange: (Int64) -> Void
+    let onMute: () -> Void
+    @State private var held: Int?
+
+    public init(_ level: Int64, muted: Bool, about: String, onChange: @escaping (Int64) -> Void, onMute: @escaping () -> Void) {
+        self.level = level
+        self.muted = muted
+        self.about = about
+        self.onChange = onChange
+        self.onMute = onMute
+    }
+
+    public var body: some View {
+        VolumeSlider(
+            level: Int(min(max(level, 0), 100)), muted: muted, about: about,
+            onLevel: { held = $0 },
+            onDone: {
+                if let h = held { onChange(Int64(h)) }
+                held = nil
+            },
+            onMute: onMute)
+    }
+}

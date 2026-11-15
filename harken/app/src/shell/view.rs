@@ -7,7 +7,8 @@ use ark_app::view::*;
 use super::{ShellMsg, ShellPage};
 
 /// Home, Library and Search, each its toolbar over what it hosts, and a record's
-/// page pushed over it.
+/// page pushed over it; the player over them all, its bar while something
+/// plays, swiped to skip, grown into the full player.
 #[view]
 pub fn harken_shell(p: &ShellPage) -> View<ShellMsg> {
     adaptive_tabs(
@@ -46,5 +47,9 @@ pub fn harken_shell(p: &ShellPage) -> View<ShellMsg> {
             ),
         ),
     )
+    .accessory(hosted("player.bar"), hosted("player"), ShellMsg::OpenPlayer, ShellMsg::ClosePlayer)
+    .showing(p.playing)
+    .expanded(p.player_open)
+    .skips(ShellMsg::Skip { by: 1 }, ShellMsg::Skip { by: -1 })
     .into()
 }
