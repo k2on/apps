@@ -30,6 +30,9 @@ pub struct Listen {
     sound: Option<MediaSound>,
     /// What plays alone, as the player last drew it.
     pub own: Option<Playing>,
+    /// The clock the sound is timed by, which the player's timeline counts
+    /// on from (the demo's day is not it).
+    clock: ark_app::host::Clock,
 }
 
 /// Every song, as the host reads a track a screen named.
@@ -75,6 +78,7 @@ impl Listen {
         let port = cx.place.modules().get::<dyn MediaPlayer>();
         let waker = cx.place.waker();
         let clock = cx.place.clock();
+        let timed = clock.clone();
         let sound = port.map(|p| {
             // A step asked for later comes at the first position the player
             // says once it is due (`MediaSound`): the host keeps no timer.
@@ -86,13 +90,14 @@ impl Listen {
                         waker()
                     }
                 },
-                move || clock(),
+                move || timed(),
             )
         });
         Listen {
             core: Reconciler::new(&session.device, Some(Loaded::Nothing)),
             sound,
             own: None,
+            clock,
         }
     }
 
@@ -131,7 +136,7 @@ impl Listen {
         self.core.reconcile(&v, sound, &mut Says { cx });
         self.own = match v.joined {
             true => None,
-            false => own(&s.server, sound, cx.now_ms),
+            false => own(&s.server, sound, (self.clock)()),
         };
     }
 
