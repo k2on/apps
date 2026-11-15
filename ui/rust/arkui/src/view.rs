@@ -546,9 +546,11 @@ fn shell_part<'a, M: Clone + 'static>(p: Part<M>, ctx: &mut Ctx<'a, '_, M>) -> E
                             press: select.call(t.tag),
                         });
                     }
+                    // The sidebar's foot is the sidebar's: its rows are no
+                    // pane's the keys walk (the sidebar's cursor is the section).
                     let foot = match *footer {
                         View::Empty => None,
-                        f => Some(draw(f, ctx)),
+                        f => Some(cursor::in_pane(Pane::Sidebar, || draw(f, ctx))),
                     };
                     let side = sidebar::view_with_footer(items, at, focused, SIDEBAR_WIDTH, SIDEBAR_PAD, "ark-shell-sidebar", foot);
                     let shown = draw(content, ctx);
