@@ -266,7 +266,7 @@ jobs:
           - { name: ffi, checks: "ffi harken-domain harken-module traces vectors fuzz-smoke versions" }
           - { name: docs, checks: "docs" }
           - { name: lint, checks: "fmt theme theme-contrast layers channels" }
-          - { name: apps, checks: "prebuild money-native revelation-native money-web-sync" }
+          - { name: apps, checks: "prebuild money-native revelation-native money-web-sync money-desktop" }
     name: checks (${{ matrix.group.name }})
     runs-on: ubuntu-latest
     steps:
