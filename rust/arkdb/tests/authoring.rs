@@ -1,6 +1,7 @@
 //! `spec/AUTHORING.md` is held to the sources: every Rust block in it is
-//! cut from `rust/arkdb/src/demo.rs` or a file of `harken/core/src/`,
-//! its lines that file's lines in order, indentation aside, a line `// …`
+//! cut from `rust/arkdb/src/demo.rs` or a file of `harken/core/src/` (or
+//! of a directory in it), its lines that file's lines in order,
+//! indentation aside, a line `// …`
 //! standing for any run of them. Falsified by changing one word of the
 //! `Item` row in the document (`pub pos: i64` to `pub pos: u64`): "no
 //! source holds block 1".
@@ -56,7 +57,13 @@ fn every_example_is_cut_from_a_source() {
     let md = std::fs::read_to_string(root().join("spec/AUTHORING.md")).unwrap();
     let mut sources = vec![root().join("rust/arkdb/src/demo.rs")];
     let domain = root().join("harken/core/src");
-    sources.extend(std::fs::read_dir(&domain).unwrap().map(|e| e.unwrap().path()));
+    // Its files, and those of its modules' directories (`player/`).
+    for p in std::fs::read_dir(&domain).unwrap().map(|e| e.unwrap().path()) {
+        match p.is_dir() {
+            true => sources.extend(std::fs::read_dir(&p).unwrap().map(|e| e.unwrap().path())),
+            false => sources.push(p),
+        }
+    }
     let texts: Vec<String> = sources.iter().map(|p| std::fs::read_to_string(p).unwrap()).collect();
     let bs = blocks(&md);
     assert!(bs.len() >= 5, "the document's examples: {}", bs.len());
