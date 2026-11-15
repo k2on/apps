@@ -6,9 +6,10 @@
 //! desktop and the browser have none: their operations answer
 //! `Unavailable`.
 //!
-//! **Off by default.** Nothing is scheduled until the app asks
-//! ([`set`]), and an app asks only once the person has turned it on in
-//! the app (`ark_app::background`'s setting); [`set`] with none stops it.
+//! **Off by default.** Nothing is scheduled until the app asks ([`set`]):
+//! when the person turns it on (`ark_app::background`'s setting), or when
+//! the app decides (a device owner's, once enrolled); [`set`] with none
+//! stops it.
 //! What was asked is kept across launches by the platform ([`wanted`]).
 //! An app whose app.toml declares no `[background]` has none of this in
 //! its projects at all.

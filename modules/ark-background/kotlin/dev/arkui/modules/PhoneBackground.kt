@@ -4,7 +4,7 @@
 // it outlives a restart (the RECEIVE_BOOT_COMPLETED it needs, and the job service, are written by
 // ui/prebuild.py only for an app whose app.toml says `[background] sync`).
 //
-// Off until the app asks (`set`), and the app asks only once the person turned it on; what was
+// Off until the app asks (`set`): when the person turns it on, or when the app decides; what was
 // asked is kept in the module's private preferences. Each run is a wake of the process's one
 // runtime (`ArkProcess.wake(Sync, …)`), the job finished when the runtime is idle or its time is
 // nearly up.

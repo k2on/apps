@@ -32,11 +32,12 @@ process's runtime turns an `Action` and a `Pushed` into a wake-up
 
 ## Push
 
-Off by default, opt-in per app and per person: only an app whose app.toml
-says `[background] push = true` has any of it in its projects, and that
-app registers only once the person turns it on (`ark_app::background`'s
-"Notify Me"); turning it off unregisters and takes the session's push row
-away. Local notices are every listing app's, as before.
+Off by default, opt-in per app: only an app whose app.toml says
+`[background] push = true` has any of it in its projects, and that app
+registers when its update asks (`register_push`): once the person turns on
+`ark_app::background`'s "Notify Me", which unregisters again when turned
+off and takes the session's push row away, or on its own (a device owner's).
+Local notices are every app's that depends on it, as before.
 
 **A push is only a wake-up.** The server never puts the app's data in one:
 no name, amount or word from a row. Its hub wakes the devices of the

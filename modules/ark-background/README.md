@@ -4,12 +4,12 @@
 (ui/docs/app.md, Background And Notifications). Its update asks through
 the port (`ark_app::modules::background`), never this crate.
 
-**Off by default, opt-in per app and per person.** An app whose app.toml
-says no `[background] sync` has nothing of it in its projects: no
-background mode, no task identifier, no job service, no boot receiver. One
-that declares it still schedules nothing until the person turns it on in
-the app (`ark_app::background`'s setting), and stops when they turn it
-off.
+**Off by default, opt-in per app.** An app whose app.toml says no
+`[background] sync` has nothing of it in its projects: no background mode,
+no task identifier, no job service, no boot receiver. One that declares it
+schedules when its update asks (`set`): once the person turns on
+`ark_app::background`'s setting, or on its own when its background is the
+point (a device owner's).
 
 ## API
 

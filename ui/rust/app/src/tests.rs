@@ -430,9 +430,10 @@ mod woken {
     }
 }
 
-/// The person's say: a fixture app that embeds "Notify Me" and declares a
-/// background sync, over the fakes. Nothing is asked of the device until
-/// the person turns it on, and turning it off takes everything back.
+/// The person's say, for an app that leaves it to them: a fixture app that
+/// embeds "Notify Me" and declares a background sync, over the fakes.
+/// Nothing is asked of the device until the person turns it on, and turning
+/// it off takes everything back.
 mod notify_me {
     use super::*;
     use crate::background::{self, Notify, NotifyApp, NotifyMsg};

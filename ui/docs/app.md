@@ -614,9 +614,10 @@ phone's file system are adapters of one trait, is left for later.
 
 ## Background And Notifications
 
-**Off by default, opt-in per app and per person.** An app runs nothing in
-the background unless its app.toml says so, and even then nothing until
-the person turns it on in the app.
+**Off by default, opt-in per app.** An app runs nothing in the background
+unless its app.toml says so; one that does decides in its own update when
+to register for push and schedule its sync (`notifications::register_push`,
+`background::set`), as it decides anything else.
 
 - *Per app:* only an app whose app.toml has a `[background]` gets any of
   it in its projects. With none, ui/prebuild.py writes no background mode
@@ -625,13 +626,16 @@ the person turns it on in the app.
   UnifiedPush receiver and no Notification Service Extension;
   `checks.prebuild` holds it (`prebuild.py selftest`: every app without
   one, and a fixture with all of it).
-- *Per person:* an app that declares it embeds the shared "Notify Me"
+- *The person's say, where the app wants it:* the shared "Notify Me"
   setting (`ark_app::background`: `Notify`, `NotifyMsg`, `update`, the
-  `notify_me` view over ArkUI's switch row). Off until they turn it on:
-  then they are asked whether the app may notify them, the device is
-  registered for push and the periodic sync scheduled; turned off, the
-  device is unregistered (its session's push row taken away) and the sync
-  stopped. What they chose is read back at launch.
+  `notify_me` view over ArkUI's switch row) is there for an app that leaves
+  it to the person, as a household's budget would. Turned on, they are
+  asked whether the app may notify them, the device is registered for push
+  and the periodic sync scheduled; turned off, the device is unregistered
+  (its session's push row taken away) and the sync stopped; what they chose
+  is read back at launch. An app whose background is the point, not a
+  courtesy — a device owner's (ark-dpc), which syncs its policy from the
+  moment it is enrolled — asks for both itself, with no setting.
 - Local notices (`ark_app::modules::notifications::schedule`, `cancel`)
   are any app's that lists ark-notifications, as before; they run nothing
   in the background.

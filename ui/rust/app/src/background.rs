@@ -3,10 +3,12 @@
 //! its settings are — the switch, what it says, and what turning it on and
 //! off asks of the device.
 //!
-//! **Off by default, opt-in per app and per person.** An app runs nothing
-//! in the background unless its app.toml declares `[background]`; one that
-//! does still registers for push and schedules its periodic sync only once
-//! the person turns this on, and stops both when they turn it off:
+//! An app runs nothing in the background unless its app.toml declares
+//! `[background]`. One that does decides when to register for push and
+//! schedule its sync; an app that leaves that to the person embeds this
+//! setting, which does both once they turn it on and stops both when they
+//! turn it off (an app whose background is the point, a device owner's,
+//! asks for them itself):
 //!
 //! - on: the person asked whether the app may notify them
 //!   (`notifications::authorize`); yes, the device registered for push

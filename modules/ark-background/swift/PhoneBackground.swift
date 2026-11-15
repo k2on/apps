@@ -8,8 +8,8 @@
 //   launch finishes, as Apple requires), and asked for again after each run.
 // - Mac: an `NSBackgroundActivityScheduler` repeating at the interval.
 //
-// Off until the app asks (`set`), and the app asks only once the person
-// turned it on; what was asked is kept in the app's defaults. Each run is a
+// Off until the app asks (`set`): when the person turns it on, or when the
+// app decides; what was asked is kept in the app's defaults. Each run is a
 // wake of the process's one runtime (`ArkProcess.wake(.sync, …)`), and the
 // task is finished when the runtime is idle or the system's time is up.
 import Foundation
