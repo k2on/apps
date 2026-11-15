@@ -266,7 +266,7 @@ jobs:
           - { name: ffi, checks: "ffi harken-domain harken-module traces vectors fuzz-smoke versions" }
           - { name: docs, checks: "docs" }
           - { name: lint, checks: "fmt theme theme-contrast layers channels" }
-          - { name: apps, checks: "prebuild money-native revelation-native money-web-sync money-desktop" }
+          - { name: apps, checks: "prebuild money-native harken-native revelation-native money-web-sync money-desktop harken-desktop" }
     name: checks (${{ matrix.group.name }})
     runs-on: ubuntu-latest
     steps:
@@ -436,7 +436,7 @@ jobs:
   # A tag is a release: every APK (the stable channel's, the apps' own
   # ids), attached to it, by one job so the builds never race to create
   # the same release. The keys are public, so the APKs install anywhere
-  # and belong nowhere public (harken/android/README.md). The same APKs go
+  # and belong nowhere public (nix/fdroid/README.md). The same APKs go
   # to the stable F-Droid repository (`deploy`).
   release:
     needs: apk

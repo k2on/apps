@@ -4,7 +4,7 @@
 
 use ark_app::{App, Ask, Host, Inbox, Modules, Runtime, Ticket};
 use ark_peer::store::Store;
-use ark_peer::{Config, Peer};
+use ark_peer::Peer;
 use harken_domain::{HarkenChange, HarkenView};
 
 use crate::{HarkenRequest, Route};
@@ -23,10 +23,7 @@ pub struct Demo<A: App> {
 
 /// The demo's library as a peer of its own, its authority the library's.
 pub fn demo_peer() -> Peer {
-    let mut peer = Peer::open_as(Config::of(harken_domain::shared()), Box::new(harken_seed::seeded_disk(1)), None);
-    peer.set_roles([harken_domain::LIBRARY]);
-    peer.alone();
-    peer
+    harken_seed::open(harken_seed::seeded_disk("2026-10-26", NOW))
 }
 
 impl<A: App<Key = HarkenView, Change = HarkenChange, Route = Route, Request = HarkenRequest>> Demo<A> {

@@ -494,8 +494,8 @@ impl Headless {
         with_roles(&mut who, &f.roles);
         let config = match &f.device {
             Some(d) => {
-                let said = harken_player::config::device(d.can_play, &d.kind, &d.name);
-                harken_player::config::peer(&hosted.domain, said, 250)
+                let said = harken_server::config::device(d.can_play, &d.kind, &d.name);
+                harken_server::config::peer(&hosted.domain, said, 250)
             }
             None => Config::of(hosted.domain.clone()),
         };

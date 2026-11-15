@@ -1,3 +1,0 @@
-# harken's library's Kotlin package; the Swift module is the crate's name.
-[bindings.kotlin]
-package_name = "dev.harken.ffi"

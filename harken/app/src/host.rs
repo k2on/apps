@@ -8,7 +8,7 @@
 //! made to agree with the session whenever the store or the sound moved
 //! (ui/docs/app.md, "harken's Port").
 
-use ark_app::host::{Cx, Has, HostedApp, Link, Running, Screen, Session};
+use ark_app::host::{Cx, Has, HostedApp, Link, Running, Screen, Session, ShellAsk};
 use harken_domain::player::{Change, Press};
 use harken_domain::{HarkenChange, HarkenView};
 
@@ -42,6 +42,9 @@ pub struct Harken {
     pub car: Car,
     /// Why the last press was not taken, while it is the last.
     pub refused: Option<String>,
+    /// Settings shows, in a window its host draws itself
+    /// (`ark_app::window`); a phone's shell puts up its own.
+    pub settings: bool,
 }
 
 /// `n` tracks' order shuffled from `seed`: a permutation, the same for one
@@ -66,6 +69,18 @@ fn title(r: &Route) -> String {
         Route::Playlist { name, .. } => name.clone(),
         r => r.title(),
     }
+}
+
+/// The path an address names, its scheme, host and query gone: `search`
+/// for `/search/`, `harken://search` and `harken:///search?x=1`.
+fn section_of(address: &str) -> &str {
+    let path = address.split(['?', '#']).next().unwrap_or_default();
+    let path = match path.split_once("://") {
+        Some((scheme, rest)) if scheme.starts_with("http") => rest.find('/').map_or("", |i| &rest[i..]),
+        Some((_, rest)) => rest,
+        None => path,
+    };
+    path.trim_matches('/')
 }
 
 impl HostedApp for Harken {
@@ -95,6 +110,7 @@ impl HostedApp for Harken {
             listen: Listen::open(session, cx),
             car: Car::default(),
             refused: None,
+            settings: false,
         };
         let server = session.server.clone();
         h.home.send(HomeMsg::Server { server: server.clone() }, cx);
@@ -202,6 +218,7 @@ impl HostedApp for Harken {
             HarkenRequest::Mute { muted } => self.listen.loud(Change::Mute { muted }, cx),
             HarkenRequest::AddTo { track } => return self.sheets.send(SheetsMsg::AddTo { track }, cx),
             HarkenRequest::Follow { kind } => return self.sheets.send(SheetsMsg::Follow { kind }, cx),
+            HarkenRequest::Settings { pane } => return cx.native(ShellAsk::Settings { pane }),
         };
         self.refused = self.listen.press(press, cx);
         self.listen.step(cx);
@@ -219,14 +236,41 @@ impl HostedApp for Harken {
         self.tell(cx);
     }
 
+    /// A link: what shows of the shell's own put away (a sheet, the full
+    /// player, Settings), then a launch's arguments, or an address — a
+    /// section's own (`/`, `/search`), Settings', else a route's page.
     fn link(&mut self, link: Link, cx: &mut Cx<'_, Harken>) {
-        if let Link::Address(address) = link {
-            let route = <Route as ark_router::Routable>::route_of(&address);
-            self.route(route, cx)
+        self.sheets.send(SheetsMsg::Dismiss, cx);
+        self.shell.send(ShellMsg::ClosePlayer, cx);
+        cx.native(ShellAsk::Reset);
+        let address = match link {
+            Link::Launch(args) => return self.shell.send(ShellMsg::Launch { args }, cx),
+            Link::Address(address) => address,
+        };
+        match section_of(&address) {
+            "" | "home" => self.shell.send(ShellMsg::Select { tag: "home".into() }, cx),
+            "search" => self.shell.send(ShellMsg::Select { tag: "search".into() }, cx),
+            "library/playlists" => {
+                self.shell.send(ShellMsg::Select { tag: "library".into() }, cx);
+                self.library.send(LibraryMsg::Show { kind: "playlists".into() }, cx)
+            }
+            // Settings, on the pane its query names (`?pane=diagnostics`).
+            "settings" => {
+                let pane = address.split_once("pane=").map(|(_, p)| p.split('&').next().unwrap_or_default());
+                let mut args = vec!["-screen".to_string(), "settings".into()];
+                args.extend(pane.into_iter().flat_map(|p| ["-pane".to_string(), p.to_string()]));
+                self.shell.send(ShellMsg::Launch { args }, cx)
+            }
+            _ => {
+                let route = <Route as ark_router::Routable>::route_of(&address);
+                self.route(route, cx)
+            }
         }
     }
 
-    fn launched(&mut self, _: Vec<String>, _: &mut Cx<'_, Harken>) {}
+    fn launched(&mut self, args: Vec<String>, cx: &mut Cx<'_, Harken>) {
+        self.shell.send(ShellMsg::Launch { args }, cx)
+    }
 }
 
 impl Harken {
@@ -281,7 +325,7 @@ macro_rules! has {
 has!(HarkenShell => shell, Home => home, Library => library, Search => search, Page => page, Player => player, Sheets => sheets);
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
 
 #[cfg(test)]
 mod listen_tests;

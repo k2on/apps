@@ -26,3 +26,9 @@ ark-media-player = { path = "../../modules/ark-media-player" }
 # The tests' store, a peer's, over the demo's library.
 ark-peer = { path = "../../rust/ark-peer", default-features = false }
 harken-seed = { path = "../demo", default-features = false }
+# harken as its phones run it against a deployed server (tests/deployed.rs):
+# its part of its host under ark-ffi's `Hosted`, as its generated library
+# puts them together.
+ark-ffi = { path = "../../rust/ark-ffi" }
+serde_json = { workspace = true }
+tempfile = "3"

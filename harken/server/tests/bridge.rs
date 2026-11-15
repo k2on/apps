@@ -1052,7 +1052,7 @@ fn asking_for_the_next_batch_does_not_leave_the_session() {
 ///
 /// The browser's half of the rule — offering what it played while it was
 /// away only to a session no other device has — is its reconciler's, and
-/// tested there (`harken-player`'s tests); what is held here is that the
+/// tested there (`harken_domain::player`'s tests); what is held here is that the
 /// session the browser comes back to says so.
 ///
 /// Falsified by an `on_join` that gave a present output to whoever joined
@@ -1681,7 +1681,7 @@ fn standing(p: &mut Peer) -> Option<i64> {
 /// Here a browser is forty seconds into a track and hands it to the kitchen,
 /// which drops a seek sent before it has loaded the track ([`LOADING`]), as
 /// a Sonos does. From the transfer on the browser is not the output — its
-/// reconciler goes quiet on that, which `harken-iced`'s tests hold — and the
+/// reconciler goes quiet on that, which `harken_domain::player`'s tests hold — and the
 /// session stands still where the track was while the kitchen fetches; the
 /// kitchen ends up there and not at 0; and on no device does the session's
 /// position ever go back. Then the same handed back to the browser, which

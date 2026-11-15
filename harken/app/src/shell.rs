@@ -7,6 +7,7 @@
 //! grows into), there while something plays ([`ShellMsg::Playing`], the
 //! host's word).
 
+use ark_app::shell::{Household, Launch};
 use ark_app::{App, Command, Data};
 use harken_domain::{HarkenChange, HarkenView};
 
@@ -32,7 +33,22 @@ pub struct State {
     pub pane: String,
     /// What the session says of itself, for Settings and the diagnostics.
     pub facts: Facts,
+    /// The appearance asked for over the system's: a launch's.
+    pub appearance: Option<Appearance>,
 }
+
+/// Light or dark, over the system's.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, ark::twin::Twin)]
+pub enum Appearance {
+    Light,
+    Dark,
+}
+
+/// The sections, by their tags, in the order the shell shows them.
+pub const SECTIONS: [&str; 3] = ["home", "library", "search"];
+
+/// Settings' panes, by their titles.
+pub const PANES: [&str; 2] = ["General", "Diagnostics"];
 
 /// What Settings and the diagnostics say of the session, as the host's
 /// session says it.
@@ -51,6 +67,13 @@ pub struct Facts {
     pub connections: String,
     /// A server is there to say.
     pub on_server: bool,
+    /// Who is signed in (the demo's listener alone), and their picture.
+    pub who: String,
+    pub picture: String,
+    /// Their login, as the account sheet says it under their name.
+    pub login: String,
+    /// The link: up, down, or not known yet; none alone.
+    pub linked: Option<bool>,
 }
 
 impl Facts {
@@ -75,6 +98,14 @@ impl Facts {
             device: if s.device.is_empty() { "None".into() } else { s.device.clone() },
             connections: s.epoch.to_string(),
             on_server: !s.demo,
+            who: match () {
+                _ if s.demo => "Alex".into(),
+                _ if !s.name.is_empty() => s.name.clone(),
+                _ => s.user.clone(),
+            },
+            picture: if s.demo { String::new() } else { s.picture.clone() },
+            login: if s.demo { String::new() } else { s.user.clone() },
+            linked: if s.demo { None } else { s.linked },
         }
     }
 }
@@ -98,10 +129,13 @@ pub enum ShellMsg {
     /// The now-playing bar grown into the full player, and back.
     OpenPlayer,
     ClosePlayer,
-    /// The bar swiped: on (1) or back (-1) a track.
+    /// The bar swiped, or the menu's Next and Previous: on (1) or back
+    /// (-1) a track.
     Skip {
         by: i64,
     },
+    /// The menu's Play and Pause.
+    Toggle,
     /// Settings' pane of this title.
     Pane {
         title: String,
@@ -109,6 +143,17 @@ pub enum ShellMsg {
     /// What the session says of itself now, as the host reads it.
     Facts {
         facts: Facts,
+    },
+    /// Who is signed in, pressed: Settings, on General.
+    Account,
+    /// A launch's arguments (`-screen library`, `-appearance dark`,
+    /// `-pane diagnostics`): the section and the look they name.
+    Launch {
+        args: Vec<String>,
+    },
+    /// A page shown in the system's browser closed: harken opens none.
+    PageClosed {
+        url: String,
     },
 }
 
@@ -122,6 +167,62 @@ pub struct ShellPage {
     pub player_open: bool,
     pub pane: String,
     pub facts: Facts,
+    /// Light or dark over the system's, as a launch asked.
+    pub appearance: Option<Appearance>,
+    /// Who is signed in, as the account face and its sheet say it.
+    pub household: Household,
+    /// A page shown in the system's browser: harken opens none.
+    pub browse: Option<String>,
+}
+
+/// Who is listening and where, of the facts the host told the shell.
+fn household(f: &Facts) -> Household {
+    Household {
+        who: f.who.clone(),
+        picture: f.picture.clone(),
+        detail: if f.on_server {
+            f.login.clone()
+        } else {
+            "The demo's library, on this device alone".into()
+        },
+        server: (f.on_server && !f.server.is_empty()).then(|| f.server.clone()),
+        linked: f.linked,
+        demo: !f.on_server,
+        ..Household::default()
+    }
+}
+
+/// A launch's section, pane and look taken.
+fn launch(s: &mut State, l: Launch) -> Vec<Command<HarkenShell>> {
+    if let Some(a) = l.appearance.as_deref() {
+        s.appearance = match a {
+            "light" => Some(Appearance::Light),
+            "dark" => Some(Appearance::Dark),
+            _ => None,
+        };
+    }
+    if let Some(p) = l.pane.as_deref() {
+        if let Some(t) = PANES.iter().find(|t| t.eq_ignore_ascii_case(p)) {
+            s.pane = (*t).into();
+        }
+    }
+    match l.screen.as_deref() {
+        Some("settings") => vec![Command::Request(HarkenRequest::Settings { pane: s.pane.clone() })],
+        Some(tag) if SECTIONS.contains(&tag) => {
+            if tag != s.section {
+                s.pushed = None;
+            }
+            s.section = tag.into();
+            vec![]
+        }
+        // One of the library's kinds (`-screen albums`): its index, the
+        // library's way.
+        Some(kind) => match Route::of_kind(kind) {
+            Some(r) => vec![Command::Open(r)],
+            None => vec![],
+        },
+        None => vec![],
+    }
 }
 
 impl App for HarkenShell {
@@ -171,6 +272,7 @@ impl App for HarkenShell {
                 vec![]
             }
             ShellMsg::Skip { by } => vec![Command::Request(HarkenRequest::Skip { by })],
+            ShellMsg::Toggle => vec![Command::Request(HarkenRequest::Toggle)],
             ShellMsg::Pane { title } => {
                 s.pane = title;
                 vec![]
@@ -179,6 +281,12 @@ impl App for HarkenShell {
                 s.facts = facts;
                 vec![]
             }
+            ShellMsg::Account => {
+                s.pane = PANES[0].into();
+                vec![Command::Request(HarkenRequest::Settings { pane: PANES[0].into() })]
+            }
+            ShellMsg::Launch { args } => launch(s, Launch::parse(&args)),
+            ShellMsg::PageClosed { .. } => vec![],
         }
     }
 
@@ -189,8 +297,11 @@ impl App for HarkenShell {
             page_title: s.pushed.clone().unwrap_or_default(),
             playing: s.playing,
             player_open: s.player_open,
-            pane: if s.pane.is_empty() { "General".into() } else { s.pane.clone() },
+            pane: if s.pane.is_empty() { PANES[0].into() } else { s.pane.clone() },
             facts: s.facts.clone(),
+            appearance: s.appearance,
+            household: household(&s.facts),
+            browse: None,
         }
     }
 }

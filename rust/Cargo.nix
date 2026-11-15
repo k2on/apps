@@ -347,36 +347,6 @@ rec {
       # File a bug if you depend on any for non-debug work!
       debug = internal.debugCrate { inherit packageId; };
     };
-    "harken-ffi" = rec {
-      packageId = "harken-ffi";
-      build = internal.buildRustCrateWithFeatures {
-        packageId = "harken-ffi";
-      };
-
-      # Debug support which might change between releases.
-      # File a bug if you depend on any for non-debug work!
-      debug = internal.debugCrate { inherit packageId; };
-    };
-    "harken-iced" = rec {
-      packageId = "harken-iced";
-      build = internal.buildRustCrateWithFeatures {
-        packageId = "harken-iced";
-      };
-
-      # Debug support which might change between releases.
-      # File a bug if you depend on any for non-debug work!
-      debug = internal.debugCrate { inherit packageId; };
-    };
-    "harken-player" = rec {
-      packageId = "harken-player";
-      build = internal.buildRustCrateWithFeatures {
-        packageId = "harken-player";
-      };
-
-      # Debug support which might change between releases.
-      # File a bug if you depend on any for non-debug work!
-      debug = internal.debugCrate { inherit packageId; };
-    };
     "harken-seed" = rec {
       packageId = "harken-seed";
       build = internal.buildRustCrateWithFeatures {
@@ -1578,6 +1548,12 @@ rec {
             features = [ "ffi" ];
           }
           {
+            name = "ark-media-player";
+            packageId = "ark-media-player";
+            optional = true;
+            features = [ "ffi" ];
+          }
+          {
             name = "ark-module";
             packageId = "ark-module";
           }
@@ -1653,12 +1629,13 @@ rec {
           "camera" = [ "dep:ark-camera" ];
           "clipboard" = [ "dep:ark-clipboard" ];
           "haptics" = [ "dep:ark-haptics" ];
+          "media-player" = [ "dep:ark-media-player" ];
           "model" = [ "scanner" "ark-scanner/model" ];
           "push" = [ "dep:ark-push" ];
           "scanner" = [ "camera" "dep:ark-scanner" ];
           "share" = [ "dep:ark-share" ];
         };
-        resolvedDefaultFeatures = [ "bindgen" "camera" "clipboard" "haptics" "model" "push" "scanner" "share" ];
+        resolvedDefaultFeatures = [ "bindgen" "camera" "clipboard" "haptics" "media-player" "model" "push" "scanner" "share" ];
       };
       "ark-format" = rec {
         crateName = "ark-format";
@@ -9888,6 +9865,10 @@ rec {
         ];
         devDependencies = [
           {
+            name = "ark-ffi";
+            packageId = "ark-ffi";
+          }
+          {
             name = "ark-peer";
             packageId = "ark-peer";
             usesDefaultFeatures = false;
@@ -9896,6 +9877,15 @@ rec {
             name = "harken-seed";
             packageId = "harken-seed";
             usesDefaultFeatures = false;
+          }
+          {
+            name = "serde_json";
+            packageId = "serde_json";
+            features = [ "raw_value" ];
+          }
+          {
+            name = "tempfile";
+            packageId = "tempfile";
           }
         ];
 
@@ -9936,219 +9926,6 @@ rec {
         features = {
         };
         resolvedDefaultFeatures = [ "push" ];
-      };
-      "harken-ffi" = rec {
-        crateName = "harken-ffi";
-        version = "0.1.0";
-        edition = "2021";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../harken/ffi; };
-        libName = "harken_ffi";type = [ "lib" "cdylib" "staticlib" ];
-        dependencies = [
-          {
-            name = "ark";
-            packageId = "ark";
-          }
-          {
-            name = "ark-app";
-            packageId = "ark-app";
-          }
-          {
-            name = "ark-ffi";
-            packageId = "ark-ffi";
-          }
-          {
-            name = "ark-format";
-            packageId = "ark-format";
-          }
-          {
-            name = "ark-format-ffi";
-            packageId = "ark-format-ffi";
-          }
-          {
-            name = "ark-media-player";
-            packageId = "ark-media-player";
-            features = [ "ffi" ];
-          }
-          {
-            name = "ark-peer";
-            packageId = "ark-peer";
-            usesDefaultFeatures = false;
-          }
-          {
-            name = "harken-app";
-            packageId = "harken-app";
-          }
-          {
-            name = "harken-domain";
-            packageId = "harken-domain";
-          }
-          {
-            name = "harken-player";
-            packageId = "harken-player";
-          }
-          {
-            name = "serde_json";
-            packageId = "serde_json";
-            features = [ "raw_value" ];
-          }
-          {
-            name = "uniffi";
-            packageId = "uniffi";
-            usesDefaultFeatures = false;
-          }
-        ];
-        devDependencies = [
-          {
-            name = "arkdb";
-            packageId = "arkdb";
-          }
-          {
-            name = "serde_json";
-            packageId = "serde_json";
-            features = [ "raw_value" ];
-          }
-          {
-            name = "tempfile";
-            packageId = "tempfile";
-          }
-        ];
-
-      };
-      "harken-iced" = rec {
-        crateName = "harken-iced";
-        version = "0.1.0";
-        edition = "2021";
-        crateBin = [
-          {
-            name = "harken-iced";
-            path = "src/main.rs";
-            requiredFeatures = [ ];
-          }
-        ];
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../harken/iced; };
-        dependencies = [
-          {
-            name = "ark";
-            packageId = "ark";
-          }
-          {
-            name = "ark-auth";
-            packageId = "ark-auth";
-            usesDefaultFeatures = false;
-          }
-          {
-            name = "ark-media-player";
-            packageId = "ark-media-player";
-            features = [ "desktop" ];
-          }
-          {
-            name = "ark-peer";
-            packageId = "ark-peer";
-            usesDefaultFeatures = false;
-          }
-          {
-            name = "ark-secure-store";
-            packageId = "ark-secure-store";
-            features = [ "desktop" ];
-          }
-          {
-            name = "arkui";
-            packageId = "arkui";
-          }
-          {
-            name = "arkui-shots";
-            packageId = "arkui-shots";
-          }
-          {
-            name = "harken-app";
-            packageId = "harken-app";
-          }
-          {
-            name = "harken-domain";
-            packageId = "harken-domain";
-          }
-          {
-            name = "harken-player";
-            packageId = "harken-player";
-          }
-          {
-            name = "harken-seed";
-            packageId = "harken-seed";
-            optional = true;
-            usesDefaultFeatures = false;
-          }
-          {
-            name = "iced";
-            packageId = "iced";
-            usesDefaultFeatures = false;
-            features = [ "winit" "wgpu" "tiny-skia" "crisp" "web-colors" "thread-pool" "linux-theme-detection" "x11" "wayland" "a11y" "smol" "svg" "image" "advanced" "fira-sans" ];
-          }
-          {
-            name = "serde";
-            packageId = "serde";
-            features = [ "derive" ];
-          }
-          {
-            name = "serde_json";
-            packageId = "serde_json";
-            features = [ "raw_value" ];
-          }
-          {
-            name = "tungstenite";
-            packageId = "tungstenite";
-            usesDefaultFeatures = false;
-            features = [ "handshake" ];
-          }
-          {
-            name = "ureq";
-            packageId = "ureq";
-            usesDefaultFeatures = false;
-            features = [ "tls" ];
-          }
-        ];
-        devDependencies = [
-          {
-            name = "iced_tiny_skia";
-            packageId = "iced_tiny_skia";
-          }
-        ];
-        features = {
-          "demo" = [ "dep:harken-seed" ];
-        };
-        resolvedDefaultFeatures = [ "demo" ];
-      };
-      "harken-player" = rec {
-        crateName = "harken-player";
-        version = "0.1.0";
-        edition = "2021";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../harken/player; };
-        libName = "harken_player";
-        dependencies = [
-          {
-            name = "ark";
-            packageId = "ark";
-          }
-          {
-            name = "ark-peer";
-            packageId = "ark-peer";
-            usesDefaultFeatures = false;
-          }
-          {
-            name = "harken-domain";
-            packageId = "harken-domain";
-          }
-          {
-            name = "serde";
-            packageId = "serde";
-            features = [ "derive" ];
-          }
-          {
-            name = "serde_json";
-            packageId = "serde_json";
-            features = [ "raw_value" ];
-          }
-        ];
-
       };
       "harken-seed" = rec {
         crateName = "harken-seed";
@@ -10256,10 +10033,6 @@ rec {
           {
             name = "harken-domain";
             packageId = "harken-domain";
-          }
-          {
-            name = "harken-player";
-            packageId = "harken-player";
           }
           {
             name = "lofty";
@@ -11722,7 +11495,7 @@ rec {
           "wayland" = [ "softbuffer/wayland" "softbuffer/wayland-dlopen" ];
           "x11" = [ "softbuffer/x11" "softbuffer/x11-dlopen" ];
         };
-        resolvedDefaultFeatures = [ "default" "image" "resvg" "svg" "wayland" "x11" ];
+        resolvedDefaultFeatures = [ "image" "resvg" "svg" "wayland" "x11" ];
       };
       "iced_wgpu" = rec {
         crateName = "iced_wgpu";

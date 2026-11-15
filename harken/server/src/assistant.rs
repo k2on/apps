@@ -9,7 +9,7 @@
 //! hub in this process ([`ha`]), a volatile machine of its own saying in
 //! its `Hello` that it is a speaker, standing in each account's session for
 //! each configured speaker, reconciled against the state by **the same
-//! reconciler a phone's player is** (`harken-player`, S3b), which says what
+//! reconciler a phone's player is** (`harken_domain::player`, S3b), which says what
 //! the speaker does as the output's own transitions.
 //!
 //! **Home Assistant rather than Sonos directly**, and not for convenience: you

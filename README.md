@@ -34,10 +34,10 @@ a crate of plain Rust every peer links — and harken, the first app on it.
 - `spec/` — the vectors the kernel is held to (the bytes, the machine, the
   frames, the views), `RUNNERS.md` (how `arkdb` runs them) and
   `AUTHORING.md` (writing a domain).
-- `harken/` — the app: `domain/` (a crate of plain Rust), `server/` and
-  `iced/` (desktop and browser), and the phones: `ffi/` (the kernel with
-  the domain linked in, one native library) under `android/` (Compose)
-  and `ios/` (SwiftUI), each over the types `arkdb gen` writes.
+- `harken/` — the app, an Ark app as money is (ui/docs/app.md): its
+  `app.toml`, `core/` (the domain, a crate of plain Rust), `app/` (every
+  screen and its host's part in Rust), `server/` and `demo/`; its phones,
+  its browser page and its desktop window are generated from app.toml.
   `harken/README.md` says how to run them together.
 - `docs/site` — the documentation site, static HTML generated with pictures
   drawn by arkui itself, its own Cargo workspace so that it
@@ -130,7 +130,7 @@ build of main, as `.unstable` apps beside them, in another
 One command holds all of it:
 
     nix flake check   # rust: every test of the workspace
-                      #   (and harken-iced's demo feature);
+                      #   (and arkui with the desktop's host);
                       # clippy: the workspace lint-clean, -D warnings;
                       # fmt: the workspace formatted;
                       # vectors: spec/vectors is what the writer writes;
@@ -140,13 +140,13 @@ One command holds all of it:
                       #   pinned revisions (none pinned now);
                       # harken-domain: the domain builds, its schema hash pinned;
                       # harken-module: the NixOS module evaluates;
-                      # ffi: ark-ffi and harken/ffi, their tests, UniFFI's
-                      #   Kotlin and Swift, the generated types held to the domain;
-                      # harken-ios-typecheck: the iOS app's non-UI Swift
-                      #   type-checked on Linux against the library
-    nix build .#harken-server   # or harken-iced, harken-domain,
-                                # ark, vectors, trace-corpus
+                      # ffi: ark-ffi and its tests, UniFFI's Kotlin and Swift
+                      #   for each Ark app's generated library;
+                      # <app>-ios-typecheck: the app library's non-UI Swift
+                      #   type-checked on Linux against each app's library
+    nix build .#harken-server   # or harken-domain, ark, vectors, trace-corpus
     nix run .#money-desktop     # money's desktop window, generated from app.toml
+                                # (and harken-desktop, harken-export-web)
     nix build .#harken-apk      # the kernel for three ABIs and the APK over it
     nix build .#revelation-apk  # Revelation's APK
     nix build .#fdroid-repo     # every APK as the stable F-Droid repository,
@@ -167,7 +167,7 @@ the seen part ends.
 
 ## The desktop window and the GPU
 
-`nix run .#money-desktop` (and `harken-iced`) says on stderr, first thing,
+`nix run .#money-desktop` (and `harken-desktop`) says on stderr, first thing,
 what it will draw with: `renderer: wgpu (Vulkan, Apple M2 (G14G), integrated
 GPU)`, or `renderer: tiny-skia (CPU) — no GPU adapter: <why>`, the why being
 what refused iced's device or which driver library would not load and what

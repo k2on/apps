@@ -7,6 +7,15 @@ crate = "ark-media-player"
 [ops]
 MediaOp = "()"
 
+# How the phone makes its player and hands it to the process (ark-ffi's
+# `devices`, ui/prebuild.py): AVPlayer with its placeholder artwork in the
+# app's palette (`{accent}`, app.toml's), and Media3 over the media session
+# service below.
+[phone]
+register = "registerMediaPlayer"
+swift = "PhoneMediaPlayer(squares: .{accent})"
+kotlin = "dev.arkui.modules.PhoneMediaPlayer(view.context)"
+
 # Playing on with the screen locked and the app in the background: only for
 # an app whose app.toml says `[background] playback = true` (ui/prebuild.py).
 [ios.playback]

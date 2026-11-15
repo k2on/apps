@@ -26,6 +26,7 @@ ark-clipboard = { path = "../../modules/ark-clipboard", features = ["ffi"], opti
 ark-share = { path = "../../modules/ark-share", features = ["ffi"], optional = true }
 ark-camera = { path = "../../modules/ark-camera", features = ["ffi"], optional = true }
 ark-scanner = { path = "../../modules/ark-scanner", optional = true }
+ark-media-player = { path = "../../modules/ark-media-player", features = ["ffi"], optional = true }
 # A wake from the notifications (a push, a notice's button) and the
 # endpoint they hand out written as the session's push row (`wake`).
 ark-notifications = { path = "../../modules/ark-notifications", features = ["ffi"] }
@@ -59,6 +60,7 @@ haptics = ["dep:ark-haptics"]
 clipboard = ["dep:ark-clipboard"]
 share = ["dep:ark-share"]
 camera = ["dep:ark-camera"]
+media-player = ["dep:ark-media-player"]
 scanner = ["camera", "dep:ark-scanner"]
 # The scanner's corner model (ark-scanner's): Android's camera gives its
 # eyes a colour square, which the model reads; the iPhone and the Mac find

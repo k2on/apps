@@ -21,9 +21,9 @@ The rule that decides which is which:
 
 ## What Harken Lays Out
 
-Harken's phones are still hand-written (harken/ios, SwiftUI; harken/android,
-Compose); its port to Rust comes later. What it lays out, and what that
-asks of ArkUI:
+Harken's screens are Rust now (harken-app's `#[view]`s, ui/docs/app.md,
+"harken's Port"), drawn by every toolkit from these parts. What it lays
+out, and what that asked of ArkUI:
 
 | Screen | Native containers (stay parts) | Stack-composed visuals | Components that fall out |
 |---|---|---|---|

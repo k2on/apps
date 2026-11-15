@@ -4,7 +4,7 @@ A self-hosted music system: a library a server scans from a directory,
 podcasts and sermons it follows by their feeds and downloads, playlists, one listening session per account across every device, and the
 speakers in the house as devices in it. All of it runs on ArkDB at spec v5
 (`docs/plan-v5.md`): one log, one domain written once in plain Rust and
-linked by the server, the desktop and the phones, and every
+linked by the server and every client, and every
 query a view a client keeps up to date by the rows a change touched.
 
 ```
@@ -18,27 +18,29 @@ domain/    the domain, in plain Rust (spec/AUTHORING.md): src/schema.rs,
            of it beside its functions
 server/    an ark-peer that listens, with harken's own parts: the scanner, the Home Assistant
            bridge, sign-in, /media, a web directory when given one;
-           the NixOS module (server/README.md)
-iced/      the desktop client, on arkui and ark-peer; the `demo`
-           feature is a seeded library with no server
-ffi/       the phones' library: ark-ffi (the kernel through UniFFI) with the
-           domain linked in — `harken_open`, the listening session as JSON,
-           and a Hall, a harken server in the process for the apps' tests
-android/   the phone: Compose over ffi/, through the Kotlin `arkdb gen
-           kotlin` writes from the domain (android/README.md)
-ios/       SwiftUI over ffi/, through the Swift `arkdb gen swift` writes
-           (ios/README.md); never built for iOS
+           the NixOS module (server/README.md); the peers' configuration
+           (src/config.rs), and in its tests a hall, the hub in the process
+app/       harken as an Ark app (ui/docs/app.md, "harken's Port"): every
+           screen's state, messages, update and #[view], the shell and
+           Settings, the player and this device's sound, the car's
+           browse tree, and its host's part (`host::Harken`, and
+           `window` for the desktop and the browser)
+demo/      harken-seed: the demo library (the classical catalogue, the
+           shows, the covers), shots.json, server.sh
+app.toml   what it is, from which every client is generated: the
+           phones' library and projects, the browser's page, the
+           desktop's window (ui/docs/app.md, "Generated, Not Committed")
+icon.svg   its icon, every platform's
 ```
 
-**What runs where.** The domain is Rust and runs everywhere as Rust: the
-server and the desktop link it, and each phone loads
-it inside one native library, `libharken_ffi` (`ffi/`, `docs/plan-v5.md`
-§1.16) — the kernel, the link, the disk and the views are the same code on
-every device. A phone's own code is its screens, its player and its
-onboarding; it calls the domain by function name with JSON, typed by the
-data classes and structs `arkdb gen` writes from the registered domain
-(`android/.../gen/Harken.kt`, `ios/Harken/Gen/Harken.swift`, held to the
-domain by `ffi/tests/gen.rs`).
+**What runs where.** The domain is Rust and runs everywhere as Rust, and
+so does every screen: the iPhone, the iPad, the Mac and Android draw
+harken-app's views through the app library's shell over the generated
+library (`harken-ffi`), the browser through arkui-web's host
+(`harken-web`), the desktop through arkui's (`harken-desktop`) — the
+kernel, the link, the disk, the views and the screens are the same code
+on every device. Nothing native of harken's is committed but the debug
+key every APK is signed with (`debug.keystore`).
 
 ## The domain
 
@@ -106,7 +108,8 @@ They come from two places:
   account holding the `library` role (`services.harken.roles`) — on the
   desktop and in a browser from the + on Podcasts or Sermons, which
   searches Apple's podcast directory or takes a feed's address
-  (`iced/src/directory.rs`); on a phone from Settings. The server reads each at boot, at every
+  (the directory's search is not in harken-app yet: following is by the
+  feed's address, from Library's Podcasts and Sermons). The server reads each at boot, at every
   rescan, every hour and whenever one is followed, and puts its newest
   twenty episodes in the library; a show's page fetches older ones
   (`library.fetch_older`, twenty more or every one), and Unfollow takes
@@ -238,30 +241,13 @@ position itself and nothing heartbeats.
   member in proportion (`set_group_volume`, `nudge_group_volume`,
   `set_group_mute`). A phone, a browser and a desktop have no family —
   nothing keeps their audio in step with anybody's — so nothing joins them.
-- **`q`** is the queue — the track playing, then up next, in the order it
-  will play, the session's or, alone, this device's own: `<Enter>` or a
-  click plays a row, `x` takes it out, `J` and `K` move it down and up
-  among what plays after the track playing; the button beside the
-  device picker's on the bar opens it too, and a row's menu has **Play
-  next** and **Add to queue**.
-- **`t`** is the transcript of the episode playing, once the server has
-  heard it (the button beside the queue's on the bar, there only then):
-  the line being said lit and kept in the middle, what was said dimmed,
-  whoever says it over their lines — a click on a voice's name asks who
-  it is. `j` and `k` walk it and `<Enter>` or a
-  click plays from a line; a cursor moved or a page scrolled by hand stays
-  put until playback reaches the line it was left on, or **Follow** (`f`).
-- **`d`** is the picker — every device, the one away drawn and not a target,
-  no row that stops it everywhere, this device ticked while nothing plays,
-  every member of a playing group ticked, each row with its volume, a `+`
-  on a speaker that can join and a `−` on one that can leave, and the group
-  first as itself — and **`D`** every number the session holds: the
-  instance's sequence and pending calls, the server's clock offset, the
-  devices with their volumes, families and leaders, the group, every
-  scrubber being dragged (the one ephemeral field), the calls refused. On
-  the bar, a mute and a slider for what is playing; **`+`** and **`-`**
-  nudge it and **`M`** mutes it — in the picker, the row's; **`J`** there
-  joins or unjoins the row.
+- **The player** is harken-app's (`player::Player`): the now-playing bar
+  over the sections, grown into the full player — the cover, the
+  scrubber counting on from the session's clock, the controls, the
+  volume, and while this device stands in the session the devices to
+  hand the sound to. The queue, the transcript and the groups' picker
+  the iced window had are not drawn yet (ui/docs/app.md, "Where It
+  Stands").
 
 **A play is the log's**: `record_play`, authored by the output once a
 track has played thirty seconds or half its length, once per play — so
@@ -278,32 +264,31 @@ Everything is `nix`, from the repository root:
 
     nix build .#harken-server      # the server, and harken-peer beside it
     nix run .#harken-serve         # …in dev auth: anyone is whoever they say
-    nix build .#harken-iced        # the desktop window
+    nix run .#harken-desktop       # the desktop window, generated from app.toml
+    nix run .#harken-export-web    # the browser's page, into dist/
     nix build .#harken-domain      # the domain crate, its schema hash held to its pin
     nix flake check                # fmt, clippy and every Rust test; the domain
                                    # builds, its schema hash pinned;
                                    # the vectors and traces; the NixOS module
 
 `nixosModules.default` is `services.harken` (`server/README.md` has its
-options). The phones:
+options). The phones, generated from app.toml as money's are:
 
-    nix build .#harken-android-lib # the kernel for three Android ABIs, and its Kotlin
-    nix build .#harken-apk         # the APK (android/README.md)
-    nix build .#harken-ios-xcframework  # a Mac only: HarkenFFI.xcframework (ios/README.md)
+    nix build .#harken-apk         # the APK, over harken-android-lib
+    nix run .#harken-prebuild      # the projects into harken/.native, for Xcode
+                                   # and Android Studio
+    nix build .#harken-ios-simulator  # a Mac only
 
-One workflow builds from `main` (`.github/workflows/build.yaml`). The
-browser demo that Pages published was iced compiled to wasm; iced is the
-desktop's alone now, and harken leaves Pages until its Leptos client
-exists (ui/docs/app.md). The F-Droid repository is `nix build .#fdroid-repo` over the APKs. That
-is the workflow once `.github/workflows/build.yaml` is updated for the native tree (its cache keys name files that no longer exist), and the
-patch predates the APK's return: its APK job is not in it.
+One workflow builds from `main` (`.github/workflows/build.yaml`): the
+APKs into the F-Droid repositories (`nix build .#fdroid-repo`), the
+browser's page at /apps/harken/ with its demo.
 
 ## Running it
 
     mkdir -p media/music && cp -r ~/Music/SomeAlbum media/music/
     HARKEN_MEDIA=$PWD/media nix run .#harken-serve   # 127.0.0.1:8787, dev auth
-    nix run .#harken-iced -- --server http://127.0.0.1:8787 --user alice
-    nix run .#harken-iced -- --server http://127.0.0.1:8787 --user bob
+    nix run .#harken-desktop -- --server http://127.0.0.1:8787 --user alice
+    nix run .#harken-desktop -- --server http://127.0.0.1:8787 --user bob
 
 The scanner adds whatever audio is under `music/` in `HARKEN_MEDIA`, and
 anything dropped there later; a file retagged is the same song with its new
@@ -319,29 +304,19 @@ additions land after the other's, in the order the server sequenced them.
 A window with no remembered login opens signed out and offers a sign-in
 button.
 
-### Starting without a server, connecting later
+### Starting without a server
 
-    nix run .#harken-iced            # no --server: alone
+    nix run .#harken-desktop -- -demo   # the demo library, no server
 
-With no `--server` the desktop opens **alone**. A page with no `?server=`
-first asks whoever served it: when its `/healthz` answers — a harken
-server serving its own page — it opens on that server, as it always did;
-from anywhere else (GitHub Pages, a file) it opens alone. Alone is this
-device's own replica in a fixed place — `local` under
-`$XDG_DATA_HOME/harken` —
-and it is not a demo: the peer is its own authority, every change is
-sequenced as it is made and kept, and the debug view (`D`) says `alone`. The
-line above the table has a server address and **connect**: that joins the
-server in place (`docs/plan-alone.md` §4). The chain sequenced alone is
-handed to it whole — the server adopts it by its facts and answers with the
-sequences it assigned (`docs/plan-v5.md` §1.7) — and that server's sign-in
-starts; once it finishes, the changes become the signer's, keeping their
-ids, and land after whatever the server already has. The lists on screen are patched through
-the join, not rebuilt. The server is remembered for `local`, so the next
-start opens there. Leaving a server is not yet a control.
+Every client's first run is every Ark app's (`ark_app::welcome`): a
+server's address and its sign-in, or the demo — the demo library
+(`harken-seed`) on this device alone, which `-demo` on the desktop and
+`?demo` in the browser open straight away. The phones and the browser
+signed in to the server that served the page sync with it as money's do
+(ui/docs/app.md, "Signing In").
 
-`harken-peer` does the same from a shell: `--alone` and later `--server
-URL` over one `--dir` is the join, and `join` and `leave` are commands.
+`harken-peer` joins a server from alone: `--alone` and later `--server
+URL` over one `--dir` is the join (`docs/plan-alone.md` §4), and `join` and `leave` are commands.
 
 ### Asking a running server, and backing it up
 
@@ -491,13 +466,11 @@ shipped v5 revision.
 
 ## Not verified
 
-No phone has run either app. The APK is assembled for three ABIs; it has
-not been installed. The iOS app has not been built: the xcframework needs a
-Mac, and its Swift has not met a compiler (android/README.md,
-ios/README.md say what was checked).
-No desktop window has been opened: the desktop is only driven through its
-tests (the browser build, iced in wasm, is gone: harken's browser client
-will be Leptos, ui/docs/app.md). Nothing
+No phone has run the generated app by hand: its screens are photographed
+on simulators and emulators (app-screens), and its Rust is tested over the
+demo library and a hub. The generated clients do not stand in the
+listening session yet: their peer opens with no live space
+(ui/docs/app.md, "Where It Stands"), so each plays alone. Nothing
 here has met a real Home Assistant or a real OpenID Connect provider.
 The listening session has run between real sockets, peers and the bridge
 against a stand-in house, and the reconcilers against a stand-in player;

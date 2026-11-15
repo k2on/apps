@@ -191,6 +191,24 @@ fn alone_a_play_is_this_devices_own_sound() {
     assert!(!h.app().player.page(&place, NOW).now.playing);
 }
 
+/// A player registered after the session opened (a phone's screen hands
+/// the process its player once it shows) is the one a play then loads.
+/// Falsified by the host taking the place's player only at its open: the
+/// play found none, and nothing here played.
+#[test]
+fn a_player_registered_after_the_open_is_the_one_played() {
+    let fake = Fake::new();
+    let mut place = alone(&fake);
+    place.modules = Modules::new();
+    let (mut h, mut place) = hosted(place);
+    fake.register(&mut place.modules);
+    let first = h.app().home.page(&place, NOW).newest[0].clone();
+    h.send::<Home>(HomeMsg::PlayNew { id: first.key.clone() }, &mut place);
+    let asked = fake.take();
+    assert!(asked.iter().any(|a| a.starts_with("load ")), "{asked:?}");
+    assert!(h.app().player.page(&place, NOW).has);
+}
+
 /// Part of the session, a song played is the session's: a live call the
 /// server takes, read back through the device's live view and drawn by
 /// the player — the sound here, since this device pressed it — and the

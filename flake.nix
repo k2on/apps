@@ -78,15 +78,9 @@
       arkApp = import ./nix/ark-app.nix { inherit lib self; };
       # The release channels, stable and unstable, every app's alike.
       channelsOf = pkgs: import ./nix/channels.nix { inherit lib pkgs self; };
-      arkApps = [ "money" "revelation" ];
+      arkApps = [ "harken" "money" "revelation" ];
 
-      rustDirs = [ "rust" "ui/rust" "modules" "harken/core" "harken/app" "harken/player" "harken/server" "harken/iced" "harken/ffi" "money/core" "money/demo" "money/app" "money/server" "harken/demo" ];
-      # The typed Kotlin and Swift `arkdb gen` writes, which harken/ffi's
-      # tests hold to its domain (`tests/gen.rs`).
-      genDirs = [
-        "harken/android/app/src/main/kotlin/dev/harken/android/gen" "harken/ios/Harken/Gen"
-      ];
-
+      rustDirs = [ "rust" "ui/rust" "modules" "harken/core" "harken/app" "harken/server" "money/core" "money/demo" "money/app" "money/server" "harken/demo" ];
       # The wasm-bindgen CLI must be the exact version of the `wasm-bindgen`
       # crate the workspace locked, or the glue it writes does not match the
       # module's imports and the page fails at load with a name nobody
@@ -144,7 +138,7 @@
           # first on NixOS (nix/gpu-env.sh).
           desktopOverrides = lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux (
             let xkb = _: { nativeBuildInputs = [ pkgs.pkg-config ]; buildInputs = [ pkgs.libxkbcommon ]; }; in
-            lib.genAttrs [ "smithay-client-toolkit" "xkbcommon" "arkui" "arkui-shots" "money-desktop" "harken-iced" "money-app" "docs" ] (_: xkb)
+            lib.genAttrs [ "smithay-client-toolkit" "xkbcommon" "arkui" "arkui-shots" "money-desktop" "harken-desktop" "money-app" "docs" ] (_: xkb)
           );
           crossPkgs = crossSystem: importPkgs {
             localSystem = pkgs.stdenv.buildPlatform.system;
@@ -441,7 +435,9 @@
                 chmod +x $out/bin/${packageId}
               ''
             else built;
-          harken-iced = icedApp "harken-iced";
+          # harken's window, generated from harken/app.toml as money's is:
+          # arkui's `DesktopHost` over harken-app.
+          harken-desktop = icedApp "harken-desktop";
           # money's window, generated from money/app.toml (nix/ark-app.nix's
           # `desktopSrc`): arkui's `DesktopHost` over money-app.
           money-desktop = icedApp "money-desktop";
@@ -503,6 +499,14 @@
             crate = "money-web";
             files = let page = arkApp.webSrc pkgs cargoMetadata (arkApp.read "money"); in [ "${page}/index.html" "${page}/favicon.svg" ];
           };
+          # harken's page, the same way: harken-app's part of its host run by
+          # arkui-web's `WebHost`, on its server or its demo, from
+          # harken/app.toml.
+          harken-web = wasmPage {
+            pname = "harken-web";
+            crate = "harken-web";
+            files = let page = arkApp.webSrc pkgs cargoMetadata (arkApp.read "harken"); in [ "${page}/index.html" "${page}/favicon.svg" ];
+          };
           # The specification is `rust/ark` (spec/README.md), and the tools
           # over it are `rust/arkdb`, whose binary is `arkdb` (`gen`, `fuzz`,
           # and reading a system's events: `tail`, `trace`, `peer`): `ark` is
@@ -555,8 +559,8 @@
           '';
 
           # The phones (docs/plan-v5.md §1.16, N3): the Rust kernel through
-          # UniFFI. `harken/ffi` is ark-ffi with harken's domain linked in, one
-          # library; UniFFI writes its Kotlin and Swift from the library built
+          # UniFFI. An app's library is ark-ffi with its crate linked in, one
+          # library (generated, nix/ark-app.nix); UniFFI writes its Kotlin and Swift from the library built
           # for the host (`uniffi-bindgen generate <library>`), and beside
           # them goes the bridge's typed half (rust/ark-ffi/{kotlin,swift}).
           # The bindgen reads each crate's uniffi.toml from the directory
@@ -566,12 +570,11 @@
           # UniFFI's defaults.
           ffiBindings = { lib, language, out ? "$TMPDIR/bindings" }:
             let
-              roots = only [ "rust/ark-ffi/uniffi.toml" "rust/ark-auth/uniffi.toml" "harken/ffi/uniffi.toml" ];
+              roots = only [ "rust/ark-ffi/uniffi.toml" "rust/ark-auth/uniffi.toml" ];
               config = pkgs.writeText "uniffi-roots.toml" ''
                 [crate-roots]
                 ark_ffi = "${roots}/rust/ark-ffi"
                 ark_auth = "${roots}/rust/ark-auth"
-                harken_ffi = "${roots}/harken/ffi"
               '';
             in
             ''
@@ -596,9 +599,9 @@
           ffiHostLib = { crate, so, features ? [ "default" ], ... }:
             "${(ffiHostCrate { inherit crate features; }).lib}/lib/lib${so}${pkgs.stdenv.hostPlatform.extensions.sharedLibrary}";
           ffiHostCrate = { crate, features ? [ "default" ] }: rustCrates.build { inherit pkgs rust features; packageId = crate; };
-          harkenFfi = { name = "harken"; crate = "harken-ffi"; so = "harken_ffi"; };
           # An Ark app's library is the shim nix/ark-app.nix generates over
           # its crate (`ark`: its app.toml), no crate of the app's own.
+          harkenFfi = { name = "harken"; crate = "harken-ffi"; so = "harken_ffi"; ark = arkApp.read "harken"; };
           moneyFfi = { name = "money"; crate = "money-ffi"; so = "money_ffi"; ark = arkApp.read "money"; };
           # The ABIs the APK carries — a phone, an old phone, an emulator —
           # each nixpkgs for that Android against API 26 (the app's minSdk),
@@ -627,8 +630,8 @@
             pkgs = androidPkgs.${t};
             roots = map (f: { packageId = f.crate; }) [ harkenFfi moneyFfi ];
           }) androidTargets;
-          # An app's library for its phones (`harken/ffi`; money's the
-          # generated shim over money/app) as the
+          # An app's library for its phones (the generated shim over its
+          # crate) as the
           # APK carries it: `name` the app, `crate` its ffi crate, `so` the
           # library's name (`harken_ffi`).
           androidPhone = { name, crate, so, ark ? null }:
@@ -670,9 +673,9 @@
                 cp -r --no-preserve=mode $part/. $out/
               done
             '';
-          harken-android-lib = androidPhone harkenFfi;
-          # money's (the generated `money-ffi` over money/app): what its APK
+          # Each app's (the generated `<id>-ffi` over its crate): what its APK
           # builds over.
+          harken-android-lib = androidPhone harkenFfi;
           money-android-lib = androidPhone moneyFfi;
 
           # The Android SDK the APK is built with. Google ships one for
@@ -787,7 +790,7 @@
           # it as it would any app, with the baseline profiles Compose's
           # libraries ship. Not minified: R8 is not in the recorded graph.
           # Signed with the app's own `debug.keystore`, committed and public
-          # on purpose (harken/android/app/build.gradle.kts says why), so each
+          # on purpose (money/README.md says why), so each
           # build installs over the last; and a version code that rises with
           # each commit, the flake's own source time in minutes.
           #
@@ -881,15 +884,14 @@
             in
             { inherit apk apkUnstable appid; deps = apk.mitmCache.updateScript; };
 
-          # The phone (harken/android/README.md): the app — its onboarding
-          # and its look are its own code — over `harken-android-lib` (the
-          # kernel per ABI, and the Kotlin over it).
+          # harken's phone (harken/README.md), as money's: Compose over
+          # `harken-android-lib` and the app library's shell, in the project
+          # ui/prebuild.py generates from harken/app.toml.
           harken = androidApp {
             name = "harken";
-            # ArkUI's Kotlin linked prebuilt (`arkui-kotlin`), not compiled.
-            flags = [ "-PharkenLib=${harken-android-lib}" "-ParkuiLib=${arkui-kotlin}" ];
-            # The media player's and the secure store's Kotlin (modules/), compiled with the app.
-            shared = [ "modules/ark-media-player/kotlin" "modules/ark-secure-store/kotlin" ];
+            ark = arkOf.harken;
+            flags = [ "-ParkLib=${harken-android-lib}" "-ParkuiLib=${arkui-kotlin}" "-ParkAppLib=${ark-app-android}" ];
+            shared = [ "modules" ];
           };
           harken-apk = harken.apk;
 
@@ -944,9 +946,8 @@
             }) [
               {
                 name = "harken";
-                metadata = ./harken/android/fdroid/metadata/us.koon.harken.yml;
-                # The trumpet the desktop window and the docs draw.
-                icon = ./harken/iced/icon.svg;
+                metadata = storeYml "harken";
+                icon = ./harken/icon.svg;
               }
               {
                 name = "revelation";
@@ -1738,12 +1739,12 @@
               sources = "*.swift";
               deps = [ app.bindings ] ++ app.arkAppModule ++ arkuiSwift kind ++ [ (module "ark-background") (module "ark-notifications") ];
             };
-          # money's generated project is Linux's (`arkOf` there): what the
-          # generator writes is text, the same on any machine, and a Mac
+          # An Ark app's generated project is Linux's (`arkOf` there): what
+          # the generator writes is text, the same on any machine, and a Mac
           # would otherwise compile the generator's Rust (money-gen and
           # its crates) itself, which nothing builds ahead on Linux.
           moneyIos = { name = "money"; App = "Money"; ffi = moneyFfi; framework = "MoneyFFI"; ark = outputs.x86_64-linux.arkOf.money; };
-          harkenIos = { name = "harken"; App = "Harken"; ffi = harkenFfi; framework = "HarkenFFI"; shared = [ "modules/ark-media-player/swift" "modules/ark-secure-store/swift" ]; };
+          harkenIos = { name = "harken"; App = "Harken"; ffi = harkenFfi; framework = "HarkenFFI"; ark = outputs.x86_64-linux.arkOf.harken; };
           # Both slices; and the simulator's alone, which the tests link
           # (ios.yaml) and the screenshots' app is built over: the same
           # derivation, so built once.
@@ -1754,6 +1755,9 @@
           money-prebuild = arkOf.money.prebuild ({ android = money-android-lib; }
             // lib.optionalAttrs pkgs.stdenv.hostPlatform.isDarwin { ios = iosKernel { inherit (moneyIos) ffi framework; targets = [ "aarch64-apple-ios-sim" "aarch64-apple-darwin" ]; }; });
           harken-ios-kernel = iosKernel { inherit (harkenIos) ffi framework; };
+          # `nix run .#harken-prebuild`: harken's, the same way.
+          harken-prebuild = arkOf.harken.prebuild ({ android = harken-android-lib; }
+            // lib.optionalAttrs pkgs.stdenv.hostPlatform.isDarwin { ios = iosKernel { inherit (harkenIos) ffi framework; targets = [ "aarch64-apple-ios-sim" "aarch64-apple-darwin" ]; }; });
           money-ios-kernel-simulator = iosKernel { inherit (moneyIos) ffi framework; targets = [ "aarch64-apple-ios-sim" ]; };
           harken-ios-kernel-simulator = iosKernel { inherit (harkenIos) ffi framework; targets = [ "aarch64-apple-ios-sim" ]; };
           money-ios-simulator = iosApp (moneyIos // { kind = "simulator"; });
@@ -1763,6 +1767,31 @@
           # screenshots (the shell's sidebar, toolbar, inspector, Settings).
           money-macos = iosApp (moneyIos // { kind = "macos"; });
           harken-ios-archive = iosApp (harkenIos // { kind = "archive"; });
+          harken-macos = iosApp (harkenIos // { kind = "macos"; });
+
+          # An Ark app's iPhone app type-checked on Linux (checks' `<app>-ios-typecheck`).
+          iosTypecheck = app: pkgs.swiftPackages.stdenv.mkDerivation {
+            name = "${app}-ios-typecheck";
+            src = only [ "${app}/app.toml" "modules" "rust/ark-ffi/swift" "ui/swift" "ui/prebuild.py" ];
+            nativeBuildInputs = [ pkgs.swift ];
+            buildInputs = [ pkgs.swiftPackages.Foundation pkgs.swiftPackages.Dispatch ];
+            # nixpkgs' Swift 5.8 on Linux reports x86_64-pc-linux-gnu where
+            # its standard library's modules are x86_64-unknown-linux-gnu. And
+            # it predates `nonisolated(unsafe)` (5.10), which UniFFI's Swift
+            # writes twice for Swift 6's checks: taken out of this copy only.
+            buildPhase = ''
+              mkdir -p bin bindings
+              printf '#!/bin/sh\nexec swiftc -target ${pkgs.stdenv.hostPlatform.parsed.cpu.name}-unknown-linux-gnu "$@"\n' > bin/swiftc-here
+              chmod +x bin/swiftc-here
+              cp ${self.checks.${system}.ffi}/${app}/swift/* bindings/
+              chmod u+w bindings/*
+              sed -i 's/nonisolated(unsafe) //' bindings/*.swift
+              SWIFT_EXEC=$PWD/bin/swiftc-here TYPED=$PWD/rust/ark-ffi/swift/Typed.swift \
+                ARK_MODULES="${lib.concatMapStringsSep " " (m: m.name) (arkApp.modulesOf (arkApp.read app))}" \
+                bash ui/swift/typecheck.sh ${app} bindings
+            '';
+            installPhase = "touch $out";
+          };
 
           # harken's domain (harken/core: plain Rust, §1.16) built, and
           # its schema's hash held to the one its tests pin.
@@ -1813,21 +1842,20 @@
               }
             '';
           };
-          # One member's tests (and harken-iced's again with its demo, a
+          # One member's tests (and arkui's again with the desktop's host, a
           # feature), run from a tree that is what any of them reads.
           memberTests = m: crateTests {
             name = m.packageId + (m.suffix or (lib.optionalString (m ? features) "-demo"));
             unified = if m ? features then demoUnified else checksUnified;
             crates = [ m ];
-            dirs = rustDirs ++ genDirs ++ [ "spec/vectors" "spec/README.md" "spec/AUTHORING.md" ];
+            dirs = rustDirs ++ [ "spec/vectors" "spec/README.md" "spec/AUTHORING.md" ];
             # What makes a speaker's copy of a hi-res file (harken/server/tests/speaker.rs).
             nativeBuildInputs = [ pkgs.ffmpeg-headless ];
             rootAttrs = rustcHook { inherit (m) packageId; };
           };
-          demos = map (app: { packageId = "${app}-iced"; member = "${app}/iced"; features = [ "default" "demo" ]; }) [ "harken" ]
-            # And arkui with the desktop's host and devices, which no member
-            # turns on: an app's generated window does (nix/ark-app.nix).
-            ++ [{ packageId = "arkui"; member = "ui/rust/arkui"; features = [ "default" "host" "clipboard" "scanner" ]; suffix = "-host"; }];
+          # arkui with the desktop's host and devices, which no member turns
+          # on: an app's generated window does (nix/ark-app.nix).
+          demos = [{ packageId = "arkui"; member = "ui/rust/arkui"; features = [ "default" "host" "clipboard" "scanner" ]; suffix = "-host"; }];
           # One member lint-clean, as `cargo clippy --all-targets -- -D
           # warnings`: its libraries and binaries, and again as its tests
           # build them.
@@ -1886,7 +1914,7 @@
               # A check's own test and lint builds are its job's: what they
               # are built from is here.
               first = crateClosure (lib.concatMap (r: r.completeDeps ++ r.completeBuildDeps) (lib.concatMap (n: rootsOf self.checks.${system}.${n}) checks)
-                ++ [ harken-server money-server-bin money-web.wasm money-seed arkdb arkOf.money.gen ]
+                ++ [ harken-server money-server-bin money-web.wasm money-seed arkdb arkOf.money.gen arkOf.harken.gen ]
                 ++ map (f: ffiHostCrate { inherit (f) crate; }) [ harkenFfi moneyFfi ]
                 ++ all);
             in
@@ -1961,7 +1989,7 @@
             inherit ark vectors fuzz harken-domain trace-corpus harken-android-lib harken-ios-xcframework;
             # The iPhone apps from the pinned Xcode: for the simulator (the
             # screenshots), as the archive TestFlight is sent, and the kernel.
-            inherit money-ios-simulator harken-ios-simulator money-ios-archive harken-ios-archive money-macos ark-app-fixture-ios;
+            inherit money-ios-simulator harken-ios-simulator money-ios-archive harken-ios-archive money-macos harken-macos ark-app-fixture-ios;
             inherit money-ios-kernel harken-ios-kernel money-ios-kernel-simulator harken-ios-kernel-simulator;
             # ArkUI for SwiftUI, compiled once per platform for every app.
             inherit arkui-swift-simulator arkui-swift-archive arkui-swift-macos;
@@ -1978,17 +2006,21 @@
             money-ui = arkOf.money.ui;
             money-native = arkOf.money.native;
             inherit money-prebuild;
+            harken-ui = arkOf.harken.ui;
+            harken-native = arkOf.harken.native;
+            inherit harken-prebuild;
             # revelation's: Kotlin alone, its Android project generated.
             revelation-native = arkOf.revelation.native;
             revelation-prebuild = arkOf.revelation.prebuild { };
             # `nix run .#harken-serve [ADDR]`: the dev server, anyone is
             # whoever they say.
             harken-serve = pkgs.callPackage ./harken/server/nix/serve.nix { inherit harken-server; };
-            inherit harken-iced docs docs-web screens-ffmpeg screens-python xcodegen;
-            inherit money-desktop money-web money-server;
+            inherit docs docs-web screens-ffmpeg screens-python xcodegen;
+            inherit money-desktop money-web money-server harken-desktop harken-web;
             # Each web app's export, Expo's `expo export --platform web`.
             docs-export-web = exportWeb "docs" docs;
             money-export-web = exportWeb "money" money-web;
+            harken-export-web = exportWeb "harken" harken-web;
             inherit money-seed harken-seed harken-covers money-demo harken-demo;
           } // {
             # money's library for its phones (the generated shim over
@@ -2032,12 +2064,12 @@
               checks = [
                 "fmt" "clippy" "rust" "ffi" "traces" "vectors" "fuzz-smoke" "versions"
                 "harken-domain" "harken-module" "docs" "theme" "theme-contrast"
-                "prebuild" "money-native" "revelation-native" "money-web-sync"
+                "prebuild" "money-native" "harken-native" "revelation-native" "money-web-sync"
               ];
               # The docs, which on main `page` and `docs-site` both build.
               all = [ (docsCrate { }) docs-web.wasm docs-web.export ];
               groups = {
-                server = [ harken-server arkdb money-server-bin harken-seed money-seed money-web.wasm ];
+                server = [ harken-server arkdb money-server-bin harken-seed money-seed money-web.wasm harken-web.wasm ];
                 harken-apk = harken-android-lib.crates;
                 money-apk = money-android-lib.crates;
               };
@@ -2047,7 +2079,7 @@
             # before the desktop jobs fan out: the crates both windows link
             # (iced, wgpu, arkui, …), which each desktop job compiled at once.
             screens-crates = allOf "screens-crates" (lib.attrValues (sharedCrates {
-              harken = [ harken-iced.crate ];
+              harken = [ harken-desktop.crate ];
               money = [ money-desktop.crate ];
             }));
             # The fleet on three NixOS machines (docs/plan-fleet.md §3): an
@@ -2080,6 +2112,9 @@
               inherit money-web money-seed;
               money-server = money-server-bin;
             };
+            # harken's page and window, generated from harken/app.toml the
+            # same way, build.
+            inherit harken-web harken-desktop;
             # The demo's copy of the catalogue is the `classical` input's:
             # `nix flake update classical` then `nix run .#update-catalogue`.
             catalogue = pkgs.runCommand "catalogue-current" { } ''
@@ -2119,6 +2154,7 @@
             # projects (nix/ark-app.nix). The emitters' own snapshots are
             # ark-ui-gen's tests (checks.rust).
             money-native = arkOf.money.native;
+            harken-native = arkOf.harken.native;
             revelation-native = arkOf.revelation.native;
             # Every text colour the tokens define is legible on every ground
             # it is drawn on, at WCAG's 4.5:1 (3:1 for large text, icons and
@@ -2218,13 +2254,13 @@
             # harken's domain crate builds, and its schema's hash is the one
             # pinned (harken/core/tests/port.rs).
             inherit harken-domain;
-            # The bridge (§1.16, N3): ark-ffi and harken/ffi build natively,
-            # their tests drive the whole surface in the process (a server in
-            # it, a mutate and its refusal, a view's patches, the live space,
-            # alone and joining, a hall of devices) and hold the generated
-            # Kotlin and Swift to the domains; and UniFFI writes the Kotlin and
-            # the Swift for harken's library and money's generated one (whose
-            # Rust money-app's tests/phone.rs drives).
+            # The bridge (§1.16, N3): ark-ffi builds natively, its tests drive
+            # the whole surface in the process (a server in it, a mutate and
+            # its refusal, a view's patches, the live space, alone and
+            # joining, a hall of devices); and UniFFI writes the Kotlin and
+            # the Swift for each Ark app's generated library (whose Rust its
+            # app's tests drive: money-app's tests/phone.rs, harken-app's
+            # host tests), each under its name.
             ffi =
               let
                 bindings = app: out: ''
@@ -2237,79 +2273,34 @@
                 name = "arkdb-ffi";
                 crates = [
                   { packageId = "ark-ffi"; member = "rust/ark-ffi"; }
-                  { packageId = "harken-ffi"; member = "harken/ffi"; }
                   # The scanner's corner model (modules/ark-scanner/tests/model.rs).
                   { packageId = "ark-scanner"; member = "modules/ark-scanner"; features = [ "default" "model" ]; }
                 ];
-                dirs = rustDirs ++ genDirs;
+                dirs = rustDirs;
                 postCheck = ''
-                  ${bindings harkenFfi "$TMPDIR/bindings"}
-                  grep -q 'fun `harkenOpen`' "$TMPDIR/bindings/kotlin/dev/harken/ffi/harken_ffi.kt"
-                  grep -q "class Peer" "$TMPDIR/bindings/kotlin/dev/arkdb/ffi/ark_ffi.kt"
-                  grep -q "func harkenOpen" "$TMPDIR/bindings/swift/harken_ffi.swift"
-                  ${bindings moneyFfi "$TMPDIR/money"}
-                  # money's generated library (nix/ark-app.nix): its host, its twins, its route.
-                  grep -q "class MoneyHost" "$TMPDIR/money/kotlin/uniffi/money_ffi/money_ffi.kt"
+                  ${lib.concatMapStrings (f: ''
+                    ${bindings f "$TMPDIR/${f.name}"}
+                    # Its generated library (nix/ark-app.nix): its host, its route.
+                    grep -q "class ${f.ark.ffi.host}" "$TMPDIR/${f.name}/kotlin/uniffi/${f.so}/${f.so}.kt"
+                    grep -q "class Peer" "$TMPDIR/${f.name}/kotlin/dev/arkdb/ffi/ark_ffi.kt"
+                    grep -q "func routeFromUrl" "$TMPDIR/${f.name}/swift/${f.so}.swift"
+                    # Every client's formatting, linked into each library.
+                    grep -q "func formatLength" "$TMPDIR/${f.name}/swift/ark_format.swift"
+                    grep -q 'fun `formatLength`' "$TMPDIR/${f.name}/kotlin/uniffi/ark_format/ark_format.kt"
+                  '') [ harkenFfi moneyFfi ]}
                   grep -q "class MoneyChange" "$TMPDIR/money/kotlin/uniffi/money_ffi/money_ffi.kt"
-                  grep -q "func routeFromUrl" "$TMPDIR/money/swift/money_ffi.swift"
-                  # Every client's formatting, linked into each library.
-                  grep -q "func formatAmount" "$TMPDIR/money/swift/ark_format.swift"
-                  grep -q "func formatLength" "$TMPDIR/bindings/swift/ark_format.swift"
-                  grep -q 'fun `formatLength`' "$TMPDIR/bindings/kotlin/uniffi/ark_format/ark_format.kt"
                 '';
-                # The bindings it wrote: harken's, which the iOS type-check
-                # reads, and money's under `money/`, which money's reads.
-                out = "cp -r $TMPDIR/bindings $out && cp -r $TMPDIR/money $out/money";
+                # The bindings it wrote, each app's under its name, which its
+                # iOS type-check and its Android build read.
+                out = "mkdir -p $out && cp -r $TMPDIR/harken $out/harken && cp -r $TMPDIR/money $out/money";
               };
           } // lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
-            # What of the iOS app Linux can check (harken/ios/tools/typecheck.sh):
-            # Rows.swift, Bridge.swift and Model.swift with the generated types,
-            # UniFFI's Swift and the bridge's typed half, type-checked by
-            # nixpkgs' Swift against the library's headers and a stand-in for
-            # SwiftUI. The views are SwiftUI's and are not checked here.
-            harken-ios-typecheck = pkgs.swiftPackages.stdenv.mkDerivation {
-              name = "harken-ios-typecheck";
-              src = only [ "harken/ios" "rust/ark-ffi/swift" "ui/swift" ];
-              nativeBuildInputs = [ pkgs.swift ];
-              buildInputs = [ pkgs.swiftPackages.Foundation pkgs.swiftPackages.Dispatch ];
-              # nixpkgs' Swift 5.8 on Linux reports x86_64-pc-linux-gnu where
-              # its standard library's modules are x86_64-unknown-linux-gnu. And
-              # it predates `nonisolated(unsafe)` (5.10), which UniFFI's Swift
-              # writes twice for Swift 6's checks: taken out of this copy only.
-              buildPhase = ''
-                mkdir -p bin bindings
-                printf '#!/bin/sh\nexec swiftc -target ${pkgs.stdenv.hostPlatform.parsed.cpu.name}-unknown-linux-gnu "$@"\n' > bin/swiftc-here
-                chmod +x bin/swiftc-here
-                cp ${self.checks.${system}.ffi}/swift/* bindings/
-                chmod u+w bindings/*
-                sed -i 's/nonisolated(unsafe) //' bindings/*.swift
-                SWIFT_EXEC=$PWD/bin/swiftc-here TYPED=$PWD/rust/ark-ffi/swift/Typed.swift \
-                  bash harken/ios/tools/typecheck.sh bindings
-              '';
-              installPhase = "touch $out";
-            };
-            # The same for money's (ui/swift/typecheck.sh): what of the app
-            # library and its device modules Linux can read, against UniFFI's
-            # Swift for money's library and ArkUICore. money has no Swift of
-            # its own.
-            money-ios-typecheck = pkgs.swiftPackages.stdenv.mkDerivation {
-              name = "money-ios-typecheck";
-              src = only [ "money/app.toml" "modules" "rust/ark-ffi/swift" "ui/swift" "ui/prebuild.py" ];
-              nativeBuildInputs = [ pkgs.swift ];
-              buildInputs = [ pkgs.swiftPackages.Foundation pkgs.swiftPackages.Dispatch ];
-              buildPhase = ''
-                mkdir -p bin bindings
-                printf '#!/bin/sh\nexec swiftc -target ${pkgs.stdenv.hostPlatform.parsed.cpu.name}-unknown-linux-gnu "$@"\n' > bin/swiftc-here
-                chmod +x bin/swiftc-here
-                cp ${self.checks.${system}.ffi}/money/swift/* bindings/
-                chmod u+w bindings/*
-                sed -i 's/nonisolated(unsafe) //' bindings/*.swift
-                SWIFT_EXEC=$PWD/bin/swiftc-here TYPED=$PWD/rust/ark-ffi/swift/Typed.swift \
-                  ARK_MODULES="${lib.concatMapStringsSep " " (m: m.name) (arkApp.modulesOf (arkApp.read "money"))}" \
-                  bash ui/swift/typecheck.sh money bindings
-              '';
-              installPhase = "touch $out";
-            };
+            # What of an Ark app's iPhone app Linux can check
+            # (ui/swift/typecheck.sh): the app library and its device modules,
+            # against UniFFI's Swift for the app's library and ArkUICore. No
+            # app has Swift of its own.
+            money-ios-typecheck = iosTypecheck "money";
+            harken-ios-typecheck = iosTypecheck "harken";
             # The NixOS module, evaluated under the configurations that
             # matter and held to its assertions, its warning and its unit.
             harken-module = pkgs.callPackage ./harken/server/nix/module-test.nix {
@@ -2402,11 +2393,11 @@
                 (iphone "harken" "Harken" { })
                 (iphone "money" "Money" { })
               ];
-              # The desktop windows (harken's `harken-iced`, money's generated
-              # `money-desktop`), published nowhere yet but photographed beside
+              # The desktop windows (each generated from its app.toml,
+              # `<app>-desktop`), published nowhere yet but photographed beside
               # the phones (app-screens.yaml), each built by nix at the commit.
               desktop = map ({ name, package }: { inherit name package; key = key self.packages.${pkgs.system}.${package}; }) [
-                { name = "harken"; package = "harken-iced"; }
+                { name = "harken"; package = "harken-desktop"; }
                 { name = "money"; package = "money-desktop"; }
               ];
             };
@@ -2418,8 +2409,8 @@
           # still says otherwise.
           #
           # On Linux a shell also has the desktop window's library path
-          # (nix/gpu-env.sh, as the launcher does), so `cargo run -p
-          # harken-iced` reaches the GPU as `nix run .#harken-iced` does.
+          # (nix/gpu-env.sh, as the launcher does), so a cargo run of a
+          # window reaches the GPU as `nix run .#money-desktop` does.
           devShells = let
             cargoJobs = { CARGO_BUILD_JOBS = "4"; }
               // lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux { shellHook = "source ${gpuEnv}"; };

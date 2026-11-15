@@ -1,5 +1,0 @@
-# Gradle's and the build's own.
-.gradle/
-.kotlin/
-build/
-local.properties

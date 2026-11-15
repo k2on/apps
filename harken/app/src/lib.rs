@@ -4,13 +4,12 @@
 //! ([`routes`]), which every shell spells the same way; and what it says
 //! on its first run ([`welcome`]).
 //!
-//! The screens moved here so far are the library's: Home ([`home`]),
-//! Library ([`library`]), Search ([`search`]) and a record's page
-//! ([`page`]), under the shell ([`shell`]), the player ([`player`]) and
-//! the sheets any of them raises ([`sheets`]),
-//! run by the host's part ([`host`]), which drives this device's own sound
-//! ([`sound`], the media player module). The sheets and Settings follow
-//! (ui/docs/app.md, "Where It Stands").
+//! Its screens are Home ([`home`]), Library ([`library`]), Search
+//! ([`search`]) and a record's page ([`page`]), under the shell
+//! ([`shell`], with Settings), the player ([`player`]) and the sheets any
+//! of them raises ([`sheets`]), run by the host's part ([`host`]), which
+//! drives this device's own sound ([`sound`], the media player module);
+//! the window the desktop and the browser draw is [`window`]'s.
 
 pub mod home;
 pub mod host;
@@ -23,6 +22,7 @@ pub mod sheets;
 pub mod shell;
 pub mod sound;
 pub mod welcome;
+pub mod window;
 pub mod words;
 
 #[cfg(test)]
@@ -82,6 +82,11 @@ pub enum HarkenRequest {
     },
     Mute {
         muted: bool,
+    },
+    /// Settings, on the pane of this title: the shell's own on a phone, the
+    /// window's place on the desktop and in the browser.
+    Settings {
+        pane: String,
     },
 }
 

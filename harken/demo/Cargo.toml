@@ -26,7 +26,7 @@ cli = ["dep:ureq", "dep:png", "dep:sha2"]
 ark = { path = "../../rust/ark" }
 harken-domain = { path = "../../harken/core" }
 ark-peer = { path = "../../rust/ark-peer", default-features = false }
-# A cover from the catalogue's address, as harken-iced fetches one.
+# A cover from the catalogue's address, fetched once for the server's media root.
 ureq = { version = "2", default-features = false, features = ["tls"], optional = true }
 # A cover of its own when that cannot be had, and the colours it is drawn in.
 png = { version = "0.18", optional = true }

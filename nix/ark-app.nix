@@ -164,7 +164,7 @@ rec {
       edition = "2021";
       src = webSrc pkgs cargoMetadata a;
       crateBin = [{ name = webName a; path = "main.rs"; requiredFeatures = [ ]; }];
-      dependencies = map (c: { name = c; packageId = c; } // lib.optionalAttrs (c == "ark-peer" || (c == a.crate && webStatic a)) { usesDefaultFeatures = false; }) (webCrates a)
+      dependencies = map (c: { name = c; packageId = c; } // lib.optionalAttrs (c == "ark-peer" || (c == a.crate && webStatic a) || bare a c) { usesDefaultFeatures = false; }) (webCrates a)
         ++ map (m: { name = m; packageId = m; features = [ "web" ]; target = wasm; }) (webModules a)
         ++ (if webStatic a then [
           { name = "arkui-web"; packageId = "arkui-web"; usesDefaultFeatures = false; features = [ "hydrate" ]; target = wasm; }
@@ -215,6 +215,10 @@ rec {
   # process (module.toml's `[phone]`): `camera` for ark-camera.
   arkFfiFeatures = a: map (m: lib.removePrefix "ark-" m.name) (lib.filter (m: m.toml ? phone) (modulesOf a));
 
+  # Whether `c` is the app's demo crate, which every generated target links
+  # without its defaults (ui/prebuild.py's `bare`).
+  bare = a: c: c == ((a.ffi or { }).demo or null);
+
   ffiName = a: "${a.id}-ffi";
   ffiLib = a: "${a.id}_ffi";
   # The crates the library names, by their packages' names (a lib's name
@@ -241,7 +245,7 @@ rec {
         libPath = "lib.rs";
         libName = ffiLib a;
         type = [ "lib" "cdylib" "staticlib" ];
-        dependencies = map (c: { name = c; packageId = c; }) (ffiCrates a) ++ [
+        dependencies = map (c: { name = c; packageId = c; } // lib.optionalAttrs (bare a c) { usesDefaultFeatures = false; }) (ffiCrates a) ++ [
           { name = "ark-ffi"; packageId = "ark-ffi"; features = arkFfiFeatures a; }
           { name = "uniffi"; packageId = "uniffi"; usesDefaultFeatures = false; }
         ];
@@ -257,7 +261,7 @@ rec {
         edition = "2021";
         src = desktopSrc pkgs cargoMetadata a;
         crateBin = [{ name = desktopName a; path = "main.rs"; requiredFeatures = [ ]; }];
-        dependencies = map (c: { name = c; packageId = c; } // lib.optionalAttrs (c == "ark-peer") { usesDefaultFeatures = false; }) (desktopCrates a) ++ [
+        dependencies = map (c: { name = c; packageId = c; } // lib.optionalAttrs (c == "ark-peer" || bare a c) { usesDefaultFeatures = false; }) (desktopCrates a) ++ [
           { name = "arkui"; packageId = "arkui"; features = desktopFeatures a; }
         ];
         features = { };

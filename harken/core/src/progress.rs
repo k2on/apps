@@ -3,7 +3,7 @@
 //! and every member sees how far the others have got.
 //!
 //! The device making the sound says where it is now and then while an
-//! episode plays, and when it pauses (`harken-player`'s reconciler,
+//! episode plays, and when it pauses (`harken_domain::player`'s reconciler,
 //! [`report_progress`]); a hand says an episode is played or not
 //! ([`mark_played`]). A song has none: it is not a thing one is part way
 //! through.

@@ -78,6 +78,19 @@ pub enum Route {
 }
 
 impl Route {
+    /// The library's index of a kind, by its word (`albums`, `songs`), as
+    /// a launch names it.
+    pub fn of_kind(kind: &str) -> Option<Route> {
+        Some(match kind {
+            "songs" => Route::Library,
+            "albums" => Route::Albums,
+            "artists" => Route::Artists,
+            "podcasts" => Route::Podcasts,
+            "sermons" => Route::Sermons,
+            _ => return None,
+        })
+    }
+
     /// What the page is called: its own title, or the index's name. Empty
     /// for a route read back from a path until the shell has found it.
     pub fn title(&self) -> String {

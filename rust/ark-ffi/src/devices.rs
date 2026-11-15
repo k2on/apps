@@ -56,6 +56,18 @@ impl ArkProcess {
     }
 }
 
+#[cfg(feature = "media-player")]
+#[uniffi::export]
+impl ArkProcess {
+    /// The phone's player (ark-media-player): AVPlayer, Media3. Held by the
+    /// process, so the sound outlives a screen.
+    pub fn register_media_player(&self, device: Arc<dyn ark_media_player::phone::NativeMediaPlayer>) {
+        self.add_modules(|m| {
+            m.set(Some(ark_media_player::phone::port(device)));
+        })
+    }
+}
+
 #[cfg(feature = "scanner")]
 #[uniffi::export]
 impl ArkProcess {

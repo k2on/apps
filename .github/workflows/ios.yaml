@@ -77,10 +77,14 @@ on:
     branches: [main]
     tags: ["v*"]
     paths: &paths
-      - "harken/ios/**"
-      - "harken/ffi/**"
+      - "harken/app.toml"
+      - "harken/icon.svg"
       - "harken/core/**"
-      - "harken/player/**"
+      - "harken/app/**"
+      # The demo's library, which harken's library links for its demo.
+      - "harken/demo/src/**"
+      - "harken/demo/catalogue.json"
+      - "harken/demo/shows.json"
       - "money/app.toml"
       - "money/icon.svg"
       - "ui/prebuild.py"

@@ -1107,8 +1107,8 @@ drives every build: `nix flake check` is the vectors against what
 `rust/ark` writes, the Rust workspace's formatting, lint and tests,
 harken's module against what its Rust emits, and the NixOS module; `nix
 build` is any program, the Android APK included. The APK's Maven graph is
-recorded (`harken/android/deps.json`, re-recorded by `nix run
-.#harken-apk-deps`) and replayed offline, so no build reaches the network
+recorded (`ui/kotlin/android/deps.json`, re-recorded by `nix run
+.#arkui-kotlin-deps`) and replayed offline, so no build reaches the network
 but the ones that fetch sources.
 
 ```

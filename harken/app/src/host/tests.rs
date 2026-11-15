@@ -10,7 +10,7 @@ use super::*;
 use crate::testing::{demo_peer, NOW};
 
 /// The demo library as a host's place.
-struct Demo {
+pub(crate) struct Demo {
     peer: Peer,
     store: Store<HarkenView>,
 }
@@ -43,7 +43,7 @@ impl Place<HarkenView, HarkenChange> for Demo {
     }
 }
 
-fn hosted() -> (Hosting<Harken>, Demo) {
+pub(crate) fn hosted() -> (Hosting<Harken>, Demo) {
     let mut place = Demo {
         peer: demo_peer(),
         store: Store::new(),

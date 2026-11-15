@@ -47,6 +47,7 @@ pub fn harken_shell(p: &ShellPage) -> View<ShellMsg> {
             ),
         ),
     )
+    .account(account_item(p.household.who, p.household.picture, ShellMsg::Account))
     .accessory(hosted("player.bar"), hosted("player"), ShellMsg::OpenPlayer, ShellMsg::ClosePlayer)
     .showing(p.playing)
     .expanded(p.player_open)
@@ -97,4 +98,29 @@ pub fn settings_diagnostics(p: &ShellPage) -> View<ShellMsg> {
         .padding(Edges::All, Space::L)
         .fill_width_at(Align::Start),
     ))
+}
+
+/// The menu bar's commands: View, Go. On the Mac, the menu bar; on an iPad
+/// and Android, the hardware keyboard's shortcuts and the app bar's menu;
+/// on the desktop and in the browser, the keys and the command box.
+pub fn commands() -> Vec<CommandMenu<ShellMsg>> {
+    let go = |tag: &str| ShellMsg::Select { tag: tag.into() };
+    vec![
+        command_menu(
+            MenuPlace::View,
+            vec![
+                command("Play or Pause", "p", ShellMsg::Toggle),
+                command("Next Track", "]", ShellMsg::Skip { by: 1 }),
+                command("Previous Track", "[", ShellMsg::Skip { by: -1 }),
+            ],
+        ),
+        command_menu(
+            MenuPlace::Go,
+            vec![
+                command("Home", "1", go("home")),
+                command("Library", "2", go("library")),
+                command("Search", "3", go("search")),
+            ],
+        ),
+    ]
 }

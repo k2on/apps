@@ -458,8 +458,8 @@ build, the same driver, the same shots.json, light and dark.
 
 ## The desktop
 
-The desktop windows are iced apps (`harken/iced`, and money's generated
-from its app.toml over arkui's `host`, both over `ui/rust/arkui`), so there is no emulator to run them in and no accessibility
+The desktop windows are iced apps (each generated from its app.toml over
+arkui's `host`, over `ui/rust/arkui`), so there is no emulator to run them in and no accessibility
 tree to drive them by; what there is, is iced's own headless runtime.
 `ui/rust/shots` is that, for any app: the app's `main` hands it the same
 `iced::application(...)` it would run, when `ARK_SHOTS` names its
@@ -500,11 +500,10 @@ draws is different, and the hook only captures.
   (`ark_app::shots`), as the phones' walks are, and each shot's tree.txt
   lists those ids; a key (`{"key": "j"}`) and a wait are the driver's, as
   a hand's. Its shot is taken at its ready signal (signed in, the
-  server's data here, its runtimes idle at one version). harken's window
-  still clicks what a text says.
+  server's data here, its runtimes idle at one version).
 
 To take one app's by hand: start its server (`app-server.sh`), build its
-window (`nix build .#harken-iced`), and run `app-desktop.sh <out> result
+window (`nix build .#harken-desktop`), and run `app-desktop.sh <out> result
 harken http://127.0.0.1:8787` from the repository's root; `ARK_SHOTS_ONLY=<id>`
 takes one shot.
 

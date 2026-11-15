@@ -1038,7 +1038,8 @@ def swift_devices(root, a):
     lines = []
     for n, ph in devices(root, a):
         if "swift" in ph:
-            lines.append(f"        process.{ph['register']}(device: {ph['swift']})")
+            # `{accent}`: app.toml's accent, as the theme's palettes name it.
+            lines.append(f"        process.{ph['register']}(device: {ph['swift'].replace('{accent}', a['accent'])})")
         elif "kotlin" not in ph:
             lines.append(f"        process.{ph['register']}()")
     if not lines:
@@ -1273,6 +1274,23 @@ def shell_screens(a):
     return [(n, sc) for n, sc in a.get("screens", {}).items() if n != sh and not sc.get("beside")]
 
 
+def shell_hosted(a):
+    """Each name the shell's view hosts (`[shell.hosted]`), with the screen
+    whose holder draws it and its view's Swift and Kotlin names: a screen's
+    own view (`budget = "budget"`), or a further view of one (`[views]`:
+    harken's `"player.bar" = "player_bar"`, the player's now-playing bar
+    beside its full player)."""
+    out = []
+    for name, target in a["shell"].get("hosted", {}).items():
+        if target in a.get("screens", {}):
+            sc = a["screens"][target]
+            out.append((name, (target, sc["swift-view"], sc["kotlin-view"])))
+        else:
+            v = a["views"][target]
+            out.append((name, (v["screen"], v["swift-view"], v["kotlin-view"])))
+    return out
+
+
 def swift_shell(root, a):
     """`Generated/ArkShell.swift`: the app's holders over the app library's
     shell, the names it hosts, and the scenes the `@main` draws."""
@@ -1283,7 +1301,7 @@ def swift_shell(root, a):
     lines = [f"    let shell: ArkShell<{host}, {shell['runtime']}>"]
     lines += [f"    let {n}: ArkSlot<{sc['swift']}>" for n, sc in shell_screens(a)]
     made = [f"        {n} = shell.slot {{ {sc['swift']}($0.{n}()) }}" for n, sc in shell_screens(a)]
-    cases = [f'        case "{name}": ArkHosted(screens.{screen}) {{ {a["screens"][screen]["swift-view"]}() }}' for name, screen in sh.get("hosted", {}).items()]
+    cases = [f'        case "{name}": ArkHosted(screens.{screen}) {{ {sv}() }}' for name, (screen, sv, _) in shell_hosted(a)]
     over = sh["over"]
     accent = a["accent"]
     return f"""// {HEADER.format(app=a['dir'])}
@@ -1374,7 +1392,7 @@ def kotlin_shell(root, a):
     shell = a["screens"][sh["screen"]]
     views = a.get("views", {})
     slots = [f"    val {n} = shell.slot {{ {sc['kotlin']}(library.{n}()) }}" for n, sc in shell_screens(a)]
-    cases = [f'            "{name}" -> ArkHosted({screen}) {{ {a["screens"][screen]["kotlin-view"]}(it) }}' for name, screen in sh.get("hosted", {}).items()]
+    cases = [f'            "{name}" -> ArkHosted({screen}) {{ {kv}(it) }}' for name, (screen, _, kv) in shell_hosted(a)]
     over = sh["over"]
     accent = a["accent"][:1].upper() + a["accent"][1:]
     hh = field(sh["household"])
@@ -1660,7 +1678,9 @@ def ffi_cargo(root, a):
     `<app>/.ffi` (the iPhone's cargo build)."""
     dirs = workspace_dirs(root)
     here = os.path.join(a["dir"], ".ffi")
-    deps = "".join(f'{c} = {{ path = "{os.path.relpath(dirs[c], here)}" }}\n' for c in ffi_crates(a))
+    # The demo's crate without its defaults (a seed's command line and
+    # what it fetches with), as every generated target links it.
+    deps = "".join(f'{c} = {{ path = "{os.path.relpath(dirs[c], here)}"{bare(a, c)} }}\n' for c in ffi_crates(a))
     feats = ", ".join(json.dumps(f) for f in arkffi_features(root, a))
     android = ", ".join(json.dumps(f"ark-ffi/{f}") for f in a["ffi"].get("android", []))
     return f"""# {HEADER.format(app=a['dir'])}
@@ -1684,6 +1704,14 @@ uniffi = {{ version = "0.32.2", default-features = false }}
 # Android's are its default; the iPhone's build takes none.
 default = [{android}]
 """
+
+
+def bare(a, crate):
+    """`, default-features = false` for the app's demo crate, which every
+    generated target links without its defaults (a seed's command line,
+    and what it fetches and draws with: nothing a phone, a page or a window
+    runs); nothing for any other crate."""
+    return ", default-features = false" if crate == (a.get("ffi") or {}).get("demo") else ""
 
 
 def arkffi_features(root, a):
@@ -1865,7 +1893,7 @@ def web_cargo(root, a):
     workspace = "rust" if a["crate"] in workspace_dirs(root) else crate_dir(root, a)
     # The app's crate natively with its default features (what its export
     # prepares with), in the browser with none.
-    plain = lambda c: c == "ark-peer" or (c == a["crate"] and web_static(a))
+    plain = lambda c: c == "ark-peer" or (c == a["crate"] and web_static(a)) or bool(bare(a, c))
     deps = "".join(f'{c} = {{ path = "{rel(c)}"{", default-features = false" if plain(c) else ""} }}\n' for c in web_crates(a))
     mods = "".join(f'{c} = {{ path = "{rel(c)}", features = ["web"] }}\n' for c, _, _ in web_modules(root, a))
     web = rel("arkui-web")
@@ -2025,7 +2053,7 @@ def desktop_cargo(root, a):
     dirs = workspace_dirs(root)
     here = os.path.join(a["dir"], ".desktop")
     rel = lambda c: os.path.relpath(dirs[c], here)
-    deps = "".join(f'{c} = {{ path = "{rel(c)}"{", default-features = false" if c == "ark-peer" else ""} }}\n' for c in desktop_crates(a))
+    deps = "".join(f'{c} = {{ path = "{rel(c)}"{", default-features = false" if c == "ark-peer" or bare(a, c) else ""} }}\n' for c in desktop_crates(a))
     feats = ", ".join(json.dumps(f) for f in desktop_features(root, a))
     return f"""# {HEADER.format(app=a['dir'])}
 [package]
@@ -2219,9 +2247,14 @@ def check(root):
             for k in ("settings", "commands"):
                 if k in sh and sh[k] not in a.get("views", {}):
                     problems.append(f"{app}/app.toml's [shell] {k} {sh[k]} is no view of [views]")
-            for name, screen in sh.get("hosted", {}).items():
+            for name, target in sh.get("hosted", {}).items():
+                # A screen's own view, or a further view of one ([views]).
+                view = a.get("views", {}).get(target)
+                screen = view.get("screen") if view and target not in a.get("screens", {}) else target
+                if view and target not in a.get("screens", {}) and "view" not in view:
+                    problems.append(f"{app}/app.toml's [shell.hosted] {name} is {target}, a [views] entry that is no view")
                 if screen not in a.get("screens", {}) or a["screens"][screen].get("beside"):
-                    problems.append(f"{app}/app.toml's [shell.hosted] {name} is over {screen}, no screen of [screens] the shell holds")
+                    problems.append(f"{app}/app.toml's [shell.hosted] {name} is over {target}, no screen of [screens] the shell holds, nor a view of one")
         # The phones' library is written from `[ffi]` and `[screens]`
         # (`ffi_lib`), its crates named by their libs' names with dashes.
         if a.get("crate") and "ffi" in a:

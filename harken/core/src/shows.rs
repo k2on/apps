@@ -589,7 +589,7 @@ pub fn episode_details(_: &Ctx, _: &Db<Harken>, input: ShowInput) -> Result<Plan
 
 /// Shows written down as one JSON document: a show's fields and its
 /// episodes', as a feed says them. What the demo's library has beside its
-/// catalogue (`harken-iced`'s `shows.json`).
+/// catalogue (harken-seed's `shows.json`).
 #[derive(Clone, Debug, Default, serde::Deserialize)]
 #[serde(default)]
 pub struct Shelf {

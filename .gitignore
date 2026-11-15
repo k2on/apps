@@ -1,13 +1,12 @@
 result
 result-*
 docs/perf/
-# What `nix build .#harken-android-lib -o harken/ffi/android` and
-# `.#harken-ios-xcframework -o harken/ffi/ios` leave for a local build.
-/harken/ffi/android
-/harken/ffi/ios
-# The same for money (`.#money-ios-xcframework -o money/ffi/ios`).
+# What `nix build .#money-ios-xcframework -o money/ffi/ios` (and harken's)
+# leaves for a local build.
 /money/ffi/ios
 /money/ffi/android
+/harken/ffi/ios
+/harken/ffi/android
 __pycache__/
 /target/
 # The prebuild self-test fixture's generated Kotlin (`prebuild.py fixture`).

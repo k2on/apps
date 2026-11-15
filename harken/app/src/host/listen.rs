@@ -75,30 +75,40 @@ impl Listen {
     /// Over the session just opened: the place's media player, if it has
     /// one, playing the tracks of its server.
     pub fn open(session: &Session, cx: &mut Cx<'_, Harken>) -> Listen {
-        let port = cx.place.modules().get::<dyn MediaPlayer>();
-        let waker = cx.place.waker();
-        let clock = cx.place.clock();
-        let timed = clock.clone();
-        let sound = port.map(|p| {
-            // A step asked for later comes at the first position the player
-            // says once it is due (`MediaSound`): the host keeps no timer.
-            MediaSound::new(
-                p,
-                &session.server,
-                move |ms| {
-                    if ms == 0 {
-                        waker()
-                    }
-                },
-                move || timed(),
-            )
-        });
-        Listen {
+        let mut l = Listen {
             core: Reconciler::new(&session.device, Some(Loaded::Nothing)),
-            sound,
+            sound: None,
             own: None,
-            clock,
+            clock: cx.place.clock(),
+        };
+        l.attach(&session.server, cx);
+        l
+    }
+
+    /// The place's media player, once it has one: at the session's open,
+    /// or (a phone whose screen registers its player after the session
+    /// opened) the first step after.
+    fn attach(&mut self, server: &str, cx: &mut Cx<'_, Harken>) {
+        if self.sound.is_some() {
+            return;
         }
+        let Some(port) = cx.place.modules().get::<dyn MediaPlayer>() else {
+            return;
+        };
+        let waker = cx.place.waker();
+        let timed = cx.place.clock();
+        // A step asked for later comes at the first position the player
+        // says once it is due (`MediaSound`): the host keeps no timer.
+        self.sound = Some(MediaSound::new(
+            port,
+            server,
+            move |ms| {
+                if ms == 0 {
+                    waker()
+                }
+            },
+            move || timed(),
+        ));
     }
 
     /// The account's session as the views hold it.
@@ -117,6 +127,8 @@ impl Listen {
     /// controls asked pressed, and what plays alone worked out for the
     /// player.
     pub fn step(&mut self, cx: &mut Cx<'_, Harken>) {
+        let server = cx.place.session().server;
+        self.attach(&server, cx);
         let Some(sound) = self.sound.as_mut() else { return };
         let remote = sound.take_remote();
         let at = sound.heard().place.ms().unwrap_or(0);
@@ -147,6 +159,7 @@ impl Listen {
     /// to its own sound while it is alone. Why not, where it was neither.
     pub fn press(&mut self, p: Press, cx: &mut Cx<'_, Harken>) -> Option<String> {
         let s = cx.place.session();
+        self.attach(&s.server, cx);
         let l = Listen::listening(cx);
         if Listen::joined(&s, &l) {
             let local = self.sound.as_ref().map(|o| (o.tracks(), o.heard().at.unwrap_or(0), o.heard().from));

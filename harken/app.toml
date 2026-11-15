@@ -1,0 +1,153 @@
+# harken as an Ark app (ui/docs/app.md, "harken's Port"). Every native
+# project is generated from this, the modules' module.toml and the Rust
+# views (`nix run .#harken-prebuild` writes them into harken/.native, for
+# Xcode and Android Studio; nothing there is committed), and so are its
+# phones' library, its browser's page and its desktop's window.
+
+name = "Harken"
+# The bundle id and the applicationId are the flake's `bundlePrefix` and
+# this: us.koon.harken.
+id = "harken"
+version = "0.1"
+# ui/theme.toml's [accent.gold].
+accent = "gold"
+platforms = ["iphone", "ipad", "mac", "android", "desktop", "web"]
+# Its device modules are its crate's dependencies (harken/app/Cargo.toml:
+# the media player): depending on a module's crate is what takes it on
+# (ui/docs/app.md, How an App Opts In).
+# The scheme the server's sign-in sends the code back on (harken://auth),
+# and a route opened by a link (harken://album/…).
+scheme = "harken"
+# The Rust crate that is the app (harken/app): its #[view]s, its runtimes
+# and its part of its host.
+crate = "harken-app"
+
+# Each screen's runtime (`app`, its type in the app's crate, whose page and
+# message are beside it), its page and message, the holder each toolkit's
+# generated views read it through, its `#[view]` and the names the phones'
+# generator writes it under (ui/docs/app.md, app.toml).
+[screens]
+home = { app = "home::Home", runtime = "HomeApp", page = "HomePage", msg = "HomeMsg", swift = "HomeScreen", kotlin = "HomeHolder", view = "home::view::home", swift-view = "HomeView", kotlin-view = "HomeScreen" }
+library = { app = "library::Library", runtime = "LibraryApp", page = "LibraryPage", msg = "LibraryMsg", swift = "LibraryScreen", kotlin = "LibraryHolder", view = "library::view::library", swift-view = "LibraryView", kotlin-view = "LibraryScreen" }
+search = { app = "search::Search", runtime = "SearchApp", page = "SearchPage", msg = "SearchMsg", swift = "SearchScreen", kotlin = "SearchHolder", view = "search::view::search", swift-view = "SearchView", kotlin-view = "SearchScreen" }
+# A record's page (an album, an artist, a playlist, a show), pushed over
+# the section it was opened from.
+page = { app = "page::Page", runtime = "PageApp", page = "RecordPage", msg = "PageMsg", swift = "RecordScreen", kotlin = "RecordHolder", view = "page::view::record", swift-view = "RecordView", kotlin-view = "RecordScreen" }
+# The full player; its now-playing bar is a further view (`[views]`).
+player = { app = "player::Player", runtime = "PlayerApp", page = "PlayerPage", msg = "PlayerMsg", swift = "PlayerScreen", kotlin = "PlayerHolder", view = "player::view::player", swift-view = "PlayerView", kotlin-view = "PlayerScreen" }
+sheets = { app = "sheets::Sheets", runtime = "SheetsApp", page = "SheetsPage", msg = "SheetsMsg", swift = "SheetsScreen", kotlin = "SheetsHolder", view = "sheets::view::sheets", swift-view = "SheetsView", kotlin-view = "SheetsScreen" }
+# The shell's main window.
+shell = { app = "shell::HarkenShell", runtime = "ShellApp", page = "ShellPage", msg = "ShellMsg", swift = "HarkenShellScreen", kotlin = "HarkenShellHolder", view = "shell::view::harken_shell", swift-view = "HarkenShellView", kotlin-view = "HarkenShell" }
+
+# The shell every phone shows once the app runs, the app library's
+# `ArkShell`, drawn from these names alone (money/app.toml says each).
+# harken opens no page in the system's browser: `browse` is always none.
+[shell]
+screen = "shell"
+settings = "settings"
+commands = "commands"
+over = "sheets"
+account = "household"
+section = "section"
+appearance = "appearance"
+household = "household"
+browse = "browse"
+closed = "PageClosed"
+
+# Each name the shell's view hosts and what draws it: a screen's view, or a
+# further view of one (`player.bar`, the player's now-playing bar, which
+# the shell's accessory grows into the full player).
+[shell.hosted]
+home = "home"
+library = "library"
+search = "search"
+page = "page"
+player = "player"
+"player.bar" = "player_bar"
+
+# A screen's further views, over its runtime (`screen`): the now-playing
+# bar, Settings, and the menu bar's commands.
+[views]
+player_bar = { screen = "player", view = "player::view::now_playing", swift-view = "NowPlayingView", kotlin-view = "NowPlaying" }
+settings = { screen = "shell", view = "shell::view::harken_settings", swift-view = "HarkenSettingsView", kotlin-view = "HarkenSettings" }
+commands = { screen = "shell", commands = "shell::view::commands", swift-view = "HarkenCommands", kotlin-view = "harkenCommands" }
+
+[icon]
+# icon.svg's full-canvas rectangle is the ground; on Android the rest is the
+# adaptive icon's foreground and its themed (monochrome) icon.
+svg = "icon.svg"
+
+# Playing on with the screen locked and the app in the background: the
+# media player's `audio` mode and its foreground service (ui/prebuild.py).
+[background]
+playback = true
+
+[apple]
+product = "Harken"
+category = "public.app-category.music"
+deployment = "26.0"
+[apple.info]
+ITSAppUsesNonExemptEncryption = false
+NSLocalNetworkUsageDescription = "Harken plays from your own music server, which may be on this network."
+
+[android]
+package = "dev.harken.android"
+min-sdk = 26
+target-sdk = 35
+# The one key every build is signed with, committed and public on purpose
+# (README.md says why): one APK installs over the last.
+keystore = "debug.keystore"
+permissions = ["android.permission.INTERNET"]
+# The hosts its scheme opens on: harken://auth, harken://join.
+hosts = ["auth", "join"]
+dependencies = []
+
+[web]
+# The SPA alone, served by harken-server beside the sync socket: the
+# library is private, so no page of it is written ahead.
+modes = ["spa"]
+
+[store]
+summary = "A music library of your own, synced from your own server"
+categories = ["Multimedia"]
+license = "MIT OR Apache-2.0"
+website = "https://k2on.github.io/apps/"
+source = "https://github.com/k2on/apps"
+issues = "https://github.com/k2on/apps/issues"
+description = """
+Harken plays the music library a harken server holds: albums, artists, playlists, podcasts and sermons, and a queue, with the lock screen, the notification, Bluetooth and the car as the media session's. The library lives on the phone and syncs with the server, so what is already here keeps playing when the server cannot be reached, and a playlist made offline lands when it can.
+
+It needs a harken server to sign in to; there is no account anywhere else. Without a server, the app plays a demo library on the phone alone. The server, the desktop client and the browser client are in the same repository.
+
+This is a release build signed with a key committed to that repository, so anyone could sign an APK as this app. It is for the one person running the server.
+"""
+
+# The release channels (nix/channels.nix): main's unstable build and a
+# tag's stable one, as every app's; no unstable TestFlight app yet.
+[channels]
+stable = true
+unstable = true
+ios-unstable = false
+
+[ffi]
+# The phones' library, generated (ui/prebuild.py's `ffi`): `harken-ffi`
+# (lib and UniFFI namespace `harken_ffi`) over harken's part of its host.
+host = "HarkenHost"
+app = "host::Harken"
+route = "routes::Route"
+domain = "harken_domain::shared"
+demo = "harken-seed"
+android = []
+apple = []
+
+# What else crosses to the phones, by crate: every type a screen's page or
+# message holds that is not the page or the message itself.
+[ffi.twins]
+harken_app = [
+  "HarkenRequest",
+  "home::LastPlayed",
+  "library::{ArtTile, KindChip, NameForm, PlaylistItem, TrackItem}",
+  "player::{DeviceRow, Playing}",
+  "sheets::{FollowForm, PlaylistChoice}",
+  "shell::{Appearance, Facts}",
+]

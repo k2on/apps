@@ -1,89 +1,196 @@
 {
-  "_": "harken's screenshots (.github/screens/apps.md; which phones it is on is flake.nix's list, `publish`): its server is server.sh, signed in to as `user`; the app opened once for each device and theme and every shot taken in that one launch, in order, each its steps done from where the last left it; `search` from Home, as iOS 26's tab bar shows the tab it was opened from. `player` is `fresh`: it plays a song (from Home's Recently added, which the shot before it is not on), and the app is opened again for it; it is paused and put halfway before it is taken, so that what it shows is the same each run. `devices` goes on from it, the player open, and opens its device picker. `desktop` is the iced window's (ui/rust/shots): its size, and its shots, each clicking or typing what a text on the screen says, in one window, each shot opening its own section first (`search` its command box over Songs, as it was taken in a window of its own); `keys` is `fresh`, as `search` leaves the command box open. It has no player shot: nothing on the desktop can play.",
+  "_": "harken's screenshots (.github/screens/apps.md; which phones it is on is flake.nix's list, `publish`): its server is server.sh (the demo's catalogue as a media root its scanner reads), signed in to as `user`, who goes by `name`. `walk`: the phones' and the larger screens' (the same list), walked inside the app from a new install (ui/docs/shots.md, \"In the App\"): `welcome`, the first run's page; then signed in through the first run, landing on Home; and every shot after reached by tapping from where the last left it, each step naming an element by its id (`tab:library`, `library.show:albums`, `library.open-album:<title>`; a shot's `<id>.tree.txt` lists them). `player` plays the album open from its page's Play, grows the now-playing bar into the full player (`shell.open-player`, the accessory's own press) and pauses it there, so the picture holds still; `settings` puts it back and opens Settings from who is signed in. `desktop` is the window's (arkui's `host`, photographed by ui/rust/shots), the same walk signed in straight back from the run's dev server. `screens` and `launch` are the Mac's and the browser's: each screen opened by its launch arguments (the Mac's own window over the demo library, app-mac.sh; the browser's address, app-web.sh, over the demo in the page).",
   "server": {
     "port": 8787,
     "user": "alex",
     "name": "Alex",
     "picture": "nix/demo/alex.jpg"
   },
-  "shots": [
-    {
-      "id": "home",
-      "steps": [
-        {
-          "tap": "Home",
-          "role": "tab"
-        }
-      ]
-    },
-    {
-      "id": "library",
-      "steps": [
-        {
-          "tap": "Library",
-          "role": "tab"
-        }
-      ]
-    },
-    {
-      "id": "search",
-      "steps": [
-        {
-          "tap": "Home",
-          "role": "tab"
-        },
-        {
-          "tap": "Search",
-          "role": "tab"
-        }
-      ]
-    },
-    {
-      "id": "player",
-      "fresh": true,
-      "steps": [
-        {
-          "tap": "Für Elise",
-          "where": "bottom"
-        },
-        {
-          "await": "Pause|Close the player"
-        },
-        {
-          "relaunch": true
-        },
-        {
-          "tap": "Für Elise",
-          "where": "bottom"
-        },
-        {
-          "await": "Close the player"
-        },
-        {
-          "tap": "Pause",
-          "optional": true
-        },
-        {
-          "tap": "Position",
-          "optional": true
-        },
-        {
-          "wait": 2
-        }
-      ]
-    },
-    {
-      "id": "devices",
-      "steps": [
-        {
-          "tap": "Playing on|iPhone 17 Pro|iPad Pro 13-inch (M5)"
-        },
-        {
-          "wait": 2
-        }
-      ]
-    }
-  ],
+  "walk": {
+    "phone": [
+      {
+        "id": "welcome",
+        "steps": []
+      },
+      {
+        "id": "home",
+        "signIn": true,
+        "steps": [
+          {
+            "tap": "welcome.next"
+          },
+          {
+            "tap": "welcome.typed"
+          },
+          {
+            "type": "{server}"
+          },
+          {
+            "tap": "welcome.check"
+          },
+          {
+            "await": "tab:home"
+          }
+        ]
+      },
+      {
+        "id": "search",
+        "steps": [
+          {
+            "tap": "tab:search"
+          }
+        ]
+      },
+      {
+        "id": "library",
+        "steps": [
+          {
+            "tap": "tab:library"
+          }
+        ]
+      },
+      {
+        "id": "albums",
+        "steps": [
+          {
+            "tap": "library.show:albums"
+          }
+        ]
+      },
+      {
+        "id": "album",
+        "steps": [
+          {
+            "tap": "library.open-album:goldberg-variations-bwv-988"
+          }
+        ]
+      },
+      {
+        "id": "player",
+        "steps": [
+          {
+            "tap": "page.play-all:play"
+          },
+          {
+            "await": "shell.open-player"
+          },
+          {
+            "tap": "shell.open-player"
+          },
+          {
+            "await": "player.toggle"
+          },
+          {
+            "tap": "player.toggle"
+          }
+        ]
+      },
+      {
+        "id": "settings",
+        "steps": [
+          {
+            "tap": "shell.close-player"
+          },
+          {
+            "tap": "shell.account"
+          }
+        ]
+      }
+    ],
+    "large": [
+      {
+        "id": "welcome",
+        "steps": []
+      },
+      {
+        "id": "home",
+        "signIn": true,
+        "steps": [
+          {
+            "tap": "welcome.next"
+          },
+          {
+            "tap": "welcome.typed"
+          },
+          {
+            "type": "{server}"
+          },
+          {
+            "tap": "welcome.check"
+          },
+          {
+            "await": "tab:home"
+          }
+        ]
+      },
+      {
+        "id": "search",
+        "steps": [
+          {
+            "tap": "tab:search"
+          }
+        ]
+      },
+      {
+        "id": "library",
+        "steps": [
+          {
+            "tap": "tab:library"
+          }
+        ]
+      },
+      {
+        "id": "albums",
+        "steps": [
+          {
+            "tap": "library.show:albums"
+          }
+        ]
+      },
+      {
+        "id": "album",
+        "steps": [
+          {
+            "tap": "library.open-album:goldberg-variations-bwv-988"
+          }
+        ]
+      },
+      {
+        "id": "player",
+        "steps": [
+          {
+            "tap": "tab:library"
+          },
+          {
+            "tap": "page.play-all:play"
+          },
+          {
+            "await": "shell.open-player"
+          },
+          {
+            "tap": "shell.open-player"
+          },
+          {
+            "await": "player.toggle"
+          },
+          {
+            "tap": "player.toggle"
+          }
+        ]
+      },
+      {
+        "id": "settings",
+        "steps": [
+          {
+            "tap": "shell.close-player"
+          },
+          {
+            "tap": "shell.account"
+          }
+        ]
+      }
+    ]
+  },
   "desktop": {
     "window": [
       1440,
@@ -95,15 +202,7 @@
         "id": "home",
         "steps": [
           {
-            "click": "Songs"
-          }
-        ]
-      },
-      {
-        "id": "library",
-        "steps": [
-          {
-            "click": "Albums"
+            "await": "tab:home"
           }
         ]
       },
@@ -111,34 +210,62 @@
         "id": "search",
         "steps": [
           {
-            "click": "Songs"
-          },
-          {
-            "key": "ctrl+k"
-          },
-          {
-            "type": "Elise"
-          },
-          {
-            "await": "Für Elise"
+            "tap": "tab:search"
           }
         ]
       },
       {
-        "id": "keys",
-        "fresh": true,
+        "id": "library",
         "steps": [
           {
-            "click": "Songs"
+            "tap": "tab:library"
+          }
+        ]
+      },
+      {
+        "id": "albums",
+        "steps": [
+          {
+            "tap": "library.show:albums"
+          }
+        ]
+      },
+      {
+        "id": "album",
+        "steps": [
+          {
+            "tap": "library.open-album:goldberg-variations-bwv-988"
+          }
+        ]
+      },
+      {
+        "id": "player",
+        "steps": [
+          {
+            "tap": "page.play-all:play"
           },
           {
-            "key": "l"
+            "await": "shell.open-player"
           },
           {
-            "key": "z"
+            "tap": "shell.open-player"
           },
           {
-            "wait": 1
+            "await": "player.toggle"
+          },
+          {
+            "tap": "player.toggle"
+          }
+        ]
+      },
+      {
+        "id": "settings",
+        "steps": [
+          {
+            "tap": "shell.close-player"
+          },
+          {
+            "tap": "shell.account"
           }
         ]
       }
@@ -147,7 +274,128 @@
   "hero": {
     "name": "Harken",
     "line": "Music, podcasts and sermons, from your own server, on every device",
-    "logo": "harken/ios/Harken/Assets.xcassets/AppIcon.appiconset/icon-1024.png",
+    "logo": "harken/icon.svg",
     "screen": "home"
+  },
+  "launch": {
+    "mac": [
+      "-demo",
+      "2026-11-18",
+      "-window",
+      "1440x900",
+      "-ApplePersistenceIgnoreState",
+      "YES"
+    ]
+  },
+  "screens": [
+    {
+      "id": "home",
+      "args": [
+        "-screen",
+        "home"
+      ],
+      "route": "/",
+      "on": [
+        "ios",
+        "ipad-portrait",
+        "ipad-landscape",
+        "mac"
+      ]
+    },
+    {
+      "id": "library",
+      "args": [
+        "-screen",
+        "library"
+      ],
+      "route": "/library/playlists/",
+      "on": [
+        "ios",
+        "ipad-portrait",
+        "ipad-landscape",
+        "mac"
+      ]
+    },
+    {
+      "id": "albums",
+      "args": [
+        "-screen",
+        "albums"
+      ],
+      "route": "/albums/",
+      "on": [
+        "ios",
+        "ipad-portrait",
+        "ipad-landscape",
+        "mac"
+      ]
+    },
+    {
+      "id": "search",
+      "args": [
+        "-screen",
+        "search"
+      ],
+      "route": "/search/",
+      "on": [
+        "ios",
+        "ipad-portrait",
+        "ipad-landscape",
+        "mac"
+      ]
+    },
+    {
+      "id": "settings",
+      "args": [
+        "-screen",
+        "settings"
+      ],
+      "route": "/settings/",
+      "on": [
+        "ios",
+        "ipad-portrait",
+        "ipad-landscape",
+        "mac"
+      ]
+    },
+    {
+      "id": "welcome",
+      "fresh": true,
+      "route": "welcome/",
+      "on": [
+        "ios",
+        "ipad-portrait",
+        "ipad-landscape"
+      ]
+    }
+  ],
+  "web": {
+    "_": "The browser's (app-web.sh, web-shots.js): harken-web over the demo library in the page (`query`'s `demo`: no server to sign in to), at each of `sizes` (named as `screens`' `on`) in light and dark; every one of `screens` is taken on the sizes it is `on`, its launch arguments as the page's address.",
+    "query": "demo",
+    "today": "2026-11-10",
+    "sizes": {
+      "mac": [
+        1440,
+        900
+      ],
+      "ipad-landscape": [
+        1366,
+        1024
+      ],
+      "ipad-portrait": [
+        900,
+        1100
+      ],
+      "ios": [
+        400,
+        860
+      ]
+    },
+    "shots": [
+      {
+        "id": "command-box",
+        "query": "command=Library"
+      }
+    ]
   }
 }

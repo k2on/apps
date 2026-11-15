@@ -3,7 +3,7 @@
 //! it — the copy `nix run .#update-catalogue` writes from the flake's
 //! `classical` input, and `checks.catalogue` holds to it — and the shows in
 //! `shows.json` beside it. It lives beside the app, not in it (`docs/seed.md`): the
-//! demo window (`harken/iced`'s `demo` feature) opens on [`seeded_disk`],
+//! demo every platform runs opens on [`seeded_disk`] ([`open`]),
 //! and `harken-seed` (beside this file, [`media`]) writes the same albums
 //! as a folder of tagged files a server's scanner reads. The real client is
 //! built without it and the library there is whatever its server's scanner
@@ -33,7 +33,7 @@ use ark::format::Encode;
 use ark::log::{EntryId, Record, Snapshot};
 use ark::peer::Ctx;
 use ark::store::Store;
-use ark_peer::{Disk, Memory};
+use ark_peer::{Config, Disk, Memory, Peer};
 use harken_domain::catalogue::Catalogue;
 use harken_domain::shows::Shelf;
 use harken_domain::{AddToPlaylist, CreatePlaylist, Id as Key, Library, LibraryEntry, Playlist, LIBRARY};
@@ -159,51 +159,21 @@ impl Seeder {
     }
 }
 
-/// The catalogue as copy `k` of it: every name and file with ` (k)` after
-/// it, so that nothing in one copy is a row of another. Copy 0 is itself.
-fn copy_of(c: &Catalogue, k: usize) -> Catalogue {
-    let mut c = c.clone();
-    if k == 0 {
-        return c;
-    }
-    let n = |s: &str| match s.is_empty() {
-        true => String::new(),
-        false => format!("{s} ({k})"),
-    };
-    for p in &mut c.people {
-        (p.name, p.sort_name) = (n(&p.name), n(&p.sort_name));
-    }
-    for w in &mut c.works {
-        w.composer = n(&w.composer);
-    }
-    for a in &mut c.albums {
-        a.name = n(&a.name);
-        for t in &mut a.tracks {
-            (t.title, t.composer, t.file) = (n(&t.title), n(&t.composer), n(&t.file));
-        }
-    }
-    c
-}
-
-/// The demo's library `copies` times over, as the records of a peer alone:
-/// a snapshot of the seeded store, and who it is. `1` is the demo. Every
-/// copy after the first has its own composers, albums, works, recordings and
-/// files (the names carry ` (k)`), so every list is `copies` times as long,
-/// for measuring how a list's cost grows with the library; the playlists
-/// are the first copy's.
-pub fn seeded_disk(copies: usize) -> Memory {
+/// The demo's library, as the records of a peer alone: a snapshot of the
+/// seeded store, and who it is. The same whatever the day (`today`,
+/// `now_ms`, which every app's demo is handed): a library has no month.
+pub fn seeded_disk(today: &str, now_ms: i64) -> Memory {
+    let _ = (today, now_ms);
     let mut seed = Seeder::new();
     // People, then tracks, then what a track could not carry, copy by copy:
     // the order `Catalogue::calls` gives. The demo has every file it names:
     // they are URLs, played from where they are. What it describes that
     // only a library of its own would have (`Call::if_there`) is not here.
-    for k in 0..copies {
-        for call in copy_of(catalogue(), k).calls(|url| Some(url.to_string())) {
-            if call.if_there {
-                continue;
-            }
-            seed.apply(&call.what, call.name, &call.input);
+    for call in catalogue().calls(|url| Some(url.to_string())) {
+        if call.if_there {
+            continue;
         }
+        seed.apply(&call.what, call.name, &call.input);
     }
 
     // Then the shows, each and its episodes.
@@ -268,6 +238,16 @@ pub fn seeded_disk(copies: usize) -> Memory {
     disk
 }
 
+/// The demo's library opened on `disk` ([`seeded_disk`]) as a peer of its
+/// own, alone, its authority the library's: what every platform's demo
+/// runs (`[ffi] demo` in harken/app.toml).
+pub fn open(disk: Memory) -> Peer {
+    let mut peer = Peer::open_as(Config::of(harken_domain::shared()), Box::new(disk), None);
+    peer.set_roles([LIBRARY]);
+    peer.alone();
+    peer
+}
+
 #[cfg(test)]
 mod tests {
     /// Falsified by a catalogue or a show the domain refuses, or a playlist
@@ -276,6 +256,6 @@ mod tests {
     #[test]
     fn the_library_is_seeded() {
         assert!(!super::catalogue().albums.is_empty());
-        super::seeded_disk(1);
+        super::seeded_disk("2026-11-15", 0);
     }
 }

@@ -35,6 +35,7 @@ pub mod assistant;
 pub mod captions;
 pub mod catalogue;
 pub mod chapters;
+pub mod config;
 pub mod covers;
 pub mod domain;
 pub mod feeds;
@@ -254,10 +255,10 @@ const SCANNER: &str = "the scanner";
 /// What the house's sign-in of a listener says it is.
 const HOUSE: &str = "the house's speakers";
 
-/// The hub's configuration for `hosted` (`harken_player::config::hub`),
+/// The hub's configuration for `hosted` (`config::hub`),
 /// keeping `keep` entries above the log's snapshot.
 pub fn hub_config(hosted: &Hosted, keep: usize) -> HubConfig {
-    harken_player::config::hub(&hosted.domain, Some(keep))
+    config::hub(&hosted.domain, Some(keep))
 }
 
 /// What `/healthz` says, a line each: `ok`; the connections open; the

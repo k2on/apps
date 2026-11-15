@@ -60,7 +60,7 @@ fn a_seeded_hub_fills_a_device_that_has_nothing() {
         }),
         ..Config::of(d)
     };
-    let mut hub = Peer::serve(hub_config, Box::new(harken_seed::seeded_disk(1)), 0);
+    let mut hub = Peer::serve(hub_config, Box::new(harken_seed::seeded_disk("2026-10-26", 0)), 0);
     let mut who = dev("alice@phone").unwrap();
     who.roles = vec![harken_domain::LIBRARY.into()];
     let mut device = Peer::open(config, who, Box::new(Memory::default()), false);

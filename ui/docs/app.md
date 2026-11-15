@@ -1062,6 +1062,17 @@ is; their motion from `ui/theme.toml`'s `[motion]` through `Springs`/
   generated window; harken/ffi with the generated library (its `Hall`
   first moved to harken-server's tests).
 
+Done, in one commit (step 4 below). Beside the plan: `[shell.hosted]`
+names a further view of a runtime as well as a screen's own
+(`"player.bar" = "player_bar"`, a `[views]` entry over `player`:
+ui/prebuild.py's `shell_hosted`), the demo's crate is linked without its
+defaults by every generated target (`bare`: harken-seed's command line
+fetches covers, which no phone or page runs), harken-seed says what
+every app's demo says (`seeded_disk(today, now_ms)`, `open`), the peers'
+configuration that harken-player kept moved to the server
+(`harken_server::config`), and the F-Droid repository's key and README,
+which were under harken/android, are nix/fdroid's.
+
 ### Screenshots
 
 harken goes back into app-screens (the `apps` list's "back once ported")
@@ -1141,7 +1152,38 @@ changes, `.github/compat-check.sh`'s harken part grows with it.
    port, not built: following is by address until then) and recent
    searches as a durable local row (which needs a place's local
    instance, not built).
-4. Generated targets, the old clients deleted: not started.
+4. Generated targets, the old clients deleted: done. harken/app.toml says
+   it all (its screens, `[shell]` with the player's bar hosted as a
+   further view, `[views]`, `[background] playback`, `[web]`, `[apple]`,
+   `[android]` with the committed key, `[store]`, `[channels]`, `[ffi]`),
+   and `harken-ffi`, the phones' projects (`harken-native`), the page
+   (`harken-web`, `nix run .#harken-export-web`) and the window
+   (`harken-desktop`) are generated from it as money's; `host::Harken` is
+   `Windowed` (`harken_app::window`: every hosted name harken's views, the
+   address the section, the library's kind or the page pushed, Settings
+   the window's place, the menu's View and Go). The shell says who is
+   signed in (its account face opens Settings), a launch's section, pane
+   and look, and `PageClosed` (harken opens no page in the system's
+   browser). harken/ios, harken/android, harken/iced, harken/ffi and
+   harken/player are gone; the Hall is `harken-server`'s tests/hall.rs.
+   The media player is a phone device as the camera is (its module.toml's
+   `[phone]`, ark-ffi's `media-player`, `registerMediaPlayer`; `{accent}`
+   in a `[phone]` device's Swift is app.toml's), registered by the
+   generated entry points, and the host takes it at its first step after
+   the open when the screen registered it later (Android's activity).
+   The browser's `<audio>` and the desktop's rodio are the module's but
+   not wired (its module.toml says no `[web]` or `[desktop]`: the
+   browser's `Browser::new()` may be none), so a page and a window play
+   nothing yet.
+   Not yet: the generated hosts open the peer with no live space
+   (`ark_peer::Config::of`), so a generated client does not stand in the
+   listening session — it plays alone, and the player's devices and the
+   group's volume wait on it. What it needs is the app's word for its
+   live space (what its `Hello` says it is, what it relays as ephemeral),
+   which ark-app cannot name (it is no adapter): a `[ffi] live` the
+   generated hosts read, or a `HostedApp` hook every host turns into an
+   `ark_peer::Live`. The queue, the transcript and the groups' picker
+   the iced window drew are not views yet.
 5. Screenshots: not started. The open issue it waited on is found and
    fixed: a hub opened on `harken_seed::seeded_disk` (a log standing at
    its start on a snapshot of rows) took a device at cursor 0 for one
@@ -1199,7 +1241,7 @@ or `#[derive(ark::twin::Twin)]` (on a plain one; `#[ark(ffi_eq)]` for
 one that compares and hashes) writes beside it only its shape — each
 field's type by position (`ark::twin::Field<V, F>`) and a hidden macro.
 The phones' library, generated, calls them (`ark::twins!(money_core::{…},
-money_app::{…})`, from app.toml's `[ffi.twins]`; harken/ffi for harken)
+money_app::{…})`, from app.toml's `[ffi.twins]`, harken's the same way)
 and the twins are written there: `AccountLineFfi`, named `AccountLine` in
 Swift and Kotlin, with the conversions both ways (`ark_ffi::Twin`). So
 money-core and money-app have no `ffi` feature and no UniFFI; their
@@ -1447,7 +1489,7 @@ resources in `revelation/native/android`.
   message, the keys move and run, a press outside closes it), money-app
   (Accounts over the demo household with the fakes, Reconcile, the amount
   in cents, the row's menu in order), arkui with `host`, `clipboard` and
-  `scanner` (`arkui-host`), harken-iced with `demo`, the generated
+  `scanner` (`arkui-host`), the generated
   money-desktop built (`checks.money-desktop`), money-ffi (`--no-default-features`: the session's day).
 - nix: `checks.theme`, `checks.prebuild`, `checks.money-native`,
   `checks.money-ios-typecheck` (now with the listed modules' Swift, and

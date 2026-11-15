@@ -1,5 +1,5 @@
 # The phones' F-Droid repositories, one per release channel
-# (docs/releasing.md, harken/android/fdroid/README.md), each for every app
+# (docs/releasing.md, nix/fdroid/README.md), each for every app
 # of this tree, so a phone adds one address for all of them:
 #
 #   https://k2on.github.io/apps/fdroid/repo            stable: `v*` tags'
@@ -24,7 +24,7 @@
 # metadata and icon are made from the stable's (nix/channels.nix).
 #
 # **The index is signed with a key committed beside the metadata**
-# (harken/android/fdroid/repo.keystore, `harken` / `harken`), public on
+# (nix/fdroid/repo.keystore, `harken` / `harken`), public on
 # purpose, the same trade the APKs' own committed key makes. The client refuses an
 # unsigned index, and a key nobody may read would be a secret for CI to
 # hold before the first repository could exist. What a key that anyone can
@@ -112,7 +112,7 @@ let
   # since: main's builds are in the other repository, under other ids.
   keep = 3;
   repoKey = {
-    file = ../harken/android/fdroid/repo.keystore;
+    file = ./fdroid/repo.keystore;
     alias = "harken";
     pass = "harken";
     # SHA-256 of its certificate: what `?fingerprint=` pins, and what the

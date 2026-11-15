@@ -8,13 +8,15 @@
 #           the address typed, the dev sign-in, the demo's household synced
 #           from the old server, a transaction entered and confirmed there,
 #           and seen on a second phone signed in after it.
-#   harken  the headless client this build's harken-server package carries
-#           (harken-peer, which drives ark-ffi's Peer as a phone does):
-#           signed in through the dev sign-in, a playlist made and
-#           confirmed, and seen by a second peer.
+#   harken  the phone host (harken/app/tests/deployed.rs), as money's: the
+#           first run, the address typed, the dev sign-in, the server's
+#           Favorites synced, a playlist made and confirmed there, and seen
+#           on a second phone; then the headless client this build's
+#           harken-server package carries (harken-peer, which drives
+#           ark-ffi's Peer as a phone does) the same way.
 #
 # Neither is in CI: it builds the old servers (from Cachix when they are
-# there) and money's phone host. Run it from the repository's root, in the
+# there) and both phone hosts. Run it from the repository's root, in the
 # dev shell (cargo, curl, python3), before a release that the deployed
 # servers will meet:
 #
@@ -75,6 +77,7 @@ HARKEN_DEV_AUTH=1 HARKEN_DATA="$work/harken/data" \
 pids+=($!)
 up "$harken" "$work/harken/server.log"
 echo "harken's deployed server: $(curl -sf "$harken/healthz" | grep '^domain')"
+(cd rust && ARK_DEPLOYED_SERVER=$harken cargo test -p harken-app --test deployed -- --nocapture)
 python3 - "$harken_peer" "$harken" "$work/harken" << 'EOF'
 import json, subprocess, sys, time
 

@@ -93,7 +93,7 @@ Add either repository, or both, in F-Droid (Settings → Repositories → +):
     https://k2on.github.io/apps/fdroid/unstable/repo?fingerprint=E48F7E6E1AB9C74C4F0404835580DE590334C636EAF654680E1BF0D250BEF3DD
 
 Both indexes are signed with the same committed key, so the fingerprint
-is the same (harken/android/fdroid/README.md says why the key is public).
+is the same (nix/fdroid/README.md says why the key is public).
 
 The stable app and the unstable app are two apps: they install side by
 side, each with its own data, its own sign-in and its own server
