@@ -24,6 +24,7 @@ use crate::{context_menu, glyphs, icon, layer, parts, sidebar, style};
 
 pub use iced::Element;
 
+pub mod cursor;
 mod layout;
 
 /// What a page is padded by.
@@ -487,6 +488,11 @@ enum Sections {
     BottomBar,
 }
 
+/// Whether the shell's sections are a sidebar in a window `width` wide.
+pub fn has_sidebar(width: f32) -> bool {
+    sections(Frame { width, focus: Pane::Content }) == Sections::Sidebar
+}
+
 fn sections(frame: Frame) -> Sections {
     match frame.class() {
         SizeClass::Compact => Sections::BottomBar,
@@ -528,6 +534,7 @@ fn shell_part<'a, M: Clone + 'static>(p: Part<M>, ctx: &mut Ctx<'a, '_, M>) -> E
                         if i == at {
                             content = t.content;
                         }
+                        cursor::section_drawn(&select.call(t.tag.clone()), i == at);
                         items.push(sidebar::Item {
                             glyph: shape(&t.glyph),
                             label: t.title,
@@ -592,7 +599,9 @@ fn shell_part<'a, M: Clone + 'static>(p: Part<M>, ctx: &mut Ctx<'a, '_, M>) -> E
             (SizeClass::Expanded, _) => row![
                 container(draw(*content, ctx)).width(CONTENT_WIDTH).height(Length::Fill),
                 rule::vertical(1).style(style::edge),
-                container(draw(*detail, ctx)).width(Length::Fill).height(Length::Fill),
+                container(cursor::in_pane(Pane::Detail, || draw(*detail, ctx)))
+                    .width(Length::Fill)
+                    .height(Length::Fill),
             ]
             .into(),
             (_, true) => pushed(*detail, back, ctx),
@@ -636,7 +645,7 @@ fn shell_part<'a, M: Clone + 'static>(p: Part<M>, ctx: &mut Ctx<'a, '_, M>) -> E
                         ]
                         .align_y(Alignment::Center)
                         .padding([8, 12]),
-                        container(draw(*inspector, ctx)).height(Length::Fill)
+                        container(cursor::in_pane(Pane::Inspector, || draw(*inspector, ctx))).height(Length::Fill)
                     ];
                     stack![
                         content,
@@ -651,7 +660,7 @@ fn shell_part<'a, M: Clone + 'static>(p: Part<M>, ctx: &mut Ctx<'a, '_, M>) -> E
                 _ => row![
                     container(content).width(Length::Fill),
                     rule::vertical(1).style(style::edge),
-                    container(draw(*inspector, ctx))
+                    container(cursor::in_pane(Pane::Inspector, || draw(*inspector, ctx)))
                         .width(INSPECTOR_WIDTH)
                         .height(Length::Fill)
                         .style(style::surface)
@@ -1226,7 +1235,12 @@ fn meter_row<M: Clone + 'static>(r: MeterRow<M>) -> Element<'static, M> {
     }
     let badge = crate::figures::status_badge(r.status.get(), parts::Tint::named(&r.status_tint.get()));
     line = line.push(container(badge).width(METER_COLUMN).align_right(METER_COLUMN));
-    let b = button(line).width(Length::Fill).padding([2, 0]).style(style::bare).on_press_maybe(r.tap);
+    let lit = cursor::row_drawn(&r.title.get(), r.tap.as_ref());
+    let b = button(lit_row(line, lit))
+        .width(Length::Fill)
+        .padding([2, 0])
+        .style(style::bare)
+        .on_press_maybe(r.tap);
     let items = menu_of(r.menu);
     match items.is_empty() {
         true => b.into(),
@@ -1270,7 +1284,12 @@ fn list_row<M: Clone + 'static>(r: ListRow<M>) -> Element<'static, M> {
     if r.tap.is_none() && r.menu.is_empty() {
         return container(line).width(Length::Fill).padding([2, 0]).into();
     }
-    let b = button(line).width(Length::Fill).padding([2, 0]).style(style::bare).on_press_maybe(r.tap);
+    let lit = cursor::row_drawn(&r.title.get(), r.tap.as_ref());
+    let b = button(lit_row(line, lit))
+        .width(Length::Fill)
+        .padding([2, 0])
+        .style(style::bare)
+        .on_press_maybe(r.tap);
     let items: Vec<context_menu::Item<M>> = r
         .menu
         .into_iter()
@@ -1285,6 +1304,15 @@ fn list_row<M: Clone + 'static>(r: ListRow<M>) -> Element<'static, M> {
     match items.is_empty() {
         true => b.into(),
         false => context_menu::context_menu(b, r.title.get(), items),
+    }
+}
+
+/// `line` lit as the keyboard's cursor is, while it is on it
+/// ([`cursor`]); as it was otherwise.
+fn lit_row<M: 'static>(line: impl Into<Element<'static, M>>, lit: bool) -> Element<'static, M> {
+    match lit {
+        true => container(line).width(Length::Fill).style(|t| style::row(t, true, true, false)).into(),
+        false => line.into(),
     }
 }
 
@@ -1449,7 +1477,8 @@ fn table_row<M: Clone + 'static>(columns: &[TableColumn], r: TableRow<M>, odd: u
     for (i, c) in cells.into_iter().enumerate() {
         line = line.push(table_cell(c, columns.get(i)));
     }
-    let body = crate::table::row(line, selected, true, odd % 2 == 1);
+    let lit = cursor::row_drawn(&title, r.tap.as_ref());
+    let body = crate::table::row(line, selected || lit, true, odd % 2 == 1);
     let b = button(body).width(Length::Fill).padding(0).style(style::bare).on_press_maybe(r.tap);
     let items: Vec<context_menu::Item<M>> = r
         .menu

@@ -105,6 +105,26 @@ pub type Ready<S> = fn(&S) -> Option<u64>;
 /// A frame, for a widget that asks for the next one.
 const FRAME: Duration = Duration::from_millis(16);
 
+/// A step of a walk inside the app ([`Asked::run_walk`]): what it came to.
+pub enum Walked<M> {
+    /// Not the walk's: a key, a wait, a click by what a text says.
+    Not,
+    /// What it names is not on the screen yet (what is, as a tree says it).
+    NotYet(String),
+    /// Done: these messages sent, as the element's tap sends them.
+    Send(Vec<M>),
+    /// It cannot be done.
+    Failed(String),
+}
+
+/// An app's walk inside itself (ui/docs/shots.md, "In the App"): a step
+/// taken against the views on its screen by their ids, and the ids there
+/// now, written beside each shot as its `<id>.tree.txt`.
+pub struct Walk<S, M> {
+    pub step: fn(&S, &Value) -> Walked<M>,
+    pub tree: fn(&S) -> String,
+}
+
 /// Shots asked for: where their steps are and where they go.
 pub struct Asked {
     shots: PathBuf,
@@ -142,11 +162,14 @@ impl Asked {
         self.run_with(program, Some(ready))
     }
 
-    fn run_with<P>(self, program: P, ready: Option<Ready<P::State>>) -> !
+    /// As [`Asked::run_ready`], each step that names an element by its id
+    /// (`{"tap": "tab:budget"}`) taken inside the app by `walk`, as the
+    /// phones' walks are; a key, a wait and a click by a text the driver's.
+    pub fn run_walk<P>(self, program: P, ready: Ready<P::State>, walk: Walk<P::State, P::Message>) -> !
     where
         P: Program<Theme = Theme> + 'static,
     {
-        let code = match self.take(&program, ready) {
+        let code = match self.take(&program, Some(ready), Some(&walk)) {
             Ok(()) => 0,
             Err(e) => {
                 eprintln!("shots: {e}");
@@ -156,7 +179,21 @@ impl Asked {
         std::process::exit(code)
     }
 
-    fn take<P>(&self, program: &P, ready: Option<Ready<P::State>>) -> Result<(), String>
+    fn run_with<P>(self, program: P, ready: Option<Ready<P::State>>) -> !
+    where
+        P: Program<Theme = Theme> + 'static,
+    {
+        let code = match self.take(&program, ready, None) {
+            Ok(()) => 0,
+            Err(e) => {
+                eprintln!("shots: {e}");
+                1
+            }
+        };
+        std::process::exit(code)
+    }
+
+    fn take<P>(&self, program: &P, ready: Option<Ready<P::State>>, walk: Option<&Walk<P::State, P::Message>>) -> Result<(), String>
     where
         P: Program<Theme = Theme> + 'static,
     {
@@ -219,7 +256,7 @@ impl Asked {
                     // replica's files and socket let go before the next opens.
                     drop(window);
                     window = Window::open(program, size, scale);
-                } else if let Err(why) = window.step(step) {
+                } else if let Err(why) = window.walk_or_step(walk, step) {
                     done = Err(why);
                     break;
                 }
@@ -235,7 +272,10 @@ impl Asked {
             });
             match done {
                 Ok(()) => {
-                    let tree = window.tree();
+                    let tree = match walk {
+                        Some(w) => (w.tree)(&window.state),
+                        None => window.tree(),
+                    };
                     for (theme, name) in [(Theme::Light, "light"), (Theme::Dark, "dark")] {
                         window.write(&theme, &self.out.join(name).join(format!("{id}.png")))?;
                         std::fs::write(self.out.join(name).join(format!("{id}.tree.txt")), &tree).map_err(|e| e.to_string())?;
@@ -679,6 +719,32 @@ where
             .unwrap_or_default();
         self.events(events);
         self.settle(Duration::from_millis(300), Duration::from_secs(5));
+    }
+
+    /// A step the app's walk takes (`walk`), waiting while what it names
+    /// is not there yet; else the driver's own.
+    fn walk_or_step(&mut self, walk: Option<&Walk<P::State, P::Message>>, step: &Value) -> Result<(), String> {
+        let Some(walk) = walk else { return self.step(step) };
+        let start = Instant::now();
+        loop {
+            match (walk.step)(&self.state, step) {
+                Walked::Not => return self.step(step),
+                Walked::Send(messages) => {
+                    for m in messages {
+                        self.update(m);
+                    }
+                    self.settle(Duration::from_millis(300), Duration::from_secs(5));
+                    return Ok(());
+                }
+                Walked::Failed(why) => return Err(why),
+                Walked::NotYet(tree) => {
+                    if start.elapsed() >= PATIENCE {
+                        return Err(format!("{step} never came; on the screen:\n{tree}"));
+                    }
+                    self.settle(Duration::from_millis(100), Duration::from_millis(250));
+                }
+            }
+        }
     }
 
     /// One of a shot's steps (all but `relaunch`, which is the shot's own).
