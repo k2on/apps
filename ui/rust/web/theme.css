@@ -36,6 +36,9 @@
   --ark-sheet-bar-height: 56px;
   --ark-dropdown-width: 320px;
   --ark-dropdown-height: 360px;
+  --ark-art-row: 48px;
+  --ark-art-shelf: 148px;
+  --ark-art-header: 132px;
   --ark-type-large-title: 28px;
   --ark-type-title: 20px;
   --ark-type-headline: 15px;
@@ -228,6 +231,155 @@
   --ark-accent-container: #1E3A5C;
   --ark-on-accent-container: #D2E6FF;
 }
+
+/* The derived squares (a cover's, while none has come): a seed's square
+   class, each accent's set in light and dark, as every toolkit's `Art.pick`. */
+:root .ark-square-0 { --ark-square-a: #E4E4E6; --ark-square-b: #BCBCC0; }
+:root .ark-square-1 { --ark-square-a: #DDE2EA; --ark-square-b: #AEB8C6; }
+:root .ark-square-2 { --ark-square-a: #E6E1DC; --ark-square-b: #C0B6AC; }
+:root .ark-square-3 { --ark-square-a: #E4E4E6; --ark-square-b: #BCBCC0; }
+:root .ark-square-4 { --ark-square-a: #DDE2EA; --ark-square-b: #AEB8C6; }
+:root .ark-square-5 { --ark-square-a: #E6E1DC; --ark-square-b: #C0B6AC; }
+:root .ark-square-6 { --ark-square-a: #E4E4E6; --ark-square-b: #BCBCC0; }
+:root .ark-square-7 { --ark-square-a: #DDE2EA; --ark-square-b: #AEB8C6; }
+:root .ark-square-8 { --ark-square-a: #E6E1DC; --ark-square-b: #C0B6AC; }
+:root .ark-square-9 { --ark-square-a: #E4E4E6; --ark-square-b: #BCBCC0; }
+:root .ark-square-10 { --ark-square-a: #DDE2EA; --ark-square-b: #AEB8C6; }
+:root .ark-square-11 { --ark-square-a: #E6E1DC; --ark-square-b: #C0B6AC; }
+:root[data-accent="gold"] .ark-square-0 { --ark-square-a: #E8D19A; --ark-square-b: #C9A85F; }
+:root[data-accent="gold"] .ark-square-1 { --ark-square-a: #EFDCAE; --ark-square-b: #D2B370; }
+:root[data-accent="gold"] .ark-square-2 { --ark-square-a: #E2D2AC; --ark-square-b: #BFA671; }
+:root[data-accent="gold"] .ark-square-3 { --ark-square-a: #F0DFA8; --ark-square-b: #CBAA5C; }
+:root[data-accent="gold"] .ark-square-4 { --ark-square-a: #E6D0A0; --ark-square-b: #C3A05A; }
+:root[data-accent="gold"] .ark-square-5 { --ark-square-a: #F3E6BE; --ark-square-b: #D6B877; }
+:root[data-accent="gold"] .ark-square-6 { --ark-square-a: #E8D19A; --ark-square-b: #C9A85F; }
+:root[data-accent="gold"] .ark-square-7 { --ark-square-a: #EFDCAE; --ark-square-b: #D2B370; }
+:root[data-accent="gold"] .ark-square-8 { --ark-square-a: #E2D2AC; --ark-square-b: #BFA671; }
+:root[data-accent="gold"] .ark-square-9 { --ark-square-a: #F0DFA8; --ark-square-b: #CBAA5C; }
+:root[data-accent="gold"] .ark-square-10 { --ark-square-a: #E6D0A0; --ark-square-b: #C3A05A; }
+:root[data-accent="gold"] .ark-square-11 { --ark-square-a: #F3E6BE; --ark-square-b: #D6B877; }
+:root[data-accent="green"] .ark-square-0 { --ark-square-a: #CFE6D6; --ark-square-b: #9CC7AC; }
+:root[data-accent="green"] .ark-square-1 { --ark-square-a: #DCE6DF; --ark-square-b: #B2C4B8; }
+:root[data-accent="green"] .ark-square-2 { --ark-square-a: #E4E4E6; --ark-square-b: #BCBCC0; }
+:root[data-accent="green"] .ark-square-3 { --ark-square-a: #CFE6D6; --ark-square-b: #9CC7AC; }
+:root[data-accent="green"] .ark-square-4 { --ark-square-a: #DCE6DF; --ark-square-b: #B2C4B8; }
+:root[data-accent="green"] .ark-square-5 { --ark-square-a: #E4E4E6; --ark-square-b: #BCBCC0; }
+:root[data-accent="green"] .ark-square-6 { --ark-square-a: #CFE6D6; --ark-square-b: #9CC7AC; }
+:root[data-accent="green"] .ark-square-7 { --ark-square-a: #DCE6DF; --ark-square-b: #B2C4B8; }
+:root[data-accent="green"] .ark-square-8 { --ark-square-a: #E4E4E6; --ark-square-b: #BCBCC0; }
+:root[data-accent="green"] .ark-square-9 { --ark-square-a: #CFE6D6; --ark-square-b: #9CC7AC; }
+:root[data-accent="green"] .ark-square-10 { --ark-square-a: #DCE6DF; --ark-square-b: #B2C4B8; }
+:root[data-accent="green"] .ark-square-11 { --ark-square-a: #E4E4E6; --ark-square-b: #BCBCC0; }
+:root[data-accent="blue"] .ark-square-0 { --ark-square-a: #E4E4E6; --ark-square-b: #BCBCC0; }
+:root[data-accent="blue"] .ark-square-1 { --ark-square-a: #DDE2EA; --ark-square-b: #AEB8C6; }
+:root[data-accent="blue"] .ark-square-2 { --ark-square-a: #E6E1DC; --ark-square-b: #C0B6AC; }
+:root[data-accent="blue"] .ark-square-3 { --ark-square-a: #E4E4E6; --ark-square-b: #BCBCC0; }
+:root[data-accent="blue"] .ark-square-4 { --ark-square-a: #DDE2EA; --ark-square-b: #AEB8C6; }
+:root[data-accent="blue"] .ark-square-5 { --ark-square-a: #E6E1DC; --ark-square-b: #C0B6AC; }
+:root[data-accent="blue"] .ark-square-6 { --ark-square-a: #E4E4E6; --ark-square-b: #BCBCC0; }
+:root[data-accent="blue"] .ark-square-7 { --ark-square-a: #DDE2EA; --ark-square-b: #AEB8C6; }
+:root[data-accent="blue"] .ark-square-8 { --ark-square-a: #E6E1DC; --ark-square-b: #C0B6AC; }
+:root[data-accent="blue"] .ark-square-9 { --ark-square-a: #E4E4E6; --ark-square-b: #BCBCC0; }
+:root[data-accent="blue"] .ark-square-10 { --ark-square-a: #DDE2EA; --ark-square-b: #AEB8C6; }
+:root[data-accent="blue"] .ark-square-11 { --ark-square-a: #E6E1DC; --ark-square-b: #C0B6AC; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .ark-square-0 { --ark-square-a: #5A5A5E; --ark-square-b: #18181A; }
+  :root:not([data-theme="light"]) .ark-square-1 { --ark-square-a: #4E5866; --ark-square-b: #14171B; }
+  :root:not([data-theme="light"]) .ark-square-2 { --ark-square-a: #605850; --ark-square-b: #1A1714; }
+  :root:not([data-theme="light"]) .ark-square-3 { --ark-square-a: #5A5A5E; --ark-square-b: #18181A; }
+  :root:not([data-theme="light"]) .ark-square-4 { --ark-square-a: #4E5866; --ark-square-b: #14171B; }
+  :root:not([data-theme="light"]) .ark-square-5 { --ark-square-a: #605850; --ark-square-b: #1A1714; }
+  :root:not([data-theme="light"]) .ark-square-6 { --ark-square-a: #5A5A5E; --ark-square-b: #18181A; }
+  :root:not([data-theme="light"]) .ark-square-7 { --ark-square-a: #4E5866; --ark-square-b: #14171B; }
+  :root:not([data-theme="light"]) .ark-square-8 { --ark-square-a: #605850; --ark-square-b: #1A1714; }
+  :root:not([data-theme="light"]) .ark-square-9 { --ark-square-a: #5A5A5E; --ark-square-b: #18181A; }
+  :root:not([data-theme="light"]) .ark-square-10 { --ark-square-a: #4E5866; --ark-square-b: #14171B; }
+  :root:not([data-theme="light"]) .ark-square-11 { --ark-square-a: #605850; --ark-square-b: #1A1714; }
+  :root:not([data-theme="light"])[data-accent="gold"] .ark-square-0 { --ark-square-a: #7A5C15; --ark-square-b: #201907; }
+  :root:not([data-theme="light"])[data-accent="gold"] .ark-square-1 { --ark-square-a: #8A6B22; --ark-square-b: #1B1509; }
+  :root:not([data-theme="light"])[data-accent="gold"] .ark-square-2 { --ark-square-a: #6B5A2A; --ark-square-b: #17140B; }
+  :root:not([data-theme="light"])[data-accent="gold"] .ark-square-3 { --ark-square-a: #8F7327; --ark-square-b: #221B09; }
+  :root:not([data-theme="light"])[data-accent="gold"] .ark-square-4 { --ark-square-a: #5E4A18; --ark-square-b: #141007; }
+  :root:not([data-theme="light"])[data-accent="gold"] .ark-square-5 { --ark-square-a: #A08137; --ark-square-b: #261E08; }
+  :root:not([data-theme="light"])[data-accent="gold"] .ark-square-6 { --ark-square-a: #7A5C15; --ark-square-b: #201907; }
+  :root:not([data-theme="light"])[data-accent="gold"] .ark-square-7 { --ark-square-a: #8A6B22; --ark-square-b: #1B1509; }
+  :root:not([data-theme="light"])[data-accent="gold"] .ark-square-8 { --ark-square-a: #6B5A2A; --ark-square-b: #17140B; }
+  :root:not([data-theme="light"])[data-accent="gold"] .ark-square-9 { --ark-square-a: #8F7327; --ark-square-b: #221B09; }
+  :root:not([data-theme="light"])[data-accent="gold"] .ark-square-10 { --ark-square-a: #5E4A18; --ark-square-b: #141007; }
+  :root:not([data-theme="light"])[data-accent="gold"] .ark-square-11 { --ark-square-a: #A08137; --ark-square-b: #261E08; }
+  :root:not([data-theme="light"])[data-accent="green"] .ark-square-0 { --ark-square-a: #2F6B47; --ark-square-b: #101C15; }
+  :root:not([data-theme="light"])[data-accent="green"] .ark-square-1 { --ark-square-a: #3E5E4A; --ark-square-b: #141A16; }
+  :root:not([data-theme="light"])[data-accent="green"] .ark-square-2 { --ark-square-a: #5A5A5E; --ark-square-b: #18181A; }
+  :root:not([data-theme="light"])[data-accent="green"] .ark-square-3 { --ark-square-a: #2F6B47; --ark-square-b: #101C15; }
+  :root:not([data-theme="light"])[data-accent="green"] .ark-square-4 { --ark-square-a: #3E5E4A; --ark-square-b: #141A16; }
+  :root:not([data-theme="light"])[data-accent="green"] .ark-square-5 { --ark-square-a: #5A5A5E; --ark-square-b: #18181A; }
+  :root:not([data-theme="light"])[data-accent="green"] .ark-square-6 { --ark-square-a: #2F6B47; --ark-square-b: #101C15; }
+  :root:not([data-theme="light"])[data-accent="green"] .ark-square-7 { --ark-square-a: #3E5E4A; --ark-square-b: #141A16; }
+  :root:not([data-theme="light"])[data-accent="green"] .ark-square-8 { --ark-square-a: #5A5A5E; --ark-square-b: #18181A; }
+  :root:not([data-theme="light"])[data-accent="green"] .ark-square-9 { --ark-square-a: #2F6B47; --ark-square-b: #101C15; }
+  :root:not([data-theme="light"])[data-accent="green"] .ark-square-10 { --ark-square-a: #3E5E4A; --ark-square-b: #141A16; }
+  :root:not([data-theme="light"])[data-accent="green"] .ark-square-11 { --ark-square-a: #5A5A5E; --ark-square-b: #18181A; }
+  :root:not([data-theme="light"])[data-accent="blue"] .ark-square-0 { --ark-square-a: #5A5A5E; --ark-square-b: #18181A; }
+  :root:not([data-theme="light"])[data-accent="blue"] .ark-square-1 { --ark-square-a: #4E5866; --ark-square-b: #14171B; }
+  :root:not([data-theme="light"])[data-accent="blue"] .ark-square-2 { --ark-square-a: #605850; --ark-square-b: #1A1714; }
+  :root:not([data-theme="light"])[data-accent="blue"] .ark-square-3 { --ark-square-a: #5A5A5E; --ark-square-b: #18181A; }
+  :root:not([data-theme="light"])[data-accent="blue"] .ark-square-4 { --ark-square-a: #4E5866; --ark-square-b: #14171B; }
+  :root:not([data-theme="light"])[data-accent="blue"] .ark-square-5 { --ark-square-a: #605850; --ark-square-b: #1A1714; }
+  :root:not([data-theme="light"])[data-accent="blue"] .ark-square-6 { --ark-square-a: #5A5A5E; --ark-square-b: #18181A; }
+  :root:not([data-theme="light"])[data-accent="blue"] .ark-square-7 { --ark-square-a: #4E5866; --ark-square-b: #14171B; }
+  :root:not([data-theme="light"])[data-accent="blue"] .ark-square-8 { --ark-square-a: #605850; --ark-square-b: #1A1714; }
+  :root:not([data-theme="light"])[data-accent="blue"] .ark-square-9 { --ark-square-a: #5A5A5E; --ark-square-b: #18181A; }
+  :root:not([data-theme="light"])[data-accent="blue"] .ark-square-10 { --ark-square-a: #4E5866; --ark-square-b: #14171B; }
+  :root:not([data-theme="light"])[data-accent="blue"] .ark-square-11 { --ark-square-a: #605850; --ark-square-b: #1A1714; }
+}
+:root[data-theme="dark"] .ark-square-0 { --ark-square-a: #5A5A5E; --ark-square-b: #18181A; }
+:root[data-theme="dark"] .ark-square-1 { --ark-square-a: #4E5866; --ark-square-b: #14171B; }
+:root[data-theme="dark"] .ark-square-2 { --ark-square-a: #605850; --ark-square-b: #1A1714; }
+:root[data-theme="dark"] .ark-square-3 { --ark-square-a: #5A5A5E; --ark-square-b: #18181A; }
+:root[data-theme="dark"] .ark-square-4 { --ark-square-a: #4E5866; --ark-square-b: #14171B; }
+:root[data-theme="dark"] .ark-square-5 { --ark-square-a: #605850; --ark-square-b: #1A1714; }
+:root[data-theme="dark"] .ark-square-6 { --ark-square-a: #5A5A5E; --ark-square-b: #18181A; }
+:root[data-theme="dark"] .ark-square-7 { --ark-square-a: #4E5866; --ark-square-b: #14171B; }
+:root[data-theme="dark"] .ark-square-8 { --ark-square-a: #605850; --ark-square-b: #1A1714; }
+:root[data-theme="dark"] .ark-square-9 { --ark-square-a: #5A5A5E; --ark-square-b: #18181A; }
+:root[data-theme="dark"] .ark-square-10 { --ark-square-a: #4E5866; --ark-square-b: #14171B; }
+:root[data-theme="dark"] .ark-square-11 { --ark-square-a: #605850; --ark-square-b: #1A1714; }
+:root[data-theme="dark"][data-accent="gold"] .ark-square-0 { --ark-square-a: #7A5C15; --ark-square-b: #201907; }
+:root[data-theme="dark"][data-accent="gold"] .ark-square-1 { --ark-square-a: #8A6B22; --ark-square-b: #1B1509; }
+:root[data-theme="dark"][data-accent="gold"] .ark-square-2 { --ark-square-a: #6B5A2A; --ark-square-b: #17140B; }
+:root[data-theme="dark"][data-accent="gold"] .ark-square-3 { --ark-square-a: #8F7327; --ark-square-b: #221B09; }
+:root[data-theme="dark"][data-accent="gold"] .ark-square-4 { --ark-square-a: #5E4A18; --ark-square-b: #141007; }
+:root[data-theme="dark"][data-accent="gold"] .ark-square-5 { --ark-square-a: #A08137; --ark-square-b: #261E08; }
+:root[data-theme="dark"][data-accent="gold"] .ark-square-6 { --ark-square-a: #7A5C15; --ark-square-b: #201907; }
+:root[data-theme="dark"][data-accent="gold"] .ark-square-7 { --ark-square-a: #8A6B22; --ark-square-b: #1B1509; }
+:root[data-theme="dark"][data-accent="gold"] .ark-square-8 { --ark-square-a: #6B5A2A; --ark-square-b: #17140B; }
+:root[data-theme="dark"][data-accent="gold"] .ark-square-9 { --ark-square-a: #8F7327; --ark-square-b: #221B09; }
+:root[data-theme="dark"][data-accent="gold"] .ark-square-10 { --ark-square-a: #5E4A18; --ark-square-b: #141007; }
+:root[data-theme="dark"][data-accent="gold"] .ark-square-11 { --ark-square-a: #A08137; --ark-square-b: #261E08; }
+:root[data-theme="dark"][data-accent="green"] .ark-square-0 { --ark-square-a: #2F6B47; --ark-square-b: #101C15; }
+:root[data-theme="dark"][data-accent="green"] .ark-square-1 { --ark-square-a: #3E5E4A; --ark-square-b: #141A16; }
+:root[data-theme="dark"][data-accent="green"] .ark-square-2 { --ark-square-a: #5A5A5E; --ark-square-b: #18181A; }
+:root[data-theme="dark"][data-accent="green"] .ark-square-3 { --ark-square-a: #2F6B47; --ark-square-b: #101C15; }
+:root[data-theme="dark"][data-accent="green"] .ark-square-4 { --ark-square-a: #3E5E4A; --ark-square-b: #141A16; }
+:root[data-theme="dark"][data-accent="green"] .ark-square-5 { --ark-square-a: #5A5A5E; --ark-square-b: #18181A; }
+:root[data-theme="dark"][data-accent="green"] .ark-square-6 { --ark-square-a: #2F6B47; --ark-square-b: #101C15; }
+:root[data-theme="dark"][data-accent="green"] .ark-square-7 { --ark-square-a: #3E5E4A; --ark-square-b: #141A16; }
+:root[data-theme="dark"][data-accent="green"] .ark-square-8 { --ark-square-a: #5A5A5E; --ark-square-b: #18181A; }
+:root[data-theme="dark"][data-accent="green"] .ark-square-9 { --ark-square-a: #2F6B47; --ark-square-b: #101C15; }
+:root[data-theme="dark"][data-accent="green"] .ark-square-10 { --ark-square-a: #3E5E4A; --ark-square-b: #141A16; }
+:root[data-theme="dark"][data-accent="green"] .ark-square-11 { --ark-square-a: #5A5A5E; --ark-square-b: #18181A; }
+:root[data-theme="dark"][data-accent="blue"] .ark-square-0 { --ark-square-a: #5A5A5E; --ark-square-b: #18181A; }
+:root[data-theme="dark"][data-accent="blue"] .ark-square-1 { --ark-square-a: #4E5866; --ark-square-b: #14171B; }
+:root[data-theme="dark"][data-accent="blue"] .ark-square-2 { --ark-square-a: #605850; --ark-square-b: #1A1714; }
+:root[data-theme="dark"][data-accent="blue"] .ark-square-3 { --ark-square-a: #5A5A5E; --ark-square-b: #18181A; }
+:root[data-theme="dark"][data-accent="blue"] .ark-square-4 { --ark-square-a: #4E5866; --ark-square-b: #14171B; }
+:root[data-theme="dark"][data-accent="blue"] .ark-square-5 { --ark-square-a: #605850; --ark-square-b: #1A1714; }
+:root[data-theme="dark"][data-accent="blue"] .ark-square-6 { --ark-square-a: #5A5A5E; --ark-square-b: #18181A; }
+:root[data-theme="dark"][data-accent="blue"] .ark-square-7 { --ark-square-a: #4E5866; --ark-square-b: #14171B; }
+:root[data-theme="dark"][data-accent="blue"] .ark-square-8 { --ark-square-a: #605850; --ark-square-b: #1A1714; }
+:root[data-theme="dark"][data-accent="blue"] .ark-square-9 { --ark-square-a: #5A5A5E; --ark-square-b: #18181A; }
+:root[data-theme="dark"][data-accent="blue"] .ark-square-10 { --ark-square-a: #4E5866; --ark-square-b: #14171B; }
+:root[data-theme="dark"][data-accent="blue"] .ark-square-11 { --ark-square-a: #605850; --ark-square-b: #1A1714; }
 
 /* Reduced motion: what travels fades in place (ui/docs/motion.md). The
    page says so (`data-motion`), as `motion::reduced()` does, never the

@@ -273,6 +273,7 @@ fn modifier(m: &Modifier) -> String {
             }
         ),
         Modifier::Combine => ".accessibilityElement(children: .combine)".into(),
+        Modifier::ArtWidth(a) => format!(".artWidth(.{})", a.case()),
     }
 }
 

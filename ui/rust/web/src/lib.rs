@@ -57,6 +57,7 @@ pub mod parts;
 pub mod shell;
 pub mod specimens;
 pub mod table;
+mod timeline;
 pub mod writing;
 
 pub use host::{HostMsg, WebHost, WebHosted};

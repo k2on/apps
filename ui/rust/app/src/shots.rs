@@ -19,7 +19,7 @@
 use std::fmt::Debug;
 use std::rc::Rc;
 
-use crate::view::{Input, Layout, Part, Prim, View};
+use crate::view::{Input, Layout, Part, Press, Prim, View};
 
 /// What kind of element a label names, for a step that says which of
 /// several saying the same it means (a tab and a heading both "Budget").
@@ -198,7 +198,22 @@ impl<M: Clone + Debug + 'static> Walk<M> {
                 self.view(top, shown, modal);
                 self.view(content, shown, modal);
             }
-            P::Detail { content } | P::Chips(content) => self.view(content, shown, modal),
+            P::Detail { content } | P::Chips(content) | P::Grid(content) => self.view(content, shown, modal),
+            // Pressed as one: a row by its label, else a button by what it sends.
+            P::Press {
+                press,
+                label,
+                tap,
+                menu,
+                content,
+            } => {
+                let role = match press {
+                    Press::Highlight => Role::Row,
+                    Press::Give => Role::Button,
+                };
+                self.push((shown, modal), label.get(), role, Some(tap), None, menu);
+                self.view(content, shown, modal);
+            }
             P::Section(s) => {
                 let title = s.title.as_ref().map(|t| t.get()).unwrap_or_default();
                 match &s.open {
@@ -426,6 +441,8 @@ impl<M: Clone + Debug + 'static> Walk<M> {
             P::SettingsPane { content, .. } => self.view(content, shown, modal),
             P::Hero { label, .. } | P::Summary { label, .. } => self.text(shown, modal, label.to_string()),
             P::Tile { .. }
+            | P::Artwork { .. }
+            | P::Timeline { .. }
             | P::StatusBadge { .. }
             | P::Meter { .. }
             | P::Choice { .. }
@@ -556,6 +573,14 @@ pub fn recorded<M: Debug>(screen: &str, p: &Part<M>) -> Option<Vec<Piece>> {
         Part::Row(r) => of(Role::Row, &r.title, r.tap.as_ref().map(|m| format!("{m:?}"))),
         Part::MeterRow(r) => of(Role::Row, &r.title, r.tap.as_ref().map(|m| format!("{m:?}"))),
         Part::Chip { label, tap, .. } => of(Role::Button, label, Some(format!("{tap:?}"))),
+        Part::Press { press, label, tap, .. } => of(
+            match press {
+                crate::view::Press::Highlight => Role::Row,
+                crate::view::Press::Give => Role::Button,
+            },
+            label,
+            Some(format!("{tap:?}")),
+        ),
         Part::Button { title, tap, .. } => of(Role::Button, &Val::Is(title.to_string()), Some(format!("{tap:?}"))),
         Part::WideButton { title, tap, .. } => of(Role::Button, title, Some(format!("{tap:?}"))),
         Part::Toggle { title, change, .. } => of(Role::Button, &Val::Is(title.to_string()), Some(format!("{:?}", change.call(true)))),

@@ -14,7 +14,7 @@
 
 use std::fmt::Debug;
 
-use super::{Part, Val, View};
+use super::{ArtSize, Part, Val, View};
 
 // * The tokens
 
@@ -214,6 +214,9 @@ pub enum Modifier {
     Corner(Corner),
     /// One element to a screen reader, its words in order.
     Combine,
+    /// As wide as artwork of this size (`art-*`), what it holds kept to it:
+    /// a tile's words under its cover. [`ArtSize::Fill`] is as wide as given.
+    ArtWidth(ArtSize),
 }
 
 // * The primitives
@@ -409,6 +412,10 @@ pub trait Modify: Sized {
     /// One element to a screen reader.
     fn combine(self) -> Self {
         self.modify(Modifier::Combine)
+    }
+    /// As wide as artwork of size `a`.
+    fn art_width(self, a: ArtSize) -> Self {
+        self.modify(Modifier::ArtWidth(a))
     }
 }
 

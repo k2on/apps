@@ -393,6 +393,12 @@ sheet-bar-height = 56.0
 # with the text size up to the room under the field.
 dropdown-width = 320.0
 dropdown-height = 360.0
+# Artwork (a cover, a person's picture): beside a row's words, a tile on a
+# shelf (a grid's columns are at least this wide), and beside a page's
+# title.
+art-row = 48.0
+art-shelf = 148.0
+art-header = 132.0
 # The type styles a primitive's text is set in (ui/docs/primitives.md): the
 # phones take each by name (SwiftUI's text styles, Material's type roles),
 # so Dynamic Type and the font scale grow them; these are the desktop's

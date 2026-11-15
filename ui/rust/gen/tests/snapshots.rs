@@ -61,6 +61,12 @@ pub enum ListMsg {
     Save,
     Dismiss,
     Refresh,
+    Play,
+    Shuffle,
+    Toggle,
+    Back,
+    Forward,
+    Seek { at_ms: i64 },
 }
 
 #[view]
@@ -153,6 +159,68 @@ pub fn card(p: &CardPage) -> View<ListMsg> {
     ))
 }
 
+/// A record of covers and a sound (ui/docs/primitives.md, "What Harken Lays Out").
+#[derive(Clone, Debug, PartialEq)]
+pub struct Track {
+    pub id: String,
+    pub title: String,
+    pub by: String,
+    pub art: String,
+    pub length: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct MediaPage {
+    pub title: String,
+    pub by: String,
+    pub art: String,
+    pub tracks: Vec<Track>,
+    pub play_glyph: String,
+    pub play_label: String,
+    pub at_ms: i64,
+    pub since_ms: i64,
+    pub playing: bool,
+    pub length_ms: i64,
+}
+
+#[view]
+pub fn media(p: &MediaPage) -> View<ListMsg> {
+    detail_page((
+        media_header(
+            artwork(p.art, p.title, p.title),
+            title_stack(p.title).over("Album").under(p.by).under_ink(Ink::Accent),
+            play_shuffle(ListMsg::Play, ListMsg::Shuffle),
+        ),
+        card_section(for t in p.tracks {
+            media_row(t.title, ListMsg::Open { id: t.id })
+                .art(artwork(t.art, t.title, t.title))
+                .under(t.by)
+                .trailing(text(t.length).style(TextStyle::Caption).ink(Ink::Quiet))
+                .menu("Play Next", "list-start", ListMsg::Open { id: t.id })
+        }),
+        artwork_shelf(for t in p.tracks {
+            artwork_tile(
+                artwork(t.art, t.title, t.title).size(ArtSize::Shelf),
+                t.title,
+                t.by,
+                ListMsg::Open { id: t.id },
+            )
+        }),
+        artwork_grid(for t in p.tracks {
+            artwork_tile(
+                artwork(t.art, t.by, t.by).size(ArtSize::Fill).round(),
+                t.by,
+                "",
+                ListMsg::Open { id: t.id },
+            )
+        }),
+        scrubber(p.at_ms, p.since_ms, p.playing, p.length_ms, |at_ms| ListMsg::Seek { at_ms }),
+        transport(p.play_glyph, p.play_label, ListMsg::Toggle, ListMsg::Back, ListMsg::Forward),
+        hairline(p.at_ms, p.since_ms, p.playing, p.length_ms),
+        figure_label("Tracks", p.by),
+    ))
+}
+
 fn menus() -> Vec<CommandMenu<ListMsg>> {
     vec![command_menu(
         MenuPlace::File,
@@ -181,6 +249,16 @@ fn app() -> App {
                     swift_holder: "CardScreen",
                     kotlin: "CardScreen",
                     kotlin_holder: "CardHolder",
+                    ..names
+                },
+            ),
+            Generated::view(
+                media::record,
+                Names {
+                    swift: "MediaView",
+                    swift_holder: "MediaScreen",
+                    kotlin: "MediaScreen",
+                    kotlin_holder: "MediaHolder",
                     ..names
                 },
             ),
@@ -226,6 +304,8 @@ fn the_files_are_named_for_each_language() {
             "ListScreen.kt",
             "CardView.swift",
             "CardScreen.kt",
+            "MediaView.swift",
+            "MediaScreen.kt",
             "ThingsCommands.swift",
             "thingsCommands.kt"
         ]

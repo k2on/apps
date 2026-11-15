@@ -45,7 +45,10 @@ mod components;
 pub mod layout;
 pub mod search;
 
-pub use components::{empty_state, goal_progress, title_stack, TitleStack};
+pub use components::{
+    artwork_shelf, artwork_tile, empty_state, figure_label, glyph_button, goal_progress, media_header, media_row, play_shuffle, title_stack,
+    transport, MediaRow, TitleStack, Transport,
+};
 pub use layout::{
     glyph, hstack, image, meter, scroll, scroll_across, spacer, spacer_min, status_badge, text, tile, vstack, zstack, Align, Axis, Corner, Edges,
     Ink, Layout, Modifier, Modify, Prim, Space, Surface, TextStyle, Words,
@@ -555,6 +558,50 @@ pub enum Part<M> {
         label: Val<String>,
         zoom: bool,
     },
+    /// What is laid out in `content`, pressed as one (ui/docs/motion.md,
+    /// Press Feedback): a cover, a tile or a glyph button gives
+    /// ([`Press::Give`]: `.buttonStyle(.press)`, `Press.Give`), a row the
+    /// page's width lights ([`Press::Highlight`]: `.pressRow`,
+    /// `Press.Highlight`); on the desktop and in the browser the theme's
+    /// pressed colour, no give. `label` is what a screen reader says of it
+    /// (and its walk id: a highlighted one is a row, by its label).
+    Press {
+        press: Press,
+        label: Val<String>,
+        tap: M,
+        /// A long press's (a right click's) menu.
+        menu: Vec<MenuItem<M>>,
+        content: Box<View<M>>,
+    },
+    /// A cover by its URL over the square derived from `seed` (ArkUI's
+    /// `Square`, shown while the picture comes or when there is none), at
+    /// `size`, its corner the theme's `corner` or round (a person), `label`
+    /// said for it. A screenshot waits for it to come or fail (`Ready`).
+    Artwork {
+        url: Val<String>,
+        seed: Val<String>,
+        label: Val<String>,
+        size: ArtSize,
+        round: bool,
+    },
+    /// Its content (artwork tiles) in as many columns as fit at least
+    /// `art-shelf` wide, lazily (SwiftUI's `LazyVGrid(.adaptive)`,
+    /// Compose's `LazyVerticalGrid(GridCells.Adaptive)`, iced's wrapped
+    /// rows, the browser's `grid-template-columns: repeat(auto-fill, …)`).
+    Grid(Box<View<M>>),
+    /// Where a sound is along its length, counted from a clock as it is
+    /// drawn (`at_ms` when the clock was read at `since_ms`, the device's
+    /// epoch milliseconds, running while `playing`), so it moves with no
+    /// message: with `seek`, a scrubber a finger drags (one to one, the
+    /// time under it said, `seek` sent once on release, a `Selection` haptic
+    /// as it meets either end); without, a hairline of how far.
+    Timeline {
+        at_ms: Val<i64>,
+        since_ms: Val<i64>,
+        playing: Val<bool>,
+        length_ms: Val<i64>,
+        seek: Option<Input<i64, M>>,
+    },
     /// A slip of paper (a receipt as it was printed): monospace, dark on
     /// white whatever the appearance; its heading bold and the line under
     /// it centred, then a rule, each of `names` with its `figures` against
@@ -711,6 +758,53 @@ pub enum Part<M> {
         glyph: &'static str,
         content: Box<View<M>>,
     },
+}
+
+/// How a pressed thing answers (ui/docs/motion.md, Press Feedback).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Press {
+    /// A cover, a card, a tile, a glyph button: gives to `press` at once,
+    /// back on `Springs.size`.
+    Give,
+    /// A row the page's width: lit at once, faded on `Springs.fade`.
+    Highlight,
+}
+
+impl Press {
+    /// As the phones' `PressKind` spells it.
+    pub fn case(self) -> &'static str {
+        match self {
+            Press::Give => "give",
+            Press::Highlight => "highlight",
+        }
+    }
+}
+
+/// How large a piece of artwork is drawn: one of `ui/theme.toml`'s
+/// `[layout]` `art-*` measures (each toolkit's `LayoutTokens`), or as wide
+/// as it is given.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ArtSize {
+    /// `art-row`: beside a row's words.
+    Row,
+    /// `art-shelf`: a tile on a shelf.
+    Shelf,
+    /// `art-header`: beside a page's title.
+    Header,
+    /// As wide as it is given, square: a grid's tile, the player's cover.
+    Fill,
+}
+
+impl ArtSize {
+    /// As the phones' `ArtSize` spells it.
+    pub fn case(self) -> &'static str {
+        match self {
+            ArtSize::Row => "row",
+            ArtSize::Shelf => "shelf",
+            ArtSize::Header => "header",
+            ArtSize::Fill => "fill",
+        }
+    }
 }
 
 /// Where a toolbar item goes (SwiftUI's `ToolbarItemPlacement`).
@@ -2144,6 +2238,152 @@ pub fn zoom_photo<M>(url: impl Into<Val<String>>, label: impl Into<Val<String>>)
     .into()
 }
 
+/// `content` pressed as one, sending `tap`: a cover, a tile or a glyph
+/// button that gives ([`Part::Press`]). `label` is what it is said as.
+pub fn pressable<M>(label: impl Into<Val<String>>, tap: M, content: impl Into<View<M>>) -> Pressed<M> {
+    Pressed {
+        press: Press::Give,
+        label: label.into(),
+        tap,
+        menu: vec![],
+        content: content.into(),
+    }
+}
+
+/// `content` pressed as a row the page's width, lit as it is pressed
+/// ([`Part::Press`], [`Press::Highlight`]): its walk id is a row's, by `label`.
+pub fn press_row<M>(label: impl Into<Val<String>>, tap: M, content: impl Into<View<M>>) -> Pressed<M> {
+    Pressed {
+        press: Press::Highlight,
+        ..pressable(label, tap, content)
+    }
+}
+
+/// Something pressed as one, being built ([`pressable`], [`press_row`]).
+pub struct Pressed<M> {
+    pub press: Press,
+    pub label: Val<String>,
+    pub tap: M,
+    pub menu: Vec<MenuItem<M>>,
+    pub content: View<M>,
+}
+
+impl<M> Pressed<M> {
+    /// An entry of its menu (a long press, a right click).
+    pub fn menu(mut self, title: impl Into<Val<String>>, glyph: &'static str, tap: M) -> Self {
+        self.menu.push(MenuItem {
+            title: title.into(),
+            glyph: glyph.into(),
+            tap,
+            destructive: Val::Is(false),
+            shown: None,
+        });
+        self
+    }
+}
+
+impl<M> From<Pressed<M>> for View<M> {
+    fn from(p: Pressed<M>) -> View<M> {
+        Part::Press {
+            press: p.press,
+            label: p.label,
+            tap: p.tap,
+            menu: p.menu,
+            content: Box::new(p.content),
+        }
+        .into()
+    }
+}
+
+/// A cover ([`Part::Artwork`]): the picture at `url` over the square of
+/// `seed`, at [`ArtSize::Row`] until [`Artwork::size`] says otherwise.
+pub fn artwork(url: impl Into<Val<String>>, seed: impl Into<Val<String>>, label: impl Into<Val<String>>) -> Artwork {
+    Artwork {
+        url: url.into(),
+        seed: seed.into(),
+        label: label.into(),
+        size: ArtSize::Row,
+        round: false,
+    }
+}
+
+/// A cover being built ([`artwork`]).
+#[derive(Clone, Debug)]
+pub struct Artwork {
+    pub url: Val<String>,
+    pub seed: Val<String>,
+    pub label: Val<String>,
+    pub size: ArtSize,
+    pub round: bool,
+}
+
+impl Artwork {
+    pub fn size(mut self, s: ArtSize) -> Self {
+        self.size = s;
+        self
+    }
+    /// Round: a person.
+    pub fn round(mut self) -> Self {
+        self.round = true;
+        self
+    }
+}
+
+impl<M> From<Artwork> for View<M> {
+    fn from(a: Artwork) -> View<M> {
+        Part::Artwork {
+            url: a.url,
+            seed: a.seed,
+            label: a.label,
+            size: a.size,
+            round: a.round,
+        }
+        .into()
+    }
+}
+
+/// Artwork tiles in as many columns as fit ([`Part::Grid`]).
+pub fn artwork_grid<M>(tiles: impl Into<View<M>>) -> View<M> {
+    Part::Grid(Box::new(tiles.into())).into()
+}
+
+/// Where a sound is, dragged to seek ([`Part::Timeline`]): `at_ms` read at
+/// `since_ms` (the device's clock), counting on while `playing`.
+pub fn scrubber<M: 'static>(
+    at_ms: impl Into<Val<i64>>,
+    since_ms: impl Into<Val<i64>>,
+    playing: impl Into<Val<bool>>,
+    length_ms: impl Into<Val<i64>>,
+    seek: fn(i64) -> M,
+) -> View<M> {
+    Part::Timeline {
+        at_ms: at_ms.into(),
+        since_ms: since_ms.into(),
+        playing: playing.into(),
+        length_ms: length_ms.into(),
+        seek: Some(Input::new(seek)),
+    }
+    .into()
+}
+
+/// How far along a sound is, a hairline counting on while `playing`
+/// ([`Part::Timeline`] with nothing to seek): the now-playing bar's foot.
+pub fn hairline<M>(
+    at_ms: impl Into<Val<i64>>,
+    since_ms: impl Into<Val<i64>>,
+    playing: impl Into<Val<bool>>,
+    length_ms: impl Into<Val<i64>>,
+) -> View<M> {
+    Part::Timeline {
+        at_ms: at_ms.into(),
+        since_ms: since_ms.into(),
+        playing: playing.into(),
+        length_ms: length_ms.into(),
+        seek: None,
+    }
+    .into()
+}
+
 /// A slip of paper: a receipt as it was printed ([`Part::Paper`]).
 pub fn paper<M>(
     heading: impl Into<Val<String>>,
@@ -2622,6 +2862,70 @@ impl<M> Part<M> {
                 vec![("label", G::Val(lit(label))), ("zoom", G::Val(zoom.to_string()))],
                 vec![],
             ),
+            Part::Press {
+                press,
+                label,
+                tap,
+                menu,
+                content,
+            } => {
+                let mut args = vec![(
+                    "press",
+                    G::Case {
+                        of: "PressKind",
+                        case: press.case(),
+                    },
+                )];
+                if !menu.is_empty() {
+                    args.push(("menu", menu_items(menu)));
+                }
+                args.push(("onTap", G::Act(tap)));
+                c("Pressable", Some(G::Val(lit(label))), args, vec![("", &**content)])
+            }
+            Part::Artwork {
+                url,
+                seed,
+                label,
+                size,
+                round,
+            } => c(
+                "Artwork",
+                Some(G::Val(lit(url))),
+                vec![
+                    ("seed", G::Val(lit(seed))),
+                    ("label", G::Val(lit(label))),
+                    (
+                        "size",
+                        G::Case {
+                            of: "ArtSize",
+                            case: size.case(),
+                        },
+                    ),
+                    ("round", G::Val(round.to_string())),
+                ],
+                vec![],
+            ),
+            Part::Grid(content) => c("ArtworkGrid", None, vec![], vec![("", &**content)]),
+            Part::Timeline {
+                at_ms,
+                since_ms,
+                playing,
+                length_ms,
+                seek,
+            } => {
+                let mut args = vec![
+                    ("since", G::Val(lit(since_ms))),
+                    ("playing", G::Val(lit(playing))),
+                    ("length", G::Val(lit(length_ms))),
+                ];
+                match seek {
+                    Some(s) => {
+                        args.push(("onSeek", G::Counted(s)));
+                        c("ClockScrubber", Some(G::Val(lit(at_ms))), args, vec![])
+                    }
+                    None => c("ClockHairline", Some(G::Val(lit(at_ms))), args, vec![]),
+                }
+            }
             Part::Paper {
                 heading,
                 date,
@@ -3205,6 +3509,46 @@ impl<M: 'static> Part<M> {
             Part::StatusLine { text, busy, problem } => Part::StatusLine { text, busy, problem },
             Part::CodeImage { size, dark } => Part::CodeImage { size, dark },
             Part::Photo { url, label, zoom } => Part::Photo { url, label, zoom },
+            Part::Press {
+                press,
+                label,
+                tap,
+                menu,
+                content,
+            } => Part::Press {
+                press,
+                label,
+                tap: f(tap),
+                menu: map_menu(menu, f),
+                content: b(content),
+            },
+            Part::Artwork {
+                url,
+                seed,
+                label,
+                size,
+                round,
+            } => Part::Artwork {
+                url,
+                seed,
+                label,
+                size,
+                round,
+            },
+            Part::Grid(content) => Part::Grid(b(content)),
+            Part::Timeline {
+                at_ms,
+                since_ms,
+                playing,
+                length_ms,
+                seek,
+            } => Part::Timeline {
+                at_ms,
+                since_ms,
+                playing,
+                length_ms,
+                seek: seek.map(|s| input(s, f)),
+            },
             Part::Paper {
                 heading,
                 date,

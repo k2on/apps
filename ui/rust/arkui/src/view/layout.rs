@@ -129,6 +129,8 @@ fn modified<M: 'static>(mut el: Element<'static, M>, mods: &[Modifier]) -> Eleme
             Modifier::Corner(_) => el,
             // iced has no screen reader yet.
             Modifier::Combine => el,
+            // The desktop's filling cover is a shelf's (a grid's tiles wrap at it).
+            Modifier::ArtWidth(a) => container(el).width(art_side(*a).unwrap_or(crate::layout_tokens::ART_SHELF)).into(),
         };
         i += 1;
     }
@@ -219,5 +221,17 @@ fn colour(i: Ink) -> impl Fn(&Theme) -> Color + Copy + 'static {
             (4, Tint::Neutral) | (0, _) => p.background.base.text,
             (_, t) => t.color(th),
         }
+    }
+}
+
+/// Artwork's side at `a` (`[layout]`'s `art-*`); none when it fills.
+pub(crate) fn art_side(a: ark_app::view::ArtSize) -> Option<f32> {
+    use crate::layout_tokens::{ART_HEADER, ART_ROW, ART_SHELF};
+    use ark_app::view::ArtSize;
+    match a {
+        ArtSize::Row => Some(ART_ROW),
+        ArtSize::Shelf => Some(ART_SHELF),
+        ArtSize::Header => Some(ART_HEADER),
+        ArtSize::Fill => None,
     }
 }

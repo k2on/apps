@@ -1075,7 +1075,11 @@ changes, `.github/compat-check.sh`'s harken part grows with it.
 ### Where It Stands
 
 1. The plan: this section.
-2. Shared parts: under way (ui/docs/primitives.md says which are built).
+2. Shared parts: pressable primitives, artwork (with its tile, shelf and
+   grid), media row and header, play/shuffle, transport controls, the
+   timeline (scrubber and hairline) and figure with label are built on
+   every toolkit (ui/docs/primitives.md); the now-playing accessory and
+   the volume are next.
 3. harken-app's screens and host, the domain in core/, the player split:
    not started.
 4. Generated targets, the old clients deleted: not started.

@@ -60,6 +60,12 @@ pub const SHEET_BAR_HEIGHT: f32 = 56.0;
 pub const DROPDOWN_WIDTH: f32 = 320.0;
 /// The tallest a searchable dropdown's list grows before it scrolls.
 pub const DROPDOWN_HEIGHT: f32 = 360.0;
+/// Artwork beside a row's words: a track's cover, a person's face.
+pub const ART_ROW: f32 = 48.0;
+/// Artwork on a shelf's tile; a grid's columns are at least this wide.
+pub const ART_SHELF: f32 = 148.0;
+/// Artwork beside a page's title: a record's cover.
+pub const ART_HEADER: f32 = 132.0;
 /// The desktop's large title (the phones take the style by name, so Dynamic Type and the font scale grow it).
 pub const TYPE_LARGE_TITLE: f32 = 28.0;
 /// The desktop's title.

@@ -117,6 +117,50 @@ impl Images {
     }
 }
 
+/// Every cover [`remote`] was asked for, by its URL: `None` while it comes
+/// or when it could not be had (a cover is decoration, and the derived
+/// square under it is already right).
+static REMOTE: std::sync::Mutex<Option<HashMap<String, Option<image::Handle>>>> = std::sync::Mutex::new(None);
+
+/// What rings when a cover [`remote`] fetched has come.
+pub fn arrivals() -> &'static crate::wake::Bell {
+    static BELL: std::sync::OnceLock<crate::wake::Bell> = std::sync::OnceLock::new();
+    BELL.get_or_init(crate::wake::Bell::new)
+}
+
+/// A cover by its URL for a view that has no `update` of its own to fetch
+/// it (`ark_app::view`'s artwork, drawn by `arkui::view`): what is here, or
+/// none — and, the first time it is asked, fetched on a thread of its own
+/// into `name`'s cache at most [`BOUND`] on its longest side, the window
+/// told by [`arrivals`] when it has come. A `file:` or `data:` URL is
+/// [`local`]'s.
+pub fn remote(url: &str, name: &str) -> Option<image::Handle> {
+    if url.is_empty() {
+        return None;
+    }
+    if !url.starts_with("http") {
+        return local(url);
+    }
+    let mut kept = REMOTE.lock().unwrap_or_else(|e| e.into_inner());
+    let kept = kept.get_or_insert_with(HashMap::new);
+    if let Some(h) = kept.get(url) {
+        return h.clone();
+    }
+    kept.insert(url.to_string(), None);
+    let (url, name) = (url.to_string(), name.to_string());
+    std::thread::spawn(move || {
+        let handle = imp::now(&url, &name, BOUND)
+            .ok()
+            .map(|r| image::Handle::from_rgba(r.width, r.height, r.pixels));
+        if handle.is_some() {
+            let mut kept = REMOTE.lock().unwrap_or_else(|e| e.into_inner());
+            kept.get_or_insert_with(HashMap::new).insert(url, handle);
+            arrivals().ring();
+        }
+    });
+    None
+}
+
 /// The most photos [`local`] remembers before it starts again.
 const LOCAL_KEPT: usize = 16;
 
@@ -389,6 +433,11 @@ mod imp {
             async move { rx.await.unwrap_or_else(|_| Err("the fetch was dropped".to_string())) },
             move |image| Loaded { url: url.clone(), image },
         )
+    }
+
+    /// [`fetch`]'s work, here and now: for a thread of the caller's.
+    pub fn now(url: &str, name: &str, bound: u32) -> Result<Rgba, String> {
+        blocking(url, name).and_then(|bytes| shrink(&bytes, bound))
     }
 
     fn blocking(url: &str, name: &str) -> Result<Vec<u8>, String> {

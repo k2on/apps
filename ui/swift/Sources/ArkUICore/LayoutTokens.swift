@@ -61,6 +61,12 @@ public enum LayoutTokens {
     public static let dropdownWidth: Double = 320.0
     /// The tallest a searchable dropdown's list grows before it scrolls.
     public static let dropdownHeight: Double = 360.0
+    /// Artwork beside a row's words: a track's cover, a person's face.
+    public static let artRow: Double = 48.0
+    /// Artwork on a shelf's tile; a grid's columns are at least this wide.
+    public static let artShelf: Double = 148.0
+    /// Artwork beside a page's title: a record's cover.
+    public static let artHeader: Double = 132.0
     /// The desktop's large title (the phones take the style by name, so Dynamic Type and the font scale grow it).
     public static let typeLargeTitle: Double = 28.0
     /// The desktop's title.

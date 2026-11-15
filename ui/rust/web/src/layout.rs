@@ -30,6 +30,7 @@ pub(crate) fn layout<M: Clone + std::fmt::Debug + 'static>(l: Layout<M>) -> Opti
             Modifier::Corner(Corner::Card) => class.push("ark-corner-card".into()),
             Modifier::Corner(Corner::Small) => class.push("ark-corner-small".into()),
             Modifier::Combine => group = true,
+            Modifier::ArtWidth(a) => class.push(format!("ark-art-w-{}", a.case())),
         }
     }
     let role = group.then_some("group");

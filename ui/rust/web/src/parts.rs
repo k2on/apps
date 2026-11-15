@@ -350,6 +350,28 @@ fn drawn<M: Clone + std::fmt::Debug + 'static>(v: View<M>) -> Option<AnyView> {
                     .into_any(),
             }
         }
+        Part::Press {
+            press,
+            label,
+            tap,
+            menu,
+            content,
+        } => pressed(press, label.get(), tap, &menu, *content),
+        Part::Artwork {
+            url,
+            seed,
+            label,
+            size,
+            round,
+        } => artwork(url.get(), &seed.get(), label.get(), size, round),
+        Part::Grid(content) => html::div().class("ark-art-grid").child(nodes(*content)).into_any(),
+        Part::Timeline {
+            at_ms,
+            since_ms,
+            playing,
+            length_ms,
+            seek,
+        } => crate::timeline::timeline(at_ms.get(), since_ms.get(), playing.get(), length_ms.get(), seek),
         Part::Paper {
             heading,
             date,
@@ -980,3 +1002,100 @@ fn data_table<M: Clone + std::fmt::Debug + 'static>(columns: Vec<ark_app::view::
         .collect();
     crate::table::table(&columns, rows)
 }
+
+/// What is laid out in `content`, pressed as one (`Part::Press`): a row
+/// lit by the pointer and the keys' cursor, or a cover or a glyph that
+/// takes the theme's pressed colour (the desktop's: no give); its menu at
+/// the pointer on a right click. A press inside another (a row's glyph
+/// button) is that press's alone.
+fn pressed<M: Clone + std::fmt::Debug + 'static>(
+    press: ark_app::view::Press,
+    label: String,
+    tap: M,
+    menu: &[ark_app::view::MenuItem<M>],
+    content: View<M>,
+) -> AnyView {
+    let entries = menu::of_row(menu);
+    let open: crate::Action = {
+        let tap = tap.clone();
+        Rc::new(move || send(tap.clone()))
+    };
+    let opener: Option<crate::Opener> = (!entries.is_empty()).then(|| {
+        let title = label.clone();
+        let entries = entries.clone();
+        Rc::new(move |x: f64, y: f64| menu::open(title.clone(), entries.clone(), (x, y), menu::Anchor::Pointer, false)) as crate::Opener
+    });
+    let row = press == ark_app::view::Press::Highlight;
+    let lit = match row {
+        true => {
+            if let Some(o) = &opener {
+                let (t, o) = (label.clone(), o.clone());
+                crate::drawn(|d| d.contexts.push((t, o)));
+            }
+            row_drawn(Row {
+                title: label.clone(),
+                open: Some(open.clone()),
+                menu: opener.clone(),
+            })
+            .1
+        }
+        false => false,
+    };
+    let class = match (row, lit) {
+        (true, true) => "ark-press ark-press-row ark-cursor",
+        (true, false) => "ark-press ark-press-row",
+        (false, _) => "ark-press ark-press-give",
+    };
+    let wired = crate::page::tap(&label, open.clone());
+    crate::wired!(html::button(), wired)
+        .class(class)
+        .attr("data-cursor", lit.then_some("true"))
+        .attr("data-title", row.then(|| label.clone()))
+        .attr("aria-label", label)
+        .on(leptos::ev::click, move |e: web_sys::MouseEvent| {
+            e.stop_propagation();
+            open()
+        })
+        .on(leptos::ev::contextmenu, move |e: web_sys::MouseEvent| {
+            if let Some(o) = &opener {
+                e.prevent_default();
+                e.stop_propagation();
+                o(e.client_x() as f64, e.client_y() as f64);
+            }
+        })
+        .child(nodes(content))
+        .into_any()
+}
+
+/// A cover (`Part::Artwork`): the picture at `url` over the square `seed`
+/// derives (`.ark-square-<n>`, the theme's set for the page's accent and
+/// appearance, picked as every toolkit's `Art.pick` picks), at `size`.
+fn artwork(url: String, seed: &str, label: String, size: ark_app::view::ArtSize, round: bool) -> AnyView {
+    // FNV-1a over UTF-16, as `arkui::art::hash`.
+    let mut h: u32 = 0x811c_9dc5;
+    for unit in seed.encode_utf16() {
+        h ^= u32::from(unit);
+        h = h.wrapping_mul(0x0100_0193);
+    }
+    let class = format!(
+        "ark-art ark-art-{} ark-square-{}{}",
+        size.case(),
+        h % SQUARES,
+        if round { " ark-art-round" } else { "" }
+    );
+    html::div()
+        .class(class)
+        .attr("role", "img")
+        .attr("aria-label", label)
+        .child((!url.is_empty()).then(|| {
+            html::img()
+                .attr("src", url)
+                .attr("alt", "")
+                .attr("loading", "lazy")
+                .attr("onerror", "this.remove()")
+        }))
+        .into_any()
+}
+
+/// How many square classes theme.css writes (ui/theme.py's `SQUARES`).
+const SQUARES: u32 = 12;

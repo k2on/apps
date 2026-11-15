@@ -201,7 +201,7 @@ private fun FigureColumn(title: String?, figure: @Composable () -> Unit) {
 
 /** A menu's offered actions, while [open]. */
 @Composable
-private fun MenuOf(offered: List<MenuAction>, open: Boolean, onDismiss: () -> Unit) {
+internal fun MenuOf(offered: List<MenuAction>, open: Boolean, onDismiss: () -> Unit) {
     DropdownMenu(expanded = open, onDismissRequest = onDismiss) {
         for (m in offered) {
             DropdownMenuItem(

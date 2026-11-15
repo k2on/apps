@@ -62,6 +62,9 @@ LAYOUT = {
     "sheet-bar-height": "A sheet's bar: its close, its title, its confirm.",
     "dropdown-width": "A searchable dropdown's panel: its search field over its list.",
     "dropdown-height": "The tallest a searchable dropdown's list grows before it scrolls.",
+    "art-row": "Artwork beside a row's words: a track's cover, a person's face.",
+    "art-shelf": "Artwork on a shelf's tile; a grid's columns are at least this wide.",
+    "art-header": "Artwork beside a page's title: a record's cover.",
     "type-large-title": "The desktop's large title (the phones take the style by name, so Dynamic Type and the font scale grow it).",
     "type-title": "The desktop's title.",
     "type-headline": "The desktop's headline: a card's title, bold.",
@@ -167,6 +170,9 @@ def load():
                 assert name in accent[side], f"accent.{a}.{side} has no {name}"
     for a, accent in t["accent"].items():
         assert accent["art"] in t["art"], f"accent.{a} names art {accent['art']}, which is not there"
+    for art, sets in t["art"].items():
+        for side in ("light", "dark"):
+            assert SQUARES % len(sets[side]) == 0, f"art.{art}.{side} has {len(sets[side])} squares, which does not divide {SQUARES}"
     assert len(t["chart"]["light"]) == len(t["chart"]["dark"]), "chart has a different number of colours on each side"
     for side in ("light", "dark"):
         for c in t["chart"][side]:
@@ -776,6 +782,18 @@ def spring_curve(stiffness, damping, rest):
     return round(end * 1000), f"linear({points})"
 
 
+# The browser's derived squares: a seed's FNV-1a modulo this picks one of
+# `.ark-square-0` … (arkui-web's `artwork`), which each accent's set maps to
+# its own square, `i` modulo its length; so every set's length divides it.
+SQUARES = 12
+
+
+def css_squares(sel, sets):
+    """Each of the browser's square classes as `sets` draws it, under `sel`."""
+    return [f"{sel} .ark-square-{i} {{ --ark-square-a: {sets[i % len(sets)][0]}; --ark-square-b: {sets[i % len(sets)][1]}; }}"
+            for i in range(SQUARES)]
+
+
 def css_px(v):
     return f"{float(v):g}px"
 
@@ -830,6 +848,20 @@ def css(t):
     out += block(':root[data-theme="dark"]', "dark")
     for a, accent in t["accent"].items():
         out += block(f':root[data-theme="dark"][data-accent="{a}"]', "dark", accent)
+    out.append("")
+    out += ["/* The derived squares (a cover's, while none has come): a seed's square",
+            "   class, each accent's set in light and dark, as every toolkit's `Art.pick`. */"]
+    out += css_squares(":root", t["art"]["neutral"]["light"])
+    for a, accent in t["accent"].items():
+        out += css_squares(f':root[data-accent="{a}"]', t["art"][accent["art"]]["light"])
+    out.append("@media (prefers-color-scheme: dark) {")
+    out += ["  " + l for l in css_squares(':root:not([data-theme="light"])', t["art"]["neutral"]["dark"])]
+    for a, accent in t["accent"].items():
+        out += ["  " + l for l in css_squares(f':root:not([data-theme="light"])[data-accent="{a}"]', t["art"][accent["art"]]["dark"])]
+    out.append("}")
+    out += css_squares(':root[data-theme="dark"]', t["art"]["neutral"]["dark"])
+    for a, accent in t["accent"].items():
+        out += css_squares(f':root[data-theme="dark"][data-accent="{a}"]', t["art"][accent["art"]]["dark"])
     out.append("")
     out += ["/* Reduced motion: what travels fades in place (ui/docs/motion.md). The",
             "   page says so (`data-motion`), as `motion::reduced()` does, never the",

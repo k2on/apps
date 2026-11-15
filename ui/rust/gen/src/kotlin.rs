@@ -307,6 +307,7 @@ fn chain(mods: &[Modifier]) -> Option<String> {
             Modifier::Corner(Corner::Card) => "clip(RoundedCornerShape(ArkCorner.card))".into(),
             Modifier::Corner(Corner::Small) => "clip(RoundedCornerShape(ArkCorner.small))".into(),
             Modifier::Combine => "semantics(mergeDescendants = true) {}".into(),
+            Modifier::ArtWidth(a) => format!("artWidth(ArtSize.{})", pascal(a.case())),
         })
         .collect();
     Some(format!("Modifier.{}", links.join(".")))

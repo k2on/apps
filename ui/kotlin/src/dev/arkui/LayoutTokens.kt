@@ -61,6 +61,12 @@ public object LayoutTokens {
     public const val DROPDOWN_WIDTH: Float = 320.0f
     /** The tallest a searchable dropdown's list grows before it scrolls. */
     public const val DROPDOWN_HEIGHT: Float = 360.0f
+    /** Artwork beside a row's words: a track's cover, a person's face. */
+    public const val ART_ROW: Float = 48.0f
+    /** Artwork on a shelf's tile; a grid's columns are at least this wide. */
+    public const val ART_SHELF: Float = 148.0f
+    /** Artwork beside a page's title: a record's cover. */
+    public const val ART_HEADER: Float = 132.0f
     /** The desktop's large title (the phones take the style by name, so Dynamic Type and the font scale grow it). */
     public const val TYPE_LARGE_TITLE: Float = 28.0f
     /** The desktop's title. */

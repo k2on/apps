@@ -27,6 +27,26 @@ pub use iced::Element;
 pub mod cursor;
 mod layout;
 
+/// Whether a playing timeline was drawn since the window last asked
+/// ([`timeline_running`]).
+static TIMELINE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Whether a timeline drawn last was counting on (a sound playing): the
+/// window ticks while one is, as a scrubber's clock is genuinely needed
+/// then (`crate::wake`), and not otherwise. Asking clears it; the next
+/// draw says it again.
+pub fn timeline_running() -> bool {
+    TIMELINE.swap(false, std::sync::atomic::Ordering::Relaxed)
+}
+
+/// The device's clock, as a timeline's `since_ms` is.
+fn now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
+}
+
 /// What a page is padded by.
 const PAD: f32 = 18.0;
 /// A dialog's width.
@@ -329,6 +349,89 @@ fn part<M: Clone + 'static>(v: View<M>) -> Option<Element<'static, M>> {
                 .center_x(Length::Fill)
                 .padding(PAD)
                 .into(),
+            }
+        }
+        Part::Press {
+            press,
+            label,
+            tap,
+            menu,
+            content,
+        } => {
+            let face: Element<'static, M> = column(nodes(*content)).into();
+            let b = match press {
+                // A row the window's width, lit by the cursor as a list's row is.
+                ark_app::view::Press::Highlight => {
+                    let lit = cursor::row_drawn(&label.get(), Some(&tap));
+                    button(lit_row(face, lit)).width(Length::Fill).padding(0).style(style::bare)
+                }
+                // The desktop gives no press (ui/docs/motion.md): the theme's
+                // pressed colour, at once.
+                ark_app::view::Press::Give => button(face).padding(0).style(style::bare),
+            }
+            .on_press(tap);
+            let items: Vec<context_menu::Item<M>> = menu
+                .into_iter()
+                .filter(|m| m.offered())
+                .map(|m| context_menu::Item {
+                    glyph: glyphs::named(&m.glyph.get()),
+                    label: m.title.get(),
+                    destructive: m.destructive.get(),
+                    message: m.tap,
+                })
+                .collect();
+            match items.is_empty() {
+                true => b.into(),
+                false => context_menu::context_menu(b, label.get(), items),
+            }
+        }
+        Part::Artwork {
+            url,
+            seed,
+            size,
+            round,
+            ..
+        } => {
+            let side = layout::art_side(size).unwrap_or(crate::layout_tokens::ART_SHELF);
+            let corner = if round { side / 2.0 } else { crate::layout_tokens::CORNER };
+            let handle = crate::images::remote(&url.get(), "arkui/artwork");
+            crate::art::picture(&seed.get(), handle.as_ref(), side, corner)
+        }
+        Part::Grid(content) => row(nodes(*content)).spacing(12).wrap().into(),
+        Part::Timeline {
+            at_ms,
+            since_ms,
+            playing,
+            length_ms,
+            seek,
+        } => {
+            let playing = playing.get();
+            let length = length_ms.get().max(1);
+            let at = match playing {
+                // Counted as it is drawn; the window ticks while one plays
+                // ([`timeline_running`]).
+                true => at_ms.get() + (now_ms() - since_ms.get()).max(0),
+                false => at_ms.get(),
+            }
+            .clamp(0, length);
+            if playing {
+                TIMELINE.store(true, std::sync::atomic::Ordering::Relaxed);
+            }
+            match seek {
+                // iced's slider says where it is dragged as it goes, with
+                // nothing kept of its own: each move is a seek.
+                Some(seek) => {
+                    let done = seek.call(at);
+                    parts::scrubber(
+                        ark_format::clock(at),
+                        ark_format::clock(length),
+                        length as f32,
+                        at as f32,
+                        move |v| seek.call(v as i64),
+                        done,
+                    )
+                }
+                None => crate::parts::progress_bar(at as f32 / length as f32, crate::parts::Tint::Accent, 2.0),
             }
         }
         Part::Paper {

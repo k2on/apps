@@ -63,8 +63,27 @@ What falls out, and who uses it:
 
 The first two are built (`ui/rust/app/src/view/components.rs`) and used
 by money now — its register's, transactions' and insights' empty cards are
-`empty_state`s; the leaves are what the rebuilt parts needed. The rest wait for harken's port: each is a
-`fn` in `ark_app::view` returning primitives, like the first two.
+`empty_state`s; the leaves are what the rebuilt parts needed. The media
+components are built for harken's port, each of the primitives over four
+new parts, on every toolkit:
+
+| Built | API (`ark_app::view`) | What it is drawn with |
+|---|---|---|
+| Pressed as one | `pressable(label, tap, content)` (a give), `press_row(label, tap, content)` (a row's light), `.menu(title, glyph, tap)` | `Part::Press`: SwiftUI's `Pressable` (a `Button` in `.press`/`.pressRow`, its `contextMenu`), Compose's `Pressable` (`Modifier.pressable` with `Press.Give`/`Highlight`, its menu held), iced's bare button (the pressed colour, no give), the browser's `<button class="ark-press">`; its walk id a row's by its label when it lights, else what it sends |
+| Artwork | `artwork(url, seed, label).size(ArtSize::Row \| Shelf \| Header \| Fill).round()` | `Part::Artwork`: the picture over ArkUI's derived square (`Square`, `Cover`, `art::picture`, the theme's `.ark-square-<n>`), decoded for its size (`ArtworkCache`, `UrlCovers`, `images::remote`), waited for by a screenshot; sizes `[layout]`'s `art-row`, `art-shelf`, `art-header` |
+| Artwork tile | `artwork_tile(art, title, caption, tap)` | a give over a `vstack` kept to its cover's width (`.art_width(size)`) |
+| Artwork shelf | `artwork_shelf(tiles)` | `scroll_across` at the page's margins |
+| Artwork grid | `artwork_grid(tiles)` | `Part::Grid`: `LazyVGrid(.adaptive(art-shelf))`, a `FlowRow` of cells, iced's wrapped row, a CSS grid |
+| Media row | `media_row(title, tap).art(..).under(..).trailing(..).menu(..)` | a lit row of an `hstack`: the art, a plain one-line `title_stack`, a spacer, the end |
+| Media header | `media_header(art, titles, actions)` | the cover at `art-header` beside the titles, the actions under both |
+| Play/shuffle pair | `play_shuffle(play, shuffle)` | two `wide_button`s |
+| Transport controls | `transport(play_glyph, play_label, toggle, back, forward).shuffle(tint, tap).repeat(glyph, tint, tap)` | `glyph_button`s (a give round a glyph) spaced across the width |
+| Scrubber, hairline | `scrubber(at_ms, since_ms, playing, length_ms, seek)`, `hairline(..)` | `Part::Timeline`: counted from its clock as it is drawn (`TimelineView`, a ticking state, iced's tick while one plays, an animation frame in the DOM), `seek` once on release (iced: as it is dragged), a `Selection` haptic at either end on the phones |
+| Figure with label | `figure_label(label, figure)` | a quiet caption over a headline, read as one |
+
+Still to come for harken: the now-playing accessory (the shell's) and
+the volume. ui/rust/gen/tests/snapshots holds what the emitters write for
+all of them (`MediaView.swift`, `MediaScreen.kt`).
 
 ## The Primitives
 

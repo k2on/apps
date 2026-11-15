@@ -630,7 +630,13 @@ where
             crate::window::wakes().map(|()| Msg::Swallow),
             crate::files::dropped().map(Msg::Dropped),
             self.devices.bell().subscription().map(|()| Msg::Answered),
+            // A cover an artwork asked for has come.
+            crate::images::arrivals().subscription().map(|()| Msg::Swallow),
         ];
+        // A sound plays: its timeline counts on as it is drawn.
+        if crate::view::timeline_running() {
+            subs.push(iced::time::every(std::time::Duration::from_millis(250)).map(|_| Msg::Swallow));
+        }
         if self.command.is_some() {
             subs.push(crate::command::keys(true).map(|p| Msg::Command(keys::CommandMsg::Press(p))));
         }
