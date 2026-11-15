@@ -18,8 +18,9 @@ use std::sync::{Arc, Mutex};
 use ark_ffi::Peer;
 use ark_media_player::phone::NativeMediaPlayer;
 use ark_media_player::{MediaControls, MediaEvent, NowPlaying};
+use harken_domain::player::{Press, Sound, NOT_PART};
 use harken_domain::{Active, Id, Media, Output, Track};
-use harken_player::{remote_press, MediaSound, Press, Repeat, Sound, NOT_PART};
+use harken_player::{remote_press, MediaSound, Repeat};
 use serde_json::{json, Value};
 
 /// How far an episode's skips go, in seconds: back a little, on a little more.
@@ -54,13 +55,13 @@ pub trait PlayerShell: Send + Sync {
 struct Knob(Arc<dyn PlayerShell>);
 
 impl harken_player::Knob for Knob {
-    fn volume(&self) -> Option<harken_player::Vol> {
-        self.0.volume().map(|v| harken_player::Vol {
+    fn volume(&self) -> Option<harken_domain::player::Vol> {
+        self.0.volume().map(|v| harken_domain::player::Vol {
             level: v.level,
             muted: v.muted,
         })
     }
-    fn set(&self, v: harken_player::Vol) {
+    fn set(&self, v: harken_domain::player::Vol) {
         self.0.set_volume(v.level, v.muted)
     }
 }
@@ -166,7 +167,7 @@ impl Player {
         v.to_string()
     }
 
-    /// A press (`harken_player::Press`, JSON): none when it was taken, else
+    /// A press (`harken_domain::player::Press`, JSON): none when it was taken, else
     /// why not. While the phone is its own session the press is done to its
     /// own queue.
     pub fn press(&self, press: String) -> Option<String> {

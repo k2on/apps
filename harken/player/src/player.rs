@@ -11,13 +11,29 @@
 //! `on_join` has landed). Plays are the exception, because they are the
 //! log's: offline, one is a pending intent like any other.
 
-use ark_peer::{now_ms, Disk, Peer};
+use ark::db::Durable;
+use ark::prelude::*;
+use ark_peer::{now_ms, Disk, Instance, Peer};
 use harken_domain::host::Listening;
+use harken_domain::player::{Loaded, Press, Reconciler, Say, Sound, View, NOT_PART};
 use harken_domain::{Active, Clock, Output};
-use serde::Serialize;
 use serde_json::{json, Value};
 
-use crate::{Press, Reconciler, Say, Sound, View, NOT_PART};
+/// One device's play counter: what its reconciler counted, kept on a
+/// durable local instance, so that a play is never authored twice for one
+/// load, a restart between.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Row)]
+pub struct Count {
+    #[ark(key)]
+    pub device: String,
+    pub loaded: Loaded,
+}
+
+/// The durable instance's tables.
+#[derive(Schema)]
+pub struct Counts {
+    pub count: Count,
+}
 
 /// Every number a device's player holds that its peer does not, for the
 /// diagnostics.
@@ -37,6 +53,8 @@ pub struct Stats {
 pub struct Player {
     me: String,
     core: Reconciler,
+    /// Where its plays are counted; none where it counts none.
+    counts: Option<Instance>,
     pub stats: Stats,
     /// The last refusal the server sent this device's calls.
     refused: Option<String>,
@@ -101,9 +119,15 @@ impl Player {
     /// The player of the device `me` (its login's session id, which is what
     /// its `hello` declared), its plays counted on `counts`.
     pub fn new(me: &str, counts: Option<Box<dyn Disk>>) -> Player {
+        let counts = counts.map(Instance::open::<Counts>);
+        let loaded = counts.as_ref().map(|c| {
+            let device = me.to_string();
+            c.read::<Counts, _>(|db| db.count.get(device)).map_or(Loaded::Nothing, |c| c.loaded)
+        });
         Player {
             me: me.into(),
-            core: Reconciler::new(me, counts),
+            core: Reconciler::new(me, loaded),
+            counts,
             stats: Stats::default(),
             refused: None,
         }
@@ -138,6 +162,7 @@ impl Player {
             listening: &s,
             now: now_ms(),
         };
+        let was = self.core.loaded();
         self.core.reconcile(
             &v,
             sound,
@@ -146,6 +171,10 @@ impl Player {
                 stats: &mut self.stats,
             },
         );
+        if let (Some(c), Some(loaded)) = (&mut self.counts, self.core.loaded().filter(|l| Some(*l) != was)) {
+            let device = self.me.clone();
+            let _ = c.write::<Counts, Durable, _>(|db| db.count.put(Count { device, loaded }));
+        }
         self.refusals(p)
     }
 

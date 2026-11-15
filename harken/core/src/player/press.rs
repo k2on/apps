@@ -4,9 +4,10 @@
 //! nothing queued it plays what this device had.
 
 use ark::format::Encode;
-use harken_domain::host::Listening;
-use harken_domain::*;
 use serde::{Deserialize, Serialize};
+
+use crate::host::Listening;
+use crate::*;
 
 /// What a press is answered with while the device is its own session: the
 /// player's, then.

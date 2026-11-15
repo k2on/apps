@@ -81,7 +81,7 @@ fn the_keys_on_a_queue_row_take_it_out_move_it_or_play_it() {
     );
     assert!(matches!(app.queue_key('x'), Some(Message::QueueRemove(1))), "but can be taken out");
     assert!(matches!(app.queue_key('q'), Some(Message::CloseQueue)));
-    use harken_player::Press;
+    use harken_domain::player::Press;
     assert_eq!(App::queue_call(&Message::QueueRemove(2)), Some(Press::Remove { index: 2 }));
     assert_eq!(App::queue_call(&Message::QueueMove(3, 2)), Some(Press::Move { from: 3, to: 2 }));
     assert_eq!(App::queue_call(&Message::QueueJump(3)), Some(Press::Jump { index: 3 }));

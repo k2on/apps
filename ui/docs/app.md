@@ -1096,9 +1096,14 @@ changes, `.github/compat-check.sh`'s harken part grows with it.
    `listening.session`, `listening.devices` and `listening.scrubbing` are
    `HarkenView::Listening`'s parts, read into `host::Listening` by
    `Listening::read` — on the device, no request added to the server.
-   Next: the reconciler's rules in `harken_domain::player`, the player as
-   the host's own runtime over the media player module, the sheets,
-   Settings.
+   The reconciler is split: its rules, its memory as plain values
+   (`Mind`, and the play it counted, `Loaded`, which its driver keeps),
+   the presses and the `Sound`/`Say`/`View` ports are
+   `harken_domain::player`, pure; harken-player keeps only adapters
+   (`Player` over a peer, keeping `Loaded` on a durable local instance,
+   `MediaSound`, `config`), and the server's speakers count in memory.
+   Next: the player as the host's own runtime over the media player
+   module, the sheets, Settings.
 4. Generated targets, the old clients deleted: not started.
 5. Screenshots: not started.
 

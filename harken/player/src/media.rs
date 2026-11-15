@@ -28,7 +28,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use ark_module::media_player::{MediaControls, MediaEvent, MediaListener, MediaPlayer, NowPlaying, RemoteCommand, RouteChange};
 use harken_domain::{Id, Media, Track};
 
-use crate::{Change, Event, Heard, Level, Place, Press, Sound, Vol};
+use harken_domain::player::{Change, Event, Heard, Level, Place, Press, Sound, Vol};
 
 /// What alone repeats.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]

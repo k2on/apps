@@ -135,7 +135,7 @@ fn the_keys_on_a_picker_row_join_it_or_move_its_volume() {
 fn a_control_calls_the_groups_transition_or_its_devices() {
     let mut app = app();
     assert_eq!(app.volumed(&Level::Output), Some(Volumed::Group));
-    use harken_player::{Change as To, Level as L, Press};
+    use harken_domain::player::{Change as To, Level as L, Press};
     let loud = |level: L, change: To| Some(Press::Loud { level, change });
     assert_eq!(app.volume_call(&Volumed::Group, Change::To(50)), loud(L::Group, To::To { level: 50 }));
     assert_eq!(app.volume_call(&Volumed::Group, Change::By(-5)), loud(L::Group, To::By { delta: -5 }));

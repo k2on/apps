@@ -18,7 +18,7 @@
 //! the same few service calls, where talking UPnP would buy one make of
 //! speaker and a discovery problem.
 //!
-//! What is here is the speaker as a [`harken_player::Sound`]: each command
+//! What is here is the speaker as a [`harken_domain::player::Sound`]: each command
 //! a service call ([`Act`]), and Home Assistant's polls read into what the
 //! speaker is doing and what happened to it — a hand-off fetched, a seek it
 //! dropped, a blink that is not a stall, a position dated before the last
@@ -52,7 +52,9 @@ use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use harken_player::{Caps, Event, Followers, Heard, Place, Reconciler, Say, View, Vol};
+use harken_domain::player::{
+    Caps, Event, Followers, Heard, Loaded, Place, Reconciler, Say, View, Vol,
+};
 
 use crate::domain::host::url;
 use crate::domain::host::{Kind, Listening};
@@ -221,7 +223,7 @@ pub use crate::domain::host::SYNC_MS;
 /// was somebody's hand on the speaker — a seek in the Sonos app — said as
 /// the speaker's own `seek` rather than as where it has drifted to: every
 /// player's bound.
-pub use harken_player::DRIFT_MS;
+pub use harken_domain::player::DRIFT_MS;
 
 /// How many polls in a row a speaker handed the sound must say it is not
 /// playing before that is a stall. One is a blink: a Sonos between a seek
@@ -650,7 +652,7 @@ fn url_for(media: &str, lower: Option<&Arc<Lower>>, track: &Track) -> String {
 }
 
 /// One speaker as one session's reconciler drives it: a
-/// [`harken_player::Sound`] whose commands are service calls ([`Act`]).
+/// [`harken_domain::player::Sound`] whose commands are service calls ([`Act`]).
 struct Hand<'a> {
     entity: &'a str,
     key: &'a str,
@@ -791,7 +793,7 @@ impl Hand<'_> {
     }
 }
 
-impl harken_player::Sound for Hand<'_> {
+impl harken_domain::player::Sound for Hand<'_> {
     fn heard(&self) -> Heard {
         let Some(h) = self.held() else {
             return Heard {
@@ -1172,9 +1174,7 @@ impl Speakers {
             .entry((key.into(), entity.into()))
             // Counting its plays, and so its listener's place in an
             // episode, as any player does ([`Act::Record`]).
-            .or_insert_with(|| {
-                Reconciler::new(entity, Some(Box::new(ark_peer::Memory::default())))
-            });
+            .or_insert_with(|| Reconciler::new(entity, Some(Loaded::Nothing)));
         let acts = RefCell::new(vec![]);
         let mut hand = Hand {
             entity,

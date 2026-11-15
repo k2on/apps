@@ -11,8 +11,9 @@ use std::sync::{Arc, Mutex};
 
 use ark_media_player::{Fake, MediaControls, MediaEvent, MediaPlayer, NowPlaying, RemoteCommand, RouteChange};
 use harken_domain::host::{Kind, Listening};
+use harken_domain::player::{Press, Reconciler, Say, Sound, View};
 use harken_domain::*;
-use harken_player::{remote_press, MediaSound, Press, Reconciler, Repeat, Say, Sound, View};
+use harken_player::{remote_press, MediaSound, Repeat};
 
 const ME: &str = "phone";
 const NOW: i64 = 1_700_000_000_000;
@@ -395,11 +396,11 @@ fn shuffle_reorders_what_is_to_come() {
 #[test]
 fn a_volume_is_the_player_s_gain() {
     let mut rig = Rig::new();
-    rig.sound.set_volume(harken_player::Vol { level: 40, muted: false });
-    rig.sound.set_volume(harken_player::Vol { level: 40, muted: true });
+    rig.sound.set_volume(harken_domain::player::Vol { level: 40, muted: false });
+    rig.sound.set_volume(harken_domain::player::Vol { level: 40, muted: true });
     assert_eq!(rig.fake.take(), ["volume 0.4", "volume 0"]);
     // Alone, a volume pressed for this device is the same gain.
-    use harken_player::{Change, Level};
+    use harken_domain::player::{Change, Level};
     rig.sound.alone(&Press::Loud {
         level: Level::Here,
         change: Change::To { level: 70 },
@@ -409,7 +410,7 @@ fn a_volume_is_the_player_s_gain() {
         change: Change::By { delta: -20 },
     });
     assert_eq!(rig.fake.take(), ["volume 0.7", "volume 0.5"]);
-    assert_eq!(rig.sound.volume(), Some(harken_player::Vol { level: 50, muted: false }));
+    assert_eq!(rig.sound.volume(), Some(harken_domain::player::Vol { level: 50, muted: false }));
 }
 
 /// What the system shows is told when it changes, not at every step: a
@@ -500,13 +501,13 @@ fn a_paused_player_is_idle() {
 }
 
 /// A phone's media stream, faked: a level and a mute.
-struct Stream(Mutex<Option<harken_player::Vol>>);
+struct Stream(Mutex<Option<harken_domain::player::Vol>>);
 
 impl harken_player::Knob for Stream {
-    fn volume(&self) -> Option<harken_player::Vol> {
+    fn volume(&self) -> Option<harken_domain::player::Vol> {
         *self.0.lock().unwrap()
     }
-    fn set(&self, v: harken_player::Vol) {
+    fn set(&self, v: harken_domain::player::Vol) {
         *self.0.lock().unwrap() = Some(v);
     }
 }
@@ -516,7 +517,7 @@ impl harken_player::Knob for Stream {
 /// and the player's gain is left alone; where it has none, the gain is.
 #[test]
 fn a_device_volume_is_the_session_s_not_the_gain() {
-    use harken_player::{Change, Level, Vol};
+    use harken_domain::player::{Change, Level, Vol};
     let rig = Rig::new();
     let stream = Arc::new(Stream(Mutex::new(Some(Vol { level: 33, muted: false }))));
     let mut sound = rig.sound.with_knob(stream.clone());

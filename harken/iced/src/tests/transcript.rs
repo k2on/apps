@@ -86,7 +86,7 @@ fn playing_on_the_phone(hub: &ark_peer::Handle) -> (App, Option<Replica>) {
         duration_ms: i.duration_ms,
         file: i.file,
     }];
-    let start = harken_player::Press::Start {
+    let start = harken_domain::player::Press::Start {
         queue,
         at: 0,
         position_ms: 0,

@@ -5,10 +5,10 @@
 //!
 //! The session is the domain's live state, read off the peer's live store
 //! (the server's, this device's own calls previewed on top). **The state is
-//! the instruction**: every button is a [`harken_player::Press`]
+//! the instruction**: every button is a [`harken_domain::player::Press`]
 //! ([`Remote::call`]); the device the session names as its output makes its
 //! player agree ([`Remote::reconcile`], over the window's [`crate::Player`]
-//! as a `harken_player::Sound`); every other device is silent and draws it.
+//! as a `harken_domain::player::Sound`); every other device is silent and draws it.
 //! What the output says back, the rule for coming back, the volume and the
 //! plays are the reconciler's, the same as a phone's and a speaker's.
 //!
@@ -21,7 +21,8 @@
 //! control, no volume to say.
 
 use crate::client::Replica as Peer;
-use harken_player::{Press, Sound, Stats};
+use harken_domain::player::{Press, Sound};
+use harken_player::Stats;
 // What the rest of this program asks *this* module about.
 pub use crate::domain::host::{Kind, Listening};
 pub use crate::domain::{Active, Clock, Output, Present as Device, Track};
@@ -118,7 +119,7 @@ impl Remote {
 
     /// A press, as the session's transition; `local` is this device's own
     /// player, whose queue a play presses when the session has none. An
-    /// `Err` of [`harken_player::NOT_PART`] is this device being its own
+    /// `Err` of [`harken_domain::player::NOT_PART`] is this device being its own
     /// session: the caller does it to its player.
     pub fn call(&mut self, peer: &mut Peer, press: &Press, local: Option<&dyn Sound>) -> Result<(), String> {
         match self.player.press(peer, press, local) {
@@ -128,7 +129,7 @@ impl Remote {
     }
 
     /// Make this device agree with the session, and say what happened to it
-    /// (`harken_player::Reconciler`). Called after every update, whatever it
+    /// (`harken_domain::player::Reconciler`). Called after every update, whatever it
     /// was. What the server refused of this device's calls since, taken.
     pub fn reconcile(&mut self, peer: &mut Peer, sound: &mut dyn Sound) -> Vec<String> {
         match self.me().is_empty() {

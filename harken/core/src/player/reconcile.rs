@@ -15,22 +15,25 @@
 //! A play is authored once a track has played thirty seconds or half its
 //! length, once per load, by the device making the sound; short of that the
 //! player is asked to wake the reconciler when it will have.
+//!
+//! Its memory is plain values: its [`Mind`], and the play it counted
+//! ([`Loaded`]), which its driver reads after a look ([`Reconciler::loaded`])
+//! and keeps where it outlasts a restart.
 
-use ark::db::{Durable, Volatile};
 use ark::format::Encode;
-use ark_peer::{Disk, Instance};
-use harken_domain::host::{counts_after, UNSAID_VOLUME};
-use harken_domain::{Active, Advance, At, Clock, Jump, Output, Present, Report, Seek, Track};
 
-use crate::memory::*;
-use crate::{Event, Place, Say, Sound, View, Vol, DRIFT_MS, SYNC_MS};
+use super::memory::*;
+use super::{Event, Place, Say, Sound, View, Vol, DRIFT_MS, SYNC_MS};
+use crate::host::{counts_after, UNSAID_VOLUME};
+use crate::{Active, Advance, At, Clock, Jump, Output, Present, Report, Seek, Track};
 
 /// One device's reconciler: its mind, and its play counter.
 pub struct Reconciler {
     me: String,
-    minds: Instance,
-    /// None where plays are not this player's to author.
-    counts: Option<Instance>,
+    mind: Mind,
+    /// The play it counted; none where plays are not this player's to
+    /// author.
+    counts: Option<Loaded>,
     /// Where it last said an episode had got to, and when, by the server's
     /// clock: in memory, as a place said again after a restart is only
     /// the same place.
@@ -52,34 +55,34 @@ struct Placed {
 pub const PLACE_EVERY_MS: i64 = 30_000;
 
 impl Reconciler {
-    /// The reconciler of the device `me`, counting its plays on `counts`
-    /// (none: it counts none).
-    pub fn new(me: &str, counts: Option<Box<dyn Disk>>) -> Reconciler {
+    /// The reconciler of the device `me`, counting its plays from
+    /// `counts`, what it counted before (none: it counts none).
+    pub fn new(me: &str, counts: Option<Loaded>) -> Reconciler {
         Reconciler {
             me: me.into(),
-            minds: Instance::ephemeral::<Minds>(),
-            counts: counts.map(Instance::open::<Counts>),
+            mind: Mind::new(me),
+            counts,
             placed: None,
         }
     }
 
     /// What it keeps now.
-    pub fn mind(&self) -> Mind {
-        let me = self.me.clone();
-        self.minds
-            .read::<Minds, _>(|db| db.mind.get(me.clone()))
-            .unwrap_or_else(|| Mind::new(&me))
+    pub fn mind(&self) -> &Mind {
+        &self.mind
+    }
+
+    /// The play it counted, for its driver to keep; none where it counts
+    /// none.
+    pub fn loaded(&self) -> Option<Loaded> {
+        self.counts
     }
 
     /// Make the player agree with the session as `v` reads it, and say what
     /// happened to it.
     pub fn reconcile(&mut self, v: &View, sound: &mut dyn Sound, say: &mut dyn Say) {
-        let mut m = self.mind();
-        let before = m.clone();
+        let mut m = std::mem::replace(&mut self.mind, Mind::new(&self.me));
         self.look(&mut m, v, sound, say);
-        if m != before {
-            let _ = self.minds.write::<Minds, Volatile, _>(|db| db.mind.put(m));
-        }
+        self.mind = m;
     }
 
     fn look(&mut self, m: &mut Mind, v: &View, sound: &mut dyn Sound, say: &mut dyn Say) {
@@ -109,7 +112,7 @@ impl Reconciler {
                 if s.leader().is_none_or(|l| l == v.me) {
                     let tracks = sound.tracks();
                     let at = heard.at.unwrap_or(0).min(tracks.len().saturating_sub(1));
-                    let start = harken_domain::Start {
+                    let start = crate::Start {
                         at: at as i64,
                         from: heard.from.clone(),
                         position: heard.place.ms().unwrap_or(0).max(0),
@@ -163,7 +166,7 @@ impl Reconciler {
             level: UNSAID_VOLUME,
             muted: false,
         });
-        let input = harken_domain::Equip {
+        let input = crate::Equip {
             can_volume: caps.can_volume,
             family: caps.family,
             muted: now.muted,
@@ -193,7 +196,7 @@ impl Reconciler {
             muted: mine.muted,
         };
         let report = |say: &mut dyn Say, v: Vol| {
-            let input = harken_domain::ReportVolume {
+            let input = crate::ReportVolume {
                 level: v.level.clamp(0, 100),
                 muted: v.muted,
             };
@@ -263,7 +266,7 @@ impl Reconciler {
                 m.group = Grouped::Told { members: session };
             }
             _ if f.leads => {
-                let input = harken_domain::ReportGroup { members: house.clone() };
+                let input = crate::ReportGroup { members: house.clone() };
                 let _ = say.call("report_group", input.to_bytes(), None, "it was grouped by hand");
                 m.group = Grouped::Told { members: house };
             }
@@ -438,11 +441,7 @@ impl Reconciler {
             return;
         }
         self.keep_place(sound, here, track, place, playing, now, say);
-        let Some(counts) = &mut self.counts else { return };
-        let me = self.me.clone();
-        let was = counts
-            .read::<Counts, _>(|db| db.count.get(me.clone()))
-            .map_or(Loaded::Nothing, |c| c.loaded);
+        let Some(was) = self.counts else { return };
         let mut loaded = match was {
             Loaded::Track { here: h, counted } if h == here => Loaded::Track { here, counted },
             _ => Loaded::Track { here, counted: false },
@@ -464,7 +463,7 @@ impl Reconciler {
                 sound.wake_in(due);
             } else {
                 loaded = Loaded::Track { here, counted: true };
-                let _ = say.play(harken_domain::RecordPlay {
+                let _ = say.play(crate::RecordPlay {
                     track: track.id,
                     title: track.title.clone(),
                     creator: track.creator.clone(),
@@ -475,9 +474,7 @@ impl Reconciler {
                 });
             }
         }
-        if loaded != was {
-            let _ = counts.write::<Counts, Durable, _>(|db| db.count.put(Count { device: me, loaded }));
-        }
+        self.counts = Some(loaded);
     }
 
     /// Where what plays has got to, said for its listener's place in it
@@ -509,7 +506,7 @@ impl Reconciler {
                 }
             }
         };
-        let said = say.progress(harken_domain::ReportProgress {
+        let said = say.progress(crate::ReportProgress {
             media_id: track.id,
             position_ms: ms.max(0),
             duration_ms: track.duration_ms.max(0),

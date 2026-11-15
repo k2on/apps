@@ -15,9 +15,9 @@ use std::collections::VecDeque;
 
 use ark::format::Encode;
 use harken_domain::host::{Kind, Listening};
+use harken_domain::player::memory::{Equipped, Handoff, Role};
+use harken_domain::player::{Caps, Event, Followers, Heard, Place, Reconciler, Say, Sound, View, Vol};
 use harken_domain::*;
-use harken_player::memory::{Equipped, Handoff, Role};
-use harken_player::{Caps, Event, Followers, Heard, Place, Reconciler, Say, Sound, View, Vol};
 
 const ME: &str = "kitchen";
 const STUDY: &str = "study";
@@ -215,7 +215,7 @@ impl Rig {
     /// A rig whose plays — and so places — are its own to say.
     fn counting() -> Rig {
         Rig {
-            r: Reconciler::new(ME, Some(Box::new(ark_peer::Memory::default()))),
+            r: Reconciler::new(ME, Some(harken_domain::player::Loaded::Nothing)),
             sound: Fake::default(),
         }
     }
@@ -658,7 +658,7 @@ fn coming_back_playing_offers_only_to_a_session_no_other_device_has() {
 /// A track pressed is loaded from its start, not the few milliseconds the
 /// session's clock ran before the look: a player starting a file is not
 /// sought within it — which a browser fetches the file again for — while
-/// where it starts is inside [`harken_player::SYNC_MS`] of the clock. A
+/// where it starts is inside [`harken_domain::host::SYNC_MS`] of the clock. A
 /// place further in is where it loads; and the session's confirming the
 /// press, the player still buffering, is no seek. Falsified by loading at
 /// the clock's position: the press loaded at 40.

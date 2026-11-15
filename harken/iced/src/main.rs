@@ -459,7 +459,7 @@ pub enum Press {
 }
 
 /// This device's player as harken's one reconciler drives it
-/// (`harken_player::Sound`): the window's [`Player`], which sounds one track,
+/// (`harken_domain::player::Sound`): the window's [`Player`], which sounds one track,
 /// over the window's queue, which it plays through on its own
 /// ([`App::react`] moves it on at a track's end) — the browser's `<audio>`,
 /// or on the desktop nothing at all, which never plays.
@@ -470,12 +470,12 @@ pub struct Sounding<'a> {
     /// Where the queue was taken from, as whoever set it said.
     from: &'a mut String,
     /// The volume, read once a look: reading it may make the element.
-    volume: Option<harken_player::Vol>,
+    volume: Option<harken_domain::player::Vol>,
 }
 
 impl<'a> Sounding<'a> {
     pub fn new(player: &'a mut Player, server: &'a str, queue: &'a mut Vec<listening::Track>, from: &'a mut String) -> Sounding<'a> {
-        let volume = player.volume().map(|(level, muted)| harken_player::Vol { level, muted });
+        let volume = player.volume().map(|(level, muted)| harken_domain::player::Vol { level, muted });
         Sounding {
             player,
             server,
@@ -538,12 +538,12 @@ fn play_at(player: &mut Player, server: &str, queue: &[listening::Track], at: us
     !track.file.is_empty()
 }
 
-impl harken_player::Sound for Sounding<'_> {
-    fn heard(&self) -> harken_player::Heard {
-        use harken_player::Place;
+impl harken_domain::player::Sound for Sounding<'_> {
+    fn heard(&self) -> harken_domain::player::Heard {
+        use harken_domain::player::Place;
         let at = loaded_at(self.player, self.queue);
         let ms = self.ms();
-        harken_player::Heard {
+        harken_domain::player::Heard {
             queue: self.queue.iter().map(|t| t.id).collect(),
             at,
             playing: self.player.asked(),
@@ -556,9 +556,9 @@ impl harken_player::Sound for Sounding<'_> {
             from: self.from.clone(),
         }
     }
-    fn take(&mut self) -> Option<harken_player::Event> {
+    fn take(&mut self) -> Option<harken_domain::player::Event> {
         let at_ms = self.ms();
-        self.player.take_stalled().then_some(harken_player::Event::Stalled { at_ms })
+        self.player.take_stalled().then_some(harken_domain::player::Event::Stalled { at_ms })
     }
     fn tracks(&self) -> Vec<listening::Track> {
         self.queue.clone()
@@ -593,12 +593,12 @@ impl harken_player::Sound for Sounding<'_> {
     fn seek(&mut self, ms: i64) {
         self.player.seek(ms as f64 / 1000.0);
     }
-    fn volume(&self) -> Option<harken_player::Vol> {
+    fn volume(&self) -> Option<harken_domain::player::Vol> {
         self.volume
     }
-    fn set_volume(&mut self, v: harken_player::Vol) {
+    fn set_volume(&mut self, v: harken_domain::player::Vol) {
         self.player.set_volume(v.level, v.muted);
-        self.volume = self.player.volume().map(|(level, muted)| harken_player::Vol { level, muted });
+        self.volume = self.player.volume().map(|(level, muted)| harken_domain::player::Vol { level, muted });
     }
 }
 
@@ -1819,8 +1819,8 @@ impl App {
         if self.listening.session(&self.peer.client.lock()).is_some() {
             let tracks = vec![track];
             self.call(&match next {
-                true => harken_player::Press::Next { tracks },
-                false => harken_player::Press::Append { tracks },
+                true => harken_domain::player::Press::Next { tracks },
+                false => harken_domain::player::Press::Append { tracks },
             });
             return;
         }
@@ -1838,8 +1838,8 @@ impl App {
 
     /// The session's transition for an edit of the queue: what `<Enter>`,
     /// `x`, `J` and `K` in the queue panel call, part of a session.
-    pub fn queue_call(message: &Message) -> Option<harken_player::Press> {
-        use harken_player::Press;
+    pub fn queue_call(message: &Message) -> Option<harken_domain::player::Press> {
+        use harken_domain::player::Press;
         Some(match *message {
             Message::QueueJump(i) => Press::Jump { index: i as i64 },
             Message::QueueRemove(i) => Press::Remove { index: i as i64 },
@@ -2225,20 +2225,20 @@ impl App {
     /// The press a volume control is: to this level, by so much, or muted
     /// the other way. `None` for this device's own player, which is moved
     /// here and not in the session.
-    pub fn volume_call(&self, v: &Volumed, change: Change) -> Option<harken_player::Press> {
-        use harken_player::Change as To;
+    pub fn volume_call(&self, v: &Volumed, change: Change) -> Option<harken_domain::player::Press> {
+        use harken_domain::player::Change as To;
         let muted = self.level_of(v).is_some_and(|(_, m)| m);
         let level = match v {
             Volumed::Local => return None,
-            Volumed::Group => harken_player::Level::Group,
-            Volumed::Device(id) => harken_player::Level::Device { id: id.clone() },
+            Volumed::Group => harken_domain::player::Level::Group,
+            Volumed::Device(id) => harken_domain::player::Level::Device { id: id.clone() },
         };
         let change = match change {
             Change::To(level) => To::To { level },
             Change::By(delta) => To::By { delta },
             Change::Mute => To::Mute { muted: !muted },
         };
-        Some(harken_player::Press::Loud { level, change })
+        Some(harken_domain::player::Press::Loud { level, change })
     }
 
     /// Move a volume: a transition, or this device's own player alone.
@@ -2657,7 +2657,7 @@ impl App {
     /// — through nothing but the session ([`App::react`] reconciles). Its own
     /// session, unlinked, it is done here, to this device's player.
     fn press(&mut self, press: Press) -> Task<Message> {
-        use harken_player::Press as P;
+        use harken_domain::player::Press as P;
         let p = match press {
             Press::PlayPause => P::Toggle,
             Press::Play => P::Play,
@@ -2682,7 +2682,7 @@ impl App {
 
     /// A press, as the session's transition, a refusal noted; this device's
     /// own player is what a play presses when the session has none.
-    fn call(&mut self, press: &harken_player::Press) {
+    fn call(&mut self, press: &harken_domain::player::Press) {
         let App {
             listening,
             peer,
@@ -3315,13 +3315,13 @@ impl App {
                 self.scrubbing = Some(secs);
                 if self.listening.joined(&self.peer.client.lock()) {
                     let at_ms = Some((secs as f64 * 1000.0) as i64);
-                    self.call(&harken_player::Press::Scrub { at_ms });
+                    self.call(&harken_domain::player::Press::Scrub { at_ms });
                 }
             }
             Message::SeekDone => {
                 if let Some(secs) = self.scrubbing.take() {
                     if self.listening.joined(&self.peer.client.lock()) {
-                        self.call(&harken_player::Press::Scrub { at_ms: None });
+                        self.call(&harken_domain::player::Press::Scrub { at_ms: None });
                     }
                     return self.press(Press::Seek((secs as f64 * 1000.0) as i64));
                 }
@@ -3455,7 +3455,7 @@ impl App {
             }
             Message::DeviceAt(at) => self.devices = Some(at),
             Message::PickDevice(to) => {
-                self.call(&harken_player::Press::Transfer { to });
+                self.call(&harken_domain::player::Press::Transfer { to });
                 self.devices = None;
             }
             Message::CloseDevices => self.devices = None,
@@ -3475,10 +3475,10 @@ impl App {
             Message::Mute(level) => self.change_volume(&level, Change::Mute),
             Message::Nudge(level, by) => self.change_volume(&level, Change::By(by)),
             Message::Join(id) => {
-                self.call(&harken_player::Press::Join { device: id });
+                self.call(&harken_domain::player::Press::Join { device: id });
             }
             Message::Unjoin(id) => {
-                self.call(&harken_player::Press::Unjoin { device: id });
+                self.call(&harken_domain::player::Press::Unjoin { device: id });
             }
             Message::Swallow => {}
             Message::Select(source) => {

@@ -163,7 +163,7 @@ fn joined_while_another_device_plays_the_bar_the_row_and_the_title_are_one_track
         })
         .collect();
     let mut player = harken_player::Player::new("phone", None);
-    let press = harken_player::Press::Start {
+    let press = harken_domain::player::Press::Start {
         queue,
         at: 0,
         position_ms: 0,

@@ -1,16 +1,16 @@
-//! What a reconciler keeps between two looks, as rows (`docs/plan-v5.md`
-//! §1.9, S2): its mind is a row of an **ephemeral** local instance
-//! ([`Minds`], volatile, kept nowhere — a restart begins again from what
-//! the player and the session say), and the play it counted is a row of a
-//! **durable** one ([`Counts`]), so that a play is never authored twice for
-//! one load, a restart between. Each column is a sum, so a combination the
-//! rules never make cannot be written: a hand-off is not both started and
-//! waited for, a volume is not "seen" before it was ever told.
+//! What a reconciler keeps between two looks, as plain values (§1.9): its
+//! [`Mind`], kept nowhere — a restart begins again from what the player
+//! and the session say — and the track it loaded last and whether that
+//! play was counted ([`Loaded`]), which its driver keeps where it outlasts
+//! a restart, so that a play is never authored twice for one load. Each
+//! field is a sum, so a combination the rules never make cannot be
+//! written: a hand-off is not both started and waited for, a volume is not
+//! "seen" before it was ever told.
 
 use ark::prelude::*;
-use harken_domain::{Clock, Id, Media};
 
-use crate::Vol;
+use super::Vol;
+use crate::{Clock, Id, Media};
 
 /// One place in one queue: track `at`, which is `track`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Describe)]
@@ -100,10 +100,8 @@ pub enum Grouped {
 }
 
 /// One device's reconciler, between two looks.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Row)]
-#[ark(volatile)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Describe)]
 pub struct Mind {
-    #[ark(key)]
     pub device: String,
     /// The connection whose session has been met: another is the moment
     /// of coming back.
@@ -137,30 +135,10 @@ impl Mind {
     }
 }
 
-/// The ephemeral instance's tables.
-#[derive(Schema)]
-pub struct Minds {
-    pub mind: Mind,
-}
-
 /// The track loaded last — a load of a track is a play — and whether that
 /// play has been counted.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Describe)]
 pub enum Loaded {
     Nothing,
     Track { here: Here, counted: bool },
-}
-
-/// One device's play counter.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Row)]
-pub struct Count {
-    #[ark(key)]
-    pub device: String,
-    pub loaded: Loaded,
-}
-
-/// The durable instance's tables.
-#[derive(Schema)]
-pub struct Counts {
-    pub count: Count,
 }

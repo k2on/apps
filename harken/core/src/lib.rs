@@ -28,6 +28,7 @@ pub mod keys;
 pub mod library;
 pub mod listening;
 pub mod migrations;
+pub mod player;
 pub mod playlists;
 pub mod plays;
 pub mod progress;
