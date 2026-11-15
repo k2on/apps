@@ -12,8 +12,11 @@
 //! (`ark_peer::Logins`, the page's `localStorage` under `<scheme>.logins`) is
 //! the login without it — who, which session, until when. The socket says
 //! nothing as its first message (`ark_auth::COOKIE_HELLO`), and the server
-//! takes the cookie. A session the server turns away (signed out
-//! elsewhere, expired) is forgotten and signed in again, once.
+//! takes the cookie. A server deployed before the cookie has no
+//! `/auth/session` (ui/docs/app.md, Servers Already Deployed): the code is
+//! traded at `/auth/exchange` as before, the login holds its token, which
+//! the page remembers and the socket says. A session the server turns away
+//! (signed out elsewhere, expired) is forgotten and signed in again, once.
 //!
 //! **The replica** is an `ark_peer::Peer` over the app's domain compiled to
 //! wasm, dialling the socket whenever it has a login (`Peer::connect`,
@@ -66,7 +69,8 @@ pub struct Live {
     pub server: String,
     /// The sign-in machine under the first run's pages, every app's.
     pub first_run: FirstRun,
-    /// The logins this browser remembers, the token not among them.
+    /// The logins this browser remembers: the token not among them, but
+    /// for one a server deployed before the cookie handed over.
     pub logins: Logins,
     /// Who is signed in, once the session is open.
     pub login: Option<ark_auth::Login>,
@@ -221,14 +225,11 @@ impl<W: WebHosted> WebHost<W> {
         let Some(live) = &mut self.live else { return };
         match effect {
             Effect::Remember { remembered } => match remembered.login {
-                // The token is the cookie's: none is written here.
-                Some(l) => live.logins.remember(
-                    &live.server,
-                    &ark_auth::Login {
-                        token: String::new(),
-                        ..l.into()
-                    },
-                ),
+                // The token is the cookie's, and the login holds none
+                // (`/auth/session`); a server deployed before the cookie
+                // handed it over (`/auth/exchange`, ui/docs/app.md, Servers
+                // Already Deployed), and it is kept as it was then.
+                Some(l) => live.logins.remember(&live.server, &l.into()),
                 None => live.logins.forget(&live.server),
             },
             Effect::Browse { server, .. } => {
@@ -257,7 +258,9 @@ impl<W: WebHosted> WebHost<W> {
             Effect::OpenSession { login, .. } => {
                 let login: ark_auth::Login = login.into();
                 if live.login.as_ref() != Some(&login) {
-                    self.peer.login(ark_peer::who(&login), ark_auth::COOKIE_HELLO.into());
+                    // The cookie's session says nothing (`COOKIE_HELLO`, the
+                    // empty token); an older server's, its token.
+                    self.peer.login(ark_peer::who(&login), login.token.clone());
                     live.login = Some(login);
                 }
                 self.wake();

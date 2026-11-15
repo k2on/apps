@@ -180,6 +180,10 @@ pub fn device_code(server: &str, token: &str) -> Result<(String, i64), String> {
     Ok((made.code, made.expires_ms))
 }
 
+/// What [`redeem`] and [`device_code`] say to a server older than device
+/// codes (`/auth/redeem`, `/auth/device-code`).
+pub const OLDER: &str = "This server is older than codes for adding a device. Sign in on this device instead, or update the server.";
+
 fn post<T: serde::de::DeserializeOwned>(server: &str, route: &str, body: &str, token: Option<&str>) -> Result<T, String> {
     let url = format!("{}/auth/{route}", server.trim_end_matches('/'));
     let mut req = Patience::DEFAULT.agent(5).post(&url).set("Content-Type", "application/json");
@@ -187,6 +191,10 @@ fn post<T: serde::de::DeserializeOwned>(server: &str, route: &str, body: &str, t
         req = req.set("Authorization", &format!("Bearer {t}"));
     }
     let resp = req.send_string(body).map_err(|e| match e {
+        // A server deployed before device codes has no such route
+        // (ui/docs/app.md, Servers Already Deployed): said, not an empty
+        // sentence.
+        ureq::Error::Status(404 | 405, _) => OLDER.to_string(),
         ureq::Error::Status(_, r) => r.into_string().unwrap_or_default(),
         other => format!("cannot reach {server}: {other}"),
     })?;

@@ -81,7 +81,10 @@ pub async fn exchange(server: &str, code: &str) -> Result<Login, String> {
 /// no script on the page reads it, and answers the login without it — its
 /// `token` empty, which the socket says as its first message
 /// ([`crate::COOKIE_HELLO`]) so the server takes the cookie. Same origin
-/// only: the page the server serves.
+/// only: the page the server serves. A server with no `/auth/session` (one
+/// deployed before it) is asked `/auth/exchange` instead, and its login
+/// holds the token, which the socket then says in the cookie's place
+/// ([`crate::COOKIE_HELLO`] is the empty one).
 pub async fn session(server: &str, code: &str) -> Result<Login, String> {
     let url = format!("{}/auth/session", server.trim_end_matches('/'));
     let body = serde_json::json!({ "code": code }).to_string();
@@ -92,10 +95,16 @@ pub async fn session(server: &str, code: &str) -> Result<Login, String> {
     let headers = web_sys::Headers::new().map_err(js)?;
     headers.set("Content-Type", "application/json").map_err(js)?;
     init.set_headers(&headers);
-    // The server's sentence, without its status: what the page says.
-    let text = fetch_text(&url, &init)
-        .await
-        .map_err(|e| e.split_once(' ').map_or(e.clone(), |(_, t)| t.to_string()))?;
+    let text = match fetch_text(&url, &init).await {
+        Ok(text) => text,
+        // A server built before `/auth/session` (ui/docs/app.md, Servers
+        // Already Deployed) has no such route: the code traded at
+        // `/auth/exchange` as before, its login holding the token, which
+        // the socket says as its first message and the page remembers.
+        Err(e) if e.starts_with("404 ") || e.starts_with("405 ") => return exchange(server, code).await,
+        // The server's sentence, without its status: what the page says.
+        Err(e) => return Err(e.split_once(' ').map_or(e.clone(), |(_, t)| t.to_string())),
+    };
     serde_json::from_str(&text).map_err(|e| format!("the login did not parse: {e}"))
 }
 
