@@ -507,3 +507,48 @@ fn a_wake_is_work_until_the_runtime_is_idle() {
     process.clone().settle(100, Arc::new(Done(tx)));
     assert_eq!(rx.recv_timeout(std::time::Duration::from_secs(2)), Ok(false));
 }
+
+/// A wake that comes before the app's runtime is open (the OS just started
+/// the process; its app host opens the session a moment after) waits for
+/// it and is heard then; one whose runtime never comes (signed out) is
+/// nothing to run, and finishes as idle once its grace is up. Falsified by
+/// a wake that looks for the runtime only when it is called: the late
+/// runtime heard nothing.
+#[test]
+fn a_wake_before_the_runtime_opens_waits_for_it() {
+    use std::sync::Mutex;
+
+    struct App(Mutex<Vec<ark_app::Woken>>);
+    impl ark_ffi::Wakeful for App {
+        fn woken(&self, reason: ark_app::Woken) -> bool {
+            self.0.lock().unwrap().push(reason);
+            true
+        }
+        fn idle(&self) -> bool {
+            true
+        }
+    }
+    struct Done(std::sync::mpsc::Sender<bool>);
+    impl ark_ffi::WakeDone for Done {
+        fn finished(&self, idle: bool) {
+            let _ = self.0.send(idle);
+        }
+    }
+
+    let process = ark_ffi::ArkProcess::apart();
+    let (tx, rx) = std::sync::mpsc::channel();
+    process.clone().wake(ark_ffi::WakeReason::Push, 5_000, Arc::new(Done(tx)));
+    assert!(rx.recv_timeout(std::time::Duration::from_millis(150)).is_err(), "it waits for a runtime");
+    let app = Arc::new(App(Mutex::new(vec![])));
+    process.set_wakeful(Some(app.clone()));
+    assert_eq!(rx.recv_timeout(std::time::Duration::from_secs(2)), Ok(true));
+    assert_eq!(*app.0.lock().unwrap(), vec![ark_app::Woken::Push], "heard once it opened");
+
+    // No runtime at all: done, as idle, when its (short) budget is up.
+    let process = ark_ffi::ArkProcess::apart();
+    let (tx, rx) = std::sync::mpsc::channel();
+    let start = std::time::Instant::now();
+    process.clone().wake(ark_ffi::WakeReason::Sync, 200, Arc::new(Done(tx)));
+    assert_eq!(rx.recv_timeout(std::time::Duration::from_secs(2)), Ok(true));
+    assert!(start.elapsed() >= std::time::Duration::from_millis(150), "it waited its grace first");
+}

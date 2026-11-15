@@ -123,6 +123,11 @@ pub trait HostApp: Send + Sync + 'static {
     fn reset(&self) {
         self.link(Some(vec![]), String::new())
     }
+    /// The OS woke the process for `reason` (`ArkProcess::wake`): taken by
+    /// the app's runtimes; whether anything of the app's took it.
+    fn woken(&self, _reason: ark_app::Woken) -> bool {
+        false
+    }
     /// Whether nothing of the app's is left to come.
     fn idle(&self) -> bool {
         true
@@ -146,6 +151,19 @@ pub trait HostApp: Send + Sync + 'static {
     /// screens are its own (`hosted::Hosted`'s are its library's).
     fn shots(&self) -> Vec<ark_app::shots::Screen> {
         vec![]
+    }
+}
+
+/// The host as a wake reaches it ([`ArkProcess::wake`]): weakly, so the
+/// process does not keep it, and only while its session is open.
+struct Woke(Weak<ArkHost>);
+
+impl crate::wake::Wakeful for Woke {
+    fn woken(&self, reason: ark_app::Woken) -> bool {
+        self.0.upgrade().is_some_and(|h| h.app.woken(reason))
+    }
+    fn idle(&self) -> bool {
+        self.0.upgrade().is_none_or(|h| h.app.idle())
     }
 }
 
@@ -471,6 +489,9 @@ impl ArkHost {
             s.denied = false;
         }
         peer.set_listener(Some(Arc::new(Told(self.teller()))));
+        // The OS's wakes (a periodic sync, a push, the device started) reach
+        // the app's runtimes from now on, whether or not anything shows.
+        ArkProcess::shared().set_wakeful(Some(Arc::new(Woke(self.me.clone()))));
         self.launch_args();
         self.drain();
         self.offer_link();
@@ -500,6 +521,7 @@ impl ArkHost {
         let gone = self.lock().open.take();
         if let Some((peer, _)) = gone {
             peer.set_listener(None);
+            ArkProcess::shared().set_wakeful(None);
             self.app.closed();
         }
     }

@@ -481,6 +481,10 @@ where
         });
     }
 
+    fn woken(&self, reason: ark_app::Woken) -> bool {
+        self.with(|o| o.hosting.woken(reason, &mut o.place)).unwrap_or(false)
+    }
+
     fn idle(&self) -> bool {
         lock(&self.open).as_ref().is_none_or(|o| o.hosting.idle(&o.place))
     }

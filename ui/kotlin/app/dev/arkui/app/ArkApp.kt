@@ -3,7 +3,8 @@
 // process's one runtime and watches its link) owned by the app's `Application` for as long as the
 // process lives, the activity that shows it, the browser sign-in in a Custom Tab, the app's links,
 // the secure store handed to the host, and — only for an app whose app.toml declares
-// `[background]` — the notifications' hookup to the process.
+// `[background]` — the notifications' hookup to the process and the host made when the process
+// starts, so that a wake with no screen reaches the app's runtime.
 //
 // An app's part is generated (ui/prebuild.py, from app.toml), and tiny:
 //
@@ -67,11 +68,25 @@ public abstract class ArkApplication : Application() {
 
     @Volatile private var app: ArkApp? = null
 
+    /**
+     * The device modules that need no window, registered as the process's when it starts
+     * (module.toml's `[phone] kotlin-process`: ark-dpc's device owner): what a wake with no screen
+     * asks of them is there. The generated Application overrides it; the rest are the activity's.
+     */
+    public open fun registerDevices() {}
+
     override fun onCreate() {
         super.onCreate()
+        registerDevices()
+        val bg = background ?: return
         // Only an app that declares `[background]`: the notifications' events into the process's
         // one runtime (a push or a notice's button a wake, an endpoint the session's push row).
-        background?.listen(dev.arkdb.ffi.ArkProcess.shared().notices())
+        bg.listen(dev.arkdb.ffi.ArkProcess.shared().notices())
+        // And its host made now, not when an activity first shows: the OS starts the process for a
+        // job, a push or the device started with no activity at all, and the wake it brings waits
+        // for this host's session to open (ark-ffi's `ArkProcess::wake`). An activity that shows
+        // later takes the same app; its launch's own arguments (a screenshot's) are not read then.
+        launch(null)
     }
 
     /** The app, made at its first launch (`intent`: the launcher's, a link's) and kept. */

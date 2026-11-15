@@ -415,7 +415,11 @@ method that registers it, and how Swift and Kotlin make it): the generated
 library turns on from the same modules — `<id>-ffi`'s dependency on
 ark-ffi — links its crate and carries its UniFFI traits), and
 the activity puts a module's page at its root (ark-camera's
-`CameraPage`); an app writes nothing native for its modules. An answer
+`CameraPage`); an app writes nothing native for its modules. A device that
+needs no window says `kotlin-process` (ark-dpc's `PhoneDpc(context)`) in
+place of `kotlin`: the generated Application registers it when the process
+starts (`ArkApplication.registerDevices`), so a wake with no screen
+(Background And Notifications) has it. An answer
 that comes later (the camera's) wakes the app's host, which drains its
 runtimes. `checks.prebuild` holds that no app.toml lists modules, that
 every module's crate declares itself, and that ark-ffi has a feature for
@@ -653,6 +657,16 @@ once the runtime is idle — `Command::Sync` answered, every module's
 answer in — or its time is nearly up. A wake is work
 (`ArkProcess::work`): the runtime is online for it, and offline again
 after when no UI is attached. There is no second runtime of a platform's.
+
+How a wake reaches the app: the app host (ark-ffi's `ArkHost`) hands its
+runtimes to the process as its `Wakeful` while its session is open, and
+takes them back when it closes; `HostedApp::woken` offers the wake to each
+of the app's screens (`App::woken`), and the host is idle once every one
+is. The host is made when the process starts — ArkApp's `@main` always,
+ark-app-android's `ArkApplication` for an app that declares `[background]`
+— and opens the remembered session a moment after, so a wake that comes
+first waits for it (up to ten seconds of its budget); one whose session
+never opens (signed out) finishes as idle.
 
 **A push is only a wake-up.** It carries nothing of the app's data: no
 name, amount or word from a row, only that there is something, for which

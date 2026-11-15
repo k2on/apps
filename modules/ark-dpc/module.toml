@@ -11,9 +11,11 @@ Read = "State"
 # The device the phone hands the process (ark-ffi's `dpc`): Android's
 # alone. No app manages an iPhone or a Mac; an MDM server does, so there is
 # no Swift and Apple's platforms register none (Unavailable).
+# Registered when the process starts (`kotlin-process`, the Application's),
+# not when an activity shows: a device owner is woken with no screen.
 [phone]
 register = "registerDpc"
-kotlin = "dev.arkui.modules.PhoneDpc(view.context)"
+kotlin-process = "dev.arkui.modules.PhoneDpc(context)"
 
 [ios.info]
 

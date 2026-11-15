@@ -1027,7 +1027,14 @@ def devices(root, a):
     is registered and how each phone makes it; those with a device first,
     then those over another's (the scanner, over the camera)."""
     out = [(n, m["phone"]) for n, m in modules_of(root, a) if "phone" in m]
-    return [d for d in out if "swift" in d[1] or "kotlin" in d[1]] + [d for d in out if "swift" not in d[1] and "kotlin" not in d[1]]
+    return [d for d in out if made(d[1])] + [d for d in out if not made(d[1])]
+
+
+def made(ph):
+    """Whether a `[phone]` names a device a phone makes (Swift's, the
+    activity's Kotlin, or the process's: `kotlin-process`), rather than one
+    registered over another's (the scanner, over the camera)."""
+    return any(k in ph for k in ("swift", "kotlin", "kotlin-process"))
 
 
 def swift_devices(root, a):
@@ -1036,7 +1043,7 @@ def swift_devices(root, a):
     for n, ph in devices(root, a):
         if "swift" in ph:
             lines.append(f"        process.{ph['register']}(device: {ph['swift']})")
-        elif "kotlin" not in ph:
+        elif not made(ph):
             lines.append(f"        process.{ph['register']}()")
     if not lines:
         return ""
@@ -1059,7 +1066,7 @@ def kotlin_devices(root, a):
                 pages.append(f"    {ph['kotlin-page']}({v})")
             else:
                 calls.append(f"        process.{ph['register']}({ph['kotlin']})")
-        elif "swift" not in ph:
+        elif not made(ph):
             calls.append(f"        process.{ph['register']}()")
     if not calls:
         return "", ""
@@ -1185,6 +1192,14 @@ def kotlin_app(root, a):
 
     // It declares `[background]`; its job and receivers are the manifest's.
     override val background: BackgroundHooks = BackgroundHooks()"""
+    # The device modules that need no window, the process's from its start
+    # (`[phone] kotlin-process`: ark-dpc's), so a wake with no screen has them.
+    early = [f"        process.{ph['register']}({ph['kotlin-process']})" for _, ph in devices(root, a) if "kotlin-process" in ph]
+    if early:
+        hooks += ("\n\n    // The device modules that need no window (module.toml's `[phone] kotlin-process`),\n"
+                  "    // the process's from its start: a wake with no screen asks through them.\n"
+                  "    override fun registerDevices() {\n        val process = dev.arkdb.ffi.ArkProcess.shared()\n        val context = this\n"
+                  + "\n".join(early) + "\n    }")
     return f"""// {HEADER.format(app=a['dir'])}
 // {a['name']}'s Application on the app library (ui/kotlin/app): its library, made at
 // the first launch and kept for the process.

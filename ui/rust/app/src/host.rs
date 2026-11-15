@@ -23,7 +23,7 @@ use std::collections::VecDeque;
 use std::fmt::Debug;
 use std::sync::Arc;
 
-use crate::{App, Ask, Host, Inbox, Modules, Runtime, Ticket, ViewKey, Views};
+use crate::{App, Ask, Host, Inbox, Modules, Runtime, Ticket, ViewKey, Views, Woken};
 
 /// Who is using the app and where, as the platform knows it: what the
 /// app's Settings says, and what it decides by (the demo's household).
@@ -239,6 +239,17 @@ where
         });
     }
 
+    /// The OS woke the process for `reason` (ui/docs/app.md, Background
+    /// And Notifications): the screen's app's message for it taken
+    /// ([`App::woken`]), and what modules answered since; whether its app
+    /// had one.
+    pub fn wake<H>(&mut self, reason: Woken, cx: &mut Cx<'_, H>) -> bool
+    where
+        H: HostedApp<Key = A::Key, Change = A::Change, Route = A::Route, Request = A::Request>,
+    {
+        self.run(cx, |rt, host| rt.wake(reason, host))
+    }
+
     /// What its screen shows now.
     pub fn page(&self, place: &dyn Place<A::Key, A::Change>, now_ms: i64) -> A::Screen {
         let mut out = None;
@@ -335,6 +346,7 @@ where
 /// sums and lets go of.
 pub trait Running<H: HostedApp> {
     fn drain(&mut self, cx: &mut Cx<'_, H>) -> bool;
+    fn wake(&mut self, reason: Woken, cx: &mut Cx<'_, H>) -> bool;
     fn is_idle(&self, place: &dyn Place<H::Key, H::Change>) -> bool;
     fn busy(&self, place: &dyn Place<H::Key, H::Change>) -> Option<String>;
     fn version(&self) -> u64;
@@ -348,6 +360,9 @@ where
 {
     fn drain(&mut self, cx: &mut Cx<'_, H>) -> bool {
         Screen::drain(self, cx)
+    }
+    fn wake(&mut self, reason: Woken, cx: &mut Cx<'_, H>) -> bool {
+        Screen::wake(self, reason, cx)
     }
     fn is_idle(&self, place: &dyn Place<H::Key, H::Change>) -> bool {
         Screen::is_idle(self, place)
@@ -420,6 +435,17 @@ pub trait HostedApp: Sized + 'static {
     fn link(&mut self, link: Link, cx: &mut Cx<'_, Self>);
     /// The launch's own arguments, once its runtimes run.
     fn launched(&mut self, args: Vec<String>, cx: &mut Cx<'_, Self>);
+    /// The OS woke the process for `reason`, with no screen: by default
+    /// each of its screens' apps is offered it ([`App::woken`]), and those
+    /// that have a message for it take it; whether any did. An app whose
+    /// part does something of its own then says so here.
+    fn woken(&mut self, reason: Woken, cx: &mut Cx<'_, Self>) -> bool {
+        let mut took = false;
+        for s in self.screens() {
+            took |= s.wake(reason.clone(), cx);
+        }
+        took
+    }
 }
 
 /// An app's part that runs `A` as one of its screens.
@@ -571,6 +597,14 @@ impl<H: HostedApp> Hosting<H> {
     /// The launch's own arguments.
     pub fn launched(&mut self, args: Vec<String>, place: &mut dyn Place<H::Key, H::Change>) {
         self.with(place, |app, cx| app.launched(args, cx))
+    }
+
+    /// The OS woke the process for `reason`: the app's part told
+    /// ([`HostedApp::woken`]), and what it asked carried out; whether
+    /// anything of the app's took it. The host waits for [`Hosting::idle`]
+    /// after, within the OS's time.
+    pub fn woken(&mut self, reason: Woken, place: &mut dyn Place<H::Key, H::Change>) -> bool {
+        self.with(place, |app, cx| app.woken(reason, cx))
     }
 
     /// Whether nothing of the app's is left to come.

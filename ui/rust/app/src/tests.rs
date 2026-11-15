@@ -545,3 +545,143 @@ mod notify_me {
         assert!(!rt.state().on && !notices.registered() && sync.every().is_none());
     }
 }
+
+/// A wake reaches an app's part under its host (`Hosting::woken`): each
+/// screen's app is offered it, the one with a message for it takes it, and
+/// the host is idle again once that is done. What a phone's host runs when
+/// the OS wakes its process (ark-ffi's `ArkProcess::wake`).
+mod woken_hosted {
+    use super::*;
+    use crate::host::{Cx, Has, HostedApp, Hosting, Link, Place, Running, Screen, Session};
+
+    /// A screen that counts the syncs a wake asked for.
+    struct Syncs;
+
+    #[derive(Clone, Debug, PartialEq)]
+    enum Msg {
+        Woken,
+    }
+
+    impl App for Syncs {
+        type Key = NoView;
+        type State = u32;
+        type Msg = Msg;
+        type Change = ();
+        type Route = ();
+        type Request = ();
+        type Screen = u32;
+
+        fn holds(_: &u32) -> Vec<NoView> {
+            vec![]
+        }
+        fn update(n: &mut u32, msg: Msg, _: &Data<'_, NoView>) -> Vec<Command<Self>> {
+            match msg {
+                Msg::Woken => *n += 1,
+            }
+            vec![]
+        }
+        fn screen(n: &u32, _: &Data<'_, NoView>) -> u32 {
+            *n
+        }
+        fn woken(reason: Woken) -> Option<Msg> {
+            (reason == Woken::Sync).then_some(Msg::Woken)
+        }
+    }
+
+    /// A screen with nothing to do when woken (`App::woken`'s default).
+    struct Quiet;
+
+    impl App for Quiet {
+        type Key = NoView;
+        type State = ();
+        type Msg = ();
+        type Change = ();
+        type Route = ();
+        type Request = ();
+        type Screen = ();
+
+        fn holds(_: &()) -> Vec<NoView> {
+            vec![]
+        }
+        fn update(_: &mut (), _: (), _: &Data<'_, NoView>) -> Vec<Command<Self>> {
+            vec![]
+        }
+        fn screen(_: &(), _: &Data<'_, NoView>) {}
+    }
+
+    #[derive(Default)]
+    struct Part {
+        syncs: Screen<Syncs>,
+        quiet: Screen<Quiet>,
+    }
+
+    impl Has<Syncs> for Part {
+        fn screen(&self) -> &Screen<Syncs> {
+            &self.syncs
+        }
+        fn screen_mut(&mut self) -> &mut Screen<Syncs> {
+            &mut self.syncs
+        }
+    }
+
+    impl HostedApp for Part {
+        type Key = NoView;
+        type Change = ();
+        type Route = ();
+        type Request = ();
+        const KEEPS: &'static str = "nothing";
+        fn welcome(_: bool, _: bool) -> crate::welcome::WelcomeCopy {
+            unimplemented!("no first run here")
+        }
+        fn encode(_: &()) -> (&'static str, Vec<u8>) {
+            ("none", vec![])
+        }
+        fn open(_: &Session, _: &mut Cx<'_, Self>) -> Part {
+            Part::default()
+        }
+        fn screens(&mut self) -> Vec<&mut dyn Running<Self>> {
+            vec![&mut self.syncs, &mut self.quiet]
+        }
+        fn screens_ref(&self) -> Vec<&dyn Running<Self>> {
+            vec![&self.syncs, &self.quiet]
+        }
+        fn route(&mut self, _: (), _: &mut Cx<'_, Self>) {}
+        fn request(&mut self, _: (), _: &mut Cx<'_, Self>) {}
+        fn link(&mut self, _: Link, _: &mut Cx<'_, Self>) {}
+        fn launched(&mut self, _: Vec<String>, _: &mut Cx<'_, Self>) {}
+    }
+
+    struct Nowhere(Store<NoView>);
+
+    impl Place<NoView, ()> for Nowhere {
+        fn read(&self, f: &mut dyn FnMut(&dyn Views<NoView>)) {
+            f(&self.0)
+        }
+        fn now_ms(&self) -> i64 {
+            0
+        }
+        fn send(&mut self, _: ()) -> Result<(), String> {
+            Ok(())
+        }
+        fn hold(&mut self, _: NoView) {}
+        fn release(&mut self, _: &NoView) {}
+        fn session(&self) -> Session {
+            Session::default()
+        }
+    }
+
+    /// Falsified by `HostedApp::woken`'s default offering the wake to no
+    /// screen: the count stayed 0 and `woken` said nothing took it.
+    #[test]
+    fn a_wake_reaches_the_screen_that_has_a_message_for_it() {
+        let mut place = Nowhere(Store::new());
+        let mut h = Hosting::<Part>::open(&Session::default(), &mut place);
+        assert_eq!(h.page::<Syncs>(&place), 0);
+        assert!(h.woken(Woken::Sync, &mut place), "the syncing screen took it");
+        assert_eq!(h.page::<Syncs>(&place), 1);
+        assert!(h.idle(&place));
+        // A wake no screen has a message for is taken by none.
+        assert!(!h.woken(Woken::Boot, &mut place));
+        assert_eq!(h.page::<Syncs>(&place), 1);
+    }
+}

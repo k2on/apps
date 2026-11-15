@@ -13,9 +13,9 @@
 //! work ([`ArkProcess::work`]): the runtime is online for it, dials, syncs,
 //! and goes offline again when it is done and no UI is attached.
 //!
-//! The app's runtime is handed to the process as a [`Wakeful`] by the app's
-//! own bridge (the process runtime's step owns it); until one is, a wake
-//! has nothing to run and finishes at once. The notifications' events are
+//! The app's runtime is handed to the process as a [`Wakeful`] by the app
+//! host ([`crate::ArkHost`]) while its session is open; a wake that comes
+//! before it opens waits a little for it ([`ArkProcess::woken`]). The notifications' events are
 //! turned into wakes by [`ArkProcess::notices`].
 
 use std::sync::{Arc, Mutex};
@@ -66,6 +66,10 @@ pub trait WakeDone: Send + Sync {
 /// How often a wake looks whether the runtime is idle.
 const LOOK: Duration = Duration::from_millis(50);
 
+/// How long a wake waits for the app's runtime to open in a process the OS
+/// has just started, before it takes there to be none (signed out).
+const OPENING: Duration = Duration::from_secs(10);
+
 /// The process's part that holds the app's runtime for a wake.
 #[derive(Default)]
 struct Slot(Mutex<Option<Arc<dyn Wakeful>>>);
@@ -88,18 +92,41 @@ impl ArkProcess {
     /// `reason` into the app's runtime, the process online meanwhile, and
     /// `then` told on a thread of its own once the runtime is idle or
     /// `budget` has passed.
+    ///
+    /// A process the OS has just started has no runtime yet: its app host
+    /// was made at the start ([`crate::ArkHost`], ark-app-android's
+    /// `ArkApplication`, ArkApp's `@main`) and opens the session a moment
+    /// after. The wake waits for it, up to [`OPENING`] of its budget, and
+    /// is told then; one that never comes (signed out) is nothing to run,
+    /// and finishes as idle.
     pub fn woken(self: Arc<Self>, reason: Option<Woken>, budget: Duration, then: impl FnOnce(bool) + Send + 'static) {
         let work = self.clone().work();
-        let app = self.wakeful();
-        if let (Some(app), Some(reason)) = (&app, reason) {
-            app.woken(reason);
+        let mut reason = reason;
+        // A runtime that is there hears it at once, on the caller's thread.
+        if let Some(app) = self.wakeful() {
+            if let Some(r) = reason.take() {
+                app.woken(r);
+            }
         }
         std::thread::spawn(move || {
-            let until = Instant::now() + budget;
+            let start = Instant::now();
+            let until = start + budget;
+            let opening = start + budget.min(OPENING);
             let idle = loop {
-                let idle = app.as_ref().is_none_or(|a| a.idle());
-                if idle || Instant::now() >= until {
-                    break idle;
+                match self.wakeful() {
+                    Some(app) => {
+                        if let Some(r) = reason.take() {
+                            app.woken(r);
+                        }
+                        if app.idle() {
+                            break true;
+                        }
+                    }
+                    None if Instant::now() >= opening => break true,
+                    None => {}
+                }
+                if Instant::now() >= until {
+                    break false;
                 }
                 std::thread::sleep(LOOK);
             };
