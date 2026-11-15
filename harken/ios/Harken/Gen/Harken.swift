@@ -2377,6 +2377,9 @@ public struct Harken {
     /// `listening.clear_upcoming`, on the live space.
     public func clearUpcoming() throws { try peer.call(name: "listening.clear_upcoming", input: "null") }
 
+    /// `listening.devices`, kept.
+    public func devices() throws -> LiveView<ListeningDevice> { LiveView(try peer.view(name: "listening.devices", input: "null")) { j in ListeningDevice(json: j) } }
+
     /// `listening.enqueue`, on the live space.
     public func enqueue(_ input: Enqueue) throws { try peer.call(name: "listening.enqueue", input: input.json) }
 
@@ -2440,8 +2443,14 @@ public struct Harken {
     /// `listening.scrub`, on the live space.
     public func scrub(_ input: Scrub) throws { try peer.call(name: "listening.scrub", input: input.json) }
 
+    /// `listening.scrubbing`, kept.
+    public func scrubbing() throws -> LiveView<ListeningScrub> { LiveView(try peer.view(name: "listening.scrubbing", input: "null")) { j in ListeningScrub(json: j) } }
+
     /// `listening.seek`, on the live space.
     public func seek(_ input: Seek) throws { try peer.call(name: "listening.seek", input: input.json) }
+
+    /// `listening.session`, kept.
+    public func session() throws -> LiveView<Listening> { LiveView(try peer.view(name: "listening.session", input: "null")) { j in Listening(json: j) } }
 
     /// `listening.set_group_mute`, on the live space.
     public func setGroupMute(_ input: GroupMute) throws { try peer.call(name: "listening.set_group_mute", input: input.json) }

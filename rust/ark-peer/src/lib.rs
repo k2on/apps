@@ -644,6 +644,28 @@ impl Peer {
         self.saved = (local, ids);
     }
 
+    /// Every view of `space` made again over its machine's store as it is
+    /// now — the machine was made anew — each told to read its rows afresh
+    /// ([`Update::Reset`]).
+    fn remade(&mut self, space: Space) {
+        let store = match space {
+            Space::Durable => &self.log.store,
+            Space::Volatile => match &self.live {
+                Some(l) => &l.store,
+                None => return,
+            },
+        };
+        let domain = self.config.domain_of(space);
+        for (i, w) in self.views.iter_mut().enumerate() {
+            let Some(w) = w.as_mut().filter(|w| w.space == space) else { continue };
+            w.view = domain.as_ref().and_then(|d| d.watch(store, &w.ctx, &w.name, &w.input).ok());
+            if let (Some(f), Some(v)) = (self.reconcilers.get_mut(&i), &w.view) {
+                f(&v.rows());
+            }
+            self.told.reset(i);
+        }
+    }
+
     /// Every view of `space` told a settle's changes. One that cannot be
     /// kept up, or could not be made, is made again over the store as it
     /// is, under its number: its rows are read afresh ([`Update::Reset`]).
@@ -906,6 +928,7 @@ impl Peer {
                 (p.origin, p.local) = (x.origin, x.local);
             }
             self.live = Some(p);
+            self.remade(Space::Volatile);
         }
         if let Some(r) = &mut self.record {
             r.push((Act::SignIn(who.clone(), origin, self.live.as_ref().map(|l| l.origin)), vec![], None));

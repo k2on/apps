@@ -163,6 +163,32 @@ impl Listening {
         Listening { devices, scrub, session }
     }
 
+    /// The account's state as a device holds it, from the rows of
+    /// `HarkenView::Listening`'s views (each a row's bytes): the session's,
+    /// its devices' and their scrubbers'. A row that does not read is
+    /// none.
+    pub fn read(session: &[Vec<u8>], devices: &[Vec<u8>], scrubbing: &[Vec<u8>]) -> Listening {
+        use ark::format::Encode;
+        let session = session
+            .iter()
+            .filter_map(|b| crate::schema::Listening::from_bytes(b).ok())
+            .find_map(|r| match r.session {
+                Session::Active { active } => Some(active),
+                Session::Idle => None,
+            });
+        let devices = devices
+            .iter()
+            .filter_map(|b| crate::schema::ListeningDevice::from_bytes(b).ok())
+            .map(|r| r.present)
+            .collect();
+        let scrub = scrubbing
+            .iter()
+            .filter_map(|b| crate::schema::ListeningScrub::from_bytes(b).ok())
+            .map(|r| (r.device, r.at_ms))
+            .collect();
+        Listening { devices, scrub, session }
+    }
+
     pub fn device(&self, id: &str) -> Option<&Present> {
         self.devices.iter().find(|d| d.id == id)
     }

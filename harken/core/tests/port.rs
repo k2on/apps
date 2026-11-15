@@ -512,10 +512,13 @@ fn the_schema_reads_what_the_last_one_wrote() {
 /// and how many steps were refused and how many moved rows.
 fn run(seed: u64) -> (String, String, usize, usize) {
     let native = domain();
+    // The log's views: the live part's (`listening.session`, `devices`,
+    // `scrubbing`) are over the live space, which this script never writes.
+    let live = ["listening.session", "listening.devices", "listening.scrubbing"];
     let views: Vec<&str> = native
         .fns
         .values()
-        .filter(|f| f.kind == ark::domain::Kind::View)
+        .filter(|f| f.kind == ark::domain::Kind::View && !live.contains(&f.name.as_str()))
         .map(|f| f.name.as_str())
         .collect();
     assert_eq!(views.len(), 32);

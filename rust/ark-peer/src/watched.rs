@@ -8,8 +8,11 @@
 //! was opened for another login (it is opened again for this one), or when
 //! a query that refused at open answers now — a page that is not yours is
 //! no rows rather than an error, and is asked again when anything moved.
+//! A view over the live space ([`Watched::open_in`]) is no rows the same
+//! way while there is no live machine.
 
 use ark::peer::Who;
+use ark::schema::Space;
 
 use crate::{Peer, Update};
 
@@ -17,6 +20,7 @@ use crate::{Peer, Update};
 pub struct Watched<T> {
     name: String,
     input: Vec<u8>,
+    space: Space,
     who: Who,
     /// The view, or — while its query refuses — none, which is no rows.
     view: Option<usize>,
@@ -28,20 +32,27 @@ impl<T> Watched<T> {
     /// A view of `name` on `input`, its rows read by `read`, hydrated once;
     /// refused, no rows until it answers.
     pub fn open(peer: &mut Peer, name: &str, input: Vec<u8>, read: fn(&[u8]) -> T) -> Watched<T> {
-        let view = peer.view(name, &input).ok();
-        Watched::made(peer, name, input, read, view)
+        Watched::open_in(peer, Space::Durable, name, input, read)
+    }
+
+    /// [`Watched::open`] over `space`'s state: the live space's is no rows
+    /// while there is no live machine, and asked again as it is.
+    pub fn open_in(peer: &mut Peer, space: Space, name: &str, input: Vec<u8>, read: fn(&[u8]) -> T) -> Watched<T> {
+        let view = peer.view_in(space, name, &input).ok();
+        Watched::made(peer, space, name, input, read, view)
     }
 
     /// [`Watched::open`], or the query's refusal.
     pub fn try_open(peer: &mut Peer, name: &str, input: Vec<u8>, read: fn(&[u8]) -> T) -> Result<Watched<T>, String> {
         let view = peer.view(name, &input)?;
-        Ok(Watched::made(peer, name, input, read, Some(view)))
+        Ok(Watched::made(peer, Space::Durable, name, input, read, Some(view)))
     }
 
-    fn made(peer: &Peer, name: &str, input: Vec<u8>, read: fn(&[u8]) -> T, view: Option<usize>) -> Watched<T> {
+    fn made(peer: &Peer, space: Space, name: &str, input: Vec<u8>, read: fn(&[u8]) -> T, view: Option<usize>) -> Watched<T> {
         let mut w = Watched {
             name: name.into(),
             input,
+            space,
             who: peer.me().clone(),
             view,
             read,
@@ -92,7 +103,7 @@ impl<T> Watched<T> {
                     peer.unwatch(v);
                 }
                 self.who = peer.me().clone();
-                self.view = peer.view(&self.name, &self.input).ok();
+                self.view = peer.view_in(self.space, &self.name, &self.input).ok();
                 match (was, self.view) {
                     (None, None) => Update::Unchanged,
                     _ => Update::Reset,

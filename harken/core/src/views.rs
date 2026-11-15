@@ -123,7 +123,17 @@ pub enum HarkenView {
     Transcript {
         media: Key,
     },
+    // The account's live part (§1.9), each over the live space.
+    /// The caller's listening session: its row, none while it is idle.
+    Session,
+    /// The devices standing in it.
+    Devices,
+    /// Where each of them is dragging its scrubber.
+    Scrubbing,
     // The pages, each its views.
+    /// The listening session as a player is drawn from: the session, its
+    /// devices and their scrubbers (`host::Listening::read`).
+    Listening,
     /// A show's page: its episodes, how far everybody has got in them and
     /// what each is about.
     ShowPage {
@@ -339,14 +349,28 @@ impl HarkenView {
                 if matches!(self, V::People { .. }) { "people" } else { "transcript" },
                 EpisodeInput { media_id: id(media) }.to_bytes(),
             ),
-            V::ShowPage { .. } | V::WorkPage { .. } | V::ArtistPage { .. } | V::AlbumPage { .. } | V::RecordingPage { .. } => return None,
+            V::Session => ("session", none()),
+            V::Devices => ("devices", none()),
+            V::Scrubbing => ("scrubbing", none()),
+            V::Listening | V::ShowPage { .. } | V::WorkPage { .. } | V::ArtistPage { .. } | V::AlbumPage { .. } | V::RecordingPage { .. } => {
+                return None
+            }
         })
+    }
+
+    /// Whether it is a view of the account's live part, over the live
+    /// space rather than the log's state.
+    pub fn live(&self) -> bool {
+        matches!(self, HarkenView::Session | HarkenView::Devices | HarkenView::Scrubbing)
     }
 
     /// Every view of a page: what [`ViewKey::parts`] holds.
     pub fn views(&self) -> Vec<HarkenView> {
         if self.query().is_some() {
             return vec![self.clone()];
+        }
+        if *self == HarkenView::Listening {
+            return vec![HarkenView::Session, HarkenView::Devices, HarkenView::Scrubbing];
         }
         [
             self.tracks(),
@@ -370,9 +394,10 @@ impl ViewKey for HarkenView {
 
     /// Its rows as their bytes: the phones read them as JSON, and the
     /// window as types of its own (it opens its views itself, by
-    /// [`HarkenView::query`]).
+    /// [`HarkenView::query`]); the live part's over the live space.
     fn open(&self) -> Option<Opening> {
         let (name, input) = self.query()?;
-        Some(Opening::read(name, input, <[u8]>::to_vec))
+        let o = Opening::read(name, input, <[u8]>::to_vec);
+        Some(if self.live() { o.live() } else { o })
     }
 }

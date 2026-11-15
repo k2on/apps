@@ -20,6 +20,7 @@
 
 use ark::prelude::*;
 
+use crate::browse::Plan;
 use crate::groups::led_by;
 use crate::schema::*;
 use crate::types::*;
@@ -365,4 +366,33 @@ pub fn transfer(ctx: &Ctx, db: &mut Db<Harken, Volatile>, input: Transfer) -> Re
 #[live("listening.stop")]
 pub fn stop(ctx: &Ctx, db: &mut Db<Harken, Volatile>, _: ()) -> Result<(), Refusal> {
     put_session(db, ctx.user(), Session::Idle)
+}
+
+// * The session as a device reads it
+
+/// The caller's session, over the live space (§1.9): its one row while it
+/// has one, none while it is `Idle`. With [`devices`] and [`scrubbing`] it
+/// is `HarkenView::Listening`, what a device draws its player from.
+#[view("listening.session")]
+pub fn session(ctx: &Ctx, _: &Db<Harken>, _: ()) -> Result<Plan<Listening>, Refusal> {
+    let user = ctx.user().to_string();
+    Ok(scan::<Harken, Listening>().filter(move |r| r.user == user))
+}
+
+/// The devices standing in the caller's session, by id.
+#[view("listening.devices")]
+pub fn devices(ctx: &Ctx, _: &Db<Harken>, _: ()) -> Result<Plan<ListeningDevice>, Refusal> {
+    let user = ctx.user().to_string();
+    Ok(scan::<Harken, ListeningDevice>()
+        .filter(move |r| r.user == user)
+        .sort(|r| r.device.clone()))
+}
+
+/// Where each of the caller's devices is dragging its scrubber.
+#[view("listening.scrubbing")]
+pub fn scrubbing(ctx: &Ctx, _: &Db<Harken>, _: ()) -> Result<Plan<ListeningScrub>, Refusal> {
+    let user = ctx.user().to_string();
+    Ok(scan::<Harken, ListeningScrub>()
+        .filter(move |r| r.user == user)
+        .sort(|r| r.device.clone()))
 }

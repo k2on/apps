@@ -63,7 +63,7 @@ pub fn domain() -> Domain {
         playlists::remove_from_playlist, playlists::playlists, playlists::playlists_of, playlists::playlist,
         plays::record_play, plays::last_played, plays::recently_played,
         listening::start, listening::play, listening::pause, listening::seek, listening::skip, listening::jump,
-        listening::transfer, listening::stop,
+        listening::transfer, listening::stop, listening::session, listening::devices, listening::scrubbing,
         queue::enqueue, queue::remove, queue::move_track, queue::clear_upcoming, queue::started, queue::advance,
         queue::stalled, queue::report_position, queue::release,
         devices::equip, devices::set_volume, devices::nudge_volume, devices::set_mute, devices::report_volume,

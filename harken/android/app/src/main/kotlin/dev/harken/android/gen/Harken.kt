@@ -1398,6 +1398,9 @@ class Harken(val peer: Peer) {
     /** `listening.clear_upcoming`, on the live space. */
     fun clearUpcoming() = peer.call("listening.clear_upcoming", "null")
 
+    /** `listening.devices`, kept. */
+    fun devices(): View<ListeningDevice> = View(peer.view("listening.devices", "null")) { j -> ListeningDevice.of(j) }
+
     /** `listening.enqueue`, on the live space. */
     fun enqueue(input: Enqueue) = peer.call("listening.enqueue", input.json())
 
@@ -1461,8 +1464,14 @@ class Harken(val peer: Peer) {
     /** `listening.scrub`, on the live space. */
     fun scrub(input: Scrub) = peer.call("listening.scrub", input.json())
 
+    /** `listening.scrubbing`, kept. */
+    fun scrubbing(): View<ListeningScrub> = View(peer.view("listening.scrubbing", "null")) { j -> ListeningScrub.of(j) }
+
     /** `listening.seek`, on the live space. */
     fun seek(input: Seek) = peer.call("listening.seek", input.json())
+
+    /** `listening.session`, kept. */
+    fun session(): View<Listening> = View(peer.view("listening.session", "null")) { j -> Listening.of(j) }
 
     /** `listening.set_group_mute`, on the live space. */
     fun setGroupMute(input: GroupMute) = peer.call("listening.set_group_mute", input.json())

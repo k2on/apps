@@ -337,8 +337,20 @@ impl Peer {
     /// A maintained view of a query (§1.10) over the optimistic state, as
     /// this login reads it: its number, or the query's refusal.
     pub fn view(&mut self, name: &str, input: &[u8]) -> Result<usize, String> {
-        let (ctx, b) = (self.ctx(), self.func(name)?);
-        self.watch(Space::Durable, &b, input, ctx).map_err(|r| r.0)
+        self.view_in(Space::Durable, name, input)
+    }
+
+    /// [`Peer::view`] over `space`'s optimistic state: the live space's
+    /// (§1.9) by a name of its module's domain (or the log's), refused
+    /// while there is no live machine. Its rows are read afresh whenever
+    /// the live machine is made anew (a sign-in).
+    pub fn view_in(&mut self, space: Space, name: &str, input: &[u8]) -> Result<usize, String> {
+        let live = self.config.live.as_ref().and_then(|l| l.module.domain.as_deref());
+        let b = match live.filter(|_| space == Space::Volatile).and_then(|d| d.binding(name)) {
+            Some(b) => b.to_string(),
+            None => self.func(name)?,
+        };
+        self.watch(space, &b, input, self.ctx()).map_err(|r| r.0)
     }
 
     /// A view's rows as they stand, each its bytes.

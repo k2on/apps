@@ -19,6 +19,7 @@ use std::fmt::Debug;
 use crate::file::FileRef;
 use crate::format::Encode;
 use crate::plan::Patch;
+use crate::schema::Space;
 
 /// A key of an app's views: one view of the domain, or a page made of
 /// several.
@@ -87,11 +88,13 @@ fn decode<T: Encode>(b: &[u8]) -> T {
     T::from_bytes(b).unwrap_or_else(|e| panic!("a view's row: {e}"))
 }
 
-/// How one view is opened: its function by name, its input's bytes, and
+/// How one view is opened: its function by name, its input's bytes, the
+/// space it is over — the log's state, or the live space's (§1.9) — and
 /// the rows it is read into.
 pub struct Opening {
     name: String,
     input: Vec<u8>,
+    space: Space,
     rows: Box<dyn Rows>,
 }
 
@@ -110,8 +113,25 @@ impl Opening {
         Opening {
             name: name.into(),
             input,
+            space: Space::Durable,
             rows: Box::new(Typed { rows: vec![], read }),
         }
+    }
+
+    /// The same view over the live space's state (§1.9) instead of the
+    /// log's: what a device holds of its account's live part, which is
+    /// none — no rows, and no refusal said — while it has no live machine
+    /// (alone, a demo).
+    pub fn live(self) -> Opening {
+        Opening {
+            space: Space::Volatile,
+            ..self
+        }
+    }
+
+    /// The space it is over.
+    pub fn space(&self) -> Space {
+        self.space
     }
 
     /// The function the view is of.
@@ -124,9 +144,10 @@ impl Opening {
         &self.input
     }
 
-    /// Its name, its input and its (empty) rows, for whatever holds it.
-    pub fn into_parts(self) -> (String, Vec<u8>, Box<dyn Rows>) {
-        (self.name, self.input, self.rows)
+    /// Its name, its input, its space and its (empty) rows, for whatever
+    /// holds it.
+    pub fn into_parts(self) -> (String, Vec<u8>, Space, Box<dyn Rows>) {
+        (self.name, self.input, self.space, self.rows)
     }
 }
 

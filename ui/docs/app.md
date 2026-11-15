@@ -1088,14 +1088,17 @@ changes, `.github/compat-check.sh`'s harken part grows with it.
    section it came from, an index the library's way), tested over the
    demo library. A screen that is `searchable` on its own (Search, as
    the shell hosts it) is drawn by every toolkit, its field over it.
-   Next: the player as the host's own runtime over the media player
-   module and a view of the live session (below), the sheets, Settings.
-   For the live view: ark-peer already keeps a view of either space
-   (`Kept { space }`, `Peer::watch(Space::Volatile, …)`); what is missing
-   is an `Opening` that names the live space, `Store` opening and
-   re-reading it when the live machine is made anew (a connection), a
-   refusal while there is none (alone, the demo) that is not an error,
-   and the domain's `listening` view over its volatile tables.
+   The live view is built: an `Opening` names its space
+   (`Opening::live`), ark-peer's `Peer::view_in` and `Watched::open_in`
+   open a view over the live space, `Store` holds it and reads it afresh
+   when a sign-in makes the live machine anew, and with no live machine
+   (alone, the demo) it is no rows and no refusal; the domain's
+   `listening.session`, `listening.devices` and `listening.scrubbing` are
+   `HarkenView::Listening`'s parts, read into `host::Listening` by
+   `Listening::read` — on the device, no request added to the server.
+   Next: the reconciler's rules in `harken_domain::player`, the player as
+   the host's own runtime over the media player module, the sheets,
+   Settings.
 4. Generated targets, the old clients deleted: not started.
 5. Screenshots: not started.
 

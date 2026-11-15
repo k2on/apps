@@ -9,6 +9,11 @@
 //! is one view of the domain or a page made of several, and how a view is
 //! opened is an `ark::views::Opening`.
 //!
+//! A view is over the log's state, or over the live space's
+//! (`Opening::live`): the account's live part, which a device reads while
+//! it has a live machine, read afresh whenever that machine is made anew,
+//! and which is no rows — not a refusal — while there is none.
+//!
 //! [`Store::hold`] holds a key once more (each of its parts opened the
 //! first time, read whole), [`Store::release`] once less (each closed when
 //! nothing holds it). [`Store::settle`] takes what the peer did since into
@@ -43,8 +48,8 @@ struct Part {
 
 impl Part {
     fn open(peer: &mut Peer, o: Opening) -> Part {
-        let (name, input, mut rows) = o.into_parts();
-        let watch = Watched::open(peer, &name, input, |_| ());
+        let (name, input, space, mut rows) = o.into_parts();
+        let watch = Watched::open_in(peer, space, &name, input, |_| ());
         rows.fill(&watch.view().map(|v| peer.rows(v)).unwrap_or_default());
         Part { watch, rows }
     }
