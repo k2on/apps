@@ -4,6 +4,10 @@
 //! whose sessions are not connected, once, with nothing of the rows in what
 //! is sent; a connected device is not pushed to; a gone endpoint's row is
 //! taken away.
+//!
+//! Only with the `push` feature (off by default): nix's test builds take
+//! every file under tests/ whatever `required-features` says.
+#![cfg(feature = "push")]
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
