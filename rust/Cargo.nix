@@ -7063,6 +7063,11 @@ rec {
         edition = "2021";
         crateBin = [
           {
+            name = "devices-enroll";
+            path = "src/bin/devices-enroll.rs";
+            requiredFeatures = [ ];
+          }
+          {
             name = "devices-server";
             path = "src/main.rs";
             requiredFeatures = [ ];

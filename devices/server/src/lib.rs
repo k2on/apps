@@ -5,6 +5,7 @@
 //! the rows change (ark-peer's hub, through UnifiedPush).
 
 pub mod config;
+pub mod enroll;
 
 use std::ops::Deref;
 use std::path::PathBuf;

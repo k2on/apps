@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 108 108" width="512" height="512">
+  <!-- The launcher icon at F-Droid's size: a shield with a tick on devices'
+       blue (ui/theme.toml's [accent.blue]). devices hides its launcher
+       entry on a managed phone (app.toml's `launcher = false`); this is
+       its icon in Settings, F-Droid and the account sheet. -->
+  <rect width="108" height="108" fill="#005AD2"/>
+  <g transform="translate(24 24) scale(2.5)" fill="#FFFFFF">
+    <path d="M12 2l8 3v6c0 5-3.4 9.3-8 11-4.6-1.7-8-6-8-11V5l8-3zm-1.2 13.2l5.6-5.6-1.4-1.4-4.2 4.2-2.2-2.2-1.4 1.4 3.6 3.6z"/>
+  </g>
+</svg>

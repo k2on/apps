@@ -14,6 +14,12 @@ path = "src/lib.rs"
 name = "devices-server"
 path = "src/main.rs"
 
+# A phone made devices' device owner and signed in, from the laptop it is
+# plugged into (src/enroll.rs).
+[[bin]]
+name = "devices-enroll"
+path = "src/bin/devices-enroll.rs"
+
 [dependencies]
 ark = { path = "../../rust/ark" }
 devices-core = { path = "../core" }

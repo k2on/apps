@@ -1027,10 +1027,10 @@ def devices(root, a):
     is registered and how each phone makes it; those with a device first,
     then those over another's (the scanner, over the camera)."""
     out = [(n, m["phone"]) for n, m in modules_of(root, a) if "phone" in m]
-    return [d for d in out if made(d[1])] + [d for d in out if not made(d[1])]
+    return [d for d in out if makes_device(d[1])] + [d for d in out if not makes_device(d[1])]
 
 
-def made(ph):
+def makes_device(ph):
     """Whether a `[phone]` names a device a phone makes (Swift's, the
     activity's Kotlin, or the process's: `kotlin-process`), rather than one
     registered over another's (the scanner, over the camera)."""
@@ -1043,7 +1043,7 @@ def swift_devices(root, a):
     for n, ph in devices(root, a):
         if "swift" in ph:
             lines.append(f"        process.{ph['register']}(device: {ph['swift']})")
-        elif not made(ph):
+        elif not makes_device(ph):
             lines.append(f"        process.{ph['register']}()")
     if not lines:
         return ""
@@ -1066,7 +1066,7 @@ def kotlin_devices(root, a):
                 pages.append(f"    {ph['kotlin-page']}({v})")
             else:
                 calls.append(f"        process.{ph['register']}({ph['kotlin']})")
-        elif not made(ph):
+        elif not makes_device(ph):
             calls.append(f"        process.{ph['register']}()")
     if not calls:
         return "", ""

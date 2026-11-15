@@ -78,9 +78,9 @@
       arkApp = import ./nix/ark-app.nix { inherit lib self; };
       # The release channels, stable and unstable, every app's alike.
       channelsOf = pkgs: import ./nix/channels.nix { inherit lib pkgs self; };
-      arkApps = [ "money" "revelation" ];
+      arkApps = [ "money" "revelation" "devices" ];
 
-      rustDirs = [ "rust" "ui/rust" "modules" "harken/domain" "harken/app" "harken/player" "harken/server" "harken/iced" "harken/ffi" "money/core" "money/demo" "money/app" "money/iced" "money/server" "harken/demo" ];
+      rustDirs = [ "rust" "ui/rust" "modules" "harken/domain" "harken/app" "harken/player" "harken/server" "harken/iced" "harken/ffi" "money/core" "money/demo" "money/app" "money/iced" "money/server" "harken/demo" "devices/core" "devices/app" "devices/server" ];
       # The typed Kotlin and Swift `arkdb gen` writes, which harken/ffi's
       # tests hold to its domain (`tests/gen.rs`).
       genDirs = [
@@ -302,6 +302,7 @@
           serverRoots = [
             { packageId = "harken-server"; }
             { packageId = "money-server"; }
+            { packageId = "devices-server"; }
             { packageId = "harken-seed"; }
             { packageId = "money-seed"; features = [ "cli" ]; }
             { packageId = "arkdb"; }
@@ -309,6 +310,9 @@
           serversUnified = rustCrates.unify { inherit pkgs; roots = serverRoots; };
           serverCrate = packageId: crate { inherit packageId; unified = serversUnified; };
           harken-server = serverCrate "harken-server";
+          # devices' server (devices/server): the hub over devices' domain and
+          # the household's policies, the same way.
+          devices-server = serverCrate "devices-server";
           # `arkdb` for a server to read its system's events with
           # (docs/plan-observe.md): no GUI stack.
           arkdb = serverCrate "arkdb";
@@ -580,6 +584,7 @@
           # An Ark app's library is the shim nix/ark-app.nix generates over
           # its crate (`ark`: its app.toml), no crate of the app's own.
           moneyFfi = { name = "money"; crate = "money-ffi"; so = "money_ffi"; ark = arkApp.read "money"; };
+          devicesFfi = { name = "devices"; crate = "devices-ffi"; so = "devices_ffi"; ark = arkApp.read "devices"; };
           # The ABIs the APK carries — a phone, an old phone, an emulator —
           # each nixpkgs for that Android against API 26 (the app's minSdk),
           # with the NDK's prebuilt clang, which links each and compiles
@@ -605,7 +610,7 @@
           # differently by), not one for each app with everything over it.
           androidUnified = lib.mapAttrs (t: _: rustCrates.unify {
             pkgs = androidPkgs.${t};
-            roots = map (f: { packageId = f.crate; }) [ harkenFfi moneyFfi ];
+            roots = map (f: { packageId = f.crate; }) [ harkenFfi moneyFfi devicesFfi ];
           }) androidTargets;
           # An app's library for its phones (`harken/ffi`; money's the
           # generated shim over money/app) as the
@@ -654,6 +659,7 @@
           # money's (the generated `money-ffi` over money/app): what its APK
           # builds over.
           money-android-lib = androidPhone moneyFfi;
+          devices-android-lib = androidPhone devicesFfi;
 
           # The Android SDK the APK is built with. Google ships one for
           # x86_64 Linux and for macOS; on Linux the SDK is assembled by hand
@@ -888,8 +894,17 @@
             shared = [ "modules" ];
           };
           money-apk = money.apk;
+          # devices' phone: a device owner (devices/app.toml), Compose over
+          # `devices-android-lib` and the app library's shell, as money's.
+          devices = androidApp {
+            name = "devices";
+            ark = arkOf.devices;
+            flags = [ "-ParkLib=${devices-android-lib}" "-ParkuiLib=${arkui-kotlin}" "-ParkAppLib=${ark-app-android}" ];
+            shared = [ "modules" ];
+          };
+          devices-apk = devices.apk;
           # Every Android app by its name, each with both channels' APKs.
-          androidApps = { inherit harken money revelation; };
+          androidApps = { inherit harken money revelation devices; };
 
           # The Bible as one scroll, zoomed like a map (revelation/README.md,
           # docs/plan-bible.md): plain Kotlin, no native library and none of
@@ -1955,6 +1970,12 @@
             money-ui = arkOf.money.ui;
             money-native = arkOf.money.native;
             inherit money-prebuild;
+            # devices': its views, its Android project, its prebuild, its APK
+            # and its server.
+            devices-ui = arkOf.devices.ui;
+            devices-native = arkOf.devices.native;
+            devices-prebuild = arkOf.devices.prebuild { android = devices-android-lib; };
+            inherit devices-apk devices-server;
             # revelation's: Kotlin alone, its Android project generated.
             revelation-native = arkOf.revelation.native;
             revelation-prebuild = arkOf.revelation.prebuild { };
@@ -2091,6 +2112,7 @@
             # ark-ui-gen's tests (checks.rust).
             money-native = arkOf.money.native;
             revelation-native = arkOf.revelation.native;
+            devices-native = arkOf.devices.native;
             # Every text colour the tokens define is legible on every ground
             # it is drawn on, at WCAG's 4.5:1 (3:1 for large text, icons and
             # a control's edge), the player's wash among them.
@@ -2414,5 +2436,6 @@
       # `default` for harken is not given money's options too.
       nixosModules.harken = self.nixosModules.default;
       nixosModules.money = import ./money/server/nix/module.nix { packages = self.packages; };
+      nixosModules.devices = import ./devices/server/nix/module.nix { packages = self.packages; };
     };
 }

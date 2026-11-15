@@ -1,0 +1,111 @@
+# devices as an Ark app (ui/docs/app.md, "The App's Files"): a phone held to
+# its household's policy as its device owner (ark-dpc). Every native project
+# is generated from this, the modules' module.toml and the Rust views (`nix
+# run .#devices-prebuild` writes them into devices/.native; nothing there is
+# committed).
+
+name = "Devices"
+# The bundle id and the applicationId: us.koon.devices.
+id = "devices"
+version = "0.1"
+# ui/theme.toml's [accent.blue].
+accent = "blue"
+# A device owner is Android's alone: no app manages an iPhone or a Mac (an
+# MDM server does: k2on/os's NanoHUB).
+platforms = ["android"]
+# Its device modules are its crate's dependencies (devices/app/Cargo.toml):
+# ark-dpc, ark-background, ark-notifications, ark-secure-store.
+# The scheme the server's sign-in comes back on (devices://auth), and the
+# join link the enrolling laptop opens over adb (devices://join?…).
+scheme = "devices"
+crate = "devices-app"
+
+# Each screen's runtime, its page and message, the holders the generated
+# views read it through, and its #[view] (ui/docs/app.md, "The App's Files").
+[screens]
+# The status: what the phone is held to, and the work of holding it.
+status = { app = "status::Status", runtime = "StatusApp", page = "StatusPage", msg = "StatusMsg", swift = "StatusScreen", kotlin = "StatusHolder", view = "status::view::status", swift-view = "StatusView", kotlin-view = "StatusScreen" }
+# What is put up over everything: an alert, while there is one.
+notices = { app = "notices::Notices", runtime = "NoticesApp", page = "NoticesPage", msg = "NoticesMsg", swift = "NoticesScreen", kotlin = "NoticesHolder", view = "notices::view::notices", swift-view = "NoticesView", kotlin-view = "NoticesScreen" }
+# The shell's main window.
+shell = { app = "shell::DevicesShell", runtime = "ShellApp", page = "ShellPage", msg = "ShellMsg", swift = "DevicesShellScreen", kotlin = "DevicesShellHolder", view = "shell::view::devices_shell", swift-view = "DevicesShellView", kotlin-view = "DevicesShell" }
+
+# The shell the app library draws (ark-app-android's `ArkShell`), from these
+# names alone.
+[shell]
+screen = "shell"
+settings = "settings"
+commands = "commands"
+over = "notices"
+account = "household"
+section = "section"
+appearance = "appearance"
+household = "household"
+browse = "browse"
+closed = "PageClosed"
+
+# Each name the shell's view hosts (`hosted(…)`) and the screen whose view it
+# is; any other is who is signed in (`account`).
+[shell.hosted]
+status = "status"
+
+[views]
+settings = { screen = "shell", view = "shell::view::devices_settings", swift-view = "DevicesSettingsView", kotlin-view = "DevicesSettings" }
+commands = { screen = "shell", commands = "shell::view::commands", swift-view = "DevicesCommands", kotlin-view = "devicesCommands" }
+
+[icon]
+svg = "icon.svg"
+
+[android]
+# The Kotlin package of the generated screens and entry points.
+package = "dev.devices.android"
+min-sdk = 26
+target-sdk = 35
+# The one key every build is signed with, committed and public on purpose,
+# as money's is: fine for building and trying it. A phone made a device
+# owner is held to whoever holds its key — every update must be signed by
+# it — so a real enrollment installs a build signed with a key of the
+# household's own, kept as a secret (modules/ark-dpc/README.md).
+keystore = "debug.keystore"
+permissions = ["android.permission.INTERNET"]
+# Its scheme's hosts: devices://auth, devices://join.
+hosts = ["auth", "join"]
+# No icon in the launcher: on a phone with a device owner Android draws none
+# for an app without a launcher activity. Opened from Settings → Apps, or by
+# whoever set it up (`adb shell am start`).
+launcher = false
+
+# Its background is the point of it: a periodic sync, a push when the
+# policies change, and the device started (ui/docs/app.md, Background And
+# Notifications). It schedules both itself once enrolled, with no setting.
+[background]
+sync = "15m"
+push = true
+boot = true
+
+[store]
+summary = "A household's phones, held to the policy their server declares"
+categories = ["System"]
+license = "MIT OR Apache-2.0"
+website = "https://k2on.github.io/apps/"
+source = "https://github.com/k2on/apps"
+issues = "https://github.com/k2on/apps/issues"
+description = """
+Devices holds a phone to the policy its household's own server declares: an always-on VPN that nothing leaves the phone without, restrictions such as no changing the VPN or factory reset, apps that cannot be removed or stopped, and permissions. It is made the phone's device owner once, from a laptop over adb, signed in from there, and from then on it syncs its person's policy, applies it and reports what it found, woken every fifteen minutes and by a push whenever the policy changes, with nothing on the screen.
+
+It needs a devices server to sign in to; the server, and the NixOS module the policies are declared in, are in the same repository.
+
+This is a build signed with a key committed to that repository, so anyone could sign an APK as this app. A phone made its device owner should run a build signed with a key of the household's own.
+"""
+
+[ffi]
+# The phones' library, generated: `devices-ffi` (Kotlin's
+# `uniffi.devices_ffi`), over devices' part of its host.
+host = "DevicesHost"
+app = "host::Devices"
+route = "routes::Route"
+domain = "devices_core::shared"
+
+# What else crosses to the phones: every type a page or message holds.
+[ffi.twins]
+devices_app = ["policy::Seen", "shell::{Appearance, Facts}", "notices::Alert"]
