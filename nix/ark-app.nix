@@ -9,8 +9,9 @@
 #               `[screens]` and `[views]`) linking the app's crate with
 #               ark-ui-gen's command line, which writes its #[view]s as
 #               SwiftUI and Compose; `<id>-ffi`, the phones' library;
-#               `<id>-web`, the browser's page (`webSrc`); and
-#               `<id>-desktop`, the desktop's window (`desktopSrc`).
+#               `<id>-web` (`webCrate`), the browser's page: its module,
+#               and natively its export (`webSrc`); and `<id>-desktop`, the
+#               desktop's window (`desktopSrc`).
 #   ui          what the generator writes for the app: <Name>.swift, <Name>.kt.
 #   native      the app's native projects (ui/prebuild.py): ios/ (XcodeGen's
 #               project, the asset catalog, the icon, the entitlements) and
@@ -80,14 +81,19 @@ rec {
     '';
   # The browser's page, generated (ui/prebuild.py's `web`, from app.toml,
   # the phones' library's twin): `<id>-web`'s main.rs and Cargo.toml, run by
-  # arkui-web's `WebHost` over the app's crate with the browser's device of
-  # each module whose module.toml says `[web]`, its icon beside it; and the
-  # page that loads it, index.html, with favicon.svg. Nothing of it is
-  # committed; a cargo build adds the crate to the workspace at `<dir>/.web`.
+  # arkui-web's `WebHost` over the app's part of its host with the browser's
+  # device of each module whose module.toml says `[web]`, its icon and the
+  # look and files its `[web]` names beside it; and, for an app drawn in the
+  # browser alone, the page that loads it, index.html, with favicon.svg.
+  # Nothing of it is committed; a cargo build adds the crate to the
+  # workspace at `<dir>/.web`.
   webSrc = pkgs: cargoMetadata: a:
     let
       members = map (m: normal "rust/${m}") (builtins.fromTOML (builtins.readFile (self + "/rust/Cargo.toml"))).workspace.members;
-      files = [ "ui/prebuild.py" "ui/theme.py" "ui/theme.toml" "${a.dir}/app.toml" "${a.dir}/${a.icon.svg or "icon.svg"}" "rust/Cargo.toml" ] ++ map (m: "${m}/Cargo.toml") members;
+      w = a.web or { };
+      look = map (f: "${a.dir}/${f}") ((w.css or [ ]) ++ (w.files or [ ]) ++ lib.optional (w ? head) w.head);
+      files = [ "ui/prebuild.py" "ui/theme.py" "ui/theme.toml" "${a.dir}/app.toml" "${a.dir}/${a.icon.svg or "icon.svg"}" "rust/Cargo.toml" ]
+        ++ look ++ map (m: "${m}/Cargo.toml") members;
       src = lib.cleanSourceWith {
         src = self;
         filter = path: _:
@@ -132,14 +138,49 @@ rec {
     ++ [ "ark" "ark-peer" ]);
   # arkui's features for the desktop's devices (module.toml's `[desktop]`).
   desktopFeatures = a: [ "host" ] ++ map (m: m.toml.desktop.feature) (lib.filter (m: (m.toml.desktop or { }) ? feature) (modulesOf a));
+  # Whether the app's pages are written ahead (`[web] modes` has `ssg`):
+  # its page's crate is its export too, built natively.
+  webStatic = a: lib.elem "ssg" ((a.web or { }).modes or [ "spa" ]);
   # The crates the page names (ui/prebuild.py's `web_crates`): the app's,
-  # its domain's, its demo's and the runtime's.
-  webCrates = a: lib.unique ([ a.crate (lib.replaceStrings [ "_" ] [ "-" ] (lib.head (lib.splitString "::" a.ffi.domain))) ]
-    ++ lib.optional (a.ffi ? demo) a.ffi.demo
-    ++ [ "ark" "ark-app" "ark-peer" ]);
+  # its domain's and its demo's where it has data, and the runtime's.
+  webCrates = a:
+    let f = a.ffi or { }; in
+    lib.unique ([ a.crate ]
+      ++ lib.optional (f ? domain) (lib.replaceStrings [ "_" ] [ "-" ] (lib.head (lib.splitString "::" f.domain)))
+      ++ lib.optional (f ? demo) f.demo
+      ++ (if f ? domain then [ "ark" "ark-app" "ark-peer" ] else [ "ark-app" ]));
+  # The page's crate, in crate2nix's form (ui/prebuild.py's `web_cargo`):
+  # for wasm32 the module, arkui-web's `csr` (the SPA) or `hydrate` (a page
+  # written ahead, taken over); natively, for an app written ahead, the
+  # export, arkui-web's `ssr` and the app's crate with its own features.
+  webCrate = pkgs: cargoMetadata: a:
+    let
+      wasm = { target, features }: ("wasm32" == target."arch" or null);
+      native = { target, features }: ("wasm32" != target."arch" or null);
+    in
+    {
+      crateName = webName a;
+      version = "0.1.0";
+      edition = "2021";
+      src = webSrc pkgs cargoMetadata a;
+      crateBin = [{ name = webName a; path = "main.rs"; requiredFeatures = [ ]; }];
+      dependencies = map (c: { name = c; packageId = c; } // lib.optionalAttrs (c == "ark-peer" || (c == a.crate && webStatic a)) { usesDefaultFeatures = false; }) (webCrates a)
+        ++ map (m: { name = m; packageId = m; features = [ "web" ]; target = wasm; }) (webModules a)
+        ++ (if webStatic a then [
+          { name = "arkui-web"; packageId = "arkui-web"; usesDefaultFeatures = false; features = [ "hydrate" ]; target = wasm; }
+          { name = "arkui-web"; packageId = "arkui-web"; usesDefaultFeatures = false; features = [ "ssr" ]; target = native; }
+          { name = a.crate; packageId = a.crate; target = native; }
+        ] else [
+          { name = "arkui-web"; packageId = "arkui-web"; usesDefaultFeatures = false; }
+        ]);
+      features = if webStatic a then { } else { default = [ "csr" ]; csr = [ "arkui-web/csr" ]; };
+    };
   # The modules whose browser device the page registers (module.toml's `[web]`).
   webModules = a: map (m: m.name) (lib.filter (m: m.toml ? web) (modulesOf a));
 
+  # The app's crate's directory: `<dir>/app`, or the app's directory itself
+  # where its crate is (an app with no core, server or demo: the docs).
+  crateDir = a: if builtins.pathExists (self + "/${a.dir}/app/Cargo.toml") then "${a.dir}/app" else a.dir;
   # `money/app/../../modules/ark-camera` as `modules/ark-camera`.
   normal = p: lib.concatStringsSep "/" (lib.foldl'
     (acc: seg: if seg == ".." then lib.init acc else if seg == "." || seg == "" then acc else acc ++ [ seg ])
@@ -158,7 +199,7 @@ rec {
         lib.concatMap (d: lib.optional (builtins.isAttrs d && d ? path) (normal "${dir}/${d.path}"))
           (builtins.attrValues ((m.dependencies or { }) // (m.build-dependencies or { })));
       reached = builtins.genericClosure {
-        startSet = [{ key = "${a.dir}/app"; }];
+        startSet = [{ key = crateDir a; }];
         operator = item: map (key: { inherit key; }) (paths item.key);
       };
       isModule = dir: ((manifest dir).package.metadata.ark.module or null) != null;
@@ -206,18 +247,8 @@ rec {
         # Android's are its default; the iPhone's build takes none.
         features = { default = ffiFeatures a "android"; };
       };
-    } // lib.optionalAttrs (a ? crate && a ? ffi && lib.elem "web" (a.platforms or [ ])) {
-      "${webName a}" = {
-        crateName = webName a;
-        version = "0.1.0";
-        edition = "2021";
-        src = webSrc pkgs cargoMetadata a;
-        crateBin = [{ name = webName a; path = "main.rs"; requiredFeatures = [ ]; }];
-        dependencies = map (c: { name = c; packageId = c; } // lib.optionalAttrs (c == "ark-peer") { usesDefaultFeatures = false; }) (webCrates a) ++ [
-          { name = "arkui-web"; packageId = "arkui-web"; usesDefaultFeatures = false; features = [ "host" ]; }
-        ] ++ map (m: { name = m; packageId = m; features = [ "web" ]; target = { target, features }: ("wasm32" == target."arch" or null); }) (webModules a);
-        features = { default = [ "csr" ]; csr = [ "arkui-web/csr" ]; };
-      };
+    } // lib.optionalAttrs (a ? crate && lib.elem "web" (a.platforms or [ ])) {
+      "${webName a}" = webCrate pkgs cargoMetadata a;
     } // lib.optionalAttrs (a ? crate && a ? ffi && lib.elem "desktop" (a.platforms or [ ])) {
       "${desktopName a}" = {
         crateName = desktopName a;
@@ -230,7 +261,7 @@ rec {
         ];
         features = { };
       };
-    } // lib.optionalAttrs (a ? crate) {
+    } // lib.optionalAttrs (a ? crate && a ? screens) {
       "${a.id}-gen" = {
         crateName = "${a.id}-gen";
         version = "0.1.0";

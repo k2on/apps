@@ -2450,6 +2450,10 @@ rec {
             packageId = "ark-auth";
           }
           {
+            name = "ark-format";
+            packageId = "ark-format";
+          }
+          {
             name = "ark-peer";
             packageId = "ark-peer";
             features = [ "server" ];
@@ -2477,10 +2481,8 @@ rec {
         ];
         devDependencies = [
           {
-            name = "leptos";
-            packageId = "leptos";
-            usesDefaultFeatures = false;
-            features = [ "ssr" ];
+            name = "ark-app";
+            packageId = "ark-app";
           }
           {
             name = "money-core";
@@ -2539,7 +2541,6 @@ rec {
           {
             name = "ark";
             packageId = "ark";
-            optional = true;
           }
           {
             name = "ark-app";
@@ -2548,7 +2549,6 @@ rec {
           {
             name = "ark-auth";
             packageId = "ark-auth";
-            optional = true;
             usesDefaultFeatures = false;
           }
           {
@@ -2558,7 +2558,6 @@ rec {
           {
             name = "ark-peer";
             packageId = "ark-peer";
-            optional = true;
             usesDefaultFeatures = false;
           }
           {
@@ -2581,23 +2580,21 @@ rec {
           {
             name = "wasm-bindgen-futures";
             packageId = "wasm-bindgen-futures";
-            optional = true;
             target = { target, features }: ("wasm32" == target."arch" or null);
           }
           {
             name = "web-sys";
             packageId = "web-sys";
-            features = [ "Window" "Document" "Element" "HtmlElement" "HtmlInputElement" "KeyboardEvent" "MouseEvent" "Event" "EventTarget" "DomRect" "Location" "UrlSearchParams" "MediaQueryList" "CssStyleDeclaration" "Node" "History" "FocusEvent" "PointerEvent" "ScrollIntoViewOptions" "ScrollLogicalPosition" "Navigator" "NodeList" "HtmlDocument" ];
+            features = [ "Window" "Document" "Element" "HtmlElement" "HtmlInputElement" "KeyboardEvent" "MouseEvent" "Event" "EventTarget" "DomRect" "Location" "UrlSearchParams" "MediaQueryList" "CssStyleDeclaration" "Node" "History" "FocusEvent" "PointerEvent" "ScrollIntoViewOptions" "ScrollLogicalPosition" "Navigator" "NodeList" "HtmlDocument" "Storage" ];
           }
         ];
         features = {
           "csr" = [ "leptos/csr" ];
           "default" = [ "csr" ];
-          "host" = [ "dep:ark" "dep:ark-peer" "dep:ark-auth" "dep:wasm-bindgen-futures" "web-sys/Storage" ];
           "hydrate" = [ "leptos/hydrate" ];
           "ssr" = [ "leptos/ssr" ];
         };
-        resolvedDefaultFeatures = [ "csr" "default" "host" "hydrate" "ssr" ];
+        resolvedDefaultFeatures = [ "csr" "default" "hydrate" "ssr" ];
       };
       "arrayref" = rec {
         crateName = "arrayref";

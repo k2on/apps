@@ -15,7 +15,7 @@ use crate::view;
 use crate::view::*;
 
 /// What an app says of itself on its first run.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct WelcomeCopy {
     /// Its name as a person reads it: `Money`.
     pub name: String,

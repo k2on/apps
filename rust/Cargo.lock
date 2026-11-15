@@ -579,11 +579,12 @@ name = "arkui-serve"
 version = "0.1.0"
 dependencies = [
  "ark",
+ "ark-app",
  "ark-auth",
+ "ark-format",
  "ark-peer",
  "arkui-web",
  "axum",
- "leptos",
  "money-core",
  "tempfile",
  "tokio",

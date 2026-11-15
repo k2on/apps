@@ -135,6 +135,8 @@ pub fn block<'a, M: Clone + 'a>(b: &Block, on_link: Option<fn(String) -> M>) -> 
         }
         Block::Image { alt, .. } => text(alt.clone()).size(13).style(style::dim).into(),
         Block::Rule => iced::widget::rule::horizontal(1).style(style::edge).into(),
+        // The browser's own markup: no HTML is drawn here.
+        Block::Html(_) => iced::widget::Space::new().into(),
     }
 }
 

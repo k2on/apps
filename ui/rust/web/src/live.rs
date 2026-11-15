@@ -1,4 +1,4 @@
-//! An app's page on its server (feature `host`): a replica of its domain,
+//! An app's page on its server: a replica of its domain,
 //! signed in as a person, synced over the server's socket — what every
 //! native client is, in the page (ui/docs/app.md, "The Browser's Modes").
 //!
@@ -47,7 +47,7 @@ use ark_peer::{Config, Logins, Memory, Peer};
 use ark_app::host::HostedApp;
 use ark_app::window::Windowed;
 
-use crate::host::{HostMsg, WebHost, WebHosted};
+use crate::host::{Here, HostMsg, WebHost, WebHosted};
 
 #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 type Msg<W> = HostMsg<<<W as WebHosted>::App as Windowed>::Msg>;
@@ -130,8 +130,8 @@ fn at_root() -> bool {
 
 /// A replica of the app's domain in memory, dialling `server`'s socket
 /// once it has a login.
-pub fn replica<W: WebHosted>(server: &str) -> Peer {
-    let mut peer = Peer::open_as(Config::of(W::domain()), Box::new(Memory::default()), None);
+pub fn replica<W: WebHosted>(server: &str, domain: std::sync::Arc<ark::domain::Domain>) -> Peer {
+    let mut peer = Peer::open_as(Config::of(domain), Box::new(Memory::default()), None);
     // A page draws on the thread it takes frames in on: a fill is taken
     // between frames, a few milliseconds a pump.
     peer.link.budget = Some(8);
@@ -144,7 +144,7 @@ impl<W: WebHosted> WebHost<W> {
     /// and the sign-in machine told where this load starts: signed in
     /// already (the login this browser remembers there), back from signing
     /// in with a code to trade, or on its way to sign in.
-    pub fn on_server(server: String, today: String) -> WebHost<W> {
+    pub fn on_server(server: String, here: Here) -> WebHost<W> {
         let logins = Logins::new(W::SCHEME);
         let login = logins.recall(&server).filter(|l| l.expires_ms > ark_peer::now_ms());
         let live = Live {
@@ -155,9 +155,12 @@ impl<W: WebHosted> WebHost<W> {
             login: None,
             timer: None,
         };
-        let mut app = WebHost::<W>::over(replica::<W>(&server), today, Some(live));
+        let peer = W::domain().map(|d| replica::<W>(&server, d));
+        let mut app = WebHost::<W>::over(peer, here, Some(live));
         #[cfg(target_arch = "wasm32")]
-        app.peer.set_waker(Rc::new(|| crate::send(Msg::<W>::Wake)));
+        if let Some(peer) = app.peer.as_mut() {
+            peer.set_waker(Rc::new(|| crate::send(Msg::<W>::Wake)));
+        }
         #[cfg(target_arch = "wasm32")]
         let (code, returned) = (ark_auth::web::take_code(), ark_auth::web::came_back());
         #[cfg(not(target_arch = "wasm32"))]
@@ -260,7 +263,9 @@ impl<W: WebHosted> WebHost<W> {
                 if live.login.as_ref() != Some(&login) {
                     // The cookie's session says nothing (`COOKIE_HELLO`, the
                     // empty token); an older server's, its token.
-                    self.peer.login(ark_peer::who(&login), login.token.clone());
+                    if let Some(peer) = self.peer.as_mut() {
+                        peer.login(ark_peer::who(&login), login.token.clone());
+                    }
                     live.login = Some(login);
                 }
                 self.wake();
@@ -268,8 +273,9 @@ impl<W: WebHosted> WebHost<W> {
             Effect::CloseSession => {
                 // The session ended over the socket while it is up (its own
                 // to end: `session.revoke`), then the cookie forgotten.
-                if live.login.take().is_some() && self.peer.linked {
-                    let _ = self.peer.sign_out();
+                let had = live.login.take().is_some();
+                if let Some(peer) = self.peer.as_mut().filter(|p| had && p.linked) {
+                    let _ = peer.sign_out();
                 }
                 #[cfg(target_arch = "wasm32")]
                 {
@@ -289,10 +295,13 @@ impl<W: WebHosted> WebHost<W> {
     /// server cannot be reached, and nothing more is coming soon), and the
     /// next pump set for the peer's next deadline.
     pub fn wake(&mut self) {
-        let p = self.peer.pump();
+        let Some(peer) = self.peer.as_mut() else { return };
+        let p = peer.pump();
         // A refusal undoes its change in the views, as on every device.
-        let _ = self.peer.take_rejections();
-        self.store.settle(&mut self.peer);
+        let _ = peer.take_rejections();
+        self.store.settle(peer);
+        let filling = peer.machine(ark::schema::Space::Durable).is_some_and(|m| m.fill.is_some());
+        let here = peer.linked && !filling && peer.backlog() == 0 && peer.cursor() > 0;
         if let Some(reason) = p.denied {
             self.onboard(Event::Denied { reason });
         }
@@ -300,8 +309,6 @@ impl<W: WebHosted> WebHost<W> {
             .live
             .as_ref()
             .is_some_and(|l| matches!(l.first_run.machine().step(), Step::Opening { .. }));
-        let filling = self.peer.machine(ark::schema::Space::Durable).is_some_and(|m| m.fill.is_some());
-        let here = self.peer.linked && !filling && self.peer.backlog() == 0 && self.peer.cursor() > 0;
         if opening && (here || !p.closed.is_empty()) {
             self.onboard(Event::Synced);
         }
@@ -318,7 +325,9 @@ impl<W: WebHosted> WebHost<W> {
             if let Some(t) = live.timer.take() {
                 window.clear_timeout_with_handle(t);
             }
-            let Some(due) = self.peer.deadline() else { return };
+            let Some(due) = self.peer.as_ref().and_then(|p| p.deadline()) else {
+                return;
+            };
             let wait = due.saturating_sub(ark_peer::monotonic_ms()).min(i32::MAX as u64) as i32;
             let ring = wasm_bindgen::closure::Closure::once_into_js(|| crate::send(Msg::<W>::Wake));
             live.timer = window

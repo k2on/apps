@@ -23,7 +23,7 @@ use leptos::html;
 use leptos::prelude::*;
 use wasm_bindgen::JsCast;
 
-use crate::{drawn, menu, send, ui, ui_mut, Pane, WebApp};
+use crate::{drawn, menu, send, ui, ui_mut, Pane, WebHost, WebHosted};
 
 /// What the keys panel lists of the grammar: the keys, what they do.
 pub const GRAMMAR: &[(&str, &str)] = &[
@@ -97,12 +97,8 @@ fn commands_of<M: Clone + std::fmt::Debug + 'static>(menus: &[CommandMenu<M>]) -
     }
 }
 
-pub(crate) fn listen<A: WebApp>(app: Rc<RefCell<A>>) {
-    COMMANDS.with(|c| {
-        let app = app.clone();
-        *c.borrow_mut() = Some(Rc::new(move || commands_of(&app.borrow().commands())));
-    });
-    let on_key = wasm_bindgen::closure::Closure::<dyn FnMut(web_sys::KeyboardEvent)>::new(move |e: web_sys::KeyboardEvent| press::<A>(&app, e));
+pub(crate) fn listen<W: WebHosted>(app: Rc<RefCell<WebHost<W>>>) {
+    let on_key = wasm_bindgen::closure::Closure::<dyn FnMut(web_sys::KeyboardEvent)>::new(move |e: web_sys::KeyboardEvent| press::<W>(&app, e));
     if let Some(doc) = web_sys::window().and_then(|w| w.document()) {
         let _ = doc.add_event_listener_with_callback("keydown", on_key.as_ref().unchecked_ref());
     }
@@ -120,7 +116,7 @@ fn in_field(e: &web_sys::KeyboardEvent) -> bool {
         .is_some_and(|el| matches!(el.tag_name().as_str(), "INPUT" | "TEXTAREA" | "SELECT") || el.closest(".ark-calendar").ok().flatten().is_some())
 }
 
-fn press<A: WebApp>(app: &Rc<RefCell<A>>, e: web_sys::KeyboardEvent) {
+fn press<W: WebHosted>(app: &Rc<RefCell<WebHost<W>>>, e: web_sys::KeyboardEvent) {
     let key = e.key();
     let command = e.ctrl_key() || e.meta_key();
     // A menu has every key while it is up.
@@ -447,6 +443,19 @@ pub fn open_menu(id: &str) {
 /// The command box and the keys panel, over the page.
 pub(crate) fn overlay() -> AnyView {
     (command_box(), keys_panel()).into_any()
+}
+
+/// The page's app's commands as the command box lists them: each title,
+/// its shortcut said, and what runs it.
+pub(crate) fn listed() -> Vec<Listed> {
+    all_commands()
+}
+
+/// `commands` (the page's app's, as they are when asked) what the command
+/// box and the keys panel list: set when the app is installed, natively
+/// too, so a written page lists what its module will.
+pub(crate) fn set_commands<M: Clone + std::fmt::Debug + 'static>(commands: Rc<dyn Fn() -> Vec<CommandMenu<M>>>) {
+    COMMANDS.with(|c| *c.borrow_mut() = Some(Rc::new(move || commands_of(&commands()))));
 }
 
 fn all_commands() -> Vec<Listed> {

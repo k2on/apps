@@ -52,6 +52,26 @@ pub struct Session {
     pub leaves: bool,
     /// This host can make a code for another device.
     pub adds_devices: bool,
+    /// Where the app's addresses are rooted on this host: the browser's
+    /// site base (`/`, `/apps/docs/`), what a link the app writes into its
+    /// own words starts with; empty off the browser.
+    pub base: String,
+    /// What the app's build worked out for it ahead (its web export's
+    /// `[web] prepare`: the docs' pictures' sizes), as that function
+    /// returned it; empty where nothing was.
+    pub prepared: String,
+}
+
+/// The views and the changes of an app with no data of its own (a static
+/// site, the docs): none can be made, so a place that holds no replica
+/// runs it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Nothing {}
+
+impl ViewKey for Nothing {
+    fn open(&self) -> Option<ark::views::Opening> {
+        match *self {}
+    }
 }
 
 /// Something to call when a module answers after its message (the camera,
@@ -383,12 +403,14 @@ pub trait HostedApp: Sized + 'static {
     type Request: Clone + Debug + PartialEq;
 
     /// What it keeps, as a sentence of its first run says it: `your
-    /// budget`.
-    const KEEPS: &'static str;
+    /// budget`. An app with no server has no first run, and says none.
+    const KEEPS: &'static str = "";
     /// Its words on its first run's pages (`ark_app::welcome`): `scan`
     /// where a camera can read another device's code, `demo` where another
-    /// server can be chosen.
-    fn welcome(scan: bool, demo: bool) -> crate::welcome::WelcomeCopy;
+    /// server can be chosen. An app with no server has none.
+    fn welcome(_scan: bool, _demo: bool) -> crate::welcome::WelcomeCopy {
+        crate::welcome::WelcomeCopy::default()
+    }
     /// A change of its domain's as a peer takes it: its function's name and
     /// its input's bytes.
     fn encode(change: &Self::Change) -> (&'static str, Vec<u8>);

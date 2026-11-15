@@ -37,10 +37,13 @@ fn a_shot_a_picture_and_a_page_are_each_one_name() {
 /// Falsified by changing a summary without regenerating (fails: stale).
 #[test]
 fn catalogue_json_is_what_the_catalogue_prints() {
-    let committed = read(&Path::new(env!("CARGO_MANIFEST_DIR")).join("catalogue.json"));
+    let at = Path::new(env!("CARGO_MANIFEST_DIR")).join("catalogue.json");
+    if std::env::var_os("DOCS_WRITE_CATALOGUE").is_some() {
+        std::fs::write(&at, catalogue::json()).unwrap();
+    }
     assert!(
-        committed == catalogue::json(),
-        "docs/site/catalogue.json is stale: in docs/site, cargo run -- --json > catalogue.json"
+        read(&at) == catalogue::json(),
+        "docs/site/catalogue.json is stale: in docs/site, DOCS_WRITE_CATALOGUE=1 cargo test catalogue_json"
     );
 }
 
@@ -59,6 +62,43 @@ fn the_glyph_picture_draws_every_glyph() {
     }
 }
 
+/// The site as its generated entry point says it (ui/prebuild.py's `web`,
+/// from app.toml), its pictures not drawn: what the tests export and drive.
+struct Site;
+
+impl arkui_web::WebHosted for Site {
+    type App = crate::app::Docs;
+    const ID: &'static str = "docs";
+    const NAME: &'static str = "ArkUI";
+    const SCHEME: &'static str = "docs";
+    const VERSION: &'static str = "0.1";
+    const ACCENT: &'static str = "blue";
+    const MARK: &'static str = include_str!("../icon.svg");
+    const CSS: &'static str = include_str!("../public/docs.css");
+    const HEAD: &'static str = include_str!("../public/head.html");
+    const FILES: &'static [(&'static str, &'static [u8])] = &[("docs.js", include_bytes!("../public/docs.js"))];
+    const STATIC: bool = true;
+
+    fn prepare(out: &Path) -> std::io::Result<String> {
+        crate::export::unpainted(out)
+    }
+}
+
+/// The site at its overview, as a page in the browser opens it.
+fn site() -> arkui_web::WebHost<Site> {
+    let here = arkui_web::host::Here {
+        today: "2026-11-10".into(),
+        base: "/".into(),
+        prepared: String::new(),
+    };
+    arkui_web::WebHost::over(None, here, None)
+}
+
+/// `m` taken by the site's window.
+fn tell(app: &mut arkui_web::WebHost<Site>, m: crate::app::Msg) {
+    app.update(arkui_web::HostMsg::App(m));
+}
+
 fn scratch(name: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!("docs-{name}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
@@ -71,13 +111,12 @@ fn scratch(name: &str) -> PathBuf {
 #[test]
 fn every_link_lands() {
     let out = scratch("links");
-    let o = crate::write::Options {
+    let o = arkui_web::export::Options {
         base: "/docs/".into(),
-        site: "https://example.org".into(),
-        pictures: false,
-        version: "dev".into(),
+        site: Some("https://example.org".into()),
+        ..arkui_web::export::Options::default()
     };
-    let paths = crate::write::write(&out, &o).unwrap();
+    let paths = arkui_web::export::export::<Site>(&out, &o).unwrap();
     assert_eq!(paths.len(), COMPONENTS.len() + 2 + Section::ALL.len(), "{paths:?}");
     let sitemap = read(&out.join("sitemap.xml"));
     for p in &paths {
@@ -157,24 +196,27 @@ fn every_link_lands() {
 /// Falsified by leaving the sections' pages out of the reading order.
 #[test]
 fn every_page_leads_to_the_next() {
-    use arkui_web::WebApp;
-    let mut app = crate::app::DocsWeb::open("/", crate::pages::Built::default());
-    let order: Vec<String> = crate::pages::reading(app.pages()).iter().map(|p| p.tag.clone()).collect();
-    assert_eq!(order.len(), app.pages().len() - 1, "every page but the index of every page");
+    let mut app = site();
+    let pages = app.app().pages().to_vec();
+    let order: Vec<String> = crate::pages::reading(&pages).iter().map(|p| p.tag.clone()).collect();
+    assert_eq!(order.len(), pages.len() - 1, "every page but the index of every page");
     assert_eq!(order[0], "overview");
     assert_eq!(order[1], "foundations");
     let at = |t: &str| order.iter().position(|o| o == t).unwrap();
     assert_eq!(at("overlays") + 1, at("menu"));
-    app.update(crate::app::Msg::Go { tag: "menu".into() });
-    app.update(crate::app::Msg::Step(-1));
+    tell(&mut app, crate::app::Msg::Go { tag: "menu".into() });
+    tell(&mut app, crate::app::Msg::Step(-1));
     assert_eq!(app.route().path_url(), "/overlays/");
-    app.update(crate::app::Msg::Step(1));
-    app.update(crate::app::Msg::Step(1));
+    tell(&mut app, crate::app::Msg::Step(1));
+    tell(&mut app, crate::app::Msg::Step(1));
     assert_eq!(app.route().path_url(), "/command/");
-    app.update(crate::app::Msg::Go {
-        tag: order.last().unwrap().clone(),
-    });
-    app.update(crate::app::Msg::Step(1));
+    tell(
+        &mut app,
+        crate::app::Msg::Go {
+            tag: order.last().unwrap().clone(),
+        },
+    );
+    tell(&mut app, crate::app::Msg::Step(1));
     assert_eq!(app.route().path_url(), format!("/{}/", order.last().unwrap()), "past the last, it stays");
 }
 
@@ -183,18 +225,20 @@ fn every_page_leads_to_the_next() {
 /// Falsified by a route that keeps the search (the reader's) in its path.
 #[test]
 fn every_page_is_a_path_and_the_search_is_not() {
-    use arkui_web::WebApp;
-    let mut app = crate::app::DocsWeb::open("/", crate::pages::Built::default());
-    app.update(crate::app::Msg::Go { tag: "menu".into() });
+    let mut app = site();
+    tell(&mut app, crate::app::Msg::Go { tag: "menu".into() });
     assert_eq!(app.route().path_url(), "/menu/");
-    app.update(crate::app::Msg::Search { text: "spring".into() });
+    tell(&mut app, crate::app::Msg::Search { text: "spring".into() });
     assert_eq!(app.route().path_url(), "/menu/");
     assert_eq!(app.route().get("q"), Some("spring"));
-    assert_eq!(app.static_paths().len(), COMPONENTS.len() + 2 + Section::ALL.len());
-    assert!(app.static_paths().iter().all(|r| r.query.is_empty()));
-    assert!(app.found().iter().any(|h| h.tag == "springs"), "{:?}", app.found());
-    assert!(app.found().iter().all(|h| h.tag != "overview" || h.title == "ArkUI"));
-    app.update(crate::app::Msg::Go { tag: "nowhere".into() });
+    assert_eq!(app.paths().len(), COMPONENTS.len() + 2 + Section::ALL.len());
+    assert!(app.paths().iter().all(|r| r.query.is_empty()));
+    let found = app.app().found();
+    assert!(found.iter().any(|h| h.tag == "springs"), "{found:?}");
+    assert!(found.iter().all(|h| h.tag != "overview" || h.title == "ArkUI"));
+    tell(&mut app, crate::app::Msg::Phone { phone: "ios".into() });
+    assert_eq!(app.route().get("phone"), Some("ios"), "the phone is the reader's, in the query");
+    tell(&mut app, crate::app::Msg::Go { tag: "nowhere".into() });
     assert_eq!(app.route().path_url(), "/");
 }
 

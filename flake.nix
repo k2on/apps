@@ -244,35 +244,56 @@
           # to the docs is no input to the kernel, the kernel is no input to
           # the docs, and arkui is an input to both. ArkDB's docs, when they
           # join, add its crates here.
+          # The docs are an Ark app (docs/site/app.toml), their page's crate
+          # generated as every app's is (nix/ark-app.nix's `webCrate`) and
+          # built from this workspace's crates.
+          docsApp = arkApp.read "docs/site";
           docsCrates = import ./nix/rust.nix {
             inherit lib;
             cargoNix = import ./docs/site/Cargo.nix { inherit pkgs; };
             buildRust = rust;
+            extraCrates = { docs-web = arkApp.webCrate pkgs cargoMetadata docsApp; };
           };
           docsCrate = args: docsCrates.build ({ inherit pkgs rust; packageId = "docs"; overrides = desktopOverrides; } // args);
-          # The site, an ArkUI app written as static HTML (ui/docs/app.md,
-          # "The Browser's Modes"): every page drawn by arkui-web natively,
-          # each desktop component's pictures drawn by iced's own renderer
-          # on the CPU (tiny-skia: no window, no GPU), which the sandbox
-          # allows, and beside them the module that takes a page over
-          # (`docs-web`, the same crate for wasm32 under `hydrate`).
+          # The docs' page (`docs-web`): its module, the generated crate for
+          # wasm32 under arkui-web's `hydrate`; and natively its export
+          # (`passthru.export`), the same crate under `ssr`, which draws each
+          # desktop component's pictures by iced's own renderer on the CPU
+          # (tiny-skia: no window, no GPU), which the sandbox allows.
           docs-web =
             let
-              wasm = docsCrates.build { pkgs = wasmPkgs; rust = wasmRust; packageId = "docs"; features = [ "hydrate" ]; overrides = wasmOverrides; };
+              wasm = docsCrates.build { pkgs = wasmPkgs; rust = wasmRust; packageId = "docs-web"; overrides = wasmOverrides; };
+              export = docsCrates.build { inherit pkgs rust; packageId = "docs-web"; overrides = desktopOverrides; };
             in
-            pkgs.runCommand "docs-web" { nativeBuildInputs = [ wasm-bindgen-cli pkgs.binaryen ]; passthru = { inherit wasm; }; } ''
+            pkgs.runCommand "docs-web" { nativeBuildInputs = [ wasm-bindgen-cli pkgs.binaryen ]; passthru = { inherit wasm export; }; } ''
               wasm-bindgen --target web --no-typescript --out-dir $out/pkg ${wasm}/bin/docs-web.wasm
               wasm-opt -Oz --enable-bulk-memory --enable-nontrapping-float-to-int \
                 --enable-sign-ext --enable-mutable-globals --enable-reference-types \
                 -o $out/pkg/docs-web_bg.wasm $out/pkg/docs-web_bg.wasm
             '';
-          # Served at https://k2on.github.io/apps/docs/; the module's URLs
-          # named by its build's hash, so a browser holding an older one is
-          # sent URLs its cache has never seen.
+          # The docs' web export (ui/docs/app.md, "Export"; `nix run
+          # .#docs-export-web`), as it is published: every page written
+          # under where app.toml's `[web] path` puts it,
+          # https://k2on.github.io/apps/docs/, the module beside them; its
+          # URLs named by its build's hash, so a browser holding an older
+          # one is sent URLs its cache has never seen.
           docs = pkgs.runCommand "docs" { } ''
-            ${docsCrate { }}/bin/docs $out --base /apps/docs/ --site https://k2on.github.io --version $(basename ${docs-web} | cut -c1-32)
+            ${docs-web.export}/bin/docs-web $out --base ${channels.siteBase}${docsApp.web.path}/ --site https://k2on.github.io --version $(basename ${docs-web} | cut -c1-32)
             cp -r ${docs-web}/pkg $out/
           '';
+          # `nix run .#<app>-export-web [DIR]`, Expo's `expo export
+          # --platform web`: an app's web export, as nix built it at the
+          # commit, laid out in DIR (`dist` by default) to serve or publish.
+          exportWeb = name: built: pkgs.writeShellApplication {
+            name = "${name}-export-web";
+            text = ''
+              out=''${1:-dist}
+              rm -rf "$out"
+              mkdir -p "$out"
+              cp -r --no-preserve=mode ${built}/. "$out/"
+              echo "${name}: the web export in $out"
+            '';
+          };
 
           # Python with Pillow, which draws the README's heroes from the
           # published screenshots (.github/screens/hero.py).
@@ -1965,6 +1986,9 @@
             harken-serve = pkgs.callPackage ./harken/server/nix/serve.nix { inherit harken-server; };
             inherit harken-iced docs docs-web screens-ffmpeg screens-python xcodegen;
             inherit money-desktop money-web money-server;
+            # Each web app's export, Expo's `expo export --platform web`.
+            docs-export-web = exportWeb "docs" docs;
+            money-export-web = exportWeb "money" money-web;
             inherit money-seed harken-seed harken-covers money-demo harken-demo;
           } // {
             # money's library for its phones (the generated shim over
@@ -2011,7 +2035,7 @@
                 "prebuild" "money-native" "revelation-native" "money-web-sync"
               ];
               # The docs, which on main `page` and `docs-site` both build.
-              all = [ (docsCrate { }) docs-web.wasm ];
+              all = [ (docsCrate { }) docs-web.wasm docs-web.export ];
               groups = {
                 server = [ harken-server arkdb money-server-bin harken-seed money-seed money-web.wasm ];
                 harken-apk = harken-android-lib.crates;

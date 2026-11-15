@@ -1,34 +1,32 @@
 //! arkui-serve with script off, over money's domain as it is: a fixture
-//! page of the budget's groups and the person's bank asks, written by a
+//! app's page of the budget's groups and the person's bank asks — its part
+//! of its host, as every app's is, in arkui-web's `WebHost` — written by a
 //! server that is ark-peer's and ark-auth's as money-server's is, beside a
 //! socket client of the same hub. Forms are sent as a browser without
 //! script sends them: the page's own fields, its CSRF cookie and token.
 
-use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
 
 use ark::format::Encode;
+use ark_app::host::{Cx, HostedApp, Link, Place, Running, Session};
+use ark_app::view::{card_section, form_button, list_row, name_field, View};
+use ark_app::window::Windowed;
 use ark_auth::server::{Auth, Mode as SignIn};
 use ark_auth::Account;
 use ark_peer::{Memory, Peer};
-use arkui_serve::{Look, Page, Visit};
+use arkui_serve::Look;
 use arkui_web::page;
-use arkui_web::Address;
-use arkui_web::{AnyView, WebApp};
-use leptos::html;
-use leptos::prelude::*;
-use money_core::{AddGroup, AskLine, GroupLine, Import};
+use money_core::{AddGroup, AskLine, GroupLine, Import, MoneyView};
 
-/// The fixture: the groups, a name typed, Add Group, the bank's Import
-/// (the `bank` role's alone), Connect a Bank and the asks waiting.
+/// The fixture, an app's part of its host as every app's is: the groups,
+/// a name typed, Add Group, the bank's Import (the `bank` role's alone),
+/// Connect a Bank and the asks waiting, each a row.
 struct Groups {
-    peer: Peer,
     name: String,
-    problem: Option<String>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 enum Msg {
     Name(String),
     Add,
@@ -36,59 +34,24 @@ enum Msg {
     Connect,
 }
 
-impl Groups {
-    fn ask<T: Encode>(&self, view: &str) -> Vec<T> {
-        self.peer
-            .ask(view, &().to_bytes())
-            .map(|b| Vec::<T>::from_bytes(&b).unwrap())
-            .unwrap_or_default()
-    }
-
-    fn author(&mut self, name: &str, input: Vec<u8>) {
-        if let Err(why) = self.peer.mutate_bytes(name, input) {
-            self.problem = Some(why);
-        }
-    }
+/// What the fixture authors, as the domain's mutators take it.
+#[derive(Clone, Debug)]
+enum Act {
+    AddGroup(String),
+    Import,
+    Connect,
 }
 
-impl WebApp for Groups {
-    type Msg = Msg;
+impl HostedApp for Groups {
+    type Key = MoneyView;
+    type Change = Act;
+    type Route = ();
+    type Request = ();
 
-    fn view(&self) -> AnyView {
-        let groups: Vec<AnyView> = self
-            .ask::<GroupLine>("budget.groups")
-            .into_iter()
-            .map(|g| html::li().class("group").child(g.name).into_any())
-            .collect();
-        let asks: Vec<AnyView> = self
-            .ask::<AskLine>("banks.asks")
-            .into_iter()
-            .map(|a| html::li().class("ask").child(format!("{} {:?}", a.what, a.state)).into_any())
-            .collect();
-        let field = page::text("Name", &self.name, Rc::new(|s| arkui_web::send(Msg::Name(s))));
-        let button = |label: &'static str, m: Msg| arkui_web::wired!(html::button(), arkui_web::tapped(label, &m)).child(label).into_any();
-        (
-            html::ul().child(groups),
-            arkui_web::wired!(html::input().attr("type", "text"), field),
-            button("Add Group", Msg::Add),
-            button("Import", Msg::Import),
-            button("Connect a Bank", Msg::Connect),
-            html::ul().child(asks),
-        )
-            .into_any()
-    }
-
-    fn update(&mut self, m: Msg) {
-        match m {
-            Msg::Name(n) => self.name = n,
-            Msg::Add => {
-                let name = std::mem::take(&mut self.name);
-                self.author("categories.add_group", AddGroup { name: name.clone() }.to_bytes());
-                if self.problem.is_some() {
-                    self.name = name;
-                }
-            }
-            Msg::Import => self.author(
+    fn encode(change: &Act) -> (&'static str, Vec<u8>) {
+        match change {
+            Act::AddGroup(name) => ("categories.add_group", AddGroup { name: name.clone() }.to_bytes()),
+            Act::Import => (
                 "plaid.import",
                 Import {
                     bank: "chase".into(),
@@ -96,35 +59,111 @@ impl WebApp for Groups {
                 }
                 .to_bytes(),
             ),
-            Msg::Connect => self.author("banks.connect", ().to_bytes()),
+            Act::Connect => ("banks.connect", ().to_bytes()),
         }
     }
 
-    fn route(&self) -> Address {
-        match self.name.is_empty() {
-            true => Address::default(),
-            false => Address::default().with("name", self.name.clone()),
+    fn open(_session: &Session, _cx: &mut Cx<'_, Groups>) -> Groups {
+        Groups { name: String::new() }
+    }
+
+    fn screens(&mut self) -> Vec<&mut dyn Running<Groups>> {
+        vec![]
+    }
+
+    fn screens_ref(&self) -> Vec<&dyn Running<Groups>> {
+        vec![]
+    }
+
+    fn holds(&self) -> Vec<MoneyView> {
+        vec![MoneyView::Groups, MoneyView::Asks]
+    }
+
+    fn route(&mut self, _route: (), _cx: &mut Cx<'_, Groups>) {}
+
+    fn request(&mut self, _request: (), _cx: &mut Cx<'_, Groups>) {}
+
+    fn link(&mut self, link: Link, _cx: &mut Cx<'_, Groups>) {
+        if let Link::Address(url) = link {
+            let a = arkui_web::Address::of_url(&url, "/");
+            self.name = a.get("name").unwrap_or_default().to_string();
         }
     }
 
-    fn arrive(&mut self, r: &Address) -> Vec<Msg> {
-        r.get("name").map(|n| Msg::Name(n.into())).into_iter().collect()
+    fn launched(&mut self, _args: Vec<String>, _cx: &mut Cx<'_, Groups>) {}
+}
+
+type Seen<'a> = &'a dyn Place<MoneyView, Act>;
+
+fn rows<T: Clone + 'static>(place: Seen<'_>, key: &MoneyView) -> Vec<T> {
+    let mut out = vec![];
+    place.read(&mut |v| out = v.rows::<T>(key).to_vec());
+    out
+}
+
+impl Windowed for Groups {
+    type Msg = Msg;
+
+    fn take(&mut self, msg: Msg, cx: &mut Cx<'_, Groups>) {
+        match msg {
+            Msg::Name(n) => self.name = n,
+            // The name is kept when its group is refused, to be put right.
+            Msg::Add => {
+                if cx.place.send(Act::AddGroup(self.name.clone())).is_ok() {
+                    self.name.clear();
+                }
+            }
+            Msg::Import => {
+                let _ = cx.place.send(Act::Import);
+            }
+            Msg::Connect => {
+                let _ = cx.place.send(Act::Connect);
+            }
+        }
+    }
+
+    fn window(&self, place: Seen<'_>, _now_ms: i64) -> View<Msg> {
+        let groups: Vec<View<Msg>> = rows::<GroupLine>(place, &MoneyView::Groups)
+            .into_iter()
+            .map(|g| list_row(format!("group: {}", g.name)).into())
+            .collect();
+        let asks: Vec<View<Msg>> = rows::<AskLine>(place, &MoneyView::Asks)
+            .into_iter()
+            .map(|a| list_row(format!("ask: {} {:?}", a.what, a.state)).into())
+            .collect();
+        View::List(vec![
+            card_section(groups).into(),
+            name_field("Name", self.name.clone(), None::<String>, Msg::Name),
+            form_button("Add Group", true, Msg::Add),
+            form_button("Import", true, Msg::Import),
+            form_button("Connect a Bank", true, Msg::Connect),
+            card_section(asks).into(),
+        ])
+    }
+
+    fn hosted(&self, _name: &str, _place: Seen<'_>, _now_ms: i64) -> View<Msg> {
+        View::Empty
+    }
+
+    fn address(&self, _place: Seen<'_>, _now_ms: i64) -> String {
+        arkui_web::Address::default().with("name", self.name.clone()).url()
     }
 }
 
-impl Page for Groups {
-    fn open(v: Visit) -> Groups {
-        Groups {
-            peer: v.peer,
-            name: String::new(),
-            problem: None,
-        }
-    }
-    fn peer(&mut self) -> &mut Peer {
-        &mut self.peer
-    }
-    fn refused(&mut self) -> Option<String> {
-        self.problem.take()
+/// The fixture as its generated entry point would say it.
+struct Web;
+
+impl arkui_web::WebHosted for Web {
+    type App = Groups;
+    const ID: &'static str = "groups";
+    const NAME: &'static str = "Groups";
+    const SCHEME: &'static str = "groups";
+    const VERSION: &'static str = "0.1";
+    const ACCENT: &'static str = "green";
+    const MARK: &'static str = "<svg xmlns=\"http://www.w3.org/2000/svg\"/>";
+
+    fn domain() -> Option<Arc<ark::domain::Domain>> {
+        Some(money_core::shared())
     }
 }
 
@@ -150,7 +189,7 @@ fn site() -> Site {
     };
     let server = ark_peer::Server::new(config())
         .auth(auth.clone())
-        .site(arkui_serve::site::<Groups>(auth.clone(), Arc::new(config), look, None));
+        .site(arkui_serve::site::<Web>(auth.clone(), Arc::new(config), look, None));
     let running = rt.block_on(server.listen("127.0.0.1:0")).unwrap();
     let url = format!("http://{}", running.addr);
     Site {
@@ -293,7 +332,7 @@ impl Browser {
 
     fn groups(&self) -> Vec<String> {
         self.band()
-            .split("<li class=\"group\">")
+            .split("class=\"ark-row-title\">group: ")
             .skip(1)
             .map(|s| s[..s.find('<').unwrap()].to_string())
             .collect()
@@ -449,8 +488,8 @@ fn a_page_reads_what_the_socket_would() {
     alice.open(&s, "/");
     assert_eq!(alice.press(&s, "Connect a Bank", &[]).0, 303);
     alice.open(&s, "/");
-    assert!(alice.page.contains("<li class=\"ask\">connect"), "{}", alice.page);
+    assert!(alice.page.contains("class=\"ark-row-title\">ask: connect"), "{}", alice.page);
     let mut sam = Browser::of(&s, "sam");
     sam.open(&s, "/");
-    assert!(!sam.page.contains("<li class=\"ask\">"));
+    assert!(!sam.page.contains("class=\"ark-row-title\">ask: "));
 }

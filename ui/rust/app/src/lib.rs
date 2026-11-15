@@ -669,6 +669,7 @@ impl<M: Send + 'static> Inbox<M> {
 
 pub mod background;
 pub mod host;
+mod platform;
 pub mod shell;
 pub mod shots;
 pub mod view;
@@ -679,6 +680,9 @@ pub mod writing;
 /// `#[view]`: a function of a screen's record laid out once for every
 /// toolkit ([`view`]).
 pub use arkui_macros::view;
+#[doc(hidden)]
+pub use platform::set_web;
+pub use platform::{platform, Platform};
 
 #[cfg(test)]
 mod tests;

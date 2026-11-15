@@ -175,7 +175,7 @@ fn bar_items() -> View<Msg> {
 
 /// A page: its writing, the component's live parts and pictures, its
 /// modules' reference, and the phones. The shell hosts it
-/// (`hosted("page")`, `DocsWeb::page_view`), which draws its hosted parts
+/// (`hosted("page")`, `Docs::page_view`), which draws its hosted parts
 /// in their places.
 #[view]
 pub fn doc_page(t: &PageCard) -> View<Msg> {

@@ -1,9 +1,6 @@
-/* The docs' own, over ArkUI's (theme.css, arkui.css, writing.css): the
-   live parts' frame, the desktop pictures in the page's theme, and the
-   phones' captures in a frame of their device. No motion of its own. */
-.docs-live, .docs-desktop, .docs-mobile { margin-top: 8px; }
-.docs-specimen { margin: 0 0 16px; padding: 16px; border: 1px solid var(--ark-hairline); border-radius: 10px; background: var(--ark-container-lowest); display: flex; flex-direction: column; gap: 10px; }
-.docs-note { margin: 0; font-size: 13px; color: var(--ark-quiet); }
+/* The docs' own, over ArkUI's (theme.css, arkui.css, writing.css; app.toml's
+   `[web] css`): a page's measure, the desktop pictures in the page's theme,
+   and the phones' captures in a frame of their device. No motion of its own. */
 .docs-picture { margin: 0 0 16px; padding: 20px; border: 1px solid var(--ark-hairline); border-radius: 10px; }
 .docs-picture img { display: block; max-width: 100%; height: auto; }
 .docs-picture figcaption, .capture figcaption { font-size: 13px; color: var(--ark-quiet); margin-top: 12px; }
@@ -36,5 +33,5 @@
 }
 :root[data-theme=dark] .screen .light { display: none; }
 :root[data-theme=dark] .screen .dark { display: block; }
-.docs-page { max-width: 760px; gap: 0; padding: 24px 28px 64px; }
-@container (max-width: 600px) { .docs-page { padding: 16px 16px 48px; } }
+.ark-page-column { max-width: 760px; gap: 0; padding: 24px 28px 64px; }
+@container (max-width: 600px) { .ark-page-column { padding: 16px 16px 48px; } }

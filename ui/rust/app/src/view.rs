@@ -671,6 +671,14 @@ pub enum Part<M> {
     Hosted {
         name: &'static str,
     },
+    /// The toolkit's own specimen of one of its parts, live, by the part's
+    /// name (`menu`, `dialog`, `picker`): what a page about ArkUI shows of
+    /// the part in the toolkit drawing it, over a little state of the
+    /// toolkit's own, what goes over a window drawn open in its frame.
+    /// Nothing where the toolkit has no specimen of it.
+    Specimen {
+        name: &'static str,
+    },
     /// Long-form writing, as Markdown (`crate::writing`): headings,
     /// paragraphs, lists, code, callouts, tables, pictures.
     Writing {
@@ -2832,6 +2840,7 @@ impl<M> Part<M> {
                 vec![("", &**content), ("inspector", &**inspector)],
             ),
             Part::Hosted { name } => c("HostedScreen", Some(G::Text(name)), vec![], vec![]),
+            Part::Specimen { name } => c("Specimen", Some(G::Text(name)), vec![], vec![]),
             Part::Writing { markdown } => c("Writing", Some(G::Val(lit(markdown))), vec![], vec![]),
             Part::Confirm {
                 title,
@@ -3330,6 +3339,7 @@ impl<M: 'static> Part<M> {
                 inspector: b(inspector),
             },
             Part::Hosted { name } => Part::Hosted { name },
+            Part::Specimen { name } => Part::Specimen { name },
             Part::Writing { markdown } => Part::Writing { markdown },
             Part::Confirm {
                 title,

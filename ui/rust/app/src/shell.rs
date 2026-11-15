@@ -302,6 +302,12 @@ pub fn hosted<M>(name: &'static str) -> View<M> {
     Part::Hosted { name }.into()
 }
 
+/// The toolkit's own live specimen of its part `name` (`Part::Specimen`):
+/// arkui-web's in the browser, nothing where a toolkit has none.
+pub fn specimen<M>(name: &'static str) -> View<M> {
+    Part::Specimen { name }.into()
+}
+
 /// A question before something that cannot be undone: its [`Confirming::action`]s,
 /// then Cancel, which sends `cancel`.
 pub fn confirmation_dialog<M>(title: impl Into<Val<String>>, message: impl Into<Val<String>>, cancel: M) -> Confirming<M> {

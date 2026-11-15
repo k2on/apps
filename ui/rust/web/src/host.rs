@@ -1,22 +1,27 @@
-//! An Ark app in the browser, hosted once for every app (feature `host`;
-//! ui/docs/app.md, "The App's Part of Its Host"): the page is the place its
-//! part runs over ([`WebPlace`]: a replica of its domain in the page's
-//! memory and the views it holds, the time, its device modules, who is
-//! signed in where), [`WebHost`] drives `ark_app::host::Hosting` over it
-//! and draws the window the part says (`ark_app::window::Windowed`): its
-//! shell, the names it hosts, its sheets and its Settings.
+//! An Ark app in the browser, hosted once for every app (ui/docs/app.md,
+//! "The App's Part of Its Host"): the page is the place its part runs over
+//! ([`WebPlace`]: a replica of its domain in the page's memory and the
+//! views it holds, the time, its device modules, who is signed in where),
+//! and [`WebHost`] is the page itself: it drives `ark_app::host::Hosting`
+//! over that place and draws the window the part says
+//! (`ark_app::window::Windowed`) — its shell, the names it hosts, its sheets
+//! and its Settings. Every page is a `WebHost`, whatever made it: drawn in
+//! the browser alone ([`crate::run`]), written ahead by the export and
+//! taken over ([`crate::export`], [`crate::hydrate`]), or written by a
+//! server (arkui-serve).
 //!
 //! The household is the server's that served the page ([`crate::live`]):
 //! the page signs in through it as the phones do, holds a replica and syncs
 //! over its socket; the first run is every app's (`ark_app::welcome`). With
 //! `?demo` it is the app's demo, in the page's memory, its own authority,
 //! with no server, seeded to `?today=`: what the screenshots and a public
-//! demo run.
+//! demo run. An app with no data of its own (the docs: no domain in its
+//! app.toml) is the page alone, with no replica at all.
 //!
 //! An app names nothing of its own here: its entry point is generated from
 //! its app.toml (ui/prebuild.py's `web`, the phones' library's twin), a
-//! [`WebHosted`] of its name, scheme, accent, domain and demo, and
-//! [`run`]. The address opens any screen with no steps: the launch
+//! [`WebHosted`] of its name, scheme, accent, look, domain and demo, and
+//! [`start`]. The address opens any screen with no steps: the launch
 //! arguments every shell reads (`?screen=budget`, `?inspector=1`,
 //! `?appearance=dark`, `?pane=household`), or the window's own address
 //! (`Windowed::address`, read back as a link), and arkui-web's own
@@ -34,27 +39,54 @@ use ark_peer::Peer;
 use leptos::prelude::*;
 
 use crate::live::Live;
-use crate::{Address, AnyView, WebApp};
+use crate::{Address, AnyView};
 
 /// What an app is in the browser, beside its part of its host: what its
-/// generated entry point says of its app.toml.
+/// generated entry point says of its app.toml. Never written by hand.
 pub trait WebHosted: 'static {
     /// Its part of its host, drawn in a window (money's `money_app::host::Money`).
     type App: Windowed;
+    /// Its id (`money`), whose module the page loads (`<id>-web`).
+    const ID: &'static str;
     /// Its name as a person reads it (`Money`), and the scheme its links
     /// come back on (`money`).
     const NAME: &'static str;
     const SCHEME: &'static str;
     /// Its accent (an `[accent.<name>]` of ui/theme.toml) and version.
-    const ACCENT: &'static str;
     const VERSION: &'static str;
-    /// Its icon (icon.svg): the mark its first run's pages show.
+    const ACCENT: &'static str;
+    /// Its icon (icon.svg): the mark its first run's pages show, and the
+    /// page's.
     const MARK: &'static str;
-    /// The domain its replica's log is of.
-    fn domain() -> Arc<ark::domain::Domain>;
+    /// Its own styles after ArkUI's (app.toml's `[web] css`).
+    const CSS: &'static str = "";
+    /// What every page it writes says in its `<head>` besides (app.toml's
+    /// `[web] head`), `{base}` the site's base and `{version}` the build's.
+    const HEAD: &'static str = "";
+    /// Files its pages load, written beside them as they are (app.toml's
+    /// `[web] files`): a script, a picture.
+    const FILES: &'static [(&'static str, &'static [u8])] = &[];
+    /// Its pages are written ahead (app.toml's `[web] modes` has `ssg`):
+    /// the export writes each of its paths (`Windowed::paths`), whole
+    /// without script, which its module takes over.
+    const STATIC: bool = false;
+    /// The domain its replica's log is of; none for an app with no data
+    /// of its own, which is the page alone.
+    fn domain() -> Option<Arc<ark::domain::Domain>> {
+        None
+    }
     /// Its demo's household on a peer of its own, seeded up to `today` at
-    /// `now_ms`.
-    fn demo(today: &str, now_ms: i64) -> Peer;
+    /// `now_ms`; none for an app with no demo.
+    fn demo(_today: &str, _now_ms: i64) -> Option<Peer> {
+        None
+    }
+    /// What it works out natively before its pages are written (app.toml's
+    /// `[web] prepare`): files written into the export's directory (the
+    /// docs' pictures), and what it is opened with (`Session::prepared`).
+    #[cfg(not(target_arch = "wasm32"))]
+    fn prepare(_out: &std::path::Path) -> std::io::Result<String> {
+        Ok(String::new())
+    }
     /// The browser's devices of the modules its crate depends on
     /// (module.toml's `[web]`).
     fn modules(_modules: &mut Modules) {}
@@ -63,7 +95,7 @@ pub trait WebHosted: 'static {
 type App<W> = <W as WebHosted>::App;
 type Key<W> = <App<W> as HostedApp>::Key;
 type Change<W> = <App<W> as HostedApp>::Change;
-type Msg<W> = <App<W> as Windowed>::Msg;
+pub(crate) type Msg<W> = <App<W> as Windowed>::Msg;
 
 /// Everything the page can be told.
 #[derive(Clone, Debug)]
@@ -84,20 +116,56 @@ pub enum HostMsg<M> {
     Arrive(Link),
 }
 
-/// The page: its replica and the views it holds, and the app's part
-/// running every screen over it.
-pub struct WebHost<W: WebHosted> {
-    pub peer: Peer,
-    pub store: Store<Key<W>>,
+/// Where a page is: its day, the site's base, and what the export worked
+/// out for it — what the app's session says of the browser beside who is
+/// signed in.
+#[derive(Clone, Debug, Default)]
+pub struct Here {
     /// The session's day (`2026-11-10`).
     pub today: String,
+    /// Where the site is served from: `/`, `/apps/docs/`.
+    pub base: String,
+    /// What `WebHosted::prepare` returned (`Session::prepared`).
+    pub prepared: String,
+}
+
+impl Here {
+    /// The page the browser loaded, on `today`: its base and what was
+    /// prepared for it as its export wrote them (`data-ark-base`,
+    /// `#ark-prepared`).
+    pub fn of_page(today: String) -> Here {
+        let prepared = web_sys::window()
+            .and_then(|w| w.document())
+            .and_then(|d| d.get_element_by_id("ark-prepared"))
+            .and_then(|e| e.text_content())
+            .unwrap_or_default();
+        Here {
+            today,
+            base: crate::page_base(),
+            prepared,
+        }
+    }
+}
+
+/// The page: its replica and the views it holds (none for an app with no
+/// data), and the app's part running every screen over it.
+pub struct WebHost<W: WebHosted> {
+    pub peer: Option<Peer>,
+    pub store: Store<Key<W>>,
+    pub here: Here,
     pub hosting: Hosting<App<W>>,
     /// How many changes this page has sent its data.
     pub changes: u64,
-    /// Changes counted and not sent (`WebApp::dry_run`).
+    /// Changes counted and not sent ([`WebHost::dry_run`]).
     pub dry: bool,
     /// The page on its server, signed in there; none for the demo.
     pub live: Option<Live>,
+    /// Who a server wrote the page for (arkui-serve's visitor): their
+    /// login's account.
+    pub visitor: Option<String>,
+    /// Why the last change the page sent was refused there, in the
+    /// domain's words, until taken ([`WebHost::take_refused`]).
+    refused: Option<String>,
     w: PhantomData<W>,
 }
 
@@ -109,31 +177,41 @@ pub fn noon(today: &str) -> i64 {
 
 /// The page as the place the app's part runs over (`ark_app::host::Place`).
 pub struct WebPlace<'a, W: WebHosted> {
-    peer: &'a mut Peer,
+    peer: Option<&'a mut Peer>,
     store: &'a mut Store<Key<W>>,
     live: Option<&'a Live>,
-    today: &'a str,
+    visitor: Option<&'a str>,
+    here: &'a Here,
     changes: &'a mut u64,
+    refused: &'a mut Option<String>,
     dry: bool,
 }
 
-/// Who is signed in where, as the page knows it: its server and login, or
-/// the demo in the page alone (which has no way out).
-fn session_of<W: WebHosted>(peer: &Peer, live: Option<&Live>, today: &str) -> Session {
-    let version = W::VERSION.to_string();
-    let Some(live) = live else {
-        return Session {
-            demo: true,
-            today: today.into(),
-            version,
-            ..Default::default()
+/// Who is signed in where, as the page knows it: its server and login, a
+/// server's visitor, the demo in the page alone (which has no way out), or
+/// nobody, on a page with no data.
+fn session_of<W: WebHosted>(peer: Option<&Peer>, live: Option<&Live>, visitor: Option<&str>, here: &Here) -> Session {
+    let page = Session {
+        today: here.today.clone(),
+        version: W::VERSION.to_string(),
+        base: here.base.clone(),
+        prepared: here.prepared.clone(),
+        ..Default::default()
+    };
+    let (Some(peer), Some(live)) = (peer, live) else {
+        return match (peer, visitor) {
+            (Some(_), Some(user)) => Session {
+                user: user.into(),
+                linked: Some(true),
+                ..page
+            },
+            (Some(_), None) => Session { demo: true, ..page },
+            (None, _) => page,
         };
     };
     let status = peer.status();
     let user = live.login.as_ref().map(|l| l.user.clone()).unwrap_or_default();
     Session {
-        demo: false,
-        today: today.into(),
         name: user.name.clone(),
         user: user.id.clone(),
         email: user.email.clone(),
@@ -141,20 +219,23 @@ fn session_of<W: WebHosted>(peer: &Peer, live: Option<&Live>, today: &str) -> Se
         server: ark_auth::onboarding::display(&live.server),
         linked: Some(status.linked),
         pending: status.pending as i64,
-        version,
         leaves: live.login.is_some(),
         // The browser makes no code for another device.
         adds_devices: false,
+        ..page
     }
 }
 
 /// The views as a screen reads them: a file a row names read from the
-/// replica's memory (`data:`).
-fn read_files<K: ark_app::ViewKey>(peer: &Peer, store: &Store<K>, f: &mut dyn FnMut(&dyn ark::views::Views<K>)) {
-    f(&ark::views::WithFiles {
-        views: store,
-        url: |file: &ark::file::FileRef| peer.file_url(file),
-    })
+/// replica's memory (`data:`); none at all on a page with no data.
+fn read_files<K: ark_app::ViewKey>(peer: Option<&Peer>, store: &Store<K>, f: &mut dyn FnMut(&dyn ark::views::Views<K>)) {
+    match peer {
+        Some(peer) => f(&ark::views::WithFiles {
+            views: store,
+            url: |file: &ark::file::FileRef| peer.file_url(file),
+        }),
+        None => f(store),
+    }
 }
 
 /// The browser's devices: the app's modules' (module.toml's `[web]`).
@@ -166,27 +247,37 @@ fn modules<W: WebHosted>() -> Modules {
 
 impl<W: WebHosted> Place<Key<W>, Change<W>> for WebPlace<'_, W> {
     fn read(&self, f: &mut dyn FnMut(&dyn ark::views::Views<Key<W>>)) {
-        read_files(self.peer, self.store, f)
+        read_files(self.peer.as_deref(), self.store, f)
     }
     fn now_ms(&self) -> i64 {
-        clock(self.today)
+        clock(&self.here.today)
     }
     fn send(&mut self, change: Change<W>) -> Result<(), String> {
         *self.changes += 1;
         if self.dry {
             return Ok(());
         }
+        let Some(peer) = self.peer.as_deref_mut() else {
+            return Err("this page has no data to change".into());
+        };
         let (name, input) = App::<W>::encode(&change);
-        let r = self.peer.mutate_bytes(name, input).map(|_| ());
-        self.store.settle(self.peer);
+        let r = peer.mutate_bytes(name, input).map(|_| ());
+        self.store.settle(peer);
+        if let Err(why) = &r {
+            *self.refused = Some(why.clone());
+        }
         r
     }
     fn hold(&mut self, key: Key<W>) {
-        self.store.hold(self.peer, key);
-        self.store.settle(self.peer);
+        if let Some(peer) = self.peer.as_deref_mut() {
+            self.store.hold(peer, key);
+            self.store.settle(peer);
+        }
     }
     fn release(&mut self, key: &Key<W>) {
-        self.store.release(self.peer, key)
+        if let Some(peer) = self.peer.as_deref_mut() {
+            self.store.release(peer, key)
+        }
     }
     fn modules(&self) -> Modules {
         modules::<W>()
@@ -196,13 +287,15 @@ impl<W: WebHosted> Place<Key<W>, Change<W>> for WebPlace<'_, W> {
         Arc::new(|| crate::send(HostMsg::<Msg<W>>::Answered))
     }
     fn want(&mut self, file: ark::file::FileRef) {
-        let _ = self.peer.open_file(&file);
+        if let Some(peer) = self.peer.as_deref_mut() {
+            let _ = peer.open_file(&file);
+        }
     }
     fn keep(&mut self, bytes: &[u8], media: &str) -> Option<ark::file::FileRef> {
-        self.peer.put_file(bytes, media).ok()
+        self.peer.as_deref_mut()?.put_file(bytes, media).ok()
     }
     fn session(&self) -> Session {
-        session_of::<W>(self.peer, self.live, self.today)
+        session_of::<W>(self.peer.as_deref(), self.live, self.visitor, self.here)
     }
 }
 
@@ -219,10 +312,11 @@ fn clock(today: &str) -> i64 {
 /// The page as a place only read (a page drawn, the idle signal): it sends
 /// and holds nothing.
 pub struct Seen<'a, W: WebHosted> {
-    peer: &'a Peer,
+    peer: Option<&'a Peer>,
     store: &'a Store<Key<W>>,
     live: Option<&'a Live>,
-    today: &'a str,
+    visitor: Option<&'a str>,
+    here: &'a Here,
 }
 
 impl<W: WebHosted> Place<Key<W>, Change<W>> for Seen<'_, W> {
@@ -230,7 +324,7 @@ impl<W: WebHosted> Place<Key<W>, Change<W>> for Seen<'_, W> {
         read_files(self.peer, self.store, f)
     }
     fn now_ms(&self) -> i64 {
-        clock(self.today)
+        clock(&self.here.today)
     }
     fn send(&mut self, _: Change<W>) -> Result<(), String> {
         Err("a page drawn sends nothing".into())
@@ -238,20 +332,35 @@ impl<W: WebHosted> Place<Key<W>, Change<W>> for Seen<'_, W> {
     fn hold(&mut self, _: Key<W>) {}
     fn release(&mut self, _: &Key<W>) {}
     fn session(&self) -> Session {
-        session_of::<W>(self.peer, self.live, self.today)
+        session_of::<W>(self.peer, self.live, self.visitor, self.here)
     }
 }
 
-/// The app on the page, from its address: the demo's household with
-/// `?demo` (seeded to `?today=`), else its server's, the page's own origin.
-pub fn run<W: WebHosted>() {
+/// The app on the page the browser loaded: taking over the page its export
+/// or its server wrote (`data-ark-mode`), or drawing it alone (the SPA). An
+/// app with no data is the page alone; one with a domain is its demo's
+/// household with `?demo` (seeded to `?today=`), else its server's, the
+/// page's own origin.
+pub fn start<W: WebHosted>() {
     crate::set_app_mark(W::MARK);
     let now = ark_format::day_of(ark_peer::now_ms());
-    let host = match crate::query("demo") {
-        Some(_) => WebHost::<W>::demo(crate::query("today").filter(|d| ark_format::noon_of(d).is_some()).unwrap_or(now)),
-        None => WebHost::<W>::on_server(origin(), now),
+    let today = crate::query("today").filter(|d| ark_format::noon_of(d).is_some()).unwrap_or(now.clone());
+    let written = crate::root_element()
+        .and_then(|r| r.get_attribute("data-ark-mode"))
+        .and_then(|m| crate::page::Mode::of_word(&m))
+        .is_some_and(|m| m != crate::page::Mode::Spa);
+    let host = match (W::domain(), crate::query("demo")) {
+        (None, _) => WebHost::<W>::over(None, Here::of_page(today), None),
+        (Some(_), Some(_)) => WebHost::<W>::demo(Here::of_page(today)),
+        (Some(_), None) => WebHost::<W>::on_server(origin(), Here::of_page(now)),
     };
-    crate::run(host, W::ACCENT, "");
+    // A page written ahead is taken over by a module built to (`hydrate`).
+    #[cfg(feature = "hydrate")]
+    if written {
+        return crate::hydrate(host);
+    }
+    let _ = written;
+    crate::run(host)
 }
 
 /// Whoever served the page: an app's server serves it beside its socket
@@ -261,24 +370,38 @@ fn origin() -> String {
 }
 
 impl<W: WebHosted> WebHost<W> {
-    /// The app over its demo's household, seeded to `today`.
-    pub fn demo(today: String) -> WebHost<W> {
-        let now = noon(&today);
-        WebHost::over(W::demo(&today, now), today, None)
+    /// The app over its demo's household, seeded to `here`'s day; the page
+    /// alone for an app with no demo.
+    pub fn demo(here: Here) -> WebHost<W> {
+        let now = noon(&here.today);
+        WebHost::over(W::demo(&here.today, now), here, None)
     }
 
-    /// The page over `peer` (on its server when `live`): the app's part
-    /// opened on its session.
-    pub fn over(mut peer: Peer, today: String, live: Option<Live>) -> WebHost<W> {
+    /// The page as a server writes it for `visitor` over its replica of
+    /// the server's own hub (arkui-serve).
+    pub fn visiting(peer: Peer, here: Here, visitor: String) -> WebHost<W> {
+        WebHost::open(Some(peer), here, None, Some(visitor))
+    }
+
+    /// The page over `peer` (on its server when `live`; none for a page
+    /// with no data): the app's part opened on its session.
+    pub fn over(peer: Option<Peer>, here: Here, live: Option<Live>) -> WebHost<W> {
+        WebHost::open(peer, here, live, None)
+    }
+
+    fn open(mut peer: Option<Peer>, here: Here, live: Option<Live>, visitor: Option<String>) -> WebHost<W> {
         let mut store = Store::new();
         let mut changes = 0;
+        let mut refused = None;
         let hosting = {
             let mut place = WebPlace::<W> {
-                peer: &mut peer,
+                peer: peer.as_mut(),
                 store: &mut store,
                 live: live.as_ref(),
-                today: &today,
+                visitor: visitor.as_deref(),
+                here: &here,
                 changes: &mut changes,
+                refused: &mut refused,
                 dry: false,
             };
             let session = place.session();
@@ -287,11 +410,13 @@ impl<W: WebHosted> WebHost<W> {
         WebHost {
             peer,
             store,
-            today,
+            here,
             hosting,
             changes,
             dry: false,
             live,
+            visitor,
+            refused,
             w: PhantomData,
         }
     }
@@ -299,10 +424,11 @@ impl<W: WebHosted> WebHost<W> {
     /// The page, as a place read.
     pub fn seen(&self) -> Seen<'_, W> {
         Seen {
-            peer: &self.peer,
+            peer: self.peer.as_ref(),
             store: &self.store,
             live: self.live.as_ref(),
-            today: &self.today,
+            visitor: self.visitor.as_deref(),
+            here: &self.here,
         }
     }
 
@@ -314,6 +440,12 @@ impl<W: WebHosted> WebHost<W> {
     /// The time its pages are worked out at, now.
     pub fn now_ms(&self) -> i64 {
         self.hosting.now_ms(&self.seen())
+    }
+
+    /// Why the last change the page sent was refused, in the domain's
+    /// words, taken.
+    pub fn take_refused(&mut self) -> Option<String> {
+        self.refused.take()
     }
 
     /// `f` over the app's part and the page as its place; what it asked of
@@ -335,19 +467,23 @@ impl<W: WebHosted> WebHost<W> {
         let WebHost {
             peer,
             store,
-            today,
+            here,
             hosting,
             changes,
             dry,
             live,
+            visitor,
+            refused,
             ..
         } = self;
         let mut place = WebPlace::<W> {
-            peer,
+            peer: peer.as_mut(),
             store,
             live: live.as_ref(),
-            today,
+            visitor: visitor.as_deref(),
+            here,
             changes,
+            refused,
             dry: *dry,
         };
         f(hosting, &mut place)
@@ -357,7 +493,9 @@ impl<W: WebHosted> WebHost<W> {
     /// machine back to its start. The demo's page has no way out.
     fn sign_out(&mut self) {
         if self.live.is_some() {
-            let _ = self.peer.sign_out();
+            if let Some(peer) = self.peer.as_mut() {
+                let _ = peer.sign_out();
+            }
             self.onboard(ark_auth::onboarding::Event::SignOut);
         }
     }
@@ -394,7 +532,7 @@ impl<W: WebHosted> WebHost<W> {
     /// load of that address brings back.
     fn say_idle(&self) {
         #[cfg(target_arch = "wasm32")]
-        if let Some(root) = web_sys::window().and_then(|w| w.document()).and_then(|d| d.document_element()) {
+        if let Some(root) = crate::root_element() {
             let _ = root.set_attribute("data-ark-idle", if self.is_idle() { "1" } else { "0" });
             let _ = root.set_attribute("data-ark-version", &self.version().to_string());
             if self.live.as_ref().is_none_or(|l| l.running()) {
@@ -408,7 +546,7 @@ impl<W: WebHosted> WebHost<W> {
     /// `?theme=`, or none.
     fn appearance(&self) {
         #[cfg(target_arch = "wasm32")]
-        if let Some(root) = web_sys::window().and_then(|w| w.document()).and_then(|d| d.document_element()) {
+        if let Some(root) = crate::root_element() {
             let asked = self
                 .app()
                 .appearance()
@@ -438,26 +576,20 @@ impl<W: WebHosted> WebHost<W> {
         let over = crate::under(<App<W> as Windowed>::OVER, || crate::render(app.over(&seen, now).map(HostMsg::App)));
         (window, settings, over).into_any()
     }
-}
 
-/// The launch arguments every shell reads, as the address's query says
-/// them (`?screen=budget&inspector=1`), or as the page was written with.
-const LAUNCH_KEYS: [&str; 5] = ["screen", "inspector", "appearance", "pane", "settingsTab"];
-
-impl<W: WebHosted> WebApp for WebHost<W> {
-    type Msg = HostMsg<Msg<W>>;
-
-    fn view(&self) -> AnyView {
+    /// The page's view: the first run's pages while the app is not running
+    /// yet, and its pages of what the app is over it while they show; else
+    /// the window.
+    pub fn view(&self) -> AnyView {
         self.say_idle();
-        // The first run's pages while the app is not running yet, and its
-        // pages of what the app is over it while they show.
         if let Some(live) = self.live.as_ref().filter(|l| !l.running() || l.first_run.page().intro.is_some()) {
             return crate::render(ark_app::welcome::welcome::view(&live.first_run.page()).map(HostMsg::<Msg<W>>::Welcome));
         }
         self.window()
     }
 
-    fn update(&mut self, msg: Self::Msg) {
+    /// A message taken.
+    pub fn update(&mut self, msg: HostMsg<Msg<W>>) {
         match msg {
             HostMsg::App(m) => self.host(|h, place| h.with(place, |app, cx| app.take(m, cx))),
             HostMsg::Wake => {
@@ -472,7 +604,9 @@ impl<W: WebHosted> WebApp for WebHost<W> {
         self.follow();
     }
 
-    fn commands(&self) -> Vec<ark_app::shell::CommandMenu<Self::Msg>> {
+    /// The menu bar's commands: their shortcuts are the keys', their
+    /// titles the command box's.
+    pub fn commands(&self) -> Vec<ark_app::shell::CommandMenu<HostMsg<Msg<W>>>> {
         self.app()
             .commands()
             .into_iter()
@@ -491,14 +625,19 @@ impl<W: WebHosted> WebApp for WebHost<W> {
             .collect()
     }
 
-    fn suggest(&self, field: &str, typed: &str) -> Vec<String> {
+    /// What the field `field` (`search`, or a form's own id) suggests for
+    /// what is typed in it.
+    pub fn suggest(&self, field: &str, typed: &str) -> Vec<String> {
         self.app().suggest(field, typed, &self.seen())
     }
 
-    /// The app's pages of what it is by their path (`/welcome/`), over it;
-    /// the launch arguments when the query names a screen, else the address
-    /// itself, taken as a link is (`HostedApp::link`).
-    fn arrive(&mut self, route: &Address) -> Vec<Self::Msg> {
+    /// What the page's address asks for: the messages that bring the app
+    /// there. The app's pages of what it is by their path (`/welcome/`),
+    /// over it; the launch arguments when the query names a screen, else
+    /// the address itself, taken as a link is (`HostedApp::link`). A
+    /// static page arrives at its path alone and then, once the module
+    /// runs, at the whole address.
+    pub fn arrive(&mut self, route: &Address) -> Vec<HostMsg<Msg<W>>> {
         if route.path.first().map(String::as_str) == Some("welcome") {
             self.show_intro();
         }
@@ -522,21 +661,54 @@ impl<W: WebHosted> WebApp for WebHost<W> {
         })]
     }
 
-    fn route(&self) -> Address {
+    /// Where the app is, as the address that brings it back there
+    /// (`arrive` reads it): its screen, its selection, its sheet. A page
+    /// written as HTML is at its route, and a press that moves the app
+    /// leads to its new one (`page`).
+    pub fn route(&self) -> Address {
         Address::of_url(&self.app().address(&self.seen(), self.now_ms()), "/")
     }
 
-    fn changes(&self) -> u64 {
+    /// The window's title (`Windowed::title`), or the app's name.
+    pub fn title(&self) -> String {
+        self.app().title(&self.seen(), self.now_ms()).unwrap_or_else(|| W::NAME.to_string())
+    }
+
+    /// What the window shows, in a sentence, where the app says one.
+    pub fn description(&self) -> Option<String> {
+        self.app().description(&self.seen(), self.now_ms())
+    }
+
+    /// Every path the export writes a page of (`Windowed::paths`), each
+    /// bare.
+    pub fn paths(&self) -> Vec<Address> {
+        let mut out: Vec<Address> = vec![];
+        for p in self.app().paths(&self.seen()) {
+            let a = Address::of_url(&p, "/").bare();
+            if !out.contains(&a) {
+                out.push(a);
+            }
+        }
+        out
+    }
+
+    /// How many changes the app has made to its data: a press that makes
+    /// one is an action, not a way to another page.
+    pub fn changes(&self) -> u64 {
         self.changes
     }
 
-    fn dry_run(&mut self, on: bool) {
+    /// While `on`, a change the app would send its data is counted
+    /// ([`WebHost::changes`]) and not sent: the export presses every
+    /// control, and one that would change the data is an action, not a way.
+    pub fn dry_run(&mut self, on: bool) {
         self.dry = on;
     }
 
     /// The app's part opened again over the same data: every screen as a
-    /// load finds it.
-    fn rewind(&mut self) -> bool {
+    /// load finds it, what the export presses each control from and what
+    /// back and forward start from.
+    pub fn rewind(&mut self) {
         let fresh = self.with_place(|_, place| {
             let session = place.session();
             Hosting::open(&session, place)
@@ -544,6 +716,9 @@ impl<W: WebHosted> WebApp for WebHost<W> {
         let old = std::mem::replace(&mut self.hosting, fresh);
         self.with_place(|_, place| old.close(place));
         self.follow();
-        true
     }
 }
+
+/// The launch arguments every shell reads, as the address's query says
+/// them (`?screen=budget&inspector=1`), or as the page was written with.
+const LAUNCH_KEYS: [&str; 5] = ["screen", "inspector", "appearance", "pane", "settingsTab"];

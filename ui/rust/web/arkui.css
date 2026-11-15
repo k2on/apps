@@ -300,6 +300,10 @@ button.ark-sidebar-heading:hover, button.ark-sidebar-heading.ark-on { color: var
 .ark-specimen .ark-modal-layer { position: absolute; z-index: 1; border-radius: inherit; overflow: hidden; }
 .ark-specimen .ark-dialog { max-width: calc(100% - 32px); }
 .ark-specimen .ark-dialog.ark-dialog-sheet { max-width: 100%; }
+/* The specimens of arkui-web's own parts (specimens.rs), a frame each. */
+.ark-specimens { display: flex; flex-direction: column; margin: 8px 0 0; }
+.ark-specimen-frame { margin: 0 0 16px; padding: 16px; border: 1px solid var(--ark-hairline); border-radius: 10px; background: var(--ark-container-lowest); display: flex; flex-direction: column; gap: 10px; }
+.ark-specimen-note { margin: 0; font-size: 13px; color: var(--ark-quiet); }
 
 /* * The command box and the keys panel: opened by a key, no motion */
 .ark-command-layer { align-items: flex-start; padding-top: 14vh; }

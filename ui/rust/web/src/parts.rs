@@ -398,6 +398,7 @@ fn drawn<M: Clone + std::fmt::Debug + 'static>(v: View<M>) -> Option<AnyView> {
             ..
         } => crate::shell::bar_button(title, g, enabled.get(), tap),
         Part::Writing { markdown } => crate::writing::markdown(&markdown.get()),
+        Part::Specimen { name } => return crate::specimens::draw(name),
         Part::DateField { label, day, typed } => crate::fields::date_field(label, label, day.get(), Rc::new(move |s| send(typed.call(s)))),
         Part::Table { columns, rows } => data_table(columns, *rows),
         Part::BarChart { labels, values, said } => {

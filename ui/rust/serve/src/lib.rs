@@ -1,7 +1,10 @@
 //! An app's pages written by its own server (ui/docs/app.md, "The
 //! Browser's Modes", `ssr`): a capability the layers keep, which no app
-//! turns on today. [`site`] is its pages as a server's web, one call to
-//! `ark_peer::Server::site` beside the sync socket and sign-in:
+//! turns on today. The page is the same `arkui_web::WebHost` every page
+//! is, over the app's part of its host (`ark_app::window::Windowed`), as
+//! its generated `arkui_web::WebHosted` says it: nothing of the app's is
+//! written for its server. [`site`] is its pages as a server's web, one
+//! call to `ark_peer::Server::site` beside the sync socket and sign-in:
 //!
 //! - **Who.** A request's session is the ark-auth login in its
 //!   `ark-session` cookie (set by `/web/session`, where a sign-in's code is
@@ -12,11 +15,11 @@
 //!   the bank importer is, never a socket — so the hub's feed and its row
 //!   scopes are the socket's — caught up to the hub's head, and its
 //!   functions asked as that `Who` (`ark_peer::Peer::ask`: a query's
-//!   `Ctx`).
+//!   `Ctx`); the app's session is that `Who`'s (`WebHost::visiting`).
 //! - **Writes.** A form is taken against the same draw made again
 //!   (`arkui_web::Served::take`, which refuses a stale or malformed press):
-//!   its fields that changed, then its press, so the app's own `update`
-//!   runs, and what it authors is the domain's mutators on that replica —
+//!   its fields that changed, then its press, so the app's part takes its
+//!   message (`Windowed::take`), and what it authors is the domain's mutators on that replica —
 //!   their role checks and `Refusal`s run on it and again on the hub. The
 //!   page waits for the hub's verdict: confirmed, `303` to the app's new
 //!   route; refused (here or there), `422` with the page drawn again as the
@@ -37,9 +40,10 @@ use std::time::Duration;
 
 use ark::peer::Who;
 use ark_peer::{Handle, Memory, Peer};
+use arkui_web::host::Here;
 use arkui_web::page::{escape, Mode};
 use arkui_web::Address;
-use arkui_web::{document, Served, WebApp, Written};
+use arkui_web::{document, Served, WebHost, WebHosted, Written};
 use axum::extract::{DefaultBodyLimit, Request, State};
 use axum::http::{header, HeaderMap, HeaderValue, Method, StatusCode};
 use axum::response::{IntoResponse, Response};
@@ -60,16 +64,15 @@ pub struct Visit {
     pub who: Who,
 }
 
-/// An app a server writes pages of.
-pub trait Page: WebApp {
-    /// The app over the replica of a visit, its UI at its defaults.
-    fn open(visit: Visit) -> Self;
-    /// The replica it reads and authors on.
-    fn peer(&mut self) -> &mut Peer;
-    /// Why the last change it authored was refused where it was authored,
-    /// taken: the domain's words.
-    fn refused(&mut self) -> Option<String> {
-        None
+impl Visit {
+    /// The page over the visit's replica as `who`, its UI at its defaults.
+    fn open<W: WebHosted>(self, today: String) -> WebHost<W> {
+        let here = Here {
+            today,
+            base: "/".into(),
+            prepared: String::new(),
+        };
+        WebHost::visiting(self.peer, here, self.who.actor)
     }
 }
 
@@ -88,7 +91,7 @@ pub struct Look {
 /// and the order they came in.
 type Used = (HashMap<String, Option<String>>, VecDeque<String>);
 
-struct Pages<A> {
+struct Pages<W> {
     hub: Handle,
     auth: Arc<ark_auth::server::Auth>,
     config: Arc<dyn Fn() -> ark_peer::Config + Send + Sync>,
@@ -96,36 +99,36 @@ struct Pages<A> {
     files: Option<Router>,
     /// Each form's token once used, and where it went.
     once: Mutex<Used>,
-    _app: std::marker::PhantomData<fn() -> A>,
+    _app: std::marker::PhantomData<fn() -> W>,
 }
 
-/// `A`'s pages as a server's web, in one call: give it to
+/// `W`'s pages as a server's web, in one call: give it to
 /// `ark_peer::Server::site`, beside the socket and sign-in, under the
 /// server's layers.
-pub fn site<A: Page>(
+pub fn site<W: WebHosted>(
     auth: Arc<ark_auth::server::Auth>,
     config: Arc<dyn Fn() -> ark_peer::Config + Send + Sync>,
     look: Look,
     dir: Option<(PathBuf, Option<String>)>,
 ) -> ark_peer::web::Site {
     ark_peer::web::Site {
-        pages: Some(Box::new(move |hub: &Handle| pages::<A>(hub.clone(), auth, config, look, dir))),
+        pages: Some(Box::new(move |hub: &Handle| pages::<W>(hub.clone(), auth, config, look, dir))),
         ..ark_peer::web::Site::default()
     }
 }
 
-/// The router of `A`'s pages on `hub`: every path a page, its files (the
+/// The router of `W`'s pages on `hub`: every path a page, its files (the
 /// build in `dir`, `module` its rebuild's file) beside them, and
 /// `/web/session`. `config` is the replica's peer configuration (the
 /// domain's).
-pub fn pages<A: Page>(
+pub fn pages<W: WebHosted>(
     hub: Handle,
     auth: Arc<ark_auth::server::Auth>,
     config: Arc<dyn Fn() -> ark_peer::Config + Send + Sync>,
     look: Look,
     dir: Option<(PathBuf, Option<String>)>,
 ) -> Router {
-    let pages = Arc::new(Pages::<A> {
+    let pages = Arc::new(Pages::<W> {
         hub,
         auth,
         config,
@@ -135,8 +138,8 @@ pub fn pages<A: Page>(
         _app: std::marker::PhantomData,
     });
     Router::new()
-        .route("/web/session", axum::routing::get(session::<A>))
-        .fallback(page::<A>)
+        .route("/web/session", axum::routing::get(session::<W>))
+        .fallback(page::<W>)
         .layer(DefaultBodyLimit::max(MAX_BODY))
         .with_state(pages)
 }
@@ -174,7 +177,7 @@ fn see(location: &str) -> Response {
 }
 
 /// A sign-in's code traded for the session's cookie, then to `to`.
-async fn session<A: Page>(State(p): State<Arc<Pages<A>>>, req: Request) -> Response {
+async fn session<W: WebHosted>(State(p): State<Arc<Pages<W>>>, req: Request) -> Response {
     let q = Address {
         path: vec![],
         query: Address::query_of(req.uri().query().unwrap_or_default()),
@@ -199,7 +202,7 @@ async fn session<A: Page>(State(p): State<Arc<Pages<A>>>, req: Request) -> Respo
     r
 }
 
-async fn page<A: Page>(State(p): State<Arc<Pages<A>>>, req: Request) -> Response {
+async fn page<W: WebHosted>(State(p): State<Arc<Pages<W>>>, req: Request) -> Response {
     let file = req.uri().path().rsplit('/').next().is_some_and(|last| last.contains('.'));
     if let (true, Some(files)) = (file, p.files.clone()) {
         return files.oneshot(req).await.into_response();
@@ -258,7 +261,7 @@ async fn page<A: Page>(State(p): State<Arc<Pages<A>>>, req: Request) -> Response
     r
 }
 
-impl<A: Page> Pages<A> {
+impl<W: WebHosted> Pages<W> {
     /// A replica as `who`, its link the hub's in-process dialer, caught up.
     fn visit(&self, who: Who, token: &str) -> Result<Visit, String> {
         let mut peer = Peer::open((self.config)(), who.clone(), Box::new(Memory::default()), false);
@@ -301,7 +304,7 @@ impl<A: Page> Pages<A> {
             Ok(v) => v,
             Err(why) => return (StatusCode::SERVICE_UNAVAILABLE, format!("{why}\n")).into_response(),
         };
-        let s = Served::new(A::open(visit), Mode::Server, route, &self.look.args, None);
+        let s = Served::new(visit.open::<W>(today()), Mode::Server, route, &self.look.args, None);
         let view = s.draw();
         html(status, document(&self.written(route, csrf, notice), &view))
     }
@@ -334,7 +337,7 @@ impl<A: Page> Pages<A> {
             Ok(v) => v,
             Err(why) => return (StatusCode::SERVICE_UNAVAILABLE, format!("{why}\n")).into_response(),
         };
-        let s = Served::new(A::open(visit), Mode::Server, &route, &self.look.args, None);
+        let s = Served::new(visit.open::<W>(today()), Mode::Server, &route, &self.look.args, None);
         let press = field("ark").unwrap_or_default();
         let typed: Vec<(String, String)> = fields.iter().filter(|(k, _)| k.starts_with('t')).cloned().collect();
         if let Err(why) = s.take(press, &typed) {
@@ -345,10 +348,10 @@ impl<A: Page> Pages<A> {
             drop(s);
             return (StatusCode::CONFLICT, format!("{why}\n")).into_response();
         }
-        let here = s.app_mut().refused();
+        let here = s.app_mut().take_refused();
         let refused = match here {
             Some(why) => Some(why),
-            None => verdict(s.app_mut().peer()),
+            None => s.app_mut().peer.as_mut().and_then(verdict),
         };
         let to = s.app().route();
         match refused {
@@ -366,6 +369,11 @@ impl<A: Page> Pages<A> {
             }
         }
     }
+}
+
+/// The server's day, a page's.
+fn today() -> String {
+    ark_format::day_of(ark_peer::now_ms())
 }
 
 /// What the hub said of everything the replica authored: none when every

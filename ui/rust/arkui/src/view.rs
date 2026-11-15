@@ -377,6 +377,9 @@ fn part<M: Clone + 'static>(v: View<M>) -> Option<Element<'static, M>> {
         | Part::Searchable { .. }
         | Part::Inspector { .. }
         | Part::Hosted { .. }
+        // A toolkit's specimen of its own part is the browser's: the
+        // desktop's are the docs' pictures, drawn when the site is built.
+        | Part::Specimen { .. }
         | Part::Confirm { .. }
         | Part::Alert { .. }
         | Part::SettingsPanes { .. }

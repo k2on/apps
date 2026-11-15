@@ -399,6 +399,8 @@ impl<M: Clone + Debug + 'static> Walk<M> {
                 name: name.to_string(),
                 shown,
             }),
+            // The toolkit's own: no element of the app's.
+            P::Specimen { .. } => {}
             P::Confirm { title, actions, cancel, .. } => {
                 let m = self.modal();
                 self.text(shown, m, title.get());

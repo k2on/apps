@@ -1,6 +1,7 @@
 //! An app drawn in a window its host draws itself (ui/docs/app.md, "The
-//! App's Part of Its Host"): the browser's page (`arkui_web::host`), and the
-//! desktop's window once it is hosted the same way. A phone's shell is the
+//! App's Part of Its Host"): the browser's page, written ahead, by a server
+//! or in the browser alone (arkui-web's host), and the desktop's window
+//! once it is hosted the same way. A phone's shell is the
 //! app library's and hosts the generated screens by name; a window's host
 //! has no shell of its own, so the app's part says the whole window, once,
 //! in the views every toolkit draws: its shell's view, what each name it
@@ -55,6 +56,24 @@ pub trait Windowed: HostedApp {
     /// Where the window is, as the address that brings it back there
     /// (`HostedApp::link` reads it, `ark_router::Address`'s conventions).
     fn address(&self, place: &dyn Place<Self::Key, Self::Change>, now_ms: i64) -> String;
+    /// The window's title, where it says one (a page's, as a browser's tab
+    /// and a written page's `<title>` read it); none for the app's name.
+    fn title(&self, _place: &dyn Place<Self::Key, Self::Change>, _now_ms: i64) -> Option<String> {
+        None
+    }
+    /// What the window shows, in a sentence, where it says one: a written
+    /// page's description.
+    fn description(&self, _place: &dyn Place<Self::Key, Self::Change>, _now_ms: i64) -> Option<String> {
+        None
+    }
+    /// Every address a static export writes a page of (Next.js's
+    /// `generateStaticParams`, Expo's static rendering): finite, and from
+    /// the data. A query is never written: each page is its path with the
+    /// UI at its defaults. None (the default) for an app whose pages are
+    /// drawn in the browser alone.
+    fn paths(&self, _place: &dyn Place<Self::Key, Self::Change>) -> Vec<String> {
+        vec![]
+    }
     /// The appearance asked for over the system's (`light`, `dark`), while
     /// one is.
     fn appearance(&self) -> Option<&'static str> {

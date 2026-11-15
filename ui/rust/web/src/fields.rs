@@ -29,7 +29,7 @@ thread_local! {
     static ASKING: std::cell::RefCell<&'static str> = const { std::cell::RefCell::new("") };
 }
 
-/// What a field suggests for what is typed: the app's ([`crate::WebApp::suggest`]).
+/// What a field suggests for what is typed: the app's ([`crate::WebHost::suggest`]).
 pub(crate) fn suggest_with(f: impl Fn(&str, &str) -> Vec<String> + 'static) {
     SUGGESTER.with(|s| *s.borrow_mut() = Some(Rc::new(f)));
 }

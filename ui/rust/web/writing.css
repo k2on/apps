@@ -53,3 +53,5 @@
   .ark-writing-table table { font-size: 13px; }
   .ark-writing-table th, .ark-writing-table td { padding-right: 10px; }
 }
+/* The app's own markup among its words (a Markdown block of HTML), as written. */
+.ark-writing-html { display: contents; }

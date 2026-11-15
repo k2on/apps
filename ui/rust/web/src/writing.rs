@@ -90,6 +90,8 @@ pub fn block(b: &Block) -> AnyView {
             ))
             .into_any(),
         Block::Rule => html::hr().into_any(),
+        // The app's own markup, as written (never what a person typed).
+        Block::Html(markup) => html::div().class("ark-writing-html").inner_html(markup.clone()).into_any(),
     }
 }
 

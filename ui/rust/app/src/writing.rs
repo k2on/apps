@@ -54,6 +54,14 @@ pub enum Block {
         title: String,
     },
     Rule,
+    /// Markup of the browser's own, as CommonMark has it: a line that opens
+    /// one of HTML's block elements (`<figure>`, `<section>`, `<div>`),
+    /// and every line after it to a blank one. Drawn as written by the
+    /// browser's writing and left out by the toolkits that draw no HTML,
+    /// as a Markdown reader without HTML leaves it out: for an app's own
+    /// words alone (a picture in its light and dark versions), never what
+    /// a person typed.
+    Html(String),
 }
 
 /// Words inside a block.
@@ -195,9 +203,42 @@ fn separator(line: &str) -> bool {
     t.contains('-') && t.contains('|') && t.chars().all(|c| matches!(c, '|' | '-' | ':' | ' '))
 }
 
+/// HTML's block elements a line of markup may open ([`Block::Html`]).
+const HTML_BLOCKS: [&str; 18] = [
+    "address",
+    "article",
+    "aside",
+    "details",
+    "div",
+    "figure",
+    "footer",
+    "header",
+    "hr",
+    "nav",
+    "ol",
+    "p",
+    "picture",
+    "section",
+    "table",
+    "ul",
+    "video",
+    "figcaption",
+];
+
+/// Whether `line` opens a block of markup: `<figure …>`, `</div>`.
+fn html(line: &str) -> bool {
+    let t = line.trim_start();
+    let Some(rest) = t.strip_prefix('<') else { return false };
+    let rest = rest.strip_prefix('/').unwrap_or(rest);
+    let name: String = rest.chars().take_while(|c| c.is_ascii_alphanumeric()).collect();
+    let after = rest[name.len()..].chars().next();
+    HTML_BLOCKS.contains(&name.to_ascii_lowercase().as_str()) && matches!(after, None | Some(' ' | '>' | '/' | '\t'))
+}
+
 fn starts_block(lines: &[&str], i: usize) -> bool {
     let l = lines[i];
-    fence(l).is_some()
+    html(l)
+        || fence(l).is_some()
         || heading(l).is_some()
         || l.trim_start().starts_with('>')
         || marker(l).is_some()
@@ -228,6 +269,15 @@ fn blocks(lines: &[&str]) -> Vec<Block> {
                 lang: lang.split_whitespace().next().unwrap_or("").to_lowercase(),
                 text: text.join("\n"),
             });
+            continue;
+        }
+        if html(line) {
+            let mut markup = vec![];
+            while i < lines.len() && !blank(lines[i]) {
+                markup.push(lines[i]);
+                i += 1;
+            }
+            out.push(Block::Html(markup.join("\n")));
             continue;
         }
         if let Some((level, words)) = heading(line) {
@@ -530,7 +580,7 @@ pub fn text_of(blocks: &[Block]) -> String {
             Block::Callout { blocks, .. } | Block::Quote(blocks) => text_of(blocks),
             Block::Table { head, rows } => head.iter().chain(rows.iter().flatten()).map(|c| plain(c)).collect::<Vec<_>>().join(" "),
             Block::Image { alt, .. } => alt.clone(),
-            Block::Rule => String::new(),
+            Block::Rule | Block::Html(_) => String::new(),
         };
         if !part.is_empty() {
             if !out.is_empty() {
@@ -924,6 +974,19 @@ mod tests {
         assert!(matches!(&b[8], Block::Image { src, .. } if src == "p.webp"));
         assert_eq!(b[9], Block::Rule);
         assert_eq!(b.len(), 10);
+    }
+
+    /// A line that opens one of HTML's blocks is markup to the next blank
+    /// line; an autolink or a word in angle brackets is not. Falsified by
+    /// taking any `<` at a line's start for markup.
+    #[test]
+    fn a_block_of_markup_runs_to_a_blank_line() {
+        let b = parse("Before.\n\n<figure class=\"x\">\n  <img src=\"a.webp\">\n</figure>\n\n<https://example.com>\n\n<b>bold</b> words");
+        assert_eq!(b.len(), 4);
+        assert_eq!(b[1], Block::Html("<figure class=\"x\">\n  <img src=\"a.webp\">\n</figure>".into()));
+        assert!(matches!(&b[2], Block::Paragraph(_)), "{:?}", b[2]);
+        assert!(matches!(&b[3], Block::Paragraph(_)), "{:?}", b[3]);
+        assert_eq!(text_of(&b[1..2]), "", "markup is no words of the search");
     }
 
     /// Falsified by dropping a character between tokens.

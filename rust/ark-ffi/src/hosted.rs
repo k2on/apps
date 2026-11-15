@@ -183,6 +183,10 @@ impl<P: PhoneApp> Place<Key<P>, Change<P>> for PhonePlace<P> {
             version: self.handle.version(),
             leaves: true,
             adds_devices: !demo,
+            // A phone's addresses are its scheme's, rooted nowhere; its
+            // app was prepared nothing ahead.
+            base: String::new(),
+            prepared: String::new(),
         }
     }
     fn notice(&mut self, said: String) {

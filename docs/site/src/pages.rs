@@ -15,7 +15,7 @@ pub const OVERVIEW: &str = "overview";
 pub const ALL: &str = "all";
 
 /// What the native build worked out, carried in each written page for the
-/// module to draw the same page from (`#docs-built`).
+/// module to draw the same page from (`Session::prepared`, `#ark-prepared`).
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct Built {
     pub components: Vec<BuiltComponent>,
@@ -144,7 +144,7 @@ pub fn reading(pages: &[Page]) -> Vec<&Page> {
 }
 
 /// A section's own page: what it is, and a row for each of its pages
-/// (`DocsWeb`'s `index`, hosted under the words).
+/// (`Docs`'s `index`, hosted under the words).
 fn index(s: Section) -> Page {
     Page {
         tag: s.tag().into(),

@@ -8,19 +8,23 @@
 //!   tab bar at the top or at the foot by the window's size class (CSS
 //!   container queries over `[layout]`'s widths), each section's toolbar,
 //!   search field and inspector, its pushed detail, its dialogs.
-//! - [`run`] mounts an app ([`WebApp`]) on the page: its view drawn again
-//!   whenever a message was taken, and the keyboard every Ark app has
-//!   ([`keys`]): the shortcuts of its commands, the vim layer, the command
-//!   box and the keys panel.
+//! - The page is an Ark app's ([`host::WebHost`]): its part of its host
+//!   (`ark_app::window::Windowed`) run over the page, signed in to its
+//!   server and synced ([`live`]), on its demo, or with no data of its own
+//!   (a static site). [`host::start`] is what its generated entry point
+//!   calls: [`run`] draws it in the browser alone, [`hydrate`] takes over a
+//!   page written ahead ([`export`]) or by a server; either draws it again
+//!   whenever a message was taken, keeps the browser's address and title
+//!   the app's, and listens to the keyboard every Ark app has ([`keys`]):
+//!   the shortcuts of its commands, the vim layer, the command box and the
+//!   keys panel.
 //! - The transient parts are this crate's: the context menu at the pointer
 //!   and a control's menu with its submenus ([`menu`]), the date picker and
 //!   a search field's suggestions ([`fields`]), sheets and dialogs.
 //! - What a hosted screen is laid out of: [`figures`] (charts as inline
 //!   SVG) and [`table`].
-//! - An Ark app hosted whole (feature `host`): [`host::WebHost`] runs its
-//!   part of its host over the page (`ark_app::window::Windowed`), signed
-//!   in to its server and synced ([`live`]) or on its demo, and
-//!   [`host::run`] is what its generated entry point calls.
+//! - What ArkUI documents of its own parts: their live [`specimens`]
+//!   (`ark_app::shell::specimen`).
 //!
 //! A message is sent with [`send`]: the app's one sink takes it, updates,
 //! and the page is drawn again. Everything here runs on the page's one
@@ -39,21 +43,23 @@ pub use ark_router::Address;
 pub use arkui_glyphs::set_app as set_app_mark;
 pub use leptos::prelude::AnyView;
 
+#[cfg(feature = "ssr")]
+pub mod export;
 pub mod fields;
 pub mod figures;
-#[cfg(feature = "host")]
 pub mod host;
 pub mod keys;
 mod layout;
-#[cfg(feature = "host")]
 pub mod live;
 pub mod menu;
 pub mod page;
 pub mod parts;
 pub mod shell;
+pub mod specimens;
 pub mod table;
 pub mod writing;
 
+pub use host::{HostMsg, WebHost, WebHosted};
 pub use parts::render;
 pub use shell::shell;
 
@@ -124,6 +130,8 @@ pub struct Ui {
     /// The keys have walked the rows: the cursor is shown from then on, as
     /// a Mac list shows its focus only once it has the keyboard.
     pub keyed: bool,
+    /// What the specimens of arkui-web's own parts are at ([`specimens`]).
+    pub specimens: specimens::State,
 }
 
 /// What one draw left for the keyboard: each pane's rows' actions, every
@@ -171,6 +179,14 @@ pub fn send<M: 'static>(m: M) {
         let mut q = q.borrow_mut();
         (!q.is_empty()).then(|| q.remove(0))
     }) {
+        // A specimen's is the page's own; anything else is the app's.
+        let m = match m.downcast::<specimens::Said>() {
+            Ok(said) => {
+                specimens::take(*said);
+                continue;
+            }
+            Err(m) => m,
+        };
         let sink = SINK.with(|s| s.borrow().clone());
         if let Some(sink) = sink {
             sink(m);
@@ -284,8 +300,7 @@ thread_local! {
 }
 
 /// `f` drawn as the screen `name` (a hosted name's last part: `register`
-/// of `accounts.register`): the hosted page's (feature `host`).
-#[cfg_attr(not(feature = "host"), allow(dead_code))]
+/// of `accounts.register`): the hosted page's.
 pub(crate) fn under<R>(name: &str, f: impl FnOnce() -> R) -> R {
     let name = name.rsplit('.').next().unwrap_or(name).to_string();
     let was = SCREEN.with(|s| std::mem::replace(&mut *s.borrow_mut(), name));
@@ -314,64 +329,14 @@ pub(crate) fn walk_id<M: std::fmt::Debug>(p: &ark_app::view::Part<M>) -> Option<
     )
 }
 
-/// An app the page runs.
-pub trait WebApp: 'static {
-    type Msg: Clone + std::fmt::Debug + 'static;
-    /// The window's view: its shell, or a page.
-    fn view(&self) -> AnyView;
-    /// A message taken.
-    fn update(&mut self, msg: Self::Msg);
-    /// The menu bar's commands: their shortcuts are the keys', their
-    /// titles the command box's.
-    fn commands(&self) -> Vec<ark_app::shell::CommandMenu<Self::Msg>> {
-        vec![]
-    }
-    /// What the page's address asks for (`Address`: its path, the
-    /// content, and its query, the UI's state): the messages that bring
-    /// the app there. A static page arrives at its path alone and then,
-    /// once the module runs, at the whole address.
-    fn arrive(&mut self, _route: &Address) -> Vec<Self::Msg> {
-        vec![]
-    }
-    /// What the field `field` (`search`, or a form's own id) suggests for
-    /// what is typed in it.
-    fn suggest(&self, _field: &str, _typed: &str) -> Vec<String> {
-        vec![]
-    }
-    /// Where the app is, as the address that brings it back there
-    /// (`arrive` reads it): its screen, its selection, its sheet. A page
-    /// written as HTML is at its route, and a press that moves the app
-    /// leads to its new one (`page`).
-    fn route(&self) -> Address {
-        Address::default()
-    }
-    /// Every path a static site writes a page for (Next.js's
-    /// `generateStaticParams`): finite, and from the data. A query is never
-    /// written: each page is its path at the UI's defaults.
-    fn static_paths(&self) -> Vec<Address> {
-        vec![]
-    }
-    /// How many changes the app has made to its data: a press that makes
-    /// one is an action, not a way to another page.
-    fn changes(&self) -> u64 {
-        0
-    }
-    /// The app put back where it opens, its data as it is: what the
-    /// prerenderer presses each control from, rather than opening the app
-    /// again. False (the default) when it cannot.
-    fn rewind(&mut self) -> bool {
-        false
-    }
-    /// While `on`, a change the app would send its data is counted
-    /// (`changes`) and not sent: the prerenderer presses every control,
-    /// and one that would change the data is an action, not a way.
-    fn dry_run(&mut self, _on: bool) {}
-}
+/// Where the page's app is and its title, asked.
+type Where = Rc<dyn Fn() -> (Address, String)>;
 
 thread_local! {
     /// Where the page's app is, as the address that brings it back there
-    /// (`WebApp::route`): what the browser's address follows.
-    static ROUTE: RefCell<Option<Rc<dyn Fn() -> Address>>> = const { RefCell::new(None) };
+    /// (`WebHost::route`), and its title: what the browser's address and
+    /// title follow.
+    static ROUTE: RefCell<Option<Where>> = const { RefCell::new(None) };
     /// The page is arriving where its address says (a load, back or
     /// forward): what the app moves to meanwhile replaces the entry.
     static ARRIVING: Cell<bool> = const { Cell::new(false) };
@@ -385,7 +350,7 @@ thread_local! {
 /// of it comes back the same (`?demo&today=…`, a screenshot's).
 const STICKY: [&str; 5] = ["demo", "today", "shots", "theme", "reduce-motion"];
 
-/// The browser's address made the app's (`WebApp::route`), under the
+/// The browser's address made the app's (`WebHost::route`), under the
 /// site's base, with the page's own keys ([`STICKY`]) kept: a new entry in
 /// the history for a move the person made to a new place (a press, a key),
 /// and the same entry replaced for a refinement (what is typed in a field,
@@ -397,7 +362,12 @@ fn follow_address() {
         return;
     }
     let Some(route) = ROUTE.with(|r| r.borrow().clone()) else { return };
-    let mut to = route();
+    let (mut to, title) = route();
+    if let Some(d) = web_sys::window().and_then(|w| w.document()) {
+        if d.title() != title {
+            d.set_title(&title);
+        }
+    }
     let here = address();
     for key in STICKY {
         if let Some((k, v)) = here.query.iter().find(|(k, _)| k == key) {
@@ -510,14 +480,14 @@ fn root_element() -> Option<web_sys::Element> {
     web_sys::window()?.document()?.document_element()
 }
 
-/// `app` on the page, in `accent` (an `[accent.<name>]` of ui/theme.toml)
-/// and its own `css` after ArkUI's: its styles put in, its view drawn and
+/// `app` on the page, drawn in the browser alone (the SPA), in its accent
+/// and its own styles after ArkUI's: its styles put in, its view drawn and
 /// drawn again after every message, the keyboard listened to, and what
 /// the address asks for done.
-pub fn run<A: WebApp>(app: A, accent: &str, css: &str) {
+pub fn run<W: WebHosted>(app: WebHost<W>) {
     let doc = web_sys::window().and_then(|w| w.document()).expect("a document");
     if let Some(root) = root_element() {
-        let _ = root.set_attribute("data-accent", accent);
+        let _ = root.set_attribute("data-accent", W::ACCENT);
         if let Some(t) = query("theme").filter(|t| t == "light" || t == "dark") {
             let _ = root.set_attribute("data-theme", &t);
         }
@@ -531,12 +501,11 @@ pub fn run<A: WebApp>(app: A, accent: &str, css: &str) {
         let _ = root.set_attribute("data-motion", motion);
     }
     if let (Some(head), Ok(style)) = (doc.head(), doc.create_element("style")) {
-        style.set_text_content(Some(&format!("{THEME_CSS}\n{ARKUI_CSS}\n{css}")));
+        style.set_text_content(Some(&format!("{THEME_CSS}\n{ARKUI_CSS}\n{}\n{}", writing::WRITING_CSS, W::CSS)));
         let _ = head.append_child(&style);
     }
     let app = install(app);
-    keys::listen::<A>(app.clone());
-    listen_for_gestures();
+    listen::<W>(&app);
     let version = RwSignal::new(0u64);
     VERSION.with(|v| v.set(Some(version)));
     leptos::mount::mount_to_body(move || {
@@ -547,23 +516,27 @@ pub fn run<A: WebApp>(app: A, accent: &str, css: &str) {
     });
     // What the address asks for, after the first draw.
     arriving(|| arrive_here(&app));
-    // And again whenever the address moves in place (the browser's back
-    // and forward, or a screenshot's driver walking its shots in one page,
-    // ui/docs/shots.md): the app put back where it opens and the page's own
-    // menus, popovers, command box and focus with it, then brought where
-    // the address says, as a fresh page would be. An app that cannot put
-    // itself back (`rewind`) is loaded afresh at that address.
-    if cfg!(target_arch = "wasm32") {
-        use wasm_bindgen::closure::Closure;
+}
+
+/// What every page listens to once it is the module's: the keyboard, a
+/// press (whose move is a new history entry), a link to another page of
+/// the app (taken in place), and the address moving in place — back and
+/// forward, or a screenshot's driver walking its shots in one page
+/// (ui/docs/shots.md) — which puts the app back where it opens, the page's
+/// own menus, popovers, command box and focus with it, then brings it
+/// where the address says, as a fresh page would be.
+fn listen<W: WebHosted>(app: &Rc<RefCell<WebHost<W>>>) {
+    keys::listen::<W>(app.clone());
+    listen_for_gestures();
+    if !cfg!(target_arch = "wasm32") {
+        return;
+    }
+    use wasm_bindgen::closure::Closure;
+    let Some(w) = web_sys::window() else { return };
+    let moved = {
         let app = app.clone();
-        let moved = Closure::<dyn FnMut(web_sys::Event)>::new(move |_: web_sys::Event| {
-            let rewound = app.borrow_mut().rewind();
-            if !rewound {
-                if let Some(w) = web_sys::window() {
-                    let _ = w.location().reload();
-                }
-                return;
-            }
+        Closure::<dyn FnMut(web_sys::Event)>::new(move |_: web_sys::Event| {
+            app.borrow_mut().rewind();
             if let Some(el) = web_sys::window()
                 .and_then(|w| w.document())
                 .and_then(|d| d.active_element())
@@ -578,20 +551,53 @@ pub fn run<A: WebApp>(app: A, accent: &str, css: &str) {
             }
             redraw();
             arriving(|| arrive_here(&app));
-        });
-        if let Some(w) = web_sys::window() {
-            let _ = w.add_event_listener_with_callback("popstate", moved.as_ref().unchecked_ref());
+        })
+    };
+    let _ = w.add_event_listener_with_callback("popstate", moved.as_ref().unchecked_ref());
+    moved.forget();
+    // A link to another of the app's pages (under the site's base, no file,
+    // no fragment, not for another tab) is a move of the app's, in place: a
+    // new history entry, the app brought where it leads.
+    let app = app.clone();
+    let click = Closure::<dyn FnMut(web_sys::MouseEvent)>::new(move |e: web_sys::MouseEvent| {
+        if e.default_prevented() || e.button() != 0 || e.meta_key() || e.ctrl_key() || e.shift_key() || e.alt_key() {
+            return;
         }
-        moved.forget();
+        let Some(a) = e
+            .target()
+            .and_then(|t| t.dyn_into::<web_sys::Element>().ok())
+            .and_then(|el| el.closest("a[href]").ok().flatten())
+        else {
+            return;
+        };
+        let href = a.get_attribute("href").unwrap_or_default();
+        let base = page_base();
+        let path = href.split(['?', '#']).next().unwrap_or_default();
+        let file = path.rsplit('/').next().is_some_and(|last| last.contains('.'));
+        if a.has_attribute("target") || a.has_attribute("download") || !href.starts_with(&base) || href.contains('#') || file {
+            return;
+        }
+        e.prevent_default();
+        if let Some(h) = web_sys::window().and_then(|w| w.history().ok()) {
+            let _ = h.push_state_with_url(&wasm_bindgen::JsValue::NULL, "", Some(&href));
+        }
+        if let Some(w) = web_sys::window() {
+            w.scroll_to_with_x_and_y(0.0, 0.0);
+        }
+        arriving(|| arrive_here(&app));
+    });
+    if let Some(doc) = w.document() {
+        let _ = doc.add_event_listener_with_callback("click", click.as_ref().unchecked_ref());
     }
+    click.forget();
 }
 
 /// Where the page's address asks the app to be (its `arrive`), and what of
 /// the page's own it asks open: a row's menu (`context`), a control's
 /// (`menu`), a field's popover (`popover`), the command box (`command`),
 /// the keys panel (`keys`).
-fn arrive_here<A: WebApp>(app: &Rc<RefCell<A>>) {
-    let arrive: Vec<A::Msg> = app.borrow_mut().arrive(&address());
+fn arrive_here<W: WebHosted>(app: &Rc<RefCell<WebHost<W>>>) {
+    let arrive = app.borrow_mut().arrive(&address());
     for m in arrive {
         send(m);
     }
@@ -613,13 +619,13 @@ fn arrive_here<A: WebApp>(app: &Rc<RefCell<A>>) {
 }
 
 /// `app` as the page's one app: the sink its messages go to, the view
-/// drawn, what its fields suggest.
-fn install<A: WebApp>(app: A) -> Rc<RefCell<A>> {
+/// drawn, what its fields suggest, where it is.
+fn install<W: WebHosted>(app: WebHost<W>) -> Rc<RefCell<WebHost<W>>> {
     let app = Rc::new(RefCell::new(app));
     SINK.with(|s| {
         let app = app.clone();
         *s.borrow_mut() = Some(Rc::new(move |m: Box<dyn Any>| {
-            if let Ok(m) = m.downcast::<A::Msg>() {
+            if let Ok(m) = m.downcast::<HostMsg<host::Msg<W>>>() {
                 app.borrow_mut().update(*m);
             }
         }));
@@ -628,13 +634,20 @@ fn install<A: WebApp>(app: A) -> Rc<RefCell<A>> {
         let app = app.clone();
         fields::suggest_with(move |f, q| app.borrow().suggest(f, q));
     }
+    {
+        let app = app.clone();
+        keys::set_commands(Rc::new(move || app.borrow().commands()));
+    }
     APP_VIEW.with(|v| {
         let app = app.clone();
         *v.borrow_mut() = Some(Rc::new(move || app.borrow().view()));
     });
     ROUTE.with(|r| {
         let app = app.clone();
-        *r.borrow_mut() = Some(Rc::new(move || app.borrow().route()));
+        *r.borrow_mut() = Some(Rc::new(move || {
+            let a = app.borrow();
+            (a.route(), a.title())
+        }));
     });
     UI.with(|u| *u.borrow_mut() = Ui::default());
     QUEUE.with(|q| q.borrow_mut().clear());
@@ -648,7 +661,7 @@ fn install<A: WebApp>(app: A) -> Rc<RefCell<A>> {
 /// then it is the SPA's, at the window's own width. The forms the page
 /// was written with are the browser's no more: a press is the click's.
 #[cfg(feature = "hydrate")]
-pub fn hydrate<A: WebApp>(app: A) {
+pub fn hydrate<W: WebHosted>(app: WebHost<W>) {
     use wasm_bindgen::closure::Closure;
     let doc = web_sys::window().and_then(|w| w.document()).expect("a document");
     let root = root_element().expect("a root");
@@ -660,8 +673,7 @@ pub fn hydrate<A: WebApp>(app: A) {
     page::set_args(Address::query_of(&attr("data-ark-args").unwrap_or_default()));
     let _ = root.set_attribute("data-ark-js", "");
     let app = install(app);
-    keys::listen::<A>(app.clone());
-    listen_for_gestures();
+    listen::<W>(&app);
     // A static page was written at its path alone, a server's at its whole
     // address: the first draw is the written one, and a static page's query
     // is taken once the page is the module's.
@@ -670,7 +682,7 @@ pub fn hydrate<A: WebApp>(app: A) {
         page::Mode::Server => here.clone(),
         _ => here.bare(),
     };
-    let arrive: Vec<A::Msg> = app.borrow_mut().arrive(&written);
+    let arrive = app.borrow_mut().arrive(&written);
     for m in arrive {
         app.borrow_mut().update(m);
     }
@@ -719,7 +731,7 @@ pub fn hydrate<A: WebApp>(app: A) {
         page::set_every_width(false);
         page::set_width(None);
         if here != written {
-            let arrive: Vec<A::Msg> = app.borrow_mut().arrive(&here);
+            let arrive = app.borrow_mut().arrive(&here);
             arriving(|| {
                 for m in arrive {
                     send(m);
@@ -778,7 +790,7 @@ pub fn document(w: &Written, view: &str) -> String {
         "<!doctype html>\n<html lang=\"en\" data-accent=\"{accent}\"{theme} data-motion=\"{motion}\" data-ark-mode=\"{mode}\" \
          data-ark-base=\"{base}\" data-ark-width=\"{width}\" data-ark-args=\"{args}\">\n<head>\n<meta charset=\"utf-8\">\n\
          <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n<meta name=\"color-scheme\" content=\"light dark\">\n\
-         <style id=\"ark-style\">{THEME_CSS}\n{ARKUI_CSS}\n{css}</style>\n{head}\n</head>\n<body>\n\
+         <style id=\"ark-style\">{THEME_CSS}\n{ARKUI_CSS}\n{writing}\n{css}</style>\n{head}\n</head>\n<body>\n\
          <form id=\"ark-go\" method=\"get\"></form>\n\
          <form id=\"ark-act\" method=\"post\" action=\"{action}\"><button name=\"ark\" value=\"\" hidden></button>\
          <input type=\"hidden\" name=\"route\" value=\"{route}\">{hidden}</form>\n\
@@ -788,6 +800,7 @@ pub fn document(w: &Written, view: &str) -> String {
         mode = w.mode.word(),
         base = e(&w.base),
         width = w.width.map_or("every".to_string(), |w| w.to_string()),
+        writing = writing::WRITING_CSS,
         css = w.css,
         head = w.head,
         action = e(&w.action),
@@ -800,20 +813,21 @@ pub fn document(w: &Written, view: &str) -> String {
     )
 }
 
-/// An app drawn as HTML by native code: the prerenderer's, a server's. Its
+/// An app drawn as HTML by native code: the export's, a server's. Its
 /// draw records its controls (`page`), and a form sent to it is taken
 /// against the draw it makes again ([`Served::take`]). One at a time on a
 /// thread: the page's state is the thread's.
 #[cfg(feature = "ssr")]
-pub struct Served<A: WebApp> {
-    app: Rc<RefCell<A>>,
+pub struct Served<W: WebHosted> {
+    app: Rc<RefCell<WebHost<W>>>,
 }
 
 #[cfg(feature = "ssr")]
-impl<A: WebApp> Served<A> {
+impl<W: WebHosted> Served<W> {
     /// `app` at `route`, in `mode`, drawn at `width` (none: for every
     /// width at once, `page::Band`), with `args`.
-    pub fn new(app: A, mode: page::Mode, route: &Address, args: &[(String, String)], width: Option<f64>) -> Served<A> {
+    pub fn new(app: WebHost<W>, mode: page::Mode, route: &Address, args: &[(String, String)], width: Option<f64>) -> Served<W> {
+        ark_app::set_web();
         page::set_mode(mode);
         page::set_width(width);
         page::set_every_width(width.is_none());
@@ -826,24 +840,21 @@ impl<A: WebApp> Served<A> {
         Served { app }
     }
 
-    /// Put back at `route` as it opened, if the app can be (`WebApp::rewind`).
-    pub fn rewind(&self, route: &Address) -> bool {
-        if !self.app.borrow_mut().rewind() {
-            return false;
-        }
+    /// Put back at `route` as it opened (`WebHost::rewind`).
+    pub fn rewind(&self, route: &Address) {
+        self.app.borrow_mut().rewind();
         UI.with(|u| *u.borrow_mut() = Ui::default());
         let arrive = self.app.borrow_mut().arrive(route);
         for m in arrive {
             self.app.borrow_mut().update(m);
         }
-        true
     }
 
-    pub fn app(&self) -> std::cell::Ref<'_, A> {
+    pub fn app(&self) -> std::cell::Ref<'_, WebHost<W>> {
         self.app.borrow()
     }
 
-    pub fn app_mut(&self) -> std::cell::RefMut<'_, A> {
+    pub fn app_mut(&self) -> std::cell::RefMut<'_, WebHost<W>> {
         self.app.borrow_mut()
     }
 
@@ -862,37 +873,29 @@ impl<A: WebApp> Served<A> {
 }
 
 /// Every page of a static site (`page::Mode::Static`): one per path the
-/// app declares (`WebApp::static_paths`), each at the UI's defaults, or
-/// why not — more paths than `bound`, the sanity bound the app's
-/// app.toml sets. A control whose press only moves the app to another
-/// declared path, its query empty, is a link to that page; one that
-/// changes the data, or leads to UI state (a query) or a path not
+/// app declares (`Windowed::paths`), each at the UI's defaults, or why not
+/// — more paths than `bound`. A control whose press only moves the app to
+/// another declared path, its query empty, is a link to that page; one
+/// that changes the data, or leads to UI state (a query) or a path not
 /// declared, is drawn disabled until script runs. Each control's lead is
 /// found by pressing it on the app put back where the page opened
-/// (`WebApp::rewind`) or opened afresh (`open`). Returns each page's
-/// route and its HTML (written by `write` from its view).
+/// (`WebHost::rewind`), its changes counted and never sent
+/// (`WebHost::dry_run`). Returns each page's route, the app as that page shows
+/// it (its title, its description) and its HTML (written by `write` from
+/// its view).
 #[cfg(feature = "ssr")]
-pub fn prerender<A: WebApp>(
-    open: &dyn Fn() -> A,
+pub fn prerender<W: WebHosted>(
+    open: &dyn Fn() -> WebHost<W>,
     bound: usize,
     width: Option<f64>,
     args: &[(String, String)],
-    write: &dyn Fn(&Address, &str) -> String,
+    write: &dyn Fn(&Address, &WebHost<W>, &str) -> String,
 ) -> Result<Vec<(Address, String)>, String> {
     use page::{Lead, Mode};
     use std::collections::{HashMap, HashSet};
-    let mut paths: Vec<Address> = vec![];
-    for p in open().static_paths() {
-        let p = p.bare();
-        if !paths.contains(&p) {
-            paths.push(p);
-        }
-    }
+    let paths = open().paths();
     if paths.len() > bound {
-        return Err(format!(
-            "{} static paths, past the bound of {bound} app.toml's [web] static-bound sets: raise it, or declare fewer",
-            paths.len()
-        ));
+        return Err(format!("{} static paths, past the bound of {bound}: declare fewer", paths.len()));
     }
     let declared: HashSet<Address> = paths.iter().cloned().collect();
     let base = args
@@ -910,15 +913,17 @@ pub fn prerender<A: WebApp>(
             page::controls()
         };
         let mut leads: HashMap<usize, Lead> = HashMap::new();
-        let mut kept: Option<Served<A>> = None;
+        let mut kept: Option<Served<W>> = None;
         for i in 0..n {
-            // An app that only moved is put back and pressed again; one
-            // whose data changed, or that cannot be put back, opened afresh.
-            // The controls of the draw before stay recorded: an app put
-            // back is where that draw was made.
+            // The app is put back and pressed again, or opened afresh after
+            // a press that did not run. The controls of the draw before stay
+            // recorded: an app put back is where that draw was made.
             let s = match kept.take() {
-                Some(s) if s.rewind(r) => s,
-                _ => {
+                Some(s) => {
+                    s.rewind(r);
+                    s
+                }
+                None => {
                     let s = Served::new(open(), Mode::Static, r, args, width);
                     s.draw();
                     s.app_mut().dry_run(true);
@@ -943,7 +948,8 @@ pub fn prerender<A: WebApp>(
         }
         page::set_leads(Some(leads));
         let s = Served::new(open(), Mode::Static, r, args, width);
-        let html = write(r, &s.draw());
+        let view = s.draw();
+        let html = write(r, &s.app(), &view);
         page::set_leads(None);
         out.push((r.clone(), html));
     }
