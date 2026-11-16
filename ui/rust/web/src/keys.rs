@@ -178,9 +178,59 @@ fn press<W: WebHosted>(app: &Rc<RefCell<WebHost<W>>>, e: web_sys::KeyboardEvent)
         context_on_cursor();
         return;
     }
+    if page_key(&e) {
+        e.prevent_default();
+        return;
+    }
     if vim(&key, e.shift_key()) {
         e.prevent_default();
     }
+}
+
+/// The browser's own scroll keys (Page Up and Down, Space and Shift-Space,
+/// Home, End) pressed with nothing focused: the window never scrolls
+/// itself — what scrolls is the page shown inside it — so the browser,
+/// which gives them to the document, would move nothing. They move the
+/// page under the toolbar instead, at once (a key's: ui/docs/motion.md),
+/// by what the browser itself moves (seven eighths of the page's height).
+/// With anything focused they are its own, as ever.
+fn page_key(e: &web_sys::KeyboardEvent) -> bool {
+    let Some(doc) = web_sys::window().and_then(|w| w.document()) else { return false };
+    let unfocused = doc.active_element().is_none_or(|el| matches!(el.tag_name().as_str(), "BODY" | "HTML"));
+    if !unfocused || e.alt_key() {
+        return false;
+    }
+    let shift = e.shift_key();
+    let Some(page) = shown_scroller(&doc) else { return false };
+    let height = f64::from(page.client_height()) * 0.875;
+    let to = match e.key().as_str() {
+        "PageDown" => page.scroll_top() as f64 + height,
+        " " if !shift => page.scroll_top() as f64 + height,
+        "PageUp" => page.scroll_top() as f64 - height,
+        " " => page.scroll_top() as f64 - height,
+        "Home" => 0.0,
+        "End" => f64::from(page.scroll_height()),
+        _ => return false,
+    };
+    page.set_scroll_top(to.round() as i32);
+    true
+}
+
+/// The page shown in the window that scrolls: the tallest scroller of the
+/// main column (beside a sidebar) or of the window, over any sheet.
+fn shown_scroller(doc: &web_sys::Document) -> Option<web_sys::Element> {
+    let within = doc
+        .query_selector(".ark-modal-layer .ark-dialog")
+        .ok()
+        .flatten()
+        .or_else(|| doc.query_selector(".ark-accessory-full").ok().flatten())
+        .or_else(|| doc.query_selector(".ark-shell-main").ok().flatten())
+        .or_else(|| doc.query_selector(".ark-window").ok().flatten())?;
+    let list = within.query_selector_all(".ark-page, .ark-scroll.ark-v, .ark-table, .ark-sheet-body, .ark-accessory-body, .ark-split-detail").ok()?;
+    (0..list.length())
+        .filter_map(|i| list.item(i).and_then(|n| n.dyn_into::<web_sys::Element>().ok()))
+        .filter(|el| el.scroll_height() > el.client_height())
+        .max_by_key(|el| el.client_height())
 }
 
 /// `vig`: every row of the cursor's section lit.

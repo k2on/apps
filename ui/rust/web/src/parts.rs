@@ -343,11 +343,7 @@ fn drawn<M: Clone + std::fmt::Debug + 'static>(v: View<M>) -> Option<AnyView> {
                     .attr("aria-busy", "true")
                     .child(label.get())
                     .into_any(),
-                false => html::img()
-                    .class(if zoom { "ark-photo ark-photo-zoom" } else { "ark-photo" })
-                    .attr("src", url)
-                    .attr("alt", label.get())
-                    .into_any(),
+                false => crate::layout::picture(url, label.get(), if zoom { "ark-photo ark-photo-zoom" } else { "ark-photo" }),
             }
         }
         Part::Press {

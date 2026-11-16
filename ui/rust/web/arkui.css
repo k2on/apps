@@ -23,7 +23,12 @@ input { font: inherit; color: inherit; }
 h1, h2, h3, p { margin: 0; font: inherit; }
 :focus-visible { outline: 2px solid var(--ark-accent); outline-offset: -2px; }
 
-.ark-window, .ark-frame, .ark-shell-root { height: 100vh; width: 100vw; }
+/* The window is the visible viewport's (`dvh`: a phone's browser bar
+   never covers its foot), and it never scrolls itself: what scrolls is a
+   page (`.ark-page`) or a scroll (`.ark-scroll`) inside it, a swipe past
+   its end stays its own, and the keys that scroll a document scroll it
+   (keys.rs, `page_key`). */
+.ark-window, .ark-frame, .ark-shell-root { height: 100vh; height: 100dvh; width: 100vw; }
 .ark-frame { position: relative; }
 .ark-column { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 .ark-fill { flex: 1 1 auto; height: 100%; min-height: 0; }
@@ -122,7 +127,7 @@ button.ark-sidebar-heading:hover, button.ark-sidebar-heading.ark-on { color: var
 .ark-settings-window .ark-shell-root { height: 100%; width: 100%; }
 
 /* * A page */
-.ark-page { height: 100%; overflow-y: auto; }
+.ark-page { height: 100%; min-height: 0; overflow-y: auto; overscroll-behavior-y: contain; }
 .ark-page-column { max-width: 720px; margin: 0 auto; padding: 18px; display: flex; flex-direction: column; gap: 10px; }
 .ark-hero-label { font-size: 13px; color: color-mix(in srgb, var(--ark-ink) 55%, transparent); }
 .ark-hero-figure { font-size: 34px; }
@@ -376,6 +381,18 @@ button.ark-sidebar-heading:hover, button.ark-sidebar-heading.ark-on { color: var
 
 /* A photo (`photo`): fitted to its width; zoomed (`zoom_photo`), the room it is given, scrolled at its own size once wider. */
 .ark-photo { display: block; max-width: 100%; height: auto; border-radius: var(--ark-corner); }
+/* The image primitive's picture (`layout::picture`): kept by every redraw,
+   shown once it has loaded, on the theme's fade (reduced motion keeps the
+   fade; a screenshot's page has no transition at all), and hidden in place
+   when it will not load. Only where script runs (the SPA, or a written
+   page taken over), so a page without script shows its pictures as they
+   come. Under a shown picture, what a depth stack drew first (its
+   placeholder) is put away, so no edge of it shows round the picture's
+   own: no seam, and none to flicker as the page is drawn again. */
+.ark-image { transition: opacity var(--ark-fade-ms) var(--ark-fade); }
+:is(:root:not([data-ark-mode]), :root[data-ark-js]) .ark-image:not([data-ark-shown]) { opacity: 0; }
+.ark-image[data-ark-failed] { visibility: hidden; }
+.ark-stack.ark-z > :has(~ .ark-image[data-ark-shown], ~ * > .ark-image[data-ark-shown]) { visibility: hidden; }
 .ark-photo-zoom { width: 100%; max-height: 80vh; object-fit: contain; }
 .ark-photo-waiting { text-align: center; padding: var(--ark-space-l); }
 /* A slip of paper (`paper`): a receipt as it was printed, dark on white in every theme as the paper is. */
@@ -413,7 +430,7 @@ button.ark-sidebar-heading:hover, button.ark-sidebar-heading.ark-on { color: var
 .ark-z.ark-align-start { justify-items: start; align-items: center; }
 .ark-z.ark-align-center { place-items: center; }
 .ark-z.ark-align-end { justify-items: end; align-items: center; }
-.ark-scroll.ark-v { overflow-y: auto; }
+.ark-scroll.ark-v { overflow-y: auto; min-height: 0; overscroll-behavior-y: contain; }
 .ark-scroll.ark-h { overflow-x: auto; }
 .ark-spacer { flex: 1 1 0; }
 .ark-gap-xs { gap: var(--ark-space-xs); }
