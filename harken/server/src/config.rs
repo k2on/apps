@@ -37,7 +37,10 @@ pub fn device(can_play: bool, kind: &str, name: &str) -> Vec<u8> {
 pub fn peer(domain: &Arc<Domain>, device: Vec<u8>, every_ms: i64) -> Config {
     let live = Live {
         device: Some(device),
-        ephemeral: harken_domain::host::EPHEMERAL.iter().map(|e| e.to_string()).collect(),
+        ephemeral: harken_domain::host::EPHEMERAL
+            .iter()
+            .map(|e| e.to_string())
+            .collect(),
         every_ms,
         ..Live::new(Module::of(domain))
     };
