@@ -119,3 +119,18 @@ fn the_view_draws_the_page_and_its_recording_has_every_way() {
         assert!(all.contains(&part), "{part} is not in {all:?}");
     }
 }
+
+#[test]
+fn a_song_is_drawn_with_its_albums_cover() {
+    let (mut rt, mut d) = library();
+    d.run(&mut rt, [LibraryMsg::Show { kind: "albums".into() }]);
+    let covers: Vec<String> = d.page(&mut rt).albums.iter().map(|a| a.art.clone()).filter(|a| !a.is_empty()).collect();
+    assert!(!covers.is_empty(), "the demo's albums have covers");
+    d.run(&mut rt, [LibraryMsg::Show { kind: "songs".into() }]);
+    let songs = d.page(&mut rt).songs;
+    assert!(songs.iter().any(|t| !t.art.is_empty()), "no song has a cover");
+    assert!(
+        songs.iter().filter(|t| !t.art.is_empty()).all(|t| covers.contains(&t.art)),
+        "a song's cover is its album's"
+    );
+}

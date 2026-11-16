@@ -78,7 +78,10 @@ impl App for Search {
     type Screen = SearchPage;
 
     fn holds(s: &State) -> Vec<HarkenView> {
-        songs_view(s).into_iter().chain([HarkenView::Albums, HarkenView::Artists]).collect()
+        songs_view(s)
+            .into_iter()
+            .chain([HarkenView::Albums, HarkenView::Artists, HarkenView::TrackDetails])
+            .collect()
     }
 
     fn update(s: &mut State, msg: SearchMsg, data: &Data<'_, HarkenView>) -> Vec<Command<Self>> {
@@ -112,6 +115,7 @@ impl App for Search {
         let n = needle(s);
         let lower = n.to_lowercase();
         let server = &s.server;
+        let covers = crate::words::Covers::read(server, data);
         let (albums, artists, songs) = match n.is_empty() {
             true => (vec![], vec![], vec![]),
             false => (
@@ -126,7 +130,13 @@ impl App for Search {
                     .map(|a| artist_tile(server, a))
                     .collect::<Vec<_>>(),
                 songs_view(s)
-                    .map(|v| rows::<LibraryEntry>(data, &v).iter().take(SONGS).map(|e| track_item(server, e)).collect())
+                    .map(|v| {
+                        rows::<LibraryEntry>(data, &v)
+                            .iter()
+                            .take(SONGS)
+                            .map(|e| track_item(&covers, e))
+                            .collect()
+                    })
                     .unwrap_or_default(),
             ),
         };

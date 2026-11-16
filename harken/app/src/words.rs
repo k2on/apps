@@ -21,6 +21,49 @@ pub fn art_url(server: &str, art: &str) -> String {
     }
 }
 
+/// Each song's cover: its album's, by the song's id (its hex), from the
+/// songs' details (which album each is on) and the albums (each one's
+/// cover), both of them views a screen that draws a song's cover holds
+/// ([`Covers::VIEWS`]). A song on no album, or an album with no cover, has
+/// none, and is drawn as its derived square.
+#[derive(Clone, Debug, Default)]
+pub struct Covers {
+    server: String,
+    by: std::collections::BTreeMap<String, String>,
+}
+
+impl Covers {
+    /// The views a song's cover is read from.
+    pub const VIEWS: [HarkenView; 2] = [HarkenView::TrackDetails, HarkenView::Albums];
+
+    /// The covers as `server` serves them, from the songs' details and the
+    /// albums.
+    pub fn of(server: &str, details: &[harken_domain::TrackDetailsEntry], albums: &[harken_domain::AlbumsEntry]) -> Covers {
+        let art: std::collections::BTreeMap<&str, &str> = albums
+            .iter()
+            .filter(|a| !a.art.is_empty())
+            .map(|a| (a.id.as_str(), a.art.as_str()))
+            .collect();
+        let by = details
+            .iter()
+            .filter_map(|d| art.get(d.album_id.as_str()).map(|a| (d.media_id.hex(), a.to_string())))
+            .collect();
+        Covers { server: server.into(), by }
+    }
+
+    /// The covers as a screen's views hold them.
+    pub fn read(server: &str, data: &Data<'_, HarkenView>) -> Covers {
+        let [details, albums] = &Covers::VIEWS;
+        Covers::of(server, &rows(data, details), &rows(data, albums))
+    }
+
+    /// Where the song `media` (its id's hex)'s cover is fetched from; none
+    /// for none.
+    pub fn track(&self, media: &str) -> String {
+        self.by.get(media).map_or(String::new(), |a| art_url(&self.server, a))
+    }
+}
+
 /// How long a track runs (`4:21`), nothing for no length.
 pub fn length(ms: i64) -> String {
     match ms > 0 {

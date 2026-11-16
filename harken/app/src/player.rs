@@ -149,7 +149,7 @@ pub fn joined(s: &State, l: &Listening) -> bool {
 }
 
 /// What the session plays, as the player draws it.
-pub fn playing_of(server: &str, a: &Active, now: i64) -> Playing {
+pub fn playing_of(covers: &words::Covers, a: &Active, now: i64) -> Playing {
     let t = a.now();
     let (at_ms, since_ms, playing) = match (&a.output, a.clock) {
         (harken_domain::Output::Device { moving: true, .. }, _) => (a.position(now), now, false),
@@ -164,7 +164,7 @@ pub fn playing_of(server: &str, a: &Active, now: i64) -> Playing {
             .filter(|w| !w.is_empty())
             .collect::<Vec<_>>()
             .join(" · "),
-        art: words::art_url(server, &t.file),
+        art: covers.track(&t.id.hex()),
         seed: t.title.clone(),
         at_ms,
         since_ms,
@@ -198,7 +198,7 @@ impl App for Player {
     type Screen = PlayerPage;
 
     fn holds(_: &State) -> Vec<HarkenView> {
-        vec![HarkenView::Listening]
+        [HarkenView::Listening].into_iter().chain(words::Covers::VIEWS).collect()
     }
 
     fn update(s: &mut State, msg: PlayerMsg, data: &Data<'_, HarkenView>) -> Vec<Command<Self>> {
@@ -245,7 +245,7 @@ impl App for Player {
             (true, Some(a)) => Some(Playing {
                 volume: leader.as_deref().and_then(|d| l.group_volume(d)).unwrap_or(0),
                 muted: leader.as_deref().is_some_and(|d| l.group_muted(d)),
-                ..playing_of(&s.server, a, data.now_ms)
+                ..playing_of(&words::Covers::read(&s.server, data), a, data.now_ms)
             }),
             (true, None) => None,
             (false, _) => s.own.clone(),

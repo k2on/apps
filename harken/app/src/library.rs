@@ -175,13 +175,13 @@ fn songs_view() -> HarkenView {
 }
 
 /// A song as a row says it.
-pub fn track_item(server: &str, e: &LibraryEntry) -> TrackItem {
+pub fn track_item(covers: &words::Covers, e: &LibraryEntry) -> TrackItem {
     TrackItem {
         id: e.id.hex(),
         title: e.title.clone(),
         under: e.creator.clone(),
         length: words::length(e.duration_ms),
-        art: words::art_url(server, &e.file),
+        art: covers.track(&e.id.hex()),
         seed: e.title.clone(),
     }
 }
@@ -236,7 +236,7 @@ impl App for Library {
         match s.kind() {
             "albums" => vec![HarkenView::Albums],
             "artists" => vec![HarkenView::Artists],
-            "songs" => vec![songs_view()],
+            "songs" => [songs_view()].into_iter().chain(words::Covers::VIEWS).collect(),
             "podcasts" | "sermons" => vec![HarkenView::Shows],
             _ => vec![HarkenView::Playlists],
         }
@@ -304,6 +304,7 @@ impl App for Library {
     fn screen(s: &State, data: &Data<'_, HarkenView>) -> LibraryPage {
         let kind = s.kind();
         let server = &s.server;
+        let covers = words::Covers::read(server, data);
         let mut page = LibraryPage {
             chips: KINDS
                 .iter()
@@ -357,7 +358,7 @@ impl App for Library {
                 page.songs = rows::<LibraryEntry>(data, &songs_view())
                     .iter()
                     .filter(|e| e.kind != "episode")
-                    .map(|e| track_item(server, e))
+                    .map(|e| track_item(&covers, e))
                     .collect();
                 ("music", "No Songs", "The songs your server finds show here.")
             }

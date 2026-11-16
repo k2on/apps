@@ -138,6 +138,11 @@ impl Listen {
         let Some(sound) = self.sound.as_mut() else { return };
         let s = cx.place.session();
         let l = Listen::listening(cx);
+        let [details, albums] = &crate::words::Covers::VIEWS;
+        let typed = |k: &HarkenView| cx.rows::<Vec<u8>>(k);
+        let details: Vec<harken_domain::TrackDetailsEntry> = typed(details).iter().filter_map(|b| Encode::from_bytes(b).ok()).collect();
+        let albums: Vec<harken_domain::AlbumsEntry> = typed(albums).iter().filter_map(|b| Encode::from_bytes(b).ok()).collect();
+        let covers = crate::words::Covers::of(&s.url, &details, &albums);
         // One clock for the whole timeline: the sound's, which the
         // session's clocks and what plays alone are read against (a demo's
         // place has a fixed day of its own for its library).
@@ -151,7 +156,7 @@ impl Listen {
         self.core.reconcile(&v, sound, &mut Says { cx });
         self.own = match v.joined {
             true => None,
-            false => own(&s.url, sound, (self.clock)()),
+            false => own(&covers, sound, (self.clock)()),
         };
     }
 
@@ -222,7 +227,7 @@ impl Listen {
 }
 
 /// What this device's sound plays on its own, as the player draws it.
-fn own(server: &str, sound: &MediaSound, now: i64) -> Option<Playing> {
+fn own(covers: &words::Covers, sound: &MediaSound, now: i64) -> Option<Playing> {
     let h = sound.heard();
     let queue = sound.tracks();
     let at = h.at?;
@@ -231,7 +236,7 @@ fn own(server: &str, sound: &MediaSound, now: i64) -> Option<Playing> {
         key: t.id.hex(),
         title: t.title.clone(),
         under: t.creator.clone(),
-        art: words::art_url(server, &t.file),
+        art: covers.track(&t.id.hex()),
         seed: t.title.clone(),
         at_ms: h.place.ms().unwrap_or(0).max(0),
         since_ms: now,

@@ -150,6 +150,7 @@ impl HostedApp for Harken {
     /// read against; and what a car has browsed.
     fn holds(&self) -> Vec<HarkenView> {
         let mut all = vec![HarkenView::Listening, listen::songs()];
+        all.extend(crate::words::Covers::VIEWS);
         all.extend(self.car.held.iter().cloned());
         all
     }

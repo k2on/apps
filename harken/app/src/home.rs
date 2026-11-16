@@ -98,7 +98,13 @@ impl App for Home {
     type Screen = HomePage;
 
     fn holds(_: &State) -> Vec<HarkenView> {
-        vec![HarkenView::LastPlayed, songs(), HarkenView::Playlists, HarkenView::Albums]
+        vec![
+            HarkenView::LastPlayed,
+            songs(),
+            HarkenView::Playlists,
+            HarkenView::Albums,
+            HarkenView::TrackDetails,
+        ]
     }
 
     fn update(s: &mut State, msg: HomeMsg, data: &Data<'_, HarkenView>) -> Vec<Command<Self>> {
@@ -139,13 +145,14 @@ impl App for Home {
 
     fn screen(s: &State, data: &Data<'_, HarkenView>) -> HomePage {
         let server = &s.server;
+        let covers = words::Covers::read(server, data);
         let last = rows::<Play>(data, &HarkenView::LastPlayed).into_iter().next().map(|p| LastPlayed {
             under: [p.creator.clone(), p.album.clone()]
                 .into_iter()
                 .filter(|w| !w.is_empty())
                 .collect::<Vec<_>>()
                 .join(" · "),
-            art: words::art_url(server, &p.file),
+            art: covers.track(&p.track),
             seed: p.title.clone(),
             title: p.title,
         });
@@ -155,7 +162,7 @@ impl App for Home {
                 key: e.id.hex(),
                 title: e.title.clone(),
                 caption: e.creator.clone(),
-                art: words::art_url(server, &e.file),
+                art: covers.track(&e.id.hex()),
                 seed: e.title.clone(),
             })
             .collect();

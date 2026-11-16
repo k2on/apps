@@ -127,7 +127,7 @@ impl App for Page {
     type Screen = RecordPage;
 
     fn holds(s: &State) -> Vec<HarkenView> {
-        s.tracks().into_iter().chain(s.header()).collect()
+        s.tracks().into_iter().chain(s.header()).chain(words::Covers::VIEWS).collect()
     }
 
     fn update(s: &mut State, msg: PageMsg, data: &Data<'_, HarkenView>) -> Vec<Command<Self>> {
@@ -170,6 +170,7 @@ impl App for Page {
 
     fn screen(s: &State, data: &Data<'_, HarkenView>) -> RecordPage {
         let server = &s.server;
+        let covers = words::Covers::read(server, data);
         let tracks: Vec<LibraryEntry> = s.tracks().map(|v| rows(data, &v)).unwrap_or_default();
         let header = s.header();
         let mut p = RecordPage {
@@ -180,7 +181,7 @@ impl App for Page {
             art: String::new(),
             seed: String::new(),
             round: false,
-            tracks: tracks.iter().map(|e| track_item(server, e)).collect(),
+            tracks: tracks.iter().map(|e| track_item(&covers, e)).collect(),
             empty: tracks.is_empty(),
         };
         match (&s.route, header) {
