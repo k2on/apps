@@ -19,8 +19,8 @@ pub enum Tint {
 }
 
 impl Tint {
-    /// A tint by the name a view gives it (`ark_app::view::HeaderCard`'s
-    /// `tint`, an `Ink::Tint`'s), as iced's `Tint::named`: neutral unless it is one of the
+    /// A tint by the name a view gives it (a `tile`'s or a
+    /// `status_badge`'s, an `Ink::Tint`'s), as iced's `Tint::named`: neutral unless it is one of the
     /// others.
     pub fn named(name: &str) -> Tint {
         match name {

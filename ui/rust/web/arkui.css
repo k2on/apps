@@ -387,12 +387,15 @@ button.ark-sidebar-heading:hover, button.ark-sidebar-heading.ark-on { color: var
    when it will not load. Only where script runs (the SPA, or a written
    page taken over), so a page without script shows its pictures as they
    come. Under a shown picture, what a depth stack drew first (its
-   placeholder) is put away, so no edge of it shows round the picture's
-   own: no seam, and none to flicker as the page is drawn again. */
+   placeholder square) is put away once the picture's fade has ended, so
+   no edge of it shows round the picture's own (no seam, and none to
+   flicker as the page is drawn again) while the picture fades in over its
+   square, never over nothing: put away at once, a cover caught mid-fade
+   was washed out, or blank. */
 .ark-image { transition: opacity var(--ark-fade-ms) var(--ark-fade); }
 :is(:root:not([data-ark-mode]), :root[data-ark-js]) .ark-image:not([data-ark-shown]) { opacity: 0; }
 .ark-image[data-ark-failed] { visibility: hidden; }
-.ark-stack.ark-z > :has(~ .ark-image[data-ark-shown], ~ * > .ark-image[data-ark-shown]) { visibility: hidden; }
+.ark-stack.ark-z > :has(~ .ark-image[data-ark-shown], ~ * > .ark-image[data-ark-shown]) { visibility: hidden; transition: visibility 0s linear var(--ark-fade-ms); }
 .ark-photo-zoom { width: 100%; max-height: 80vh; object-fit: contain; }
 .ark-photo-waiting { text-align: center; padding: var(--ark-space-l); }
 /* A slip of paper (`paper`): a receipt as it was printed, dark on white in every theme as the paper is. */
