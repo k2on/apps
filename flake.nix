@@ -2060,7 +2060,7 @@
             lib.listToAttrs (map (p: lib.nameValuePair p.package p.drv) webPages)
           ) // lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
             # build.yaml's `crates` job (`ciCrates`): the checks' crates, and
-            # those its `server`, `docs-site`/`page` and `apk`/`tests` jobs
+            # those its `server`, `page` and `apk`/`tests` jobs
             # share. UniFFI's and wasm-bindgen's CLIs, cargo builds of their
             # own, are each a job's input beside the checks'.
             ci-crates = ciCrates {
@@ -2069,7 +2069,7 @@
                 "harken-domain" "harken-module" "docs" "theme" "theme-contrast"
                 "prebuild" "money-native" "harken-native" "revelation-native" "money-web-sync"
               ];
-              # The docs, which on main `page` and `docs-site` both build.
+              # The docs, which on main `page` builds.
               all = [ (docsCrate { }) docs-web.wasm docs-web.export ];
               groups = {
                 server = [ harken-server arkdb money-server-bin harken-seed money-seed money-web.wasm harken-web.wasm ];
