@@ -32,6 +32,11 @@ mkdir -p "$out/light" "$out/dark"
 began=$(date +%s)
 xcrun swiftc -O "$here/window.swift" -o "$tmp/window"
 echo "  window.swift compiled in $(( $(date +%s) - began ))s"
+# The display big enough for the window, at twice the pixels where it can
+# be (display.swift): the wide windows' pictures alike.
+xcrun swiftc -O "$here/display.swift" -o "$tmp/display"
+read -r ww wh < <(jq -r '.wide.window | "\(.[0]) \(.[1])"' "$shots")
+"$tmp/display" "$ww" "$((wh + 40))" || echo "::warning::the display's mode could not be set"
 
 # Asked of System Events, given twenty seconds: a prompt for leave to drive
 # it would never end.
