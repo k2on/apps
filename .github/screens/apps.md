@@ -261,8 +261,9 @@ which nix builds at the commit (see below).
   **`await-apk.sh`**: an APK from a `build` run still going, as soon as it
   is uploaded.
 - **`ios-build.sh`**: each iPhone app as nix builds it at the commit:
-  the cache's when its inputs have not moved (mac-compile.yaml builds and
-  pushes them ahead, by hand), or built with the runner's own Xcode where
+  the cache's when its inputs have not moved (ios.yaml builds and pushes
+  both on main's push, after the archive, and a PR's iPhone app;
+  mac-compile.yaml by hand), or built with the runner's own Xcode where
   it is installed: one app's build at a time, each ended after
   `BUILD_LIMIT` seconds by **`limit.sh`**, which says first what the Mac
   was doing (its memory, its processes, a sample of a stuck `actool`).
@@ -331,9 +332,12 @@ waited an hour for a Mac), then does nothing, and nothing is compared.
   A commit that also moved the scripts has its Android shots taken by its
   push's own run instead (below), from the same build run's APKs, so the
   two runs' jobs do not cancel each other. The iPhone once `ios` has ended, each
-  app whose hash moved built by nix at that commit: the cache's if its
-  build has not moved, and the kernel's simulator slice the one `ios`
-  built for its tests and pushed. The
+  app whose hash moved built by nix at that commit, and fetched: `ios`,
+  after each archive, built the app's `<app>-ios-simulator` and
+  `<app>-macos` the cache did not have, one at a time under `limit.sh`'s
+  20 minutes, and pushed them (never Xcode, the SDK or anything signed),
+  so this Mac builds nothing and boots its simulator under the fetch. One
+  `ios` could not build (it said so, as a warning) is built here. The
   desktop as soon as `build` has started, the same way: every window built
   by nix at that commit (build.yaml's own build of it fills the cache).
   Each phone taken whole replaces what the `screens` branch had at

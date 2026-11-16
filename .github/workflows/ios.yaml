@@ -33,10 +33,21 @@
 # **Main is the unstable channel and goes nowhere.** A push to main (and a
 # run by hand on a branch) archives and signs the same way and sends
 # nothing (`destination: export`): what proves the signing still works
-# before a release needs it, and all it does, to keep the Mac's minutes
-# low. A pull request builds each app's simulator kernel and the
-# screenshots' app (app-screens.yaml fetches them from the cache) and signs
-# nothing. No app has iOS unit tests, so nothing here runs any.
+# before a release needs it. A pull request builds each app's simulator
+# kernel and the screenshots' app (app-screens.yaml fetches them from the
+# cache) and signs nothing. No app has iOS unit tests, so nothing here runs
+# any.
+#
+# **Main's push also builds the screenshots' apps**, after the archive:
+# each app's `<app>-ios-simulator` and `<app>-macos`, one at a time, each
+# ended after 20 minutes by ../screens/limit.sh, and pushed to the cache,
+# so that app-screens' Mac, which runs once this has ended, only fetches
+# them (its "built here, not fetched" finds nothing on an ordinary push).
+# Only what the cache has not got: the `kernels` job asks the cache for
+# each one's store path, which moves only with what it is built from, and
+# an app none of whose builds moved builds none here. One that fails or
+# is ended is said and the run is not failed for it: app-screens then
+# builds it itself, as it did before.
 #
 # **The unstable TestFlight app is a hook, off for every app.** The
 # flake's list says `unstable` for an app whose app.toml has
@@ -185,16 +196,35 @@ jobs:
           # Apple's SDK headers that ring's C is compiled against are
           # cache.nixos.org's (nixpkgs fetches them from Apple); never ours.
           pushFilter: "macOS-SDK"
+      # On main's push, the screenshots' apps the cache has not got
+      # (`<app> <attr>` lines, the iPhone's first, in screens.txt beside the
+      # kernels, which the Mac reads): each one's store path, evaluated and
+      # not built, asked of the cache. One it has is not built again.
       - name: Build the kernels
         run: |
           attrs=()
+          : > "$RUNNER_TEMP/screens.txt"
           for a in $APPS; do
             if [ "$GITHUB_EVENT_NAME" = pull_request ]; then attrs+=("$a-ios-simulator" "$a-ios-kernel-simulator")
             else attrs+=("$a-ios-archive"); fi
+            if [ "$GITHUB_EVENT_NAME" = push ] && [ "$GITHUB_REF" = refs/heads/main ]; then
+              for p in "$a-ios-simulator" "$a-macos"; do
+                if ! out=$(nix eval --raw ".#packages.aarch64-darwin.$p.outPath" 2> /dev/null); then
+                  echo "$p: none at this commit"
+                elif nix path-info --store https://k2on.cachix.org "$out" > /dev/null 2>&1; then
+                  echo "$p: the cache's already ($out)"
+                else
+                  echo "$p: built on the Mac after the archive ($out)"
+                  attrs+=("$p")
+                  echo "$a $p" >> "$RUNNER_TEMP/screens.txt"
+                fi
+              done
+            fi
           done
           bash .github/apple-ahead.sh . "$RUNNER_TEMP/kernels.txt" "${attrs[@]}"
           nix copy --to "file://$RUNNER_TEMP/kernels" $(cat "$RUNNER_TEMP/kernels.txt")
           cp "$RUNNER_TEMP/kernels.txt" "$RUNNER_TEMP/kernels/paths.txt"
+          cp "$RUNNER_TEMP/screens.txt" "$RUNNER_TEMP/kernels/screens.txt"
       - uses: actions/upload-artifact@v4
         with:
           name: apple-kernels
@@ -258,8 +288,10 @@ jobs:
           name: ${{ vars.CACHIX_NAME }}
           authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
           # Anything named for Xcode (not XcodeGen), though none is in the
-          # store any more: Apple's licence keeps it off any cache.
-          pushFilter: "[Xx]code([^Gg]|$)"
+          # store any more: Apple's licence keeps it off any cache; nor
+          # Apple's SDK (nixpkgs fetches it from Apple). Nothing signed is
+          # ever in the store: ../ios-upload.sh signs outside nix.
+          pushFilter: "[Xx]code([^Gg]|$)|macOS-SDK"
 
       # What the next step builds, evaluated with nothing beside it; the
       # build then finds it in nix's evaluation cache.
@@ -328,3 +360,31 @@ jobs:
       - name: Remove the API key (not on PRs)
         if: always()
         run: rm -rf "$RUNNER_TEMP/asc"
+
+      # Main's push: the screenshots' apps the cache has not got (the
+      # `kernels` job's screens.txt), each built on its own, the iPhone's
+      # first, never two xcodebuilds at once (two asset catalogs compiled
+      # at once hung `actool` for an hour: ../screens/ios-build.sh), each
+      # ended after 20 minutes with what the Mac was doing said. Pushed to
+      # the cache by the step above's filter, at the job's end; app-screens
+      # fetches them. One that fails does not fail the run: app-screens
+      # builds what the cache lacks.
+      - name: Build the screenshots' apps (main), for app-screens
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        continue-on-error: true
+        env:
+          APP: ${{ matrix.app.name }}
+        run: |
+          attrs=$(awk -v a="$APP" '$1 == a {print $2}' "$RUNNER_TEMP/kernels/screens.txt" 2> /dev/null)
+          if [ -z "$attrs" ]; then echo "$APP: every screenshot build is the cache's already"; exit 0; fi
+          failed=0
+          for attr in $attrs; do
+            t=$(date +%s)
+            if bash .github/screens/limit.sh 1200 bash .github/nix-xcode.sh . "$XCODE" "$attr"; then
+              echo "$attr: built in $(( $(date +%s) - t ))s"
+            else
+              echo "::warning::$attr did not build here ($(( $(date +%s) - t ))s): app-screens builds it"
+              failed=1
+            fi
+          done
+          exit $failed

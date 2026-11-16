@@ -24,7 +24,8 @@
 # **After the publish.** This runs when build finishes (Android) and when
 # ios has ended (the iPhone, which builds the commit itself, after ios, so as
 # to fetch what ios built and pushed to the cache: the kernel's simulator
-# slice and, on a PR, the app; one kernel per commit). Android takes
+# slice and the apps: `<app>-ios-simulator` and `<app>-macos` after each
+# archive on main, a PR's `<app>-ios-simulator`; one kernel per commit). Android takes
 # that run's own APKs: one is there only when its inputs moved and it was
 # built (on main the `.unstable` twin, and so offered on the unstable
 # F-Droid repository). The iPhone takes nix's build at that
@@ -964,8 +965,9 @@ jobs:
             done'
 
       # Each app as nix has it at the commit (ios-build.sh): the cache's
-      # (what ios built and pushed, as this run starts once it has ended),
-      # or built.
+      # (what ios built and pushed, as this run starts once it has ended:
+      # on main's push the iPhone's and the Mac's apps, on a PR's the
+      # iPhone's), or built here when ios could not.
       - if: steps.open.outputs.open == 'true'
         id: build
         name: The apps, built by nix
