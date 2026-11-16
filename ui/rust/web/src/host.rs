@@ -575,13 +575,15 @@ impl<W: WebHosted> WebHost<W> {
         let app = self.app();
         // Each drawn as its screen, its elements' walk ids under its name.
         let hosts = |name: &'static str| crate::under(name, || crate::render(app.hosted(name, &seen, now).map(HostMsg::App)));
-        let shell = <App<W> as Windowed>::WINDOW;
+        let shell = <App<W> as ark_app::manifest::Declared>::SHELL;
         let window = crate::under(shell, || crate::shell(app.window(&seen, now).map(HostMsg::App), &hosts));
         let settings = crate::under(shell, || {
             app.settings(&seen, now)
                 .map(|(panes, done)| crate::parts::settings_window(panes.map(HostMsg::App), &hosts, HostMsg::App(done)))
         });
-        let over = crate::under(<App<W> as Windowed>::OVER, || crate::render(app.over(&seen, now).map(HostMsg::App)));
+        let over = crate::under(<App<W> as ark_app::manifest::Declared>::OVER, || {
+            crate::render(app.over(&seen, now).map(HostMsg::App))
+        });
         (window, settings, over).into_any()
     }
 

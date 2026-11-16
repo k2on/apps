@@ -11,7 +11,7 @@
 //! only the toolkit's shell does is an `ark_app::host::ShellAsk`: Settings
 //! and Add a Device put up, what shows put away for a link, signed out.
 
-use ark_app::host::{Cx, Has, HostedApp, Link, Running, Screen, Session, ShellAsk};
+use ark_app::host::{Cx, HostedApp, Link, Running, Screen, Session, ShellAsk};
 use money_core::demo::Bank;
 use money_core::{dates, AccountLine, BudgetLine, MoneyChange, MoneyView};
 
@@ -401,21 +401,6 @@ impl HostedApp for Money {
         self.shell.send(ShellMsg::Launch { args }, cx)
     }
 }
-
-macro_rules! has {
-    ($($app:ty => $field:ident),*) => {$(
-        impl Has<$app> for Money {
-            fn screen(&self) -> &Screen<$app> {
-                &self.$field
-            }
-            fn screen_mut(&mut self) -> &mut Screen<$app> {
-                &mut self.$field
-            }
-        }
-    )*};
-}
-
-has!(MoneyShell => shell, Accounts => accounts, Budget => budget, Transactions => transactions, Insights => insights, Sheets => sheets, Register => register);
 
 #[cfg(test)]
 pub(crate) mod tests;

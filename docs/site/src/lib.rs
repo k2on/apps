@@ -30,3 +30,10 @@ pub mod render;
 
 #[cfg(all(test, feature = "native"))]
 mod tests;
+
+// The docs' declaration (ui/docs/app.md, "The App's Declaration"): their
+// part of their host, which runs no screen of its own.
+ark_app::app! {
+    /// The docs as their page runs them: their part of their host.
+    pub type App = app::Docs {}
+}

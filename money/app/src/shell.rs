@@ -280,6 +280,10 @@ pub struct ShellPage {
     pub picture: String,
     /// Who is using the budget and where: the account sheet's.
     pub household: Household,
+    /// A page shown in the system's browser while it is set (Plaid's, as
+    /// Settings asks for it), which the shell says closed with
+    /// [`ShellMsg::PageClosed`]: every app's shell reads it by this name.
+    pub browse: Option<String>,
     /// Where the window is, as an address (`ark_router::Address`'s
     /// conventions; ui/docs/app.md, "Addresses"): the place in its path,
     /// money's route where it has one (`/budget/`, `/insights/`,
@@ -493,7 +497,9 @@ impl App for MoneyShell {
             Some(name) if s.section == SECTIONS[1] => named(&open, name),
             _ => tagged_account(&s.section).and_then(|id| open.iter().find(|a| a.id.hex() == id).copied()),
         };
+        let settings = settings::screen(s, data);
         ShellPage {
+            browse: settings.plaid.clone(),
             section: shown.map(|a| account_tag(&a.id.hex())).unwrap_or_else(|| s.section.clone()),
             inspector: s.inspector,
             search: s.search.clone(),
@@ -508,7 +514,7 @@ impl App for MoneyShell {
                 .as_deref()
                 .and_then(|k| inspect::transaction_named(data.rows(&MoneyView::Register { account: None }), k))
                 .map(inspect::transaction),
-            settings: settings::screen(s, data),
+            settings,
             to_review: (unapproved > 0).then_some(unapproved),
             budget_accounts: open.iter().filter(|a| a.on_budget).map(place).collect(),
             tracking_accounts: open.iter().filter(|a| !a.on_budget).map(place).collect(),

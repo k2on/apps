@@ -1,13 +1,14 @@
-//! An app's screens as the generator takes them: the registry an app's
-//! crate hands over (`money_app::screens()`), and the command line nix runs
-//! over it (ui/docs/app.md, "Generated, Not Committed").
+//! An app's screens as the generator takes them, and the command line nix
+//! runs over them (ui/docs/app.md, "Generated, Not Committed").
 //!
-//! An app never has a generator of its own. nix writes a tiny main for it
-//! (`fn main() { ark_ui_gen::app::main(money_app::screens()) }`), links it
-//! with the app's crate under its `gen` feature, and runs it while it
-//! builds the app's native projects, which then hold the generated SwiftUI
-//! and Compose; nothing generated is committed.
+//! An app never has a generator of its own. nix writes a one-line main for
+//! it (`fn main() { ark_ui_gen::app::run::<money_app::App>(…) }`, over its
+//! crate's declaration: [`run`]), links it with the app's crate, and runs
+//! it while it builds the app's native projects, which then hold the
+//! generated SwiftUI and Compose, and for the app's manifest; nothing
+//! generated is committed.
 //!
+//!   <generator> manifest                the app's manifest, as JSON
 //!   <generator> write DIR --package P   every screen's Swift and Kotlin, into DIR
 //!   <generator> files                   the files it writes, one a line
 
@@ -137,4 +138,76 @@ pub fn main(app: App) {
             std::process::exit(2)
         }
     }
+}
+
+/// The command line over an app's declaration (`ark_app::app!`): every
+/// view it declares written under the names its manifest gives them, the
+/// first run's among them, and `manifest`, the manifest itself as JSON
+/// (what ui/prebuild.py reads). `namespace` is its library's UniFFI
+/// namespace (`money_ffi`), `dir` its crate's directory from the
+/// repository's root (`money/app`), which each file's header names.
+///
+///   <generator> manifest                the manifest, as JSON
+///   <generator> write DIR --package P   every view's Swift and Kotlin
+///   <generator> files                   the files it writes
+pub fn run<H: ark_app::manifest::Declared>(namespace: &'static str, dir: &str) {
+    use ark_app::manifest::{Decl, Declare, Manifest};
+
+    let manifest = Manifest::of::<H>();
+    if std::env::args().nth(1).as_deref() == Some("manifest") {
+        println!("{}", manifest.json());
+        return;
+    }
+    let leak = |s: String| -> &'static str { Box::leak(s.into_boxed_str()) };
+    let names = |d: &Decl| {
+        let n = manifest.names(d.screen, d.name).expect("every view declared is in the manifest");
+        Names {
+            swift: leak(n.swift.clone()),
+            swift_holder: leak(n.swift_holder.clone()),
+            kotlin: leak(n.kotlin.clone()),
+            kotlin_holder: leak(n.kotlin_holder.clone()),
+            source: leak(format!("{dir}/{}", n.source)),
+            msg: leak(d.msg.rsplit("::").next().unwrap_or(d.msg).to_string()),
+            screen: d.screen,
+        }
+    };
+    struct Collect<'a> {
+        names: &'a dyn Fn(&Decl) -> Names,
+        own: Vec<Generated>,
+        further: Vec<Generated>,
+    }
+    impl Declare for Collect<'_> {
+        fn view<M: Debug + 'static>(&mut self, d: Decl, record: fn() -> View<M>) {
+            let g = Generated::view(record, (self.names)(&d));
+            match d.name.is_empty() {
+                true => self.own.push(g),
+                false => self.further.push(g),
+            }
+        }
+        fn commands<M: Debug + 'static>(&mut self, d: Decl, menus: fn() -> Vec<CommandMenu<M>>) {
+            self.further.push(Generated::commands(menus, (self.names)(&d)));
+        }
+    }
+    let mut c = Collect {
+        names: &names,
+        own: vec![],
+        further: vec![],
+    };
+    H::declare(&mut c);
+    // Its screens', the first run's (every app's), then the further views.
+    let mut screens = c.own;
+    screens.push(Generated::view(
+        ark_app::welcome::welcome::record,
+        Names {
+            swift: "WelcomeView",
+            swift_holder: "FirstRunScreen",
+            kotlin: "WelcomeScreen",
+            kotlin_holder: "FirstRunHolder",
+            source: "ui/rust/app/src/welcome.rs",
+            msg: "WelcomeMsg",
+            screen: "welcome",
+        },
+    ));
+    screens.extend(c.further);
+    main(App { namespace, screens })
 }

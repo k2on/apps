@@ -125,6 +125,8 @@ fn shape(input: &DeriveInput, view: bool, eq: bool) -> syn::Result<TokenStream> 
     let dn = if eq { name.clone() } else { tw.clone() };
     let p = path();
     let mut fields = vec![];
+    // Every field's type, for what the type reaches (`ark::twin::Reach`).
+    let mut held: Vec<Type> = vec![];
     let (kind, decl, out, back) = match &input.data {
         Data::Struct(s) => {
             let fs = named(&s.fields, name.span())?;
@@ -133,6 +135,7 @@ fn shape(input: &DeriveInput, view: bool, eq: bool) -> syn::Result<TokenStream> 
             for (i, (_, t, _)) in fs.iter().enumerate() {
                 let i = n(i);
                 fields.push(quote!(impl ::ark::twin::Field<0, #i> for #name { type Ty = #t; }));
+                held.push(t.clone());
             }
             let (tys, tos) = (ts.iter().map(ffi_ty), fs.iter().zip(&ts).map(|((f, _, _), t)| to(t, quote!(self.#f))));
             let froms = fs.iter().zip(&ts).map(|((f, _, _), t)| from(t, quote!(t.#f)));
@@ -167,6 +170,7 @@ fn shape(input: &DeriveInput, view: bool, eq: bool) -> syn::Result<TokenStream> 
                 for (i, (_, t, _)) in fs.iter().enumerate() {
                     let (vn, i) = (n(vn), n(i));
                     fields.push(quote!(impl ::ark::twin::Field<#vn, #i> for #name { type Ty = #t; }));
+                    held.push(t.clone());
                 }
                 let tys = ts.iter().map(ffi_ty);
                 let tos: Vec<_> = fs.iter().zip(&ts).map(|((f, _, _), t)| to(t, quote!(#f))).collect();
@@ -224,6 +228,17 @@ fn shape(input: &DeriveInput, view: bool, eq: bool) -> syn::Result<TokenStream> 
     };
     let mac = format_ident!("__ark_twin_{}", name);
     let doc = format!("`{name}`'s UniFFI twin, written where it is called: `ark::twins!`.");
+    // What it reaches: itself, by the path its twin is written over, and
+    // what its fields' types reach.
+    fields.push(quote! {
+        impl ::ark::twin::Reach for #name {
+            fn reach(r: &mut ::ark::twin::Reached) {
+                if r.add(::core::concat!(::core::module_path!(), "::", #label)) {
+                    #(::ark::reach!(r, #held);)*
+                }
+            }
+        }
+    });
     Ok(quote! {
         #(#fields)*
 

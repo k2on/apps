@@ -669,6 +669,7 @@ impl<M: Send + 'static> Inbox<M> {
 
 pub mod background;
 pub mod host;
+pub mod manifest;
 mod platform;
 pub mod shell;
 pub mod shots;

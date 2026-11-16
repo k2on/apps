@@ -216,3 +216,47 @@ fn the_time_is_on_the_sessions_day() {
     assert_eq!(super::session_now(noon_26 + 30 * 86_400_000, "2026-10-26"), noon_26);
     assert_eq!(money_core::dates::day_of_ms(super::session_now(0, "2026-10-26")), "2026-10-26");
 }
+
+/// money's manifest, from its declaration (lib.rs's `ark_app::app!`): the
+/// shell and what goes over it, each name the shell's views host as the
+/// screen that draws it, the names the phones' code is written under, and
+/// what crosses to the phones found from the screens. Falsified by a
+/// screen left out of the declaration, a hosted name the shell's view says
+/// that no screen draws, or a page's type no longer reaching what it holds.
+#[test]
+fn manifest_says_what_app_toml_once_did() {
+    use ark_app::manifest::{Declared, Manifest};
+    let m = Manifest::of::<crate::App>();
+    assert_eq!((<crate::App as Declared>::SHELL, <crate::App as Declared>::OVER), ("shell", "sheets"));
+    let hosted: Vec<(&str, &str)> = m.hosted.iter().map(|(n, t)| (n.as_str(), t.as_str())).collect();
+    assert_eq!(
+        hosted,
+        [
+            ("budget", "budget"),
+            ("accounts", "accounts"),
+            ("accounts.register", "register"),
+            ("transactions", "transactions"),
+            ("insights", "insights")
+        ]
+    );
+    let shell = m.names("shell", "").expect("the shell is declared");
+    assert_eq!(
+        (
+            shell.swift.as_str(),
+            shell.kotlin.as_str(),
+            shell.swift_holder.as_str(),
+            shell.runtime.as_str()
+        ),
+        ("MoneyShellView", "MoneyShell", "MoneyShellScreen", "ShellApp")
+    );
+    assert_eq!(m.names("shell", "commands").map(|n| n.kotlin.as_str()), Some("moneyCommands"));
+    for t in [
+        "money_app::accounts::AccountsPage",
+        "money_app::routes::Route",
+        "money_app::MoneyRequest",
+        "money_core::accounts::AccountKind",
+        "ark_app::shell::Household",
+    ] {
+        assert!(m.twins.contains(&t), "{t} crosses");
+    }
+}

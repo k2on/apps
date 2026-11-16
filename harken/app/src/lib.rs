@@ -29,6 +29,36 @@ pub mod words;
 #[cfg(test)]
 pub(crate) mod testing;
 
+// harken's declaration (ui/docs/app.md, "The App's Declaration"): its part of
+// its host and each screen it runs, with the `#[view]` each is drawn by.
+// Every generated target is written from this (its manifest); nothing of
+// it is said in app.toml.
+ark_app::app! {
+    /// harken as every generated target runs it: its part of its host.
+    pub type App = host::Harken {
+        home: home::Home = home::view::home,
+        library: library::Library = library::view::library,
+        search: search::Search = search::view::search,
+        // A record's page (an album, an artist, a playlist, a show), pushed
+        // over the section it was opened from.
+        page: page::Page = page::view::record,
+        // The full player, and its now-playing bar (`player.bar`), which the
+        // shell's accessory grows into it.
+        player: player::Player = player::view::player {
+            bar: player::view::now_playing,
+        },
+        // Over every section: its sheets and dialogs.
+        #[over]
+        sheets: sheets::Sheets = sheets::view::sheets,
+        // The shell's main window, its Settings and the menu bar's commands.
+        #[shell]
+        shell: shell::HarkenShell = shell::view::harken_shell {
+            settings: shell::view::harken_settings,
+            commands: shell::view::commands,
+        },
+    }
+}
+
 pub use harken_domain::{HarkenChange, HarkenView};
 pub use routes::Route;
 

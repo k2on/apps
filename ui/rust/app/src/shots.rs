@@ -795,7 +795,7 @@ pub fn windowed<A: crate::window::Windowed>(
     }
     .map(Own);
     let mut screens = vec![Screen {
-        name: A::WINDOW.into(),
+        name: A::SHELL.into(),
         nodes: nodes(&window, send.clone()),
     }];
     // Each name hosted, as its screen (a hosted name's last part,

@@ -8,7 +8,7 @@
 //! made to agree with the session whenever the store or the sound moved
 //! (ui/docs/app.md, "harken's Port").
 
-use ark_app::host::{Cx, Form, Has, HostedApp, Link, LiveSpace, Running, Screen, Session, ShellAsk, ThisDevice};
+use ark_app::host::{Cx, Form, HostedApp, Link, LiveSpace, Running, Screen, Session, ShellAsk, ThisDevice};
 use harken_domain::host::Kind;
 use harken_domain::player::{Change, Press};
 use harken_domain::{HarkenChange, HarkenView};
@@ -337,21 +337,6 @@ impl Harken {
         }
     }
 }
-
-macro_rules! has {
-    ($($app:ty => $field:ident),*) => {$(
-        impl Has<$app> for Harken {
-            fn screen(&self) -> &Screen<$app> {
-                &self.$field
-            }
-            fn screen_mut(&mut self) -> &mut Screen<$app> {
-                &mut self.$field
-            }
-        }
-    )*};
-}
-
-has!(HarkenShell => shell, Home => home, Library => library, Search => search, Page => page, Player => player, Sheets => sheets);
 
 #[cfg(test)]
 pub(crate) mod tests;

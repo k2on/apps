@@ -101,6 +101,10 @@ fn rows<T: Clone + 'static>(place: Seen<'_>, key: &MoneyView) -> Vec<T> {
     out
 }
 
+ark_app::app! {
+    type _App = Groups {}
+}
+
 impl Windowed for Groups {
     type Msg = Msg;
 

@@ -32,6 +32,30 @@ pub mod words;
 #[cfg(test)]
 pub(crate) mod testing;
 
+// money's declaration (ui/docs/app.md, "The App's Declaration"): its part of
+// its host and each screen it runs, with the `#[view]` each is drawn by.
+// Every generated target is written from this (its manifest); nothing of
+// it is said in app.toml.
+ark_app::app! {
+    /// money as every generated target runs it: its part of its host.
+    pub type App = host::Money {
+        accounts: accounts::Accounts = accounts::view::accounts,
+        budget: budget::Budget = budget::view::budget,
+        transactions: transactions::Transactions = transactions::view::transactions,
+        insights: insights::Insights = insights::view::insights,
+        register: register::Register = register::view::register,
+        // Over every section: its sheets and dialogs.
+        #[over]
+        sheets: sheets::Sheets = sheets::view::sheets,
+        // The shell's main window, its Settings and the menu bar's commands.
+        #[shell]
+        shell: shell::MoneyShell = shell::view::money_shell {
+            settings: shell::view::money_settings,
+            commands: shell::view::commands,
+        },
+    }
+}
+
 pub use money_core::{MoneyChange, MoneyView};
 pub use routes::Route;
 
