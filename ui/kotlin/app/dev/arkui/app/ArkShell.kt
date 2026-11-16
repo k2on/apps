@@ -14,8 +14,6 @@
 // cross-fade with motion reduced.
 package dev.arkui.app
 
-import android.net.Uri
-import androidx.browser.customtabs.CustomTabsIntent
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.WindowInsets
@@ -254,8 +252,12 @@ private fun <H : ArkScreen<P, M>, P, M> ShellApp(
     val browse = shell.page.browse(page)
     LaunchedEffect(browse) {
         val url = browse ?: return@LaunchedEffect
-        runCatching { CustomTabsIntent.Builder().setShowTitle(true).build().launchUrl(context, Uri.parse(url)) }
-            .onFailure { snackbar.showSnackbar("Couldn't open the page: open it from Settings") }
+        val opened = runCatching { openInBrowser(context, url) }
+        when {
+            opened.isFailure -> snackbar.showSnackbar("Couldn't open the page: open it from Settings")
+            opened.getOrDefault(false) -> {}
+            else -> snackbar.showSnackbar("No browser is installed to open the page with. Install one, then open it from Settings.")
+        }
         screen.send(shell.page.closed(url))
     }
     // Whatever moved, every page read again, and what the app's host asks of this shell carried

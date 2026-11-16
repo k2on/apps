@@ -706,6 +706,14 @@ impl ArkHost {
         }
     }
 
+    /// No browser could open the sign-in the shell was asked to open
+    /// (Android with none installed): said on the page, and a code from a
+    /// device that's signed in offered instead. Never a web view instead
+    /// (`ark_auth::onboarding::Event::NoBrowser` says why).
+    pub fn no_browser(&self) {
+        self.event(Event::NoBrowser);
+    }
+
     /// The app came back to the front after it was away: the link dialled
     /// now, and a sign-in that came back empty may go again.
     pub fn foreground(&self) {

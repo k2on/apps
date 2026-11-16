@@ -218,6 +218,9 @@ public class ArkApp internal constructor(public val host: ArkHost) {
         _browse.value = null
     }
 
+    /** No browser could open the sign-in: the page says so, and offers a code instead. */
+    public fun noBrowser(): Unit = host.noBrowser()
+
     /**
      * The activity's window is made: what the launch's arguments open is opened from now (at once,
      * or once the session is). The iPhone and the Mac say so once the app's content has appeared, as

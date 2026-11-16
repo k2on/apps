@@ -166,6 +166,8 @@ impl FirstRun {
             WelcomeMsg::Check => Event::Check,
             WelcomeMsg::TryDemo => Event::TryDemo,
             WelcomeMsg::SignIn => Event::OpenSignIn,
+            WelcomeMsg::TypedCode { text } => Event::TypedCode { text },
+            WelcomeMsg::UseCode => Event::UseCode,
             WelcomeMsg::ChangeServer if !self.copy.other_servers => return Asked::default(),
             WelcomeMsg::ChangeServer => Event::ChangeServer,
             WelcomeMsg::Accept => Event::Accept,
@@ -212,6 +214,7 @@ impl FirstRun {
     pub fn page(&self) -> WelcomePage {
         let c = &self.copy;
         let said = self.machine.said();
+        let code = self.machine.code_entry();
         let none = WelcomePage::none();
         match self.machine.step() {
             _ if self.asked && self.intro < c.pages.len() => self.intro_page(),
@@ -238,7 +241,13 @@ impl FirstRun {
                 sign_in: Some(SignInPage {
                     glyph: "shield-check".into(),
                     title: "Sign In".into(),
-                    sentence: format!("You'll sign in on {}'s own page, and come straight back here.", display(&server)),
+                    sentence: match code.is_some() {
+                        false => format!("You'll sign in on {}'s own page, and come straight back here.", display(&server)),
+                        true => format!(
+                            "Sign in to {} with a code from a device that's already signed in there.",
+                            display(&server)
+                        ),
+                    },
                     status: said.status,
                     busy: phase == Phase::Exchanging,
                     problem: error,
@@ -250,6 +259,10 @@ impl FirstRun {
                     can_sign_in: phase != Phase::Exchanging,
                     offers_other: c.other_servers,
                     can_change: phase != Phase::Exchanging,
+                    offers_code: code.is_some(),
+                    can_use_code: phase != Phase::Exchanging && code.as_deref().is_some_and(|t| !t.trim().is_empty()),
+                    code: code.unwrap_or_default(),
+                    scan: c.scan,
                 }),
                 ..none
             },
@@ -439,6 +452,70 @@ mod tests {
         assert_eq!(f.page().opening.unwrap().sentence, "Getting your budget from money.example.com…");
         f.event(Event::Synced);
         assert!(!f.page().shows(), "the app itself");
+    }
+
+    /// No browser to sign in with: the page says so plainly and offers a
+    /// code from a device that's signed in, typed or pasted (a join link
+    /// for this server signs in with its code), or scanned; a server older
+    /// than device codes says so. Falsified by a sign-in page that offers
+    /// nothing once the browser could not be opened.
+    #[test]
+    fn with_no_browser_the_sign_in_offers_a_code() {
+        let mut f = FirstRun::new(app(), copy(0));
+        let fx = launched(
+            &mut f,
+            Remembered {
+                server: Some("https://money.example.com".into()),
+                ..Remembered::default()
+            },
+        );
+        assert!(fx.iter().any(|e| matches!(e, Effect::Browse { .. })));
+        assert!(!f.page().sign_in.unwrap().offers_code, "a browser is tried first");
+        f.event(Event::NoBrowser);
+        let s = f.page().sign_in.unwrap();
+        assert_eq!(s.problem.as_deref(), Some(crate::onboarding::words::NO_BROWSER));
+        assert!(s.problem.as_deref().unwrap().starts_with("No browser is installed to sign in with."));
+        assert!(s.offers_code && s.scan && !s.can_use_code && s.can_sign_in);
+        assert!(s.sentence.contains("a code from a device that's already signed in"));
+        assert!(f.send(WelcomeMsg::UseCode).effects.is_empty(), "nothing typed");
+        f.send(WelcomeMsg::TypedCode {
+            text: " money://join?server=https%3A%2F%2Fmoney.example.com&code=K1 ".into(),
+        });
+        assert!(f.page().sign_in.unwrap().can_use_code);
+        let asked = f.send(WelcomeMsg::UseCode);
+        assert_eq!(
+            asked.effects,
+            vec![Effect::Redeem {
+                server: "https://money.example.com".into(),
+                code: "K1".into()
+            }]
+        );
+        let s = f.page().sign_in.unwrap();
+        assert!(s.busy && !s.can_use_code && s.code.is_empty());
+        // An older server's refusal is its own sentence.
+        f.event(Event::SignInFailed {
+            why: crate::client::OLDER.into(),
+        });
+        let s = f.page().sign_in.unwrap();
+        assert_eq!(s.problem.as_deref(), Some(crate::client::OLDER));
+        assert!(s.offers_code);
+        // A bare code is redeemed as it is; another server's link is asked about.
+        f.send(WelcomeMsg::TypedCode { text: "K2".into() });
+        let asked = f.send(WelcomeMsg::UseCode);
+        assert!(matches!(&asked.effects[..], [Effect::Redeem { code, .. }] if code == "K2"));
+        f.event(Event::SignInFailed { why: "No such code.".into() });
+        f.send(WelcomeMsg::TypedCode {
+            text: "money://join?server=https%3A%2F%2Fother.example.com&code=K3".into(),
+        });
+        assert!(f.send(WelcomeMsg::UseCode).effects.is_empty());
+        assert_eq!(f.page().confirm.unwrap().title, "Join other.example.com?");
+        f.send(WelcomeMsg::Decline);
+        assert!(f.page().sign_in.unwrap().offers_code);
+        f.send(WelcomeMsg::TypedCode {
+            text: "https://example.com/x".into(),
+        });
+        f.send(WelcomeMsg::UseCode);
+        assert_eq!(f.page().sign_in.unwrap().problem.as_deref(), Some(crate::onboarding::words::NOT_A_CODE));
     }
 
     /// A scanned join code is asked about; Join signs in with it, Cancel

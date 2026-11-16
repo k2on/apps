@@ -332,8 +332,14 @@ where
             Effect::Browse { server, .. } => {
                 let user = live.user.clone();
                 off::<W>(move || {
-                    let code = ark_auth::client::code(&server, user.as_deref(), ark_auth::client::open_browser)?;
-                    Ok(Event::Code { code })
+                    let code = ark_auth::client::code_opening(
+                        &server,
+                        user.as_deref(),
+                        ark_auth::client::try_open_browser,
+                        ark_auth::client::Patience::DEFAULT,
+                    )?;
+                    // No browser to open: said, and a code offered.
+                    Ok(code.map_or(Event::NoBrowser, |code| Event::Code { code }))
                 })
             }
             Effect::Exchange { server, code } => off::<W>(move || {

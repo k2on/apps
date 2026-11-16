@@ -7,6 +7,8 @@
 // what bring a link back here. What it draws is the app's ([Content]).
 package dev.arkui.app
 
+import android.content.ActivityNotFoundException
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
@@ -92,6 +94,21 @@ internal class Attachment : ViewModel() {
     }
 }
 
+/**
+ * [url] in a Custom Tab, which is any installed browser's (Custom Tabs fall back to whichever handles
+ * https); false when none is installed (GrapheneOS with Vanadium removed and no other), rather than
+ * the `ActivityNotFoundException` that would end the app. Never a WebView instead: the identity
+ * provider's session is the browser's, so signing in to the next app is one tap, and a page drawn
+ * inside the app would be the app's, its password typed where the app can read it.
+ */
+internal fun openInBrowser(context: Context, url: String): Boolean =
+    try {
+        CustomTabsIntent.Builder().setShowTitle(true).build().launchUrl(context, Uri.parse(url))
+        true
+    } catch (_: ActivityNotFoundException) {
+        false
+    }
+
 /** What every app's activity does around what it draws: the sign-in's tab, the app's phase. */
 @Composable
 private fun Frame(app: ArkApp) {
@@ -100,9 +117,8 @@ private fun Frame(app: ArkApp) {
     LaunchedEffect(browse) {
         val url = browse ?: return@LaunchedEffect
         app.browsed()
-        // Custom Tabs, never a WebView: the provider's session is the browser's, so signing in
-        // to the next app is one tap.
-        CustomTabsIntent.Builder().setShowTitle(true).build().launchUrl(context, Uri.parse(url))
+        // With no browser at all, the page says so and offers a code from a device that's signed in.
+        if (!openInBrowser(context, url)) app.noBrowser()
     }
     // Back in front after it was away — from the browser tab, or from elsewhere: the host decides
     // which, and dials now.

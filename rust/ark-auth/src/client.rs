@@ -92,6 +92,22 @@ pub fn code(server: &str, user: Option<&str>, open: impl FnOnce(&str)) -> Result
 
 /// [`code`], waiting on the server for `patience` at most.
 pub fn code_with(server: &str, user: Option<&str>, open: impl FnOnce(&str), patience: Patience) -> Result<String, String> {
+    let code = code_opening(
+        server,
+        user,
+        |url| {
+            open(url);
+            true
+        },
+        patience,
+    )?;
+    code.ok_or_else(|| "no browser could be opened".into())
+}
+
+/// [`code_with`], where `open` says whether a browser took the page: none
+/// when it did not (the sign-in machine's `Event::NoBrowser`), rather than
+/// waiting for a code no browser will send.
+pub fn code_opening(server: &str, user: Option<&str>, open: impl FnOnce(&str) -> bool, patience: Patience) -> Result<Option<String>, String> {
     let listener = TcpListener::bind("127.0.0.1:0").map_err(|e| e.to_string())?;
     let port = listener.local_addr().map_err(|e| e.to_string())?.port();
     let redirect = format!("http://127.0.0.1:{port}/");
@@ -106,13 +122,17 @@ pub fn code_with(server: &str, user: Option<&str>, open: impl FnOnce(&str), pati
             match location.strip_prefix(&redirect) {
                 Some(rest) => query_value(rest, "code").ok_or("the server sent no code")?,
                 None => {
-                    open(&location);
+                    if !open(&location) {
+                        return Ok(None);
+                    }
                     wait_for_code(&listener)?
                 }
             }
         }
         Ok(_) => {
-            open(&url);
+            if !open(&url) {
+                return Ok(None);
+            }
             wait_for_code(&listener)?
         }
         Err(ureq::Error::Status(status, resp)) => {
@@ -121,7 +141,7 @@ pub fn code_with(server: &str, user: Option<&str>, open: impl FnOnce(&str), pati
         }
         Err(e) => return Err(format!("cannot reach {server}: {e}")),
     };
-    Ok(code)
+    Ok(Some(code))
 }
 
 /// Where a sign-in page at `url` sends the browser at once, when it sends
@@ -232,15 +252,42 @@ fn wait_for_code(listener: &TcpListener) -> Result<String, String> {
 
 /// Open `url` in whatever the desktop calls a browser.
 pub fn open_browser(url: &str) {
+    let _ = try_open_browser(url);
+}
+
+/// How long [`try_open_browser`] waits to hear that the opener failed: an
+/// opener with nothing to open a link exits at once, and one that found a
+/// browser may keep running beside it (some desktops' `xdg-open` does).
+const OPENER_WAIT_MS: u64 = 3000;
+
+/// [`open_browser`], and whether a browser took the page: false when the
+/// desktop's opener is missing or exits failing within a few seconds (no
+/// browser, nothing set to open links). Never a web view of the app's own
+/// instead: the provider's session is the browser's.
+pub fn try_open_browser(url: &str) -> bool {
     #[cfg(target_os = "macos")]
     let cmd = ("open", vec![url]);
     #[cfg(target_os = "windows")]
     let cmd = ("cmd", vec!["/C", "start", "", url]);
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     let cmd = ("xdg-open", vec![url]);
-    let _ = std::process::Command::new(cmd.0)
+    let spawned = std::process::Command::new(cmd.0)
         .args(cmd.1)
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .spawn();
+    let Ok(mut child) = spawned else { return false };
+    let start = std::time::Instant::now();
+    while start.elapsed() < std::time::Duration::from_millis(OPENER_WAIT_MS) {
+        match child.try_wait() {
+            Ok(Some(status)) => return status.success(),
+            Ok(None) => std::thread::sleep(std::time::Duration::from_millis(50)),
+            Err(_) => return true,
+        }
+    }
+    // Still going: a browser took it. Waited for elsewhere, not left behind.
+    std::thread::spawn(move || {
+        let _ = child.wait();
+    });
+    true
 }

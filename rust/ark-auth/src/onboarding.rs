@@ -247,6 +247,20 @@ pub enum Event {
     /// tried again — or, with the browser still said to be open, the person
     /// came back from it without a code.
     Foreground,
+    /// No browser could open the sign-in ([`Effect::Browse`]): a phone with
+    /// none installed (GrapheneOS's Vanadium removed, and no other), a
+    /// desktop with nothing to open a link. Said on the page, which then
+    /// offers a code from a device that's already signed in
+    /// ([`Event::TypedCode`], [`Event::UseCode`], or "Scan a Code"). Never
+    /// a web view in the app instead: the provider's session is the
+    /// browser's, and a page drawn inside the app would be the app's.
+    NoBrowser,
+    /// The code field on the sign-in page, as typed or pasted: another
+    /// device's code, or its join link ("Add a Device"'s Share Link).
+    TypedCode { text: String },
+    /// "Sign In With the Code": what was typed redeemed at the server
+    /// (`/auth/redeem`), or a join link for another server asked about.
+    UseCode,
 }
 
 /// What a transition asks the shell for.
@@ -265,7 +279,8 @@ pub enum Effect {
     /// Trade the code at `/auth/exchange`; answer with [`Event::SignedIn`]
     /// or [`Event::SignInFailed`].
     Exchange { server: String, code: String },
-    /// Trade a join link's one-time code at `/auth/redeem`; answer with
+    /// Trade a join link's one-time code (or one typed on the sign-in
+    /// page) at `/auth/redeem`; answer with
     /// [`Event::SignedIn`] or [`Event::SignInFailed`], whose `why` is the
     /// server's own sentence ("This code has expired. …").
     Redeem { server: String, code: String },
@@ -346,6 +361,13 @@ pub mod words {
     pub fn bad_link(why: &str) -> String {
         format!("This link can't be used: {why}.")
     }
+
+    /// What was typed for a code is a link, but not a join link.
+    pub const NOT_A_CODE: &str = "That isn't a code or a link from Add a Device.";
+
+    /// No browser could open the sign-in.
+    pub const NO_BROWSER: &str =
+        "No browser is installed to sign in with. Install one, or sign in with a code from a device that's already signed in.";
 
     pub const CHECKING: &str = "Checking…";
     pub const WAITING: &str = "Waiting for the sign-in…";
@@ -569,6 +591,11 @@ struct State {
     /// back to the front.
     tried: bool,
     remembered: Remembered,
+    /// No browser could open the sign-in this launch ([`Event::NoBrowser`]):
+    /// the page offers a code instead.
+    no_browser: bool,
+    /// The sign-in page's code field, as typed ([`Event::TypedCode`]).
+    code: String,
 }
 
 /// The machine: where it stands, what is remembered, and whether this
@@ -608,6 +635,8 @@ impl Onboarding {
                 redeeming: false,
                 tried: false,
                 remembered: Remembered::default(),
+                no_browser: false,
+                code: String::new(),
             }),
         }
     }
@@ -660,6 +689,15 @@ impl Onboarding {
     pub fn next(&self, event: Event) -> Vec<Effect> {
         let mut s = self.lock();
         step(&self.app, &mut s, event)
+    }
+}
+
+impl Onboarding {
+    /// Whether no browser could open the sign-in this launch, and the
+    /// sign-in page offers a code instead; and the code typed so far.
+    pub fn code_entry(&self) -> Option<String> {
+        let s = self.lock();
+        s.no_browser.then(|| s.code.clone())
     }
 }
 
@@ -744,6 +782,8 @@ fn step(app: &AppInfo, s: &mut State, event: Event) -> Vec<Effect> {
             s.tried = false;
             s.before = None;
             s.redeeming = false;
+            s.no_browser = false;
+            s.code.clear();
             match (remembered.server, remembered.login) {
                 _ if remembered.demo && app.demo => {
                     s.step = Step::Demo;
@@ -910,6 +950,63 @@ fn step(app: &AppInfo, s: &mut State, event: Event) -> Vec<Effect> {
                 Event::OpenSignIn if phase != Phase::Exchanging => {
                     s.tried = true;
                     browse(app, s, server, None)
+                }
+                // Not here as a web view: said, and a code offered instead.
+                Event::NoBrowser if phase != Phase::Exchanging => {
+                    s.tried = true;
+                    s.no_browser = true;
+                    s.step = Step::SignIn {
+                        server,
+                        phase: Phase::Idle,
+                        error: Some(words::NO_BROWSER.into()),
+                    };
+                    vec![]
+                }
+                Event::TypedCode { text } if phase != Phase::Exchanging => {
+                    s.code = text;
+                    vec![]
+                }
+                Event::UseCode if phase != Phase::Exchanging => {
+                    let typed = s.code.trim().to_string();
+                    if typed.is_empty() {
+                        return vec![];
+                    }
+                    // A join link: its code, when it is this server's; another
+                    // server's is asked about first, as a scanned one is.
+                    let code = match join_of(typed.clone()) {
+                        Some(j) => match join_server(&j.server) {
+                            Ok(url) if url == server && j.code.is_some() => j.code,
+                            _ => {
+                                return step(
+                                    app,
+                                    s,
+                                    Event::Joined {
+                                        server: j.server,
+                                        code: j.code,
+                                    },
+                                )
+                            }
+                        },
+                        None if typed.contains("://") => {
+                            s.step = Step::SignIn {
+                                server,
+                                phase: Phase::Idle,
+                                error: Some(words::NOT_A_CODE.into()),
+                            };
+                            return vec![];
+                        }
+                        None => Some(typed),
+                    };
+                    let Some(code) = code else { return vec![] };
+                    s.tried = true;
+                    s.redeeming = true;
+                    s.code.clear();
+                    s.step = Step::SignIn {
+                        server: server.clone(),
+                        phase: Phase::Exchanging,
+                        error: None,
+                    };
+                    vec![Effect::Redeem { server, code }]
                 }
                 Event::SignedIn { login } if phase == Phase::Exchanging => {
                     s.redeeming = false;

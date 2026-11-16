@@ -580,6 +580,20 @@ that keeps it:
 | Desktop | the system browser, back on a loopback port (`ark_auth::client`) |
 | Browser | the same tab |
 
+**With no browser** (a phone with none installed: GrapheneOS with
+Vanadium removed and no other; a desktop whose opener has nothing to open
+a link with) the shell says so to the machine (`Event::NoBrowser`: Android
+when Custom Tabs find no activity, `ArkApp.noBrowser`; the desktop when
+`client::try_open_browser` fails), and the sign-in page says "No browser
+is installed to sign in with. Install one, or sign in with a code from a
+device that's already signed in." and offers that code: pasted (Add a
+Device's shared link, or its bare code) and redeemed at `/auth/redeem`,
+or scanned with the camera. A server older than device codes answers with
+its own sentence (`client::OLDER`). Never a WebView in the app instead:
+the provider's session is the browser's, and a page drawn inside the app
+is the app's, its password typed where the app could read it. The iPhone,
+the iPad and the Mac always have `ASWebAuthenticationSession`.
+
 A server is configured under its prefix (`ark_peer::settings`):
 `_OIDC_ISSUER`, `_OIDC_CLIENT_ID`, `_OIDC_CLIENT_SECRET_FILE` (a file,
 for a systemd credential), `_OIDC_SCOPES` (`openid profile email`), and

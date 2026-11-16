@@ -96,6 +96,13 @@ pub struct SignInPage {
     /// "Use Another Server" is offered, and can be pressed.
     pub offers_other: bool,
     pub can_change: bool,
+    /// No browser could open the sign-in: a code from a device that's
+    /// already signed in is offered instead, typed or pasted (`code`) or,
+    /// with a camera (`scan`), scanned.
+    pub offers_code: bool,
+    pub code: String,
+    pub can_use_code: bool,
+    pub scan: bool,
 }
 
 /// Signed in, and what the server has on its way.
@@ -166,6 +173,12 @@ pub enum WelcomeMsg {
     /// "Sign In" again, where the page offers it.
     SignIn,
     ChangeServer,
+    /// The sign-in page's code field, as typed or pasted.
+    TypedCode {
+        text: String,
+    },
+    /// "Sign In With the Code".
+    UseCode,
     /// "Join" on a server from a link.
     Accept,
     /// "Cancel" on a server from a link.
@@ -228,7 +241,29 @@ pub fn welcome(p: &WelcomePage) -> View<WelcomeMsg> {
                 s.sentence,
                 (
                     status_line(s.status, s.busy, s.problem),
-                    wide_button(s.go, true, s.can_sign_in, false, WelcomeMsg::SignIn),
+                    // With no browser, the code first and the default, the
+                    // browser after (one may have been installed since).
+                    if s.offers_code {
+                        (
+                            address_field(
+                                "Code",
+                                "Paste the link or code",
+                                s.code,
+                                "On a device that's signed in, open Add a Device and share its link here.",
+                                None::<String>,
+                                s.can_change,
+                                |text| WelcomeMsg::TypedCode { text },
+                                WelcomeMsg::UseCode,
+                            ),
+                            wide_button("Sign In With the Code", true, s.can_use_code, s.busy, WelcomeMsg::UseCode),
+                            if s.scan {
+                                wide_button("Scan a Code", false, s.can_change, false, WelcomeMsg::ScanCode)
+                            },
+                            wide_button(s.go, false, s.can_sign_in, false, WelcomeMsg::SignIn),
+                        )
+                    } else {
+                        wide_button(s.go, true, s.can_sign_in, false, WelcomeMsg::SignIn)
+                    },
                     if s.offers_other {
                         wide_button("Use Another Server", false, s.can_change, false, WelcomeMsg::ChangeServer)
                     },
@@ -373,6 +408,48 @@ mod tests {
         names(&welcome::view(&p), &mut n);
         assert_eq!(n, ["FirstRunPage", "AddressField", "WideButton", "WideButton"]);
         assert!(p.shows() && !WelcomePage::none().shows());
+    }
+
+    fn sign_in(offers_code: bool, scan: bool) -> SignInPage {
+        SignInPage {
+            glyph: "shield-check".into(),
+            title: "Sign In".into(),
+            sentence: "On h's own page.".into(),
+            status: None,
+            busy: false,
+            problem: None,
+            go: "Sign In".into(),
+            can_sign_in: true,
+            offers_other: false,
+            can_change: true,
+            offers_code,
+            code: String::new(),
+            can_use_code: false,
+            scan,
+        }
+    }
+
+    /// The sign-in page offers a code only when no browser could open the
+    /// sign-in, and Scan a Code only with a camera. Falsified by drawing
+    /// the code's field whatever `offers_code` says.
+    #[test]
+    fn the_sign_in_page_offers_a_code_only_with_no_browser() {
+        let page = |s| WelcomePage {
+            sign_in: Some(s),
+            ..WelcomePage::none()
+        };
+        let mut n = vec![];
+        names(&welcome::view(&page(sign_in(false, true))), &mut n);
+        assert_eq!(n, ["FirstRunPage", "StatusLine", "WideButton"]);
+        let mut n = vec![];
+        names(&welcome::view(&page(sign_in(true, true))), &mut n);
+        assert_eq!(
+            n,
+            ["FirstRunPage", "StatusLine", "AddressField", "WideButton", "WideButton", "WideButton"]
+        );
+        let mut n = vec![];
+        names(&welcome::view(&page(sign_in(true, false))), &mut n);
+        assert_eq!(n, ["FirstRunPage", "StatusLine", "AddressField", "WideButton", "WideButton"]);
     }
 
     /// Every page is recorded for the phones, each behind its `if let`.
