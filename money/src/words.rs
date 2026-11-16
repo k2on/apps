@@ -143,7 +143,7 @@ impl BankWords for BankLine {
     fn status(&self, now: i64) -> BankStatus {
         let alarm = |words: String| BankStatus { words, alarm: true };
         if self.needs_login {
-            return alarm("The bank wants its login again. Reconnect it.".into());
+            return alarm("The bank wants its login again.".into());
         }
         if !self.error.is_empty() {
             return alarm(format!("The last import failed {}: {}", ago(self.failed_ms, now), self.error));

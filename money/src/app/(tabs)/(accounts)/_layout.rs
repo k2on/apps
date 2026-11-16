@@ -201,8 +201,6 @@ pub struct AccountsShelf {
     pub total: i64,
     /// Whether the heading shows the total: the closed shelf's adds up to nothing that matters.
     pub shows_total: bool,
-    /// What the shelf is, said under it.
-    pub note: Option<String>,
     pub accounts: Vec<AccountItem>,
 }
 
@@ -225,7 +223,6 @@ pub struct AddForm {
     pub name_problem: Option<String>,
     pub kinds: Vec<KindChoice>,
     pub on_budget: bool,
-    pub on_budget_note: String,
     /// The chosen kind's key: the picker's selection.
     pub kind_key: String,
     pub typed: String,
@@ -503,11 +500,6 @@ impl App for Accounts {
             .into_iter()
             .map(|sh| AccountsShelf {
                 title: format!("{} Accounts", sh.title),
-                note: match sh.shelving {
-                    Shelving::Budget => Some("What these hold is budgeted: ready to assign, then spent from categories.".into()),
-                    Shelving::Tracking => Some("Counted toward net worth; none of it is budgeted.".into()),
-                    Shelving::Closed => None,
-                },
                 total: sh.total,
                 shows_total: sh.shelving != Shelving::Closed,
                 accounts: sh.accounts.iter().map(|a| item(a, style)).collect(),
@@ -602,11 +594,6 @@ fn form(d: &Draft, style: &NumberStyle) -> AddForm {
             })
             .collect(),
         on_budget: d.on_budget,
-        on_budget_note: match d.on_budget {
-            true => "What's spent from it comes out of the budget, and its balance is ready to assign.",
-            false => "Tracking only: its balance counts toward net worth, and none of it is budgeted.",
-        }
-        .into(),
         kind_key: d.kind.key().into(),
         typed: d.typed.clone(),
         cents: balance.map_or(0, i64::abs),

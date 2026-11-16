@@ -340,8 +340,7 @@ pub fn settings_household(p: &ShellPage) -> View<ShellMsg> {
                 list_row("Add a Device").glyph("smartphone").pushes().on_tap(ShellMsg::AddDevice)
             },
         ))
-        .header("Shared With")
-        .footer(p.settings.household_note),
+        .header("Shared With"),
     )
 }
 
@@ -367,9 +366,8 @@ pub fn settings_banks(p: &ShellPage) -> View<ShellMsg> {
                     list_row("Connect a Bank").glyph("circle-plus").accent().on_tap(ShellMsg::ConnectBank)
                 },
             ))
-            .header("Banks")
-            .footer(p.settings.banks_note),
-            card_section(list_row("Sync Now").glyph("refresh-cw").accent().on_tap(ShellMsg::Refresh)).footer(p.settings.sync_note),
+            .header("Banks"),
+            card_section(list_row("Sync Now").glyph("refresh-cw").accent().on_tap(ShellMsg::Refresh)),
         )),
         if let Some(b) = p.settings.bank {
             bank_page(b)
@@ -435,7 +433,6 @@ pub fn bank_page(b: &BankPage) -> View<ShellMsg> {
                         .on_tap(ShellMsg::ChooseFeed { plaid: f.plaid })
                 })
                 .header("Accounts")
-                .footer(b.feeds_note)
             },
             card_section((
                 if b.reconnects {
@@ -444,8 +441,7 @@ pub fn bank_page(b: &BankPage) -> View<ShellMsg> {
                 if b.connects {
                     list_row("Disconnect").glyph("circle-minus").accent().on_tap(ShellMsg::Disconnect)
                 },
-            ))
-            .footer(b.actions_note),
+            )),
             if b.disconnecting {
                 confirmation_dialog(
                     b.disconnect_question,
@@ -467,8 +463,7 @@ pub fn bank_page(b: &BankPage) -> View<ShellMsg> {
                                 list_row(a.name).mark(a.glyph, a.slot).on_tap(ShellMsg::FeedAccount { id: a.id })
                             },
                         ))
-                        .header(c.title)
-                        .footer(c.accounts_note),
+                        .header(c.title),
                         form_section(if c.ignored {
                             list_row("Import It Again")
                                 .glyph("eye")

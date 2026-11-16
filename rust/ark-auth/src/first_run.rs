@@ -224,7 +224,6 @@ impl FirstRun {
                     title: format!("Welcome to {}", c.name),
                     sentence: c.sentence.clone(),
                     prompt: c.placeholder.clone(),
-                    note: c.server_note.clone(),
                     can_continue: !checking && !typed.trim().is_empty(),
                     typed,
                     problem: error,
@@ -241,13 +240,8 @@ impl FirstRun {
                 sign_in: Some(SignInPage {
                     glyph: "shield-check".into(),
                     title: "Sign In".into(),
-                    sentence: match code.is_some() {
-                        false => format!("You'll sign in on {}'s own page, and come straight back here.", display(&server)),
-                        true => format!(
-                            "Sign in to {} with a code from a device that's already signed in there.",
-                            display(&server)
-                        ),
-                    },
+                    // Which server: no more (no word of how to sign in).
+                    sentence: display(&server),
                     status: said.status,
                     busy: phase == Phase::Exchanging,
                     problem: error,
@@ -292,7 +286,7 @@ impl FirstRun {
 /// link and QR code), or why it could not be.
 pub fn add_device_page(made: Option<Result<(String, Qr), String>>) -> AddDevicePage {
     let blank = AddDevicePage {
-        sentence: "Scan this with the other device's camera, or open the link there. It works once, for ten minutes.".into(),
+        sentence: "It works once, for ten minutes.".into(),
         making: false,
         problem: None,
         shown: false,
@@ -330,7 +324,6 @@ mod tests {
             glyph: "wallet".into(),
             sentence: "Your household's budget.".into(),
             placeholder: "money.example.com".into(),
-            server_note: "Where it is kept.".into(),
             demo: Some("A household of two.".into()),
             scan: true,
             other_servers: true,
@@ -443,7 +436,7 @@ mod tests {
         let s = f.page().sign_in.unwrap();
         assert_eq!(s.status.as_deref(), Some("Waiting for the sign-in…"));
         assert_eq!(s.go, "Open the Sign-In Again");
-        assert!(s.sentence.contains("money.example.com's own page"));
+        assert_eq!(s.sentence, "money.example.com");
         f.event(Event::Code { code: "c".into() });
         let s = f.page().sign_in.unwrap();
         assert!(s.busy && !s.can_sign_in && !s.can_change);

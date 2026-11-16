@@ -14,7 +14,7 @@ pub fn insights(p: &InsightsPage) -> View<InsightsMsg> {
         "Insights",
         (
             if p.nothing_spent {
-                card_section(empty_state("chart-column", "Nothing Spent Yet", p.empty_text)).header("Spending")
+                card_section(empty_state("chart-column", "Nothing Spent Yet")).header("Spending")
             },
             if p.spent_any {
                 card_section((
@@ -39,7 +39,6 @@ pub fn insights(p: &InsightsPage) -> View<InsightsMsg> {
                     meter_row(g.title, g.status, g.tint).meter(g.fraction, g.tint).note(g.note, g.tint)
                 })
                 .header("Assigned and Spent")
-                .footer(Some("Each group's plan for the month beside what it spent.".to_string()))
             },
         ),
     )

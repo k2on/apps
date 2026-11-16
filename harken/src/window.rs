@@ -69,7 +69,7 @@ impl Windowed for Harken {
             "player" => crate::player::view::player::view(&self.player.page(place, now_ms)).map(HarkenMsg::Player),
             // What a platform adds to Settings' General: the desktop's alone.
             "settings.more" => View::Empty,
-            _ => empty_state("music", "Nothing Selected", "Choose something to listen to."),
+            _ => empty_state("music", "Nothing Selected"),
         }
     }
 

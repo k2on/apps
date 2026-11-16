@@ -145,8 +145,6 @@ pub struct FeedChoice {
     pub can_open: bool,
     pub opens: String,
     pub accounts: Vec<FeedTarget>,
-    /// Which accounts here it could feed, or that none is free for it.
-    pub accounts_note: String,
     pub ignored: bool,
 }
 
@@ -171,14 +169,12 @@ pub struct BankPage {
     pub locked: String,
     pub feeds: Vec<FeedItem>,
     pub has_feeds: bool,
-    pub feeds_note: Option<String>,
     /// The ask of the moment, when it is about this bank.
     pub ask: Option<AskItem>,
     pub connects: bool,
     /// Reconnect under the bank's figures (its login is good), and on the
     /// server.
     pub reconnects: bool,
-    pub actions_note: Option<String>,
     pub disconnecting: bool,
     pub disconnect_question: String,
     pub choosing: Option<FeedChoice>,
@@ -207,15 +203,12 @@ pub struct SettingsPage {
     pub leaving: bool,
     pub leave_question: String,
     pub version: String,
-    pub household_note: Option<String>,
     pub ask: Option<AskItem>,
     pub banks: Vec<BankItem>,
     pub has_banks: bool,
     /// A bank can be connected (through a server's importer: not the
     /// demo's), and none is being connected already.
     pub can_connect: bool,
-    pub banks_note: Option<String>,
-    pub sync_note: Option<String>,
     /// The bank whose page shows.
     pub bank: Option<BankPage>,
     pub showing_bank: bool,
@@ -384,10 +377,11 @@ fn ask_item(a: &AskLine, now: i64) -> AskItem {
             AskState::Failed | AskState::Expired => "Not Finished",
         }
         .into(),
-        note: Some(match a.closes(now) {
-            Some(c) => format!("{said} {c}."),
-            None => said,
-        }),
+        note: match (said, a.closes(now)) {
+            (Some(s), Some(c)) => Some(format!("{s} {c}.")),
+            (None, Some(c)) => Some(format!("{c}.")),
+            (s, None) => s,
+        },
         state: ark_format::ago_alone(if a.is_open() { a.asked_ms } else { a.answered_ms }, now),
         waiting: a.state == AskState::Waiting && !a.url.is_empty(),
         over: !a.is_open(),
@@ -448,14 +442,6 @@ pub fn screen(s: &ShellState, data: &Data<'_, MoneyView>) -> SettingsPage {
         leaving: st.leaving,
         leave_question: if f.demo { "Leave the Demo?" } else { "Sign Out?" }.into(),
         version: f.version.clone(),
-        household_note: Some(if f.demo {
-            "The demo's household is Alex's alone, on this device.".into()
-        } else {
-            format!(
-                "Everyone who signs in to {} shares this budget. Add a Device signs another of yours in.",
-                if f.server.is_empty() { "this server" } else { &f.server }
-            )
-        }),
         ask: shown.as_ref().map(|a| ask_item(a, now)),
         banks: banks
             .iter()
@@ -473,22 +459,6 @@ pub fn screen(s: &ShellState, data: &Data<'_, MoneyView>) -> SettingsPage {
             .collect(),
         has_banks: !banks.is_empty(),
         can_connect: connects && !shown.as_ref().is_some_and(|a| a.is_open()),
-        banks_note: Some(
-            if connects {
-                "Banks and cards connect through Plaid. Their logins are kept on your server, never on this device."
-            } else {
-                "The demo's card comes from a bank of its own. Connecting a real one needs your server."
-            }
-            .into(),
-        ),
-        sync_note: Some(
-            if connects {
-                "The server asks the bank every hour; Sync Now asks it now."
-            } else {
-                "The demo's bank has a few days of news for its first two syncs."
-            }
-            .into(),
-        ),
         bank: bank.map(|b| bank_page(st, b, linked, accounts, shown.as_ref(), now)),
         showing_bank: bank.is_some(),
         plaid: plaid(st, asks),
@@ -537,11 +507,6 @@ fn bank_page(st: &SettingsState, b: &BankLine, linked: &[LinkedLine], accounts: 
                 title: l.title(),
                 can_open: l.waiting,
                 opens: l.opens_words(),
-                accounts_note: if free.is_empty() {
-                    "Every open account is fed by a bank already.".into()
-                } else {
-                    "Or an account you keep here already, which takes what the bank has from the day it was connected.".into()
-                },
                 accounts: free
                     .iter()
                     .map(|a| FeedTarget {
@@ -569,19 +534,10 @@ fn bank_page(st: &SettingsState, b: &BankLine, linked: &[LinkedLine], accounts: 
         locked: b.locked.to_string(),
         has_feeds: !feeds.is_empty(),
         feeds,
-        feeds_note: Some(
-            if b.waiting > 0 {
-                "Choose what each account feeds: a new account here, one you already keep, or nothing. One you kept by hand takes what the bank has from the day it was connected."
-            } else {
-                "Each of the bank's accounts feeds an account here, or nothing."
-            }
-            .into(),
-        ),
         ask: ask.filter(|a| a.bank == b.name).map(|a| ask_item(a, now)),
         connects,
         fixed: !connects,
         reconnects: connects && !b.needs_login,
-        actions_note: (!connects).then(|| "The demo's bank stays connected: there is no server to ask.".into()),
         disconnecting: st.disconnecting,
         disconnect_question: format!("Disconnect {title}?"),
         choosing,

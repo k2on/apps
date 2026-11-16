@@ -15,7 +15,6 @@ pub fn copy(scan: bool, demo: bool) -> WelcomeCopy {
         glyph: "app".into(),
         sentence: sentence.into(),
         placeholder: "music.example.com".into(),
-        server_note: "A name or an address, with a port if it has one.".into(),
         // The demo is a launch's (`-demo`, the page published as the demo), never the first run's.
         demo: None,
         scan,

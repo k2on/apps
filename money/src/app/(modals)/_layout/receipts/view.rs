@@ -75,15 +75,18 @@ pub fn receipt_section(r: &ReceiptSection) -> View<SheetsMsg> {
                         .amount(x.cents)
                         .glyph("receipt")
                         .on_tap(SheetsMsg::Matched { id: x.id })
-                })
-                .footer("The receipts nothing pays for yet, the nearest to this transaction first."),
+                }),
             )
         },
         if let Some(v) = r.viewing {
             form_sheet(
                 "Receipt Photo",
                 SheetsMsg::ClosePhoto,
-                form_section(zoom_photo(v.url, "The receipt's photo")).footer(v.note),
+                if v.fetching {
+                    form_section(zoom_photo(v.url, "The receipt's photo")).footer("Fetching the photo from your server\u{2026}")
+                } else {
+                    form_section(zoom_photo(v.url, "The receipt's photo"))
+                },
             )
         },
     )
@@ -109,8 +112,7 @@ pub fn receipt_fields(f: &ReceiptForm) -> View<SheetsMsg> {
             },
             list_row("Add Item").glyph("plus").on_tap(SheetsMsg::AddItem),
         ))
-        .header("Items")
-        .footer("A discount is below zero, -0.50."),
+        .header("Items"),
         // The item being typed, apart from the list, so its fields keep the
         // keyboard as its row changes with them.
         if f.typing {

@@ -801,23 +801,21 @@ public struct FirstRunPage<Content: View>: View {
 }
 
 /// A server's address: the keyboard for a URL, no capitals or corrections,
-/// Go to go on; its note under it until there is a problem.
+/// Go to go on; a problem under it.
 public struct AddressField: View {
     let label: String
     let prompt: String
     let text: String
-    let note: String
     let problem: String?
     let enabled: Bool
     let onChange: (String) -> Void
     let onSubmit: () -> Void
 
-    public init(_ label: String, prompt: String, text: String, note: String, problem: String?, enabled: Bool,
+    public init(_ label: String, prompt: String, text: String, problem: String?, enabled: Bool,
                 onChange: @escaping (String) -> Void, onSubmit: @escaping () -> Void) {
         self.label = label
         self.prompt = prompt
         self.text = text
-        self.note = note
         self.problem = problem
         self.enabled = enabled
         self.onChange = onChange
@@ -837,10 +835,12 @@ public struct AddressField: View {
                 .padding(Space.l)
                 .surface(in: RoundedRectangle(cornerRadius: 16, style: .continuous), interactive: true)
                 .accessibilityLabel(label)
-            Text(problem ?? note)
-                .font(.footnote)
-                .foregroundStyle(problem == nil ? Color.quiet : Color.error)
-                .padding(.horizontal, Space.xs)
+            if let problem {
+                Text(problem)
+                    .font(.footnote)
+                    .foregroundStyle(Color.error)
+                    .padding(.horizontal, Space.xs)
+            }
         }
     }
 }

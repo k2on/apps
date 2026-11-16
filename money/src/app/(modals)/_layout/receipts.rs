@@ -462,8 +462,8 @@ pub struct MatchSheet {
 pub struct PhotoSheet {
     /// Where it is read (`Views::file_url`); empty while it is fetched.
     pub url: String,
-    /// "Pinch to zoom.", or while it is fetched what it waits on.
-    pub note: String,
+    /// It is being fetched: said under it.
+    pub fetching: bool,
 }
 
 /// A transaction's receipt section, as its form draws it.
@@ -584,10 +584,7 @@ pub fn section(s: &State, about: About<'_>, data: &Data<'_, MoneyView>, style: &
         viewing: s.photo.as_ref().map(|f| {
             let url = data.store.file_url(f).unwrap_or_default();
             PhotoSheet {
-                note: match url.is_empty() {
-                    true => "Fetching the photo from your server\u{2026}".into(),
-                    false => "Pinch to zoom; double-tap to zoom in or out.".into(),
-                },
+                fetching: url.is_empty(),
                 url,
             }
         }),

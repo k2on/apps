@@ -278,7 +278,6 @@ fn part<M: Clone + 'static>(v: View<M>) -> Option<Element<'static, M>> {
             label,
             prompt,
             text: typed,
-            note,
             problem,
             enabled,
             typed: on,
@@ -288,17 +287,14 @@ fn part<M: Clone + 'static>(v: View<M>) -> Option<Element<'static, M>> {
             if enabled.get() {
                 input = input.on_input(move |s| on.call(s)).on_submit(submit);
             }
-            let under: Element<'static, M> = match problem.get() {
-                Some(p) => text(p)
-                    .size(12)
-                    .style(|t| iced::widget::text::Style {
-                        color: Some(crate::theme::of(t).danger.base.color),
-                        ..Default::default()
-                    })
-                    .into(),
-                None => text(note.get()).size(12).style(style::dim).into(),
-            };
-            column![text(label).size(12).style(style::dim), input, under]
+            let under = problem.get().map(|p| {
+                text(p).size(12).style(|t| iced::widget::text::Style {
+                    color: Some(crate::theme::of(t).danger.base.color),
+                    ..Default::default()
+                })
+            });
+            column![text(label).size(12).style(style::dim), input]
+                .push_maybe(under)
                 .spacing(4)
                 .width(Length::Fill)
                 .into()

@@ -75,7 +75,7 @@ pub fn library(p: &LibraryPage) -> View<LibraryMsg> {
                 )
             },
             if p.empty {
-                card_section(empty_state(p.empty_glyph, p.empty_title, p.empty_text))
+                card_section(empty_state(p.empty_glyph, p.empty_title))
             },
             if let Some(form) = p.naming {
                 form_sheet(

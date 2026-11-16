@@ -327,6 +327,8 @@ pub struct AmountForm {
     pub problem: Option<String>,
     /// What a formula typed comes to (`= $155.50`); empty while none is.
     pub gives: String,
+    /// What it is beside: `$40.00 available now.`, `From Food to Rent.`;
+    /// a target's says nothing (its sheet draws none).
     pub note: String,
     pub can_save: bool,
 }
@@ -763,16 +765,9 @@ impl App for Budget {
                 _ => None,
             },
             targeting: match &s.sheet {
-                Some(Sheet::Target { id, figure }) => line(lines, id).map(|l| {
-                    amount_form(
-                        l.name.clone(),
-                        "Monthly Target",
-                        "Needed each month",
-                        figure,
-                        "What the month should give it; none is no target.".into(),
-                        style,
-                    )
-                }),
+                Some(Sheet::Target { id, figure }) => {
+                    line(lines, id).map(|l| amount_form(l.name.clone(), "Monthly Target", "Needed each month", figure, String::new(), style))
+                }
                 _ => None,
             },
             adding: match &s.sheet {

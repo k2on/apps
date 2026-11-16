@@ -99,8 +99,7 @@ pub fn txn_fields(t: &TxnSheet) -> View<SheetsMsg> {
             )
             .unset("Needs a Category")
             .prompt("Search Categories"),
-        ))
-        .footer(t.category_note),
+        )),
         form_section((
             if t.editing {
                 list_row("Account").value(t.account_name)

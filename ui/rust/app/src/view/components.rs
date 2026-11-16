@@ -118,13 +118,13 @@ impl<M> From<TitleStack> for View<M> {
 }
 
 /// What an empty list says (ui/docs/primitives.md, "empty state"): a quiet
-/// glyph, what it is waiting for, and what to do about it, centred — the
-/// iPhone's `ContentUnavailableView`, Android's `Empty`. Harken's library,
-/// search and queue; money's register, transactions and insights.
-pub fn empty_state<M>(glyph_name: impl Into<Val<String>>, title: impl Into<Val<String>>, sentence: impl Into<Val<String>>) -> View<M> {
+/// glyph and what it is waiting for, centred — the iPhone's
+/// `ContentUnavailableView`, Android's `Empty`. Harken's library, search
+/// and queue; money's register, transactions and insights.
+pub fn empty_state<M>(glyph_name: impl Into<Val<String>>, title: impl Into<Val<String>>) -> View<M> {
     vstack((
         glyph(glyph_name).style(TextStyle::LargeTitle).ink(Ink::Quiet),
-        title_stack(title).under(sentence).large().centred(),
+        title_stack(title).large().centred(),
     ))
     .spacing(Space::L)
     .padding(Edges::Horizontal, Space::Xl)

@@ -67,8 +67,6 @@ pub struct InsightsPage {
     pub month: String,
     pub spent_any: bool,
     pub nothing_spent: bool,
-    /// "What November 2026 spends shows here."
-    pub empty_text: String,
     /// The bars: a group each, the most first.
     pub labels: Vec<String>,
     pub values: Vec<i64>,
@@ -146,7 +144,6 @@ impl App for Insights {
         InsightsPage {
             spent_any: !spending.is_empty(),
             nothing_spent: spending.is_empty(),
-            empty_text: format!("What {month} spends shows here."),
             labels: spending.iter().map(|g| g.group.clone()).collect(),
             values: spending.iter().map(|g| g.spent).collect(),
             said: spending.iter().map(|g| amount(g.spent, style)).collect(),

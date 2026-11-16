@@ -175,7 +175,6 @@ pub struct TransactionsPage {
     /// Nothing to review: "All Caught Up", or "No Results" while searching.
     pub caught_up: bool,
     pub empty_title: String,
-    pub empty_text: String,
     pub has_review: bool,
     /// "3 to Review".
     pub review_count: String,
@@ -371,12 +370,6 @@ impl App for Transactions {
             },
             caught_up: review.is_empty(),
             empty_title: if searching { "No Results" } else { "All Caught Up" }.into(),
-            empty_text: match searching {
-                true => format!("Nothing waiting matches \u{201c}{}\u{201d}.", s.search.trim()),
-                false => {
-                    "Everything from the bank has been looked at, and everything has a category. Pull down to ask the bank for anything new.".into()
-                }
-            },
             has_review: !review.is_empty(),
             review_count: format!("{} to Review", review.len()),
             review: review.iter().map(|t| item(t, style)).collect(),

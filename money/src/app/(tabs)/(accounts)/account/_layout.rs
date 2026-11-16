@@ -141,7 +141,6 @@ pub struct RegisterPage {
     pub has_bank: bool,
     pub empty: bool,
     pub empty_title: String,
-    pub empty_text: String,
     pub days: Vec<RegisterDay>,
     /// "Approve All (3)", while some wait.
     pub approve_all: String,
@@ -320,10 +319,6 @@ impl App for Register {
             has_bank: a.is_some_and(|a| a.bank_balance.is_some()),
             empty: shown.is_empty(),
             empty_title: if searching { "No Results" } else { "No Transactions" }.into(),
-            empty_text: match searching {
-                true => format!("Nothing matches \u{201c}{}\u{201d}.", s.search.trim()),
-                false => "Add one with the + button.".into(),
-            },
             days,
             approve_all: format!("Approve All ({waiting})"),
             can_approve_all: waiting > 0,

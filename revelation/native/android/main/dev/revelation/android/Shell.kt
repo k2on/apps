@@ -316,12 +316,7 @@ fun AboutSheet(bible: Bible, onClose: () -> Unit) {
         ) {
             Column(Modifier.navigationBarsPadding().padding(start = 24.dp, end = 24.dp, top = 24.dp, bottom = 20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text("Revelation", style = MaterialTheme.typography.titleLarge)
-                Text(
-                    "The Bible as one scroll, zoomed like a map. Pinch out until the words become lines, the lines a column, " +
-                        "and the column one line; pinch in to read. Double-tap zooms in, a two-finger tap zooms out, " +
-                        "and the reference at the top goes anywhere.",
-                    style = MaterialTheme.typography.bodyMedium,
-                )
+                Text("The Bible as one scroll, zoomed like a map.", style = MaterialTheme.typography.bodyMedium)
                 Spacer(Modifier.height(4.dp))
                 Text("THE TEXT", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 for (line in bible.attribution) Text(line, style = MaterialTheme.typography.bodyMedium)

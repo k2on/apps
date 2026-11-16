@@ -25,8 +25,6 @@ pub struct WelcomeCopy {
     pub sentence: String,
     /// The address field's placeholder: the usual server's.
     pub placeholder: String,
-    /// Under the address field until there is a problem.
-    pub server_note: String,
     /// The demo, with what it is in a sentence; none for an app with none.
     pub demo: Option<String>,
     /// Whether a code can be scanned here to join (a camera).
@@ -68,7 +66,6 @@ pub struct ServerPage {
     pub sentence: String,
     pub prompt: String,
     pub typed: String,
-    pub note: String,
     pub problem: Option<String>,
     /// It is being checked: nothing can be changed.
     pub checking: bool,
@@ -86,6 +83,7 @@ pub struct ServerPage {
 pub struct SignInPage {
     pub glyph: String,
     pub title: String,
+    /// The server signed in to: `money.example.com`.
     pub sentence: String,
     pub status: Option<String>,
     pub busy: bool,
@@ -215,7 +213,6 @@ pub fn welcome(p: &WelcomePage) -> View<WelcomeMsg> {
                         "Server Address",
                         s.prompt,
                         s.typed,
-                        s.note,
                         s.problem,
                         s.editable,
                         |text| WelcomeMsg::Typed { text },
@@ -249,7 +246,6 @@ pub fn welcome(p: &WelcomePage) -> View<WelcomeMsg> {
                                 "Code",
                                 "Paste the link or code",
                                 s.code,
-                                "On a device that's signed in, open Add a Device and share its link here.",
                                 None::<String>,
                                 s.can_change,
                                 |text| WelcomeMsg::TypedCode { text },
@@ -294,7 +290,7 @@ pub fn welcome(p: &WelcomePage) -> View<WelcomeMsg> {
 /// signed in, while it is made, and why it could not be.
 #[derive(Clone, Debug, PartialEq, ark::twin::Twin)]
 pub struct AddDevicePage {
-    /// "Scan this with the other device's camera, or open the link there…"
+    /// "It works once, for ten minutes."
     pub sentence: String,
     /// The code is being made (the server is asked).
     pub making: bool,

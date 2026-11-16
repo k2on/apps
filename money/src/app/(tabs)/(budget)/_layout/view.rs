@@ -110,8 +110,7 @@ pub fn budget(p: &BudgetPage) -> View<BudgetMsg> {
                             )
                             .gives(f.gives),
                         )
-                        .header(f.subject)
-                        .footer(f.note),
+                        .header(f.subject),
                     )
                     .confirm("Save", f.can_save, BudgetMsg::Save)
                 },

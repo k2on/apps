@@ -106,7 +106,7 @@ public struct AddDeviceView: View {
                 Text(e).font(.callout).foregroundStyle(.secondary).multilineTextAlignment(.center)
             } else if let s = shown, let l = s.link {
                 QrCode(size: s.size, dark: s.dark).frame(maxWidth: 260)
-                Text("Scan this with the other device's camera, or open the link there. It works once, for ten minutes.")
+                Text("It works once, for ten minutes.")
                     .font(.footnote).foregroundStyle(.secondary).multilineTextAlignment(.center)
                 ShareLink(item: l) { Label("Share Link", systemImage: "square.and.arrow.up") }
             } else {

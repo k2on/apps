@@ -83,7 +83,7 @@ public fun AddDeviceDialog(make: suspend () -> DeviceLinkShown, onDismiss: () ->
                         QrCode(s.size, s.dark, Modifier.fillMaxWidth())
                         Spacer(Modifier.height(12.dp))
                         Text(
-                            "Scan this with the other device's camera, or open the link there. It works once, for ten minutes.",
+                            "It works once, for ten minutes.",
                             style = MaterialTheme.typography.bodySmall)
                     }
                 }

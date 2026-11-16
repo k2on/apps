@@ -249,15 +249,16 @@ impl AskLine {
         }
     }
 
-    /// What has come of it, in a sentence, at `now`.
-    pub fn said(&self, now: i64) -> String {
+    /// What has come of it, in a sentence, at `now`; none while Plaid's
+    /// page waits (its title says so).
+    pub fn said(&self, now: i64) -> Option<String> {
         let name = self.bank_name();
-        match (self.state, self.what.as_str()) {
+        Some(match (self.state, self.what.as_str()) {
             (AskState::Asked, _) if now - self.asked_ms > ASK_QUIET_MS => "The server hasn't answered yet. Does it have Plaid's keys?".into(),
             (AskState::Asked, "disconnect") => format!("Asking the server to disconnect {name}\u{2026}"),
             (AskState::Asked, _) => "Asking the server for Plaid's page\u{2026}".into(),
-            (AskState::Waiting, _) => "Log in to your bank on Plaid's page. This finishes by itself once you have.".into(),
-            (AskState::Done, "connect") => format!("Connected {name}. Choose what each of its accounts feeds."),
+            (AskState::Waiting, _) => return None,
+            (AskState::Done, "connect") => format!("Connected {name}."),
             (AskState::Done, "reconnect") => format!("Logged in to {name} again."),
             (AskState::Done, "add_accounts") => {
                 format!("Shared {name}'s accounts again. One shared for the first time opens with the next import.")
@@ -271,7 +272,7 @@ impl AskLine {
                 "" => "Plaid's page closed before it was finished.".into(),
                 m => m.into(),
             },
-        }
+        })
     }
 
     /// How long Plaid's page stays open, said ("It closes in 12 min");

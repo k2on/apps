@@ -28,7 +28,7 @@ pub fn record(p: &RecordPage) -> View<PageMsg> {
                 .menu("Add to Playlist", "list-plus", PageMsg::AddTo { id: t.id })
         }),
         if p.empty {
-            card_section(empty_state("music", "Nothing Here Yet", "What your server finds of it shows here."))
+            card_section(empty_state("music", "Nothing Here Yet"))
         },
     ))
 }

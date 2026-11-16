@@ -61,10 +61,6 @@ struct CardView: View {
                                 .arkType(.title)
                                 .foregroundStyle(Color.ink)
                                 .multilineTextAlignment(.center)
-                            Text("Add one with the button above.")
-                                .arkType(.body)
-                                .foregroundStyle(Color.quiet)
-                                .multilineTextAlignment(.center)
                         }
                     }
                         .padding(.horizontal, Space.xl)

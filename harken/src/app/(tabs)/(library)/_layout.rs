@@ -166,7 +166,6 @@ pub struct LibraryPage {
     pub empty: bool,
     pub empty_glyph: String,
     pub empty_title: String,
-    pub empty_text: String,
     pub naming: Option<NameForm>,
 }
 
@@ -344,7 +343,6 @@ impl App for Library {
             empty: false,
             empty_glyph: String::new(),
             empty_title: String::new(),
-            empty_text: String::new(),
             naming: s.naming.as_ref().map(|name| {
                 let problem = s.refused.clone();
                 NameForm {
@@ -354,20 +352,20 @@ impl App for Library {
                 }
             }),
         };
-        let (glyph, title, text) = match kind {
+        let (glyph, title) = match kind {
             "albums" => {
                 page.albums = rows::<AlbumsEntry>(data, &HarkenView::Albums)
                     .iter()
                     .map(|a| album_tile(server, a))
                     .collect();
-                ("disc-3", "No Albums", "The albums your server finds show here.")
+                ("disc-3", "No Albums")
             }
             "artists" => {
                 page.artists = rows::<ArtistsEntry>(data, &HarkenView::Artists)
                     .iter()
                     .map(|a| artist_tile(server, a))
                     .collect();
-                ("mic-vocal", "No Artists", "Whoever made what your server finds shows here.")
+                ("mic-vocal", "No Artists")
             }
             "songs" => {
                 page.songs = rows::<LibraryEntry>(data, &songs_view())
@@ -375,7 +373,7 @@ impl App for Library {
                     .filter(|e| e.kind != "episode")
                     .map(|e| track_item(&covers, e))
                     .collect();
-                ("music", "No Songs", "The songs your server finds show here.")
+                ("music", "No Songs")
             }
             "podcasts" | "sermons" => {
                 let want = if kind == "podcasts" { "podcast" } else { "sermon" };
@@ -385,8 +383,8 @@ impl App for Library {
                     .map(|s| show_tile(server, s))
                     .collect();
                 match kind {
-                    "podcasts" => ("podcast", "No Podcasts", "Follow a podcast and its episodes show here."),
-                    _ => ("book-open", "No Sermons", "Follow a series of sermons and its sermons show here."),
+                    "podcasts" => ("podcast", "No Podcasts"),
+                    _ => ("book-open", "No Sermons"),
                 }
             }
             _ => {
@@ -397,7 +395,7 @@ impl App for Library {
                         name: p.name.clone(),
                     })
                     .collect();
-                ("list-music", "No Playlists", "Make one with New Playlist.")
+                ("list-music", "No Playlists")
             }
         };
         page.empty = page.playlists.is_empty()
@@ -408,7 +406,6 @@ impl App for Library {
             && !page.on_playlists;
         page.empty_glyph = glyph.into();
         page.empty_title = title.into();
-        page.empty_text = text.into();
         page
     }
 }

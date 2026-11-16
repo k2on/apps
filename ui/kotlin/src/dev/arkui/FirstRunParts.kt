@@ -55,13 +55,12 @@ public fun FirstRunPage(glyph: String, title: String, sentence: String, content:
     }
 }
 
-/** A server's address: the keyboard for a URL, no corrections, Go to go on; its note under it until there is a problem. */
+/** A server's address: the keyboard for a URL, no corrections, Go to go on; a problem under it. */
 @Composable
 public fun AddressField(
     label: String,
     prompt: String,
     text: String,
-    note: String,
     problem: String?,
     enabled: Boolean,
     onChange: (String) -> Unit,
@@ -73,7 +72,7 @@ public fun AddressField(
         label = { Text(label) },
         placeholder = { Text(prompt) },
         isError = problem != null,
-        supportingText = { Text(problem ?: note) },
+        supportingText = if (problem != null) { { Text(problem) } } else null,
         enabled = enabled,
         singleLine = true,
         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Go, autoCorrectEnabled = false),

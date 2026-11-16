@@ -245,7 +245,6 @@ fn drawn<M: Clone + std::fmt::Debug + 'static>(v: View<M>) -> Option<AnyView> {
             label,
             prompt,
             text,
-            note,
             problem,
             enabled,
             typed,
@@ -276,10 +275,7 @@ fn drawn<M: Clone + std::fmt::Debug + 'static>(v: View<M>) -> Option<AnyView> {
                             send(submit.clone())
                         }
                     }),
-                    match problem {
-                        Some(p) => html::span().class("ark-problem").attr("role", "alert").child(p).into_any(),
-                        None => html::span().class("ark-caption").child(note.get()).into_any(),
-                    },
+                    problem.map(|p| html::span().class("ark-problem").attr("role", "alert").child(p)),
                 ))
                 .into_any()
         }

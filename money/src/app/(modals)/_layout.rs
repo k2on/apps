@@ -324,8 +324,6 @@ pub struct TxnSheet {
     /// The category's key, and the choices (the account a transfer goes to among them).
     pub category: String,
     pub categories: Vec<SheetChoice>,
-    /// Under the category, for one already there: what choosing an account does.
-    pub category_note: String,
     pub account: String,
     pub accounts: Vec<SheetChoice>,
     /// Its account's name, when it can no longer change (one corrected).
@@ -857,10 +855,6 @@ fn txn_sheet(s: &State, f: &TxnForm, data: &Data<'_, MoneyView>) -> TxnSheet {
         has_bank: editing.and_then(|t| t.bank_said()).is_some(),
         category,
         categories,
-        category_note: match d.editing.is_some() && !f.transfer {
-            true => "Made a transfer, it pairs with the matching transaction in that account, or one is added there.".into(),
-            false => String::new(),
-        },
         account: d.account.map(|a| a.hex()).unwrap_or_default(),
         accounts: open
             .iter()

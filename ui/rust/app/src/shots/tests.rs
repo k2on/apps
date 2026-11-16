@@ -189,16 +189,7 @@ fn a_field_is_typed_into() {
         "Connect to Your Server",
         "Where it is kept.",
         (
-            address_field(
-                "Server Address",
-                "money.example.com",
-                "",
-                "",
-                None::<String>,
-                true,
-                Msg::Typed,
-                Msg::Check,
-            ),
+            address_field("Server Address", "money.example.com", "", None::<String>, true, Msg::Typed, Msg::Check),
             wide_button("Continue", true, true, false, Msg::Check),
         ),
     );

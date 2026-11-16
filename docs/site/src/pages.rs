@@ -203,7 +203,7 @@ fn overview(base: &str) -> Page {
 
 /// Every page, by section: the index a search without script leads to.
 fn all(base: &str) -> Page {
-    let mut md = String::from("Every page of the docs, by section. With script, the search field finds words on any of them.\n\n");
+    let mut md = String::from("Every page of the docs, by section.\n\n");
     md.push_str(&format!("- [Overview]({base})\n"));
     for section in Section::ALL {
         md.push_str(&format!("\n## [{}]({})\n\n", section.heading(), href(base, section.tag())));

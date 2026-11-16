@@ -177,7 +177,7 @@ pub fn card(p: &CardPage) -> View<ListMsg> {
         ),
         card_section(goal(p.fraction, p.tint, p.note)).header("Goal"),
         if p.empty {
-            card_section(empty_state("list", "No Things", "Add one with the button above."))
+            card_section(empty_state("list", "No Things"))
         },
         card_section(
             hstack((

@@ -15,5 +15,5 @@ fn nothing_typed_invites_and_a_word_answers_from_songs_albums_and_people() {
     assert!(p.has_songs || p.has_albums || p.has_artists);
     d.run(&mut rt, [SearchMsg::Typed { text: "zzqqxx".into() }]);
     let p = d.page(&mut rt);
-    assert!(p.nothing && p.nothing_text.contains("zzqqxx"));
+    assert!(p.nothing);
 }

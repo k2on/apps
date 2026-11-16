@@ -57,7 +57,7 @@ pub fn home(p: &HomePage) -> View<HomeMsg> {
                 )
             },
             if p.empty {
-                card_section(empty_state("music", "Nothing Here Yet", "What your server finds shows here."))
+                card_section(empty_state("music", "Nothing Here Yet"))
             },
         ),
     )

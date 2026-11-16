@@ -378,36 +378,40 @@ fn an_ask_is_followed_until_its_page_arrives() {
 fn what_an_ask_says() {
     let now = 1_000_000;
     let a = ask(1, "connect", AskState::Asked);
-    assert_eq!(a.said(now), "Asking the server for Plaid's page\u{2026}");
-    assert_eq!(a.said(now + 60_000), "The server hasn't answered yet. Does it have Plaid's keys?");
+    assert_eq!(a.said(now).unwrap(), "Asking the server for Plaid's page\u{2026}");
+    assert_eq!(
+        a.said(now + 60_000).unwrap(),
+        "The server hasn't answered yet. Does it have Plaid's keys?"
+    );
     let done = |what: &str| AskLine {
         institution: "Chase".into(),
         ..ask(1, what, AskState::Done)
     };
-    assert_eq!(done("connect").said(now), "Connected Chase. Choose what each of its accounts feeds.");
-    assert_eq!(done("reconnect").said(now), "Logged in to Chase again.");
+    assert_eq!(done("connect").said(now).unwrap(), "Connected Chase.");
+    assert_eq!(done("reconnect").said(now).unwrap(), "Logged in to Chase again.");
     assert!(
-        done("add_accounts").said(now).starts_with("Shared Chase's accounts again"),
-        "{}",
+        done("add_accounts").said(now).unwrap().starts_with("Shared Chase's accounts again"),
+        "{:?}",
         done("add_accounts").said(now)
     );
     assert_eq!(
-        done("disconnect").said(now),
+        done("disconnect").said(now).unwrap(),
         "Disconnected Chase. Its accounts stay, kept by hand from now on."
     );
     let failed = AskLine {
         message: "Plaid said no".into(),
         ..ask(1, "add_accounts", AskState::Failed)
     };
-    assert_eq!(failed.said(now), "Couldn't add accounts the bank: Plaid said no");
+    assert_eq!(failed.said(now).unwrap(), "Couldn't add accounts the bank: Plaid said no");
     assert_eq!(
-        ask(1, "connect", AskState::Expired).said(now),
+        ask(1, "connect", AskState::Expired).said(now).unwrap(),
         "Plaid's page closed before it was finished."
     );
     let waiting = AskLine {
         expires_ms: now + 10 * 60_000,
         ..ask(1, "connect", AskState::Waiting)
     };
+    assert_eq!(waiting.said(now), None, "its title says it");
     assert_eq!(waiting.closes(now).as_deref(), Some("It closes in 10 min"));
     assert_eq!(waiting.closes(now + 10 * 60_000), None);
     assert_eq!(a.closes(now), None);

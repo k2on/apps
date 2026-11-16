@@ -113,15 +113,15 @@ impl Windowed for Money {
             "accounts" => crate::accounts::view::accounts::view(&self.accounts.page(place, now_ms)).map(MoneyMsg::Accounts),
             "accounts.register" => match tagged_account(&self.shell.state().section) {
                 Some(_) => crate::register::view::register::view(&self.register.page(place, now_ms)).map(MoneyMsg::Register),
-                None => empty_state("landmark", "No Account Selected", "Choose an account to see its transactions."),
+                None => empty_state("landmark", "No Account Selected"),
             },
             "transactions" => crate::transactions::view::transactions::view(&self.transactions.page(place, now_ms)).map(MoneyMsg::Transactions),
-            "transactions.inspector" => empty_state("panel-right", "No Transaction Selected", "Select a transaction to see its details here."),
+            "transactions.inspector" => empty_state("panel-right", "No Transaction Selected"),
             "insights" => crate::insights::view::insights::view(&self.insights.page(place, now_ms)).map(MoneyMsg::Insights),
             "household" => view::household_foot::view(&self.shell.page(place, now_ms).household).map(MoneyMsg::Shell),
             // What a platform adds to Settings' General: the desktop's alone.
             "settings.more" => View::Empty,
-            _ => empty_state("panel-right", "Nothing Selected", "Select a row to see its details here."),
+            _ => empty_state("panel-right", "Nothing Selected"),
         }
     }
 

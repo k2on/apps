@@ -500,13 +500,12 @@ pub enum Part<M> {
         content: Box<View<M>>,
     },
     /// A server's address: the keyboard for a URL, no capitals or
-    /// corrections; `prompt` its placeholder, `note` under it until there
-    /// is a `problem`; Go sends `submit`.
+    /// corrections; `prompt` its placeholder, a `problem` under it; Go
+    /// sends `submit`.
     AddressField {
         label: &'static str,
         prompt: Val<String>,
         text: Val<String>,
-        note: Val<String>,
         problem: Val<Option<String>>,
         enabled: Val<bool>,
         typed: Input<String, M>,
@@ -2140,12 +2139,10 @@ pub fn first_run_page<M>(
 }
 
 /// A server's address field.
-#[allow(clippy::too_many_arguments)]
 pub fn address_field<M: 'static>(
     label: &'static str,
     prompt: impl Into<Val<String>>,
     text: impl Into<Val<String>>,
-    note: impl Into<Val<String>>,
     problem: impl Into<Val<Option<String>>>,
     enabled: impl Into<Val<bool>>,
     typed: fn(String) -> M,
@@ -2155,7 +2152,6 @@ pub fn address_field<M: 'static>(
         label,
         prompt: prompt.into(),
         text: text.into(),
-        note: note.into(),
         problem: problem.into(),
         enabled: enabled.into(),
         typed: Input::new(typed),
@@ -2811,7 +2807,6 @@ impl<M> Part<M> {
                 label,
                 prompt,
                 text,
-                note,
                 problem,
                 enabled,
                 typed,
@@ -2822,7 +2817,6 @@ impl<M> Part<M> {
                 vec![
                     ("prompt", G::Val(lit(prompt))),
                     ("text", G::Val(lit(text))),
-                    ("note", G::Val(lit(note))),
                     ("problem", G::Val(lit(problem))),
                     ("enabled", G::Val(lit(enabled))),
                     ("onChange", G::Typed(typed)),
@@ -3506,7 +3500,6 @@ impl<M: 'static> Part<M> {
                 label,
                 prompt,
                 text,
-                note,
                 problem,
                 enabled,
                 typed,
@@ -3515,7 +3508,6 @@ impl<M: 'static> Part<M> {
                 label,
                 prompt,
                 text,
-                note,
                 problem,
                 enabled,
                 typed: input(typed, f),

@@ -54,7 +54,6 @@ pub struct SearchPage {
     pub idle: bool,
     /// Typed, and nothing holds it.
     pub nothing: bool,
-    pub nothing_text: String,
 }
 
 fn needle(s: &State) -> String {
@@ -143,7 +142,6 @@ impl App for Search {
         };
         let nothing = !n.is_empty() && albums.is_empty() && artists.is_empty() && songs.is_empty();
         SearchPage {
-            nothing_text: format!("Nothing in your library holds \u{201c}{n}\u{201d}."),
             needle: s.needle.clone(),
             has_albums: !albums.is_empty(),
             albums,

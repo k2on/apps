@@ -119,7 +119,7 @@ public fun ServerScreen(
             label = { Text("Server address") },
             placeholder = { Text(placeholder) },
             isError = error != null,
-            supportingText = { Text(error ?: "A name or an address, with a port if it has one.") },
+            supportingText = if (error != null) { { Text(error) } } else null,
             enabled = !checking,
             singleLine = true,
             keyboardOptions =
@@ -168,8 +168,7 @@ public fun SignInScreen(
     OnboardingPage(
         mark,
         title = "Sign in",
-        sentence =
-            "You'll sign in on $host's own page, in a browser tab, and come straight back here.",
+        sentence = host,
     ) {
         if (error != null) {
             Text(
@@ -222,13 +221,6 @@ public fun PermissionScreen(
         Button(onClick = onAllow, modifier = Modifier.fillMaxWidth()) { Text("Allow") }
         Spacer(Modifier.height(8.dp))
         TextButton(onClick = onNotNow, modifier = Modifier.fillMaxWidth()) { Text("Not Now") }
-        Text(
-            "You can change this later in the phone's settings.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-        )
     }
 }
 

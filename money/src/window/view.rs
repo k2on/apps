@@ -31,8 +31,7 @@ pub fn month_inspector(p: &MonthInspector) -> View<BudgetMsg> {
             list_row("Assigned Last Month").glyph("clock").accent().on_tap(BudgetMsg::AutoLastMonth),
             list_row("Reset Assigned Amounts").glyph("undo-2").accent().on_tap(BudgetMsg::AutoReset),
         ))
-        .header("Auto-Assign")
-        .footer(Some("Every category at once, for this month.".to_string())),
+        .header("Auto-Assign"),
     ))
 }
 

@@ -26,7 +26,6 @@ pub fn accounts(p: &AccountsPage) -> View<AccountsMsg> {
                 .header(shelf.title)
                 .amount(shelf.total)
                 .shows_amount(shelf.shows_total)
-                .footer(shelf.note)
             },
             card_section((
                 list_row(p.banks_title).glyph("link").pushes().on_tap(AccountsMsg::OpenBanks),
@@ -64,8 +63,7 @@ pub fn accounts(p: &AccountsPage) -> View<AccountsMsg> {
                         .header(form.balance_header),
                         form_section(switch("In the Budget", form.on_budget, |on_budget| AccountsMsg::DraftOnBudget {
                             on_budget,
-                        }))
-                        .footer(form.on_budget_note),
+                        })),
                     ),
                 )
                 .confirm("Add Account", form.can_save, AccountsMsg::SaveDraft)

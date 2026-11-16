@@ -51,7 +51,7 @@ pub fn register(p: &RegisterPage) -> View<RegisterMsg> {
                 }
             },
             if p.empty {
-                card_section(empty_state("list", p.empty_title, p.empty_text))
+                card_section(empty_state("list", p.empty_title))
             },
             if p.all {
                 data_table(

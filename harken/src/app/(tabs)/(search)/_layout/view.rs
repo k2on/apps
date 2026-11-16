@@ -20,10 +20,10 @@ pub fn search(p: &SearchPage) -> View<SearchMsg> {
             "Search",
             (
                 if p.idle {
-                    card_section(empty_state("search", "Search Your Library", "Songs, albums and artists, as you type."))
+                    card_section(empty_state("search", "Search Your Library"))
                 },
                 if p.nothing {
-                    card_section(empty_state("search", "No Results", p.nothing_text))
+                    card_section(empty_state("search", "No Results"))
                 },
                 if p.has_albums {
                     artwork_shelf(

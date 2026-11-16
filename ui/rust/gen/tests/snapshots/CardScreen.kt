@@ -68,7 +68,6 @@ fun CardScreen(screen: CardHolder) {
                     ArkGlyph("list", ArkType.LargeTitle, color = ArkInk.quiet)
                     Column(verticalArrangement = Arrangement.spacedBy(Space.xs), horizontalAlignment = Alignment.CenterHorizontally) {
                         Text("No Things", style = ArkType.Title.style, color = ArkInk.ink, textAlign = TextAlign.Center)
-                        Text("Add one with the button above.", style = ArkType.Body.style, color = ArkInk.quiet, textAlign = TextAlign.Center)
                     }
                 }
             }

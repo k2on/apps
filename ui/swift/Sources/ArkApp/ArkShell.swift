@@ -205,7 +205,7 @@ public struct ArkShellPlace<Library: ArkAppHost, Shell: ArkRuntime>: View {
         if name == shell.account {
             ArkAccountButton(shell: shell, screen: shell.screen)
         } else {
-            ContentUnavailableView("Nothing Selected", systemImage: "sidebar.trailing", description: Text("Select a row to see its details here."))
+            ContentUnavailableView("Nothing Selected", systemImage: "sidebar.trailing")
         }
     }
 }

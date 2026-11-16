@@ -110,7 +110,7 @@ by the generated views by these names.
 | HeaderCard | title, figure, tint, glyph?, badge, line, caption, actions | laid out once in Rust of the primitives (ui/docs/primitives.md): a `CardSection` whose first row is its centred face, read as one, then its actions | the same, generated | the same, drawn by `arkui::view::layout` |
 | GoalProgress | fraction, tint, note | of the primitives: a `Meter` and a quiet footnote at a row's inset | the same, generated | the same |
 | Tile, StatusBadge, MeterBar | glyph/figure/fraction, tint (by name) | `Tile`, `StatusBadge`, `MeterBar` (`Primitives.kt`) | the same (`Primitives.swift`) | `parts::tile`, `figures::status_badge`, `parts::progress_bar` |
-| EmptyState, TitleStack | glyph, title, sentence; over, title, under, caption | of the primitives (`empty_state`, `title_stack`) | the same | the same |
+| EmptyState, TitleStack | glyph, title; over, title, under, caption | of the primitives (`empty_state`, `title_stack`) | the same | the same |
 | MenuAction | title, glyph, destructive, shown, onTap | `DropdownMenuItem` | `Button(role:)` with a `Label` | `context_menu::Item` |
 | FormSheet | title, onDismiss, confirm, canConfirm, onConfirm, content | `ModalBottomSheet`, the confirm a full-width button under the form | `.sheet` over a `Form`, Cancel ✕ and the confirming ✓ in its bar | a dialog with Cancel and the confirm |
 | FormSection | header, footer, content | a column, its label over and its note under | `Section(header:footer:)` | a column |
@@ -120,7 +120,7 @@ by the generated views by these names.
 | SwitchRow | title, note?, isOn, onChange | `ListItem` with a `Switch` | `Toggle` | `checkbox` |
 | Prompt, NameField, AmountField, ChipRow, Chip, FormButton, HeroFigure | as they read | | | |
 | FirstRunPage | glyph, title, sentence, content | `OnboardingPage` (the mark in the primary, centred, scrolling over the keyboard) | `WelcomePage` (the mark on glass in the accent) | a centred column under the mark's tile; the browser's `.ark-welcome` card |
-| AddressField | label, prompt, text, note, problem, enabled, onChange, onSubmit | `OutlinedTextField` (the URI keyboard, Go) | a `TextField` on glass (`.URL`, no capitals or corrections, Go) | a `text_input`, Enter submits; the browser's `<input type=url>` |
+| AddressField | label, prompt, text, problem, enabled, onChange, onSubmit | `OutlinedTextField` (the URI keyboard, Go) | a `TextField` on glass (`.URL`, no capitals or corrections, Go) | a `text_input`, Enter submits; the browser's `<input type=url>` |
 | WideButton | title, prominent, enabled, busy, onTap | `Button` / `OutlinedButton`, a spinner while busy | `.glassProminent` in the accent / `.glass`, a `ProgressView` while busy | `style::action` / `style::quiet`; the browser's `.ark-push` (`.ark-default`) |
 | StatusLine | text?, busy, problem? | a polite / assertive live region | the footnote quiet, the problem in `Color.error` | dim words, the problem in the danger colour; `role=status` / `alert` |
 | CodeImage | size, dark | `QrCode` | `QrCode` | `arkui::qr::qr_code`; the browser's inline SVG |
