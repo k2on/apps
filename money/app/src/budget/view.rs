@@ -152,7 +152,8 @@ pub fn budget(p: &BudgetPage) -> View<BudgetMsg> {
 /// A group: its heading (what its categories have, or what of the cards'
 /// debt is not covered; on a regular width what they were assigned and
 /// spent too), folded by a tap, held for New Category, Rename, Hide, Move
-/// Up or Down and Delete Group; its categories, or Add a Category while it
+/// Up or Down and Delete Group — on a keyboard's vim layer `cc`, `rg`, `{`
+/// and `}` on any of its rows; its categories, or Add a Category while it
 /// has none.
 #[view]
 pub fn group(g: &GroupItem) -> View<BudgetMsg> {
@@ -173,10 +174,14 @@ pub fn group(g: &GroupItem) -> View<BudgetMsg> {
     .columns(COLUMNS, g.assigned, g.activity)
     .collapsible(g.open, BudgetMsg::Toggle { id: g.id })
     .menu_if("New Category", "circle-plus", BudgetMsg::NewCategory { group: g.id }, false, g.own)
+    .keys("cc")
     .menu_if("Rename", "pencil", BudgetMsg::RenameGroup { id: g.id }, false, g.own)
+    .keys("rg")
     .menu_if(g.hide_title, g.hide_glyph, BudgetMsg::HideGroup { id: g.id }, false, true)
     .menu_if("Move Up", "arrow-up", BudgetMsg::GroupUp { id: g.id }, false, g.can_up)
+    .keys("{")
     .menu_if("Move Down", "arrow-down", BudgetMsg::GroupDown { id: g.id }, false, g.can_down)
+    .keys("}")
     .menu_if("Delete Group", "trash", BudgetMsg::DeleteGroup { id: g.id }, true, g.own)
     .into()
 }
@@ -184,7 +189,8 @@ pub fn group(g: &GroupItem) -> View<BudgetMsg> {
 /// A category in the month: its emoji and name (a card's payment its
 /// card's mark), the bar toward its target and what needs attention, on a
 /// regular width what it was assigned and spent, what it has in a badge of
-/// its state. Tapped, its month; held, what can be done to it.
+/// its state. Tapped, its month; held, what can be done to it (`K` and `J`
+/// move it, or every category selected, up and down).
 #[view]
 pub fn category(l: &CategoryItem) -> View<BudgetMsg> {
     meter_row(l.title, l.status, l.status_tint)
@@ -204,7 +210,9 @@ pub fn category(l: &CategoryItem) -> View<BudgetMsg> {
         .menu_if(l.target_title, "crosshair", BudgetMsg::Target { id: l.id }, false, l.own)
         .menu_if(l.hide_title, l.hide_glyph, BudgetMsg::HideCategory { id: l.id }, false, true)
         .menu_if("Move Up", "arrow-up", BudgetMsg::CategoryUp { id: l.id }, false, l.can_up)
+        .keys("K")
         .menu_if("Move Down", "arrow-down", BudgetMsg::CategoryDown { id: l.id }, false, l.can_down)
+        .keys_from_last("J")
         .menu_if("Delete Category", "trash", BudgetMsg::DeleteCategory { id: l.id }, true, l.own)
         .into()
 }

@@ -131,6 +131,7 @@ pub fn table_with(columns: &[Column], rows: Vec<TableRow>, zebra: bool, top: Opt
                     title: r.title.clone(),
                     open: r.open.clone(),
                     menu: opener.clone(),
+                    ..Row::default()
                 })
                 .1;
             let mut class = String::from(if r.heading { "ark-table-row ark-heading" } else { "ark-table-row" });

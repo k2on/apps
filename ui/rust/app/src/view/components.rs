@@ -257,6 +257,7 @@ impl<M> MediaRow<M> {
             tap,
             destructive: Val::Is(false),
             shown: None,
+            keys: None,
         });
         self
     }

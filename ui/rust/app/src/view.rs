@@ -1151,6 +1151,7 @@ impl<M> Section<M> {
             tap,
             destructive: Val::Is(destructive),
             shown: Some(shown.into()),
+            keys: None,
         });
         self
     }
@@ -1256,6 +1257,7 @@ impl<M> MeterRow<M> {
             tap,
             destructive: Val::Is(destructive),
             shown: Some(shown.into()),
+            keys: None,
         });
         self
     }
@@ -1344,7 +1346,67 @@ pub struct MenuItem<M> {
     pub destructive: Val<bool>,
     /// Offered only while this holds; always when none.
     pub shown: Option<Val<bool>>,
+    /// The keys that run it on the row the keyboard's cursor is on, where
+    /// there is a keyboard's vim layer (the desktop's, the browser's): a
+    /// sequence of the grammar's (`cc`, `rg`) or one key (`J`, `{`). An
+    /// item of a section's heading is bound on each of its rows. None for
+    /// an item no key runs.
+    pub keys: Option<Bind>,
 }
+
+/// A menu item's keys ([`MenuItem::keys`]), and how they run over a visual
+/// selection (`v`): the item of each row selected, first to last — or last
+/// to first where `from_last`, as a move down must go, so that each row
+/// moves past one that has not moved yet.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Bind {
+    pub keys: &'static str,
+    pub from_last: bool,
+}
+
+impl Bind {
+    /// The keys (`cc`, `K`), run first to last over a selection.
+    pub fn new(keys: &'static str) -> Bind {
+        Bind { keys, from_last: false }
+    }
+
+    /// The keys (`J`), run last to first over a selection.
+    pub fn from_last(keys: &'static str) -> Bind {
+        Bind { keys, from_last: true }
+    }
+}
+
+/// The last menu item added, bound to `bind`: what each part's `.keys()`
+/// and `.keys_from_last()` do.
+fn bind_last<M>(menu: &mut [MenuItem<M>], bind: Bind) {
+    match menu.last_mut() {
+        Some(m) => m.keys = Some(bind),
+        None => panic!("keys {:?} bound before any menu item", bind.keys),
+    }
+}
+
+/// Binding the last menu item added to keys, on every part with a menu.
+macro_rules! keys_on {
+    ($t:ident) => {
+        impl<M> $t<M> {
+            /// The menu item just added, run by `keys` on the cursor's row
+            /// ([`MenuItem::keys`]).
+            pub fn keys(mut self, keys: &'static str) -> Self {
+                bind_last(&mut self.menu, Bind::new(keys));
+                self
+            }
+            /// The same, run last to first over a visual selection (a move
+            /// down: [`Bind::from_last`]).
+            pub fn keys_from_last(mut self, keys: &'static str) -> Self {
+                bind_last(&mut self.menu, Bind::from_last(keys));
+                self
+            }
+        }
+    };
+}
+keys_on!(Section);
+keys_on!(ListRow);
+keys_on!(MeterRow);
 
 /// ArkUI's `ListRow`.
 #[derive(Clone, Debug)]
@@ -1448,6 +1510,7 @@ impl<M> ListRow<M> {
             tap,
             destructive: destructive.into(),
             shown: None,
+            keys: None,
         });
         self
     }
@@ -1459,6 +1522,7 @@ impl<M> ListRow<M> {
             tap,
             destructive: destructive.into(),
             shown: None,
+            keys: None,
         });
         self
     }
@@ -1470,6 +1534,7 @@ impl<M> ListRow<M> {
             tap,
             destructive: Val::Is(false),
             shown: Some(shown.into()),
+            keys: None,
         });
         self
     }
@@ -1484,6 +1549,7 @@ impl<M> ListRow<M> {
             tap,
             destructive: Val::Is(false),
             shown: None,
+            keys: None,
         });
         self
     }
@@ -2139,6 +2205,7 @@ impl<M> TableRow<M> {
             tap,
             destructive: Val::Is(destructive),
             shown: Some(shown.into()),
+            keys: None,
         });
         self
     }
@@ -2150,6 +2217,7 @@ impl<M> TableRow<M> {
             tap,
             destructive: Val::Is(destructive),
             shown: None,
+            keys: None,
         });
         self
     }
@@ -2295,6 +2363,7 @@ impl<M> Pressed<M> {
             tap,
             destructive: Val::Is(false),
             shown: None,
+            keys: None,
         });
         self
     }
@@ -3405,6 +3474,7 @@ impl<M: 'static> Part<M> {
                             tap: f(m.tap),
                             destructive: m.destructive,
                             shown: m.shown,
+                            keys: m.keys,
                         })
                         .collect(),
                 }))
@@ -3823,6 +3893,7 @@ fn map_menu<M, N>(menu: Vec<MenuItem<M>>, f: &Rc<dyn Fn(M) -> N>) -> Vec<MenuIte
             tap: f(m.tap),
             destructive: m.destructive,
             shown: m.shown,
+            keys: m.keys,
         })
         .collect()
 }

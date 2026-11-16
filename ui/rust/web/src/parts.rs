@@ -547,7 +547,10 @@ fn section<M: Clone + std::fmt::Debug + 'static>(s: Section<M>) -> AnyView {
             })
             .child((html::span().child((chevron, title)), trailing))
     });
-    let rows = if open { nodes(*s.rows) } else { vec![] };
+    let rows = match open {
+        true => crate::in_section(crate::bound(&s.menu), || nodes(*s.rows)),
+        false => vec![],
+    };
     let n = rows.len();
     let rows: Vec<AnyView> = rows
         .into_iter()
@@ -587,6 +590,8 @@ pub fn list_row<M: Clone + std::fmt::Debug + 'static>(r: ListRow<M>) -> AnyView 
         title: title.clone(),
         open: open.clone(),
         menu: opener.clone(),
+        bound: crate::bound(&r.menu),
+        ..Row::default()
     });
     let picture = match &r.picture {
         Picture::None => None,
@@ -657,6 +662,8 @@ pub fn meter_row<M: Clone + std::fmt::Debug + 'static>(r: MeterRow<M>) -> AnyVie
         title: title.clone(),
         open: open.clone(),
         menu: opener.clone(),
+        bound: crate::bound(&r.menu),
+        ..Row::default()
     });
     let faded = r.faded.as_ref().is_some_and(|f| f.get());
     let mark = r
@@ -1057,6 +1064,8 @@ fn pressed<M: Clone + std::fmt::Debug + 'static>(
                 title: label.clone(),
                 open: Some(open.clone()),
                 menu: opener.clone(),
+                bound: crate::bound(menu),
+                ..Row::default()
             })
             .1
         }

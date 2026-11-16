@@ -18,6 +18,7 @@ use ark_app::view::{
 use iced::widget::{button, checkbox, column, container, row, rule, scrollable, stack, tooltip, Column, Space};
 use iced::{Alignment, Length, Padding};
 
+use crate::context_menu::Keyed;
 use crate::layout_tokens::{CONTENT_WIDTH, INSPECTOR_WIDTH, SEARCH_WIDTH, SIDEBAR_MIN_WIDTH, SIDEBAR_WIDTH, TOOLBAR_HEIGHT};
 use crate::shell::{Frame, Pane, SizeClass};
 use crate::{context_menu, glyphs, icon, layer, parts, sidebar, style};
@@ -88,6 +89,7 @@ fn page<M: Clone + 'static>(title: Val<String>, content: View<M>) -> Element<'st
             v => dialog(v),
         };
         if let Some((dismiss, dialog)) = asked {
+            cursor::modal_drawn(&dismiss);
             layers = layers.push(layer::dimmed(dismiss.clone(), dismiss)).push(layer::centred(dialog));
         }
     }
@@ -359,31 +361,19 @@ fn part<M: Clone + 'static>(v: View<M>) -> Option<Element<'static, M>> {
             content,
         } => {
             let face: Element<'static, M> = column(nodes(*content)).into();
+            let mut keyed = Keyed::Away;
             let b = match press {
                 // A row the window's width, lit by the cursor as a list's row is.
                 ark_app::view::Press::Highlight => {
-                    let lit = cursor::row_drawn(&label.get(), Some(&tap));
-                    button(lit_row(face, lit)).width(Length::Fill).padding(0).style(style::bare)
+                    keyed = cursor::row_bound(&label.get(), Some(&tap), cursor::bound(&menu));
+                    button(lit_row(face, keyed == Keyed::Here)).width(Length::Fill).padding(0).style(style::bare)
                 }
                 // The desktop gives no press (ui/docs/motion.md): the theme's
                 // pressed colour, at once.
                 ark_app::view::Press::Give => button(face).padding(0).style(style::bare),
             }
             .on_press(tap);
-            let items: Vec<context_menu::Item<M>> = menu
-                .into_iter()
-                .filter(|m| m.offered())
-                .map(|m| context_menu::Item {
-                    glyph: glyphs::named(&m.glyph.get()),
-                    label: m.title.get(),
-                    destructive: m.destructive.get(),
-                    message: m.tap,
-                })
-                .collect();
-            match items.is_empty() {
-                true => b.into(),
-                false => context_menu::context_menu(b, label.get(), items),
-            }
+            row_menu(b, label.get(), menu_of(menu), keyed)
         }
         Part::Artwork {
             url,
@@ -475,7 +465,11 @@ fn part<M: Clone + 'static>(v: View<M>) -> Option<Element<'static, M>> {
             notes,
             total,
         } => paper(heading.get(), date.get(), names.get(), figures.get(), notes.get(), total.get()),
-        Part::Button { title, enabled, tap } => button(text(title)).on_press_maybe(enabled.get().then_some(tap)).into(),
+        Part::Button { title, enabled, tap } => button(text(title).size(13))
+            .padding([4, 10])
+            .style(style::action)
+            .on_press_maybe(enabled.get().then_some(tap))
+            .into(),
         Part::DateField { label, day, typed } => column![
             text(label).size(12).style(style::dim),
             text_input("2026-11-11", &day.get())
@@ -611,6 +605,7 @@ fn draw<'a, M: Clone + 'static>(v: View<M>, ctx: &mut Ctx<'a, '_, M>) -> Element
         match p {
             Part::Confirm { .. } | Part::Alert { .. } | Part::Sheet { .. } | Part::Prompt { .. } => {
                 if let Some((dismiss, panel)) = notice(p) {
+                    cursor::modal_drawn(&dismiss);
                     over.push(layer::dimmed(dismiss.clone(), dismiss));
                     over.push(layer::centred(panel));
                 }
@@ -858,6 +853,7 @@ fn shell_part<'a, M: Clone + 'static>(p: Part<M>, ctx: &mut Ctx<'a, '_, M>) -> E
             match frame.class() {
                 SizeClass::Compact => {
                     let close = toggle.call(false);
+                    cursor::modal_drawn(&close);
                     let pane = column![
                         row![
                             text(title).size(15).font(crate::hero::BOLD),
@@ -1225,19 +1221,14 @@ fn notice<M: Clone + 'static>(p: Part<M>) -> Option<(M, Element<'static, M>)> {
             actions,
             cancel,
         } => {
-            let mut buttons = row![Space::new().width(Length::Fill), button(text("Cancel")).on_press(cancel.clone())].spacing(8);
+            let mut buttons = row![
+                Space::new().width(Length::Fill),
+                dialog_button("Cancel", Role::Cancel, Some(cancel.clone()))
+            ]
+            .spacing(8);
             for a in actions {
-                let destructive = a.destructive;
-                buttons = buttons.push(
-                    button(text(a.title.get()).style(move |t| match destructive {
-                        true => text::Style {
-                            color: Some(crate::theme::of(t).danger.base.color),
-                            ..Default::default()
-                        },
-                        false => text::Style::default(),
-                    }))
-                    .on_press(a.tap),
-                );
+                let role = if a.destructive { Role::Destructive } else { Role::Default };
+                buttons = buttons.push(dialog_button(a.title.get(), role, Some(a.tap)));
             }
             (
                 cancel,
@@ -1253,13 +1244,41 @@ fn notice<M: Clone + 'static>(p: Part<M>) -> Option<(M, Element<'static, M>)> {
             column![
                 text(title.get()).size(18).font(crate::hero::BOLD),
                 text(message.get()).size(13).style(style::dim),
-                row![Space::new().width(Length::Fill), button(text("OK")).on_press(ok)]
+                row![Space::new().width(Length::Fill), dialog_button("OK", Role::Default, Some(ok))]
             ],
         ),
         p => return dialog(View::Part(p)),
     };
     let panel = container(content.spacing(12)).padding(20).width(DIALOG).style(style::card);
     Some((dismiss, panel.into()))
+}
+
+/// What a dialog's button does, which says how it is drawn: Cancel quiet,
+/// the one that goes ahead in the accent, one that cannot be undone in the
+/// danger colour — ArkUI's buttons (`style`), never iced's own.
+#[derive(Clone, Copy)]
+enum Role {
+    Cancel,
+    Default,
+    Destructive,
+}
+
+/// A dialog's button, pressable while it has a message.
+fn dialog_button<'a, M: Clone + 'a>(title: impl Into<String>, role: Role, press: Option<M>) -> Element<'a, M> {
+    let title: String = title.into();
+    let words = match role {
+        Role::Cancel => text(title).size(13),
+        _ => text(title).size(13).font(crate::hero::BOLD),
+    };
+    button(words)
+        .padding([5, 12])
+        .style(match role {
+            Role::Cancel => style::quiet,
+            Role::Default => style::action,
+            Role::Destructive => style::destructive,
+        })
+        .on_press_maybe(press)
+        .into()
 }
 
 /// A dialog for a sheet or a prompt, and what puts it away.
@@ -1290,8 +1309,8 @@ fn dialog<M: Clone + 'static>(v: View<M>) -> Option<(M, Element<'static, M>)> {
                 c = c.push(
                     row![
                         Space::new().width(Length::Fill),
-                        button(text("Cancel")).on_press(dismiss.clone()),
-                        button(text(title)).on_press_maybe(enabled.get().then_some(tap)),
+                        dialog_button("Cancel", Role::Cancel, Some(dismiss.clone())),
+                        dialog_button(title, Role::Default, enabled.get().then_some(tap)),
                     ]
                     .spacing(8),
                 );
@@ -1315,8 +1334,8 @@ fn dialog<M: Clone + 'static>(v: View<M>) -> Option<(M, Element<'static, M>)> {
                     .style(style::field),
                 row![
                     Space::new().width(Length::Fill),
-                    button(text("Cancel")).on_press(cancel),
-                    button(text(confirm)).on_press(ok)
+                    dialog_button("Cancel", Role::Cancel, Some(cancel)),
+                    dialog_button(confirm, Role::Default, Some(ok))
                 ]
                 .spacing(8),
             ],
@@ -1382,14 +1401,15 @@ fn section<M: Clone + 'static>(s: Section<M>) -> Element<'static, M> {
                 .on_press(toggle)
                 .into();
         }
-        let items = menu_of(s.menu);
+        let items = menu_of(s.menu.clone());
         out = out.push(match items.is_empty() {
             true => head,
             false => context_menu::context_menu(head, title, items),
         });
     }
     if open {
-        out = out.push(parts::group_card(nodes(*s.rows)));
+        let rows = cursor::in_section(cursor::bound(&s.menu), || nodes(*s.rows));
+        out = out.push(parts::group_card(rows));
     }
     if let Some(note) = s.footer.and_then(|f| f.get()) {
         out = out.push(container(text(note).size(12).style(style::dim)).padding([6, 4]));
@@ -1400,6 +1420,20 @@ fn section<M: Clone + 'static>(s: Section<M>) -> Element<'static, M> {
 /// A column's width beside a row's name, and the gap between two.
 const METER_COLUMN: f32 = 96.0;
 const COLUMN_GAP: f32 = 12.0;
+
+/// A row's button with its menu, opened by the keys while the cursor is on
+/// it ([`Keyed`]); the button alone when it offers nothing.
+fn row_menu<M: Clone + 'static>(
+    b: iced::widget::Button<'static, M>,
+    title: String,
+    items: Vec<context_menu::Item<M>>,
+    keyed: Keyed,
+) -> Element<'static, M> {
+    match items.is_empty() {
+        true => b.into(),
+        false => context_menu::on_row(b, title, items, keyed),
+    }
+}
 
 /// A menu's items as ArkUI's context menu offers them: those offered.
 fn menu_of<M: Clone + 'static>(menu: Vec<ark_app::view::MenuItem<M>>) -> Vec<context_menu::Item<M>> {
@@ -1456,17 +1490,13 @@ fn meter_row<M: Clone + 'static>(r: MeterRow<M>) -> Element<'static, M> {
     }
     let badge = crate::figures::status_badge(r.status.get(), parts::Tint::named(&r.status_tint.get()));
     line = line.push(container(badge).width(METER_COLUMN).align_right(METER_COLUMN));
-    let lit = cursor::row_drawn(&r.title.get(), r.tap.as_ref());
-    let b = button(lit_row(line, lit))
+    let keyed = cursor::row_bound(&r.title.get(), r.tap.as_ref(), cursor::bound(&r.menu));
+    let b = button(lit_row(line, keyed == Keyed::Here))
         .width(Length::Fill)
         .padding([2, 0])
         .style(style::bare)
         .on_press_maybe(r.tap);
-    let items = menu_of(r.menu);
-    match items.is_empty() {
-        true => b.into(),
-        false => context_menu::context_menu(b, r.title.get(), items),
-    }
+    row_menu(b, r.title.get(), menu_of(r.menu), keyed)
 }
 
 fn list_row<M: Clone + 'static>(r: ListRow<M>) -> Element<'static, M> {
@@ -1505,27 +1535,13 @@ fn list_row<M: Clone + 'static>(r: ListRow<M>) -> Element<'static, M> {
     if r.tap.is_none() && r.menu.is_empty() {
         return container(line).width(Length::Fill).padding([2, 0]).into();
     }
-    let lit = cursor::row_drawn(&r.title.get(), r.tap.as_ref());
-    let b = button(lit_row(line, lit))
+    let keyed = cursor::row_bound(&r.title.get(), r.tap.as_ref(), cursor::bound(&r.menu));
+    let b = button(lit_row(line, keyed == Keyed::Here))
         .width(Length::Fill)
         .padding([2, 0])
         .style(style::bare)
         .on_press_maybe(r.tap);
-    let items: Vec<context_menu::Item<M>> = r
-        .menu
-        .into_iter()
-        .filter(|m| m.offered())
-        .map(|m| context_menu::Item {
-            glyph: glyphs::named(&m.glyph.get()),
-            label: m.title.get(),
-            destructive: m.destructive.get(),
-            message: m.tap,
-        })
-        .collect();
-    match items.is_empty() {
-        true => b.into(),
-        false => context_menu::context_menu(b, r.title.get(), items),
-    }
+    row_menu(b, r.title.get(), menu_of(r.menu), keyed)
 }
 
 /// `line` lit as the keyboard's cursor is, while it is on it
@@ -1698,24 +1714,10 @@ fn table_row<M: Clone + 'static>(columns: &[TableColumn], r: TableRow<M>, odd: u
     for (i, c) in cells.into_iter().enumerate() {
         line = line.push(table_cell(c, columns.get(i)));
     }
-    let lit = cursor::row_drawn(&title, r.tap.as_ref());
-    let body = crate::table::row(line, selected || lit, true, odd % 2 == 1);
+    let keyed = cursor::row_bound(&title, r.tap.as_ref(), cursor::bound(&r.menu));
+    let body = crate::table::row(line, selected || keyed == Keyed::Here, true, odd % 2 == 1);
     let b = button(body).width(Length::Fill).padding(0).style(style::bare).on_press_maybe(r.tap);
-    let items: Vec<context_menu::Item<M>> = r
-        .menu
-        .into_iter()
-        .filter(|m| m.offered())
-        .map(|m| context_menu::Item {
-            glyph: glyphs::named(&m.glyph.get()),
-            label: m.title.get(),
-            destructive: m.destructive.get(),
-            message: m.tap,
-        })
-        .collect();
-    match items.is_empty() {
-        true => b.into(),
-        false => context_menu::context_menu(b, title, items),
-    }
+    row_menu(b, title, menu_of(r.menu), keyed)
 }
 
 /// A bar chart's three lists as its bars.

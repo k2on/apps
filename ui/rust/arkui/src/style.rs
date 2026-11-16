@@ -113,6 +113,19 @@ pub fn action(theme: &Theme, status: button::Status) -> button::Style {
     }
 }
 
+/// A button that cannot be undone (a dialog's Delete): [`action`]'s,
+/// in the theme's danger colour rather than the accent.
+pub fn destructive(theme: &Theme, status: button::Status) -> button::Style {
+    let text_color = match status {
+        button::Status::Disabled => of(theme).background.base.text.scale_alpha(0.4),
+        _ => of(theme).danger.base.color,
+    };
+    button::Style {
+        text_color,
+        ..action(theme, status)
+    }
+}
+
 /// The ground behind a button held down: the text colour at
 /// [`PRESS_ALPHA`], from the moment it goes down — what a press does is
 /// seen while the hand is still on it, not only once it lets go.

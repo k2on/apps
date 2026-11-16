@@ -779,6 +779,7 @@ fn sidebar_item<M: Clone + std::fmt::Debug + 'static>(title: &str, g: &str, badg
         title: title.to_string(),
         open: Some(Rc::new(move || send(t.clone()))),
         menu: None,
+        ..Row::default()
     });
     let mut class = String::from("ark-sidebar-item");
     if selected {

@@ -2030,10 +2030,12 @@ every toolkit where it applies, its numbers in `ui/theme.toml`:
 | A formula field: terms of a filter and a factor, what it gives as typed | `formula_field(terms, total, on_change)` over a record money-app works out; the parsing and the sum money-core's |
 | A register's filter as chips, "Save as Filter…" | `filter_bar(chips)`, the conditions money-core's `Filter`, the words money-app's |
 | The category dropdown under a cell (YNAB's) | the search picker already drawn under its field (`arkui::search_picker`) |
-| Visual mode, the budget's bindings (`cc`, `cg`, `rc`, `rg`, `J`/`K`, `{`/`}`) | a list's bound keys as the app's commands, with the selection a view's |
+| Visual mode, the budget's bindings (`cc`, `cg`, `rc`, `rg`, `J`/`K`, `{`/`}`) | done: a menu item's keys (`MenuItem::keys`, `.keys("cc")`, `.keys_from_last("J")`) run it on the cursor's row or a visual selection (`v`, `vig`), on the desktop (`arkui::host::keys`, `view::cursor`) and in the browser (arkui-web's `keys`); money binds `cc`, `rg`, `{`, `}` on a group's heading and `K`/`J` on a category. Left: `cg` and `rc` (New Group is a command, a category has no Rename) |
 | A receipt's paper on the desktop, a photo dropped with no scan asked | `receipts::view` is the phones' already; a drop with nothing waiting a `Windowed` message |
 | Settings' stores pane | a pane of money's `money_settings` over money-core's `setup` calls |
-| The appearance a launch or Settings asks (`Windowed::appearance`) | the window's theme over the system's |
+| The appearance a launch or Settings asks (`Windowed::appearance`) | done: the window's theme over the system's (`DesktopHost::theme`) |
+| `Esc` to put a sheet away; `Shift-F10` and the menu key on the cursor's row | done: the sheet or question on top recorded as it is drawn (`cursor::modal_drawn`), and `context_menu::on_row`'s `Keyed` |
+| The notice's and confirm's buttons | done: ArkUI's (`style::quiet`, `action`, `destructive`), not iced's own |
 
 ### What Is Left of money's Own Native and Web Code
 

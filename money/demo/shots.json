@@ -352,6 +352,26 @@
         ]
       },
       {
+        "id": "visual",
+        "steps": [
+          {
+            "key": "Escape"
+          },
+          {
+            "key": "j"
+          },
+          {
+            "key": "v"
+          },
+          {
+            "key": "j"
+          },
+          {
+            "key": "j"
+          }
+        ]
+      },
+      {
         "id": "auto-assign-menu",
         "steps": [
           {
@@ -366,7 +386,7 @@
         "id": "settings",
         "steps": [
           {
-            "tap": "budget.cancel-auto"
+            "key": "Escape"
           },
           {
             "tap": "shell.account"

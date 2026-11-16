@@ -90,7 +90,10 @@ Mac and with a hardware keyboard on an iPad or an Android tablet.
 | `Ctrl-o` / `Ctrl-i` | back / forward |
 | `Enter`, `o` | open |
 | `/`, `n` / `N` | search, next / previous match |
-| `Shift-F10`, the menu key | the row's context menu |
+| `Shift-F10`, the menu key | the cursor's row's context menu, at the row |
+| `v`, `vig` | select: the rows from here as the cursor walks; the section's rows |
+| a row's bound keys (`cc`, `rg`, `J`/`K`, `{`/`}`) | the menu item they are bound to, on the cursor's row or every row selected |
+| `Esc` | drop what is half-typed, the selection; put away the sheet or question on top |
 | `:` or ⌘K | the command box: every command, by name |
 | `?` (and a held prefix) | the keys panel (which-key): what can be pressed now |
 
@@ -98,7 +101,16 @@ The rows of a pane carry a focus the way a Mac list does: one row is
 selected, the focus moves with the keys and the pointer, and a pane that
 has the keyboard says so. An app adds its own commands (a month forward,
 a transaction added) as `Commands`; the parts show them in the keys panel,
-the command box and, on the Mac, the menu bar.
+the command box and, on the Mac, the menu bar. What a row's menu offers
+can be bound to keys of its own (`.menu_if(…).keys("cc")`, or
+`.keys_from_last("J")` for a move down, which runs from the last row of a
+selection up): the item of the cursor's row, or of every row selected, a
+section heading's on each of its rows and once for the section, and the
+keys panel lists them; the cursor stays with its rows. A binding is never
+one of the grammar's keys above. The desktop's keys are `arkui::host::keys`
+over `arkui::view::cursor`, the browser's arkui-web's `keys`; the phones
+draw the menu and ignore the keys (a hardware keyboard's shortcuts there
+are the commands').
 
 ## Where Things Live
 

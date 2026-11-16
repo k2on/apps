@@ -131,6 +131,12 @@ pub struct Ui {
     /// The keys have walked the rows: the cursor is shown from then on, as
     /// a Mac list shows its focus only once it has the keyboard.
     pub keyed: bool,
+    /// Visual mode's other end, in the pane with the keys (`v`): the rows
+    /// from it to the cursor are lit, and a bound key runs on each.
+    pub anchor: Option<usize>,
+    /// The rows a bound key ran on, found again by their titles when the
+    /// page is next drawn: the cursor stays with them.
+    pub(crate) follow: Option<Follow>,
     /// What the specimens of arkui-web's own parts are at ([`specimens`]).
     pub specimens: specimens::State,
 }
@@ -148,13 +154,103 @@ pub(crate) struct Drawn {
     pub sidebar_at: Option<usize>,
     /// The dismissal of the modal on top, while one is up: `Esc`'s.
     pub modal: Option<Action>,
+    /// The section being drawn (its number, from one) and its heading's
+    /// bound items, which each of its rows carries (`parts::section`).
+    pub section: usize,
+    pub sections: usize,
+    pub heading: Vec<Bound>,
 }
 
-#[derive(Clone)]
+/// A row drawn: what it says, what opening it sends, its menu, and, set
+/// as it is drawn, the section it is in and the items keys run on it
+/// (`ark_app::view::MenuItem::keys`), as the desktop's
+/// (`arkui::view::cursor::Row`).
+#[derive(Clone, Default)]
 pub(crate) struct Row {
     pub title: String,
     pub open: Option<Action>,
     pub menu: Option<Opener>,
+    pub section: usize,
+    pub bound: Vec<Bound>,
+}
+
+/// A menu item bound to keys, on a row drawn: its keys, its words, what it
+/// does, and the section whose heading binds it (run once over a selection).
+#[derive(Clone)]
+pub(crate) struct Bound {
+    pub bind: ark_app::view::Bind,
+    pub title: String,
+    pub run: Action,
+    pub heading: Option<usize>,
+}
+
+/// Where the cursor and its selection's anchor were when a bound key ran
+/// (`keys::run_bound`): the pane, and each one's row and title.
+#[derive(Clone, Debug)]
+pub(crate) struct Follow {
+    pub pane: usize,
+    pub at: (usize, String),
+    pub anchor: Option<(usize, String)>,
+}
+
+impl Follow {
+    /// The row titled as `(near, title)` was, nearest it, among `rows`.
+    fn nearest(rows: &[Row], (near, title): &(usize, String)) -> Option<usize> {
+        rows.iter()
+            .enumerate()
+            .filter(|(_, r)| r.title == *title)
+            .min_by_key(|(i, _)| i.abs_diff(*near))
+            .map(|(i, _)| i)
+    }
+
+    /// The cursor put on its rows as they are drawn now.
+    fn find(&self, u: &mut Ui) {
+        let found = drawn(|d| {
+            let rows = &d.rows[self.pane];
+            (
+                Follow::nearest(rows, &self.at),
+                self.anchor.as_ref().and_then(|a| Follow::nearest(rows, a)),
+            )
+        });
+        if let Some(i) = found.0 {
+            u.cursor[self.pane] = i;
+        }
+        if u.anchor.is_some() {
+            u.anchor = found.1.or(u.anchor);
+        }
+    }
+}
+
+/// The items of `menu` that keys run, offered now.
+pub(crate) fn bound<M: Clone + std::fmt::Debug + 'static>(menu: &[ark_app::view::MenuItem<M>]) -> Vec<Bound> {
+    menu.iter()
+        .filter(|m| m.offered())
+        .filter_map(|m| {
+            let tap = m.tap.clone();
+            Some(Bound {
+                bind: m.keys?,
+                title: m.title.get(),
+                run: Rc::new(move || send(tap.clone())),
+                heading: None,
+            })
+        })
+        .collect()
+}
+
+/// What `f` draws are one section's rows, whose heading binds `heading`.
+pub(crate) fn in_section<R>(heading: Vec<Bound>, f: impl FnOnce() -> R) -> R {
+    let was = drawn(|d| {
+        d.sections += 1;
+        let n = d.sections;
+        let heading = heading.into_iter().map(|b| Bound { heading: Some(n), ..b }).collect();
+        (std::mem::replace(&mut d.section, n), std::mem::replace(&mut d.heading, heading))
+    });
+    let r = f();
+    drawn(|d| {
+        d.section = was.0;
+        d.heading = was.1;
+    });
+    r
 }
 
 thread_local! {
@@ -284,13 +380,20 @@ pub(crate) fn in_pane<R>(pane: Pane, f: impl FnOnce() -> R) -> R {
 
 /// A row drawn in the pane being drawn: its index there, and whether the
 /// keyboard's cursor is on it.
-pub(crate) fn row_drawn(row: Row) -> (usize, bool) {
+pub(crate) fn row_drawn(mut row: Row) -> (usize, bool) {
     let (pane, i) = drawn(|d| {
         let p = d.pane;
+        row.section = d.section;
+        row.bound.extend(d.heading.iter().cloned());
         d.rows[p.index()].push(row);
         (p, d.rows[p.index()].len() - 1)
     });
-    let lit = ui(|u| u.keyed && u.focus == pane && u.cursor[pane.index()] == i);
+    // The cursor's row, or every row of a visual selection (`v`).
+    let lit = ui(|u| {
+        let at = u.cursor[pane.index()];
+        let from = u.anchor.unwrap_or(at);
+        u.keyed && u.focus == pane && from.min(at) <= i && i <= from.max(at)
+    });
     (i, lit)
 }
 
@@ -970,6 +1073,14 @@ pub fn after_draw(f: impl FnOnce() + 'static) {
 }
 
 fn draw_window() -> AnyView {
+    // A bound key moved its rows (`J`): a draw first finds them, so the
+    // one shown lights them where they went.
+    if let Some(follow) = UI.with(|u| u.borrow_mut().follow.take()) {
+        drawn(|d| *d = Drawn::default());
+        page::begin_draw();
+        let _ = app_view();
+        UI.with(|u| follow.find(&mut u.borrow_mut()));
+    }
     drawn(|d| *d = Drawn::default());
     page::begin_draw();
     let view = app_view();

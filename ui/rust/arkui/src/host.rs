@@ -131,8 +131,12 @@ pub struct DesktopHost<W: Desktop> {
     width: f32,
     /// Which pane has the keys, the vim layer and the keys panel.
     keyboard: Keyboard,
-    /// Where the cursor is in each pane.
-    cursor: Cursor,
+    /// Where the cursor is in each pane: set while the window is drawn too,
+    /// when it follows its rows ([`keys::Follow`]).
+    cursor: std::cell::Cell<Cursor>,
+    /// The rows the cursor and its selection were on before a bound key
+    /// ran: found again by their titles once the window is drawn anew.
+    follow: RefCell<Option<keys::Follow>>,
     /// What the last draw left for the keys.
     drawn: RefCell<Drawn>,
     /// The field a walk's step tapped last: what its next `type` types into.
@@ -286,6 +290,7 @@ where
     let program = iced::application(DesktopHost::<W>::boot, DesktopHost::<W>::update, DesktopHost::<W>::view)
         .subscription(DesktopHost::<W>::subscription)
         .title(|_: &DesktopHost<W>| W::NAME.to_string())
+        .theme(DesktopHost::<W>::theme)
         .window_size(WINDOW)
         .font(crate::hero::FIRA_SANS_BOLD)
         .font(crate::fonts::FIRA_MONO);
@@ -361,7 +366,8 @@ where
             opening: false,
             width: WINDOW.0,
             keyboard: Keyboard::default(),
-            cursor: Cursor::default(),
+            cursor: std::cell::Cell::new(Cursor::default()),
+            follow: RefCell::new(None),
             drawn: RefCell::new(Drawn::default()),
             walk_focus: RefCell::new(None),
             command: None,
@@ -394,6 +400,18 @@ where
                 self.host(|h, place| h.launched(args.to_vec(), place));
                 Task::none()
             }
+        }
+    }
+
+    /// The appearance the app asks for over the system's (a launch's
+    /// `-appearance dark`, Settings'), as iced's theme; none follows the
+    /// system's, as the browser's `data-theme` does. A screenshot draws
+    /// both whatever this says (arkui-shots).
+    pub fn theme(&self) -> Option<iced::Theme> {
+        match self.app().appearance()? {
+            "dark" => Some(iced::Theme::Dark),
+            "light" => Some(iced::Theme::Light),
+            _ => None,
         }
     }
 
@@ -585,11 +603,18 @@ where
             let pages = crate::view::element(ark_app::welcome::welcome::view(&live.first_run.page()).map(Msg::Welcome));
             return crate::window::view(container(pages).center(Length::Fill).style(style::page));
         }
-        let (window, drawn) = cursor::drawing(self.cursor, || self.window());
+        // A bound key moved its rows (`J`): the cursor goes with them, found
+        // by a draw before the one shown.
+        if let Some(follow) = self.follow.borrow_mut().take() {
+            let (_, drawn) = cursor::drawing(self.cursor.get(), || self.window());
+            self.cursor.set(follow.found(self.cursor.get(), &drawn));
+        }
+        let (window, drawn) = cursor::drawing(self.cursor.get(), || self.window());
         *self.drawn.borrow_mut() = drawn;
         let mut layers = stack![container(window).width(Length::Fill).height(Length::Fill).style(style::page)];
         if let Some(prefix) = self.keyboard.which.showing() {
-            let entries = crate::which::entries(&[crate::vim::GRAMMAR], &[crate::vim::GROUPS], prefix);
+            let mut entries = crate::which::entries(&[crate::vim::GRAMMAR], &[crate::vim::GROUPS], prefix);
+            entries.extend(self.bound_entries(prefix));
             if !entries.is_empty() {
                 layers = layers.push(crate::which::view(prefix, &entries, crate::toast::MARGIN));
             }
@@ -613,7 +638,7 @@ where
         let app = self.app();
         let frame = Frame {
             width: self.width,
-            focus: self.cursor.focus,
+            focus: self.cursor.get().focus,
         };
         let mut hosts = |name: &'static str| -> Element<'static, Msg<AppMsg<W>>> { crate::view::element(app.hosted(name, &seen, now).map(Msg::App)) };
         let base = match app.settings(&seen, now) {

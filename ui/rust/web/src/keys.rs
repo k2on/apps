@@ -10,6 +10,11 @@
 //!   `Tab`/`Shift-Tab` between the panes, `Enter`/`o` open, `/` the search
 //!   field, `n`/`N` the next row matching it, `Shift-F10` or the menu key
 //!   the row's context menu, `?` the keys panel, `Esc` drops it all.
+//! - Visual mode, as the desktop's (`arkui::host::keys`): `v` lights the
+//!   rows from the cursor as it walks, `vig` its section's; a key a row's
+//!   menu binds (`ark_app::view::MenuItem::keys`: `cc`, `rg`, `J`, `{`)
+//!   runs that item on the cursor's row or on every row lit, and the
+//!   cursor stays with its rows once they are drawn anew.
 //! - A key moves nothing (motion.md's frequency rule): the cursor is on
 //!   its row on the frame the key went down, and kept in view by a snap.
 //!
@@ -38,6 +43,8 @@ pub const GRAMMAR: &[(&str, &str)] = &[
     ("Enter / o", "open"),
     ("/", "search"),
     ("n / N", "next / previous match"),
+    ("v", "select"),
+    ("vig", "select the section"),
     ("Shift-F10", "the row's menu"),
     (": / ⌘K", "the command box"),
     ("?", "this panel"),
@@ -156,6 +163,7 @@ fn press<W: WebHosted>(app: &Rc<RefCell<WebHost<W>>>, e: web_sys::KeyboardEvent)
             u.pending.clear();
             u.keys_panel = false;
             u.popover = None;
+            u.anchor = None;
         });
         if let Some(m) = modal {
             m();
@@ -172,6 +180,25 @@ fn press<W: WebHosted>(app: &Rc<RefCell<WebHost<W>>>, e: web_sys::KeyboardEvent)
     }
     if vim(&key, e.shift_key()) {
         e.prevent_default();
+    }
+}
+
+/// `vig`: every row of the cursor's section lit.
+fn select_section() {
+    let p = focus();
+    let at = cursor_of(p);
+    let rows: Vec<usize> = drawn(|d| {
+        let rs = &d.rows[pane_index(p)];
+        match rs.get(at).map(|r| r.section) {
+            Some(s) if s > 0 => rs.iter().enumerate().filter(|(_, r)| r.section == s).map(|(i, _)| i).collect(),
+            _ => vec![],
+        }
+    });
+    if let (Some(&first), Some(&last)) = (rows.first(), rows.last()) {
+        ui_mut(|u| {
+            u.anchor = Some(first);
+            u.cursor[pane_index(p)] = last;
+        });
     }
 }
 
@@ -251,12 +278,101 @@ fn count(pending: &str) -> Option<usize> {
     pending.chars().take_while(|c| c.is_ascii_digit()).collect::<String>().parse().ok()
 }
 
+/// The items keys bind on the rows lit in `p` (the cursor's, or a visual
+/// selection's), for `keys`, in the order they run: first to last, or last
+/// to first for a binding that says so (a move down); a heading's once.
+fn bound_runs(p: Pane, keys: &str) -> Vec<crate::Bound> {
+    let at = cursor_of(p);
+    let from = ui(|u| u.anchor).unwrap_or(at);
+    let (first, last) = (from.min(at), from.max(at));
+    let mut out: Vec<crate::Bound> = vec![];
+    drawn(|d| {
+        for r in d.rows[pane_index(p)].iter().skip(first).take(last + 1 - first) {
+            if let Some(b) = r.bound.iter().find(|b| b.bind.keys == keys) {
+                if b.heading.is_none() || !out.iter().any(|o| o.heading == b.heading) {
+                    out.push(b.clone());
+                }
+            }
+        }
+    });
+    if out.first().is_some_and(|b| b.bind.from_last) {
+        out.reverse();
+    }
+    out
+}
+
+/// Every key sequence bound on `p`'s rows.
+fn bindings(p: Pane) -> Vec<&'static str> {
+    drawn(|d| d.rows[pane_index(p)].iter().flat_map(|r| r.bound.iter().map(|b| b.bind.keys)).collect())
+}
+
+/// The item bound to `keys` run on the rows lit; the cursor and its anchor
+/// found again by their titles once the page is drawn anew.
+fn run_bound(p: Pane, keys: &str) {
+    let runs = bound_runs(p, keys);
+    if runs.is_empty() {
+        return;
+    }
+    let title = |i: usize| drawn(|d| d.rows[pane_index(p)].get(i).map(|r| (i, r.title.clone())));
+    let follow = title(cursor_of(p)).map(|at| crate::Follow {
+        pane: pane_index(p),
+        at,
+        anchor: ui(|u| u.anchor).and_then(title),
+    });
+    ui_mut(|u| u.follow = follow);
+    for r in runs {
+        (r.run)();
+    }
+}
+
 /// A key of the vim layer: whether it was one.
 fn vim(key: &str, shift: bool) -> bool {
     let pending = ui(|u| u.pending.clone());
     let n = count(&pending);
     let clear = || ui_mut(|u| u.pending.clear());
+    // A sequence a row's menu binds (`cc`, `rg`), whole or begun; a key of
+    // the grammar's is never bound.
+    if n.is_none() && !matches!(pending.as_str(), "g" | "z") && key.chars().count() == 1 {
+        let typed = format!("{pending}{key}");
+        let seqs = bindings(focus());
+        if seqs.iter().any(|s| *s == typed) {
+            clear();
+            run_bound(focus(), &typed);
+            return true;
+        }
+        if seqs.iter().any(|s| s.len() > typed.len() && s.starts_with(typed.as_str())) {
+            ui_mut(|u| u.pending = typed);
+            return true;
+        }
+        if pending == "vi" {
+            clear();
+            if key == "g" {
+                select_section();
+            }
+            return true;
+        }
+        if !pending.is_empty() && seqs.iter().any(|s| s.starts_with(pending.as_str())) {
+            // A sequence broken: dropped, as vim drops an operator.
+            clear();
+            return true;
+        }
+    }
     match (pending.trim_start_matches(|c: char| c.is_ascii_digit()), key) {
+        (_, "v" | "V") => {
+            clear();
+            let p = focus();
+            let at = cursor_of(p);
+            ui_mut(|u| {
+                u.keyed = true;
+                u.focus = p;
+                u.anchor = match u.anchor {
+                    Some(_) => None,
+                    None => Some(at),
+                };
+            });
+        }
+        // `i` in visual mode, waiting for its object's letter.
+        (_, "i") if ui(|u| u.anchor.is_some()) => ui_mut(|u| u.pending = "vi".into()),
         ("g", "g") => {
             clear();
             set_cursor(focus(), n.map_or(0, |n| n.saturating_sub(1)));
@@ -587,7 +703,16 @@ fn keys_panel() -> AnyView {
     if !ui(|u| u.keys_panel) {
         return ().into_any();
     }
-    let commands: Vec<(String, String)> = all_commands().into_iter().filter_map(|(t, k, _)| k.map(|k| (k, t))).collect();
+    // What the cursor's row binds, then the app's shortcuts.
+    let p = focus();
+    let at = cursor_of(p);
+    let mut commands: Vec<(String, String)> = drawn(|d| {
+        d.rows[pane_index(p)]
+            .get(at)
+            .map(|r| r.bound.iter().map(|b| (b.bind.keys.to_string(), b.title.clone())).collect())
+            .unwrap_or_default()
+    });
+    commands.extend(all_commands().into_iter().filter_map(|(t, k, _)| k.map(|k| (k, t))));
     keys_drawn(commands, "ark-keys-panel")
 }
 

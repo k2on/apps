@@ -1,7 +1,12 @@
 //! A thing's context menu, held by the thing itself: right-click (or a
 //! long press on a touch screen, or `Shift+F10`/the menu key while the
 //! pointer is on it) opens ArkUI's menu at the pointer, with every item the
-//! thing offers, in order.
+//! thing offers, in order. A row the keyboard's cursor is on ([`on_row`],
+//! [`Keyed::Here`]) opens its menu by those keys wherever the pointer is,
+//! at the row's own leading corner with its first entry lit, as a list's
+//! focused row does on a Mac or in the browser (arkui-web's
+//! `context_on_cursor`); while the cursor is on another row, the pointer's
+//! row leaves the keys to it.
 //!
 //! [`crate::menu`] is a menu the app keeps — the app opens it, routes its
 //! keys and closes it — which is right for a window's own menus, the ones a
@@ -48,8 +53,31 @@ pub struct Item<M> {
     pub message: M,
 }
 
+/// Where the keyboard's cursor is, as a row's menu hears `Shift+F10` and
+/// the menu key.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Keyed {
+    /// No cursor shows: the keys open the menu of the row under the pointer.
+    #[default]
+    Away,
+    /// The cursor is on this row: the keys open its menu at the row.
+    Here,
+    /// The cursor is on another row: the keys are its.
+    Elsewhere,
+}
+
+/// Where a menu opened by the keys is put, from the row's corner: in from
+/// its leading edge, a little above its foot, as the browser's is.
+const KEYED_AT: Vector = Vector::new(24.0, -4.0);
+
 /// `content` with a context menu about `title` offering `items`.
 pub fn context_menu<'a, M: Clone + 'a>(content: impl Into<Element<'a, M>>, title: impl Into<String>, items: Vec<Item<M>>) -> Element<'a, M> {
+    on_row(content, title, items, Keyed::Away)
+}
+
+/// [`context_menu`] on a row the keyboard's cursor walks, `keyed` saying
+/// where the cursor is.
+pub fn on_row<'a, M: Clone + 'a>(content: impl Into<Element<'a, M>>, title: impl Into<String>, items: Vec<Item<M>>, keyed: Keyed) -> Element<'a, M> {
     let title = title.into();
     let menu = panel_of(&title, &items);
     Element::new(ContextMenu {
@@ -57,6 +85,7 @@ pub fn context_menu<'a, M: Clone + 'a>(content: impl Into<Element<'a, M>>, title
         width: width_for(&items),
         items,
         menu,
+        keyed,
     })
 }
 
@@ -107,6 +136,7 @@ struct ContextMenu<'a, M> {
     items: Vec<Item<M>>,
     width: f32,
     menu: Element<'a, M>,
+    keyed: Keyed,
 }
 
 /// Where the menu is, while it is up.
@@ -174,7 +204,19 @@ impl<M: Clone> Widget<M, iced::Theme, iced::Renderer> for ContextMenu<'_, M> {
                 Event::Keyboard(iced::keyboard::Event::KeyPressed { key, modifiers, .. })
                     if matches!(key, Key::Named(Named::ContextMenu)) || (modifiers.shift() && matches!(key, Key::Named(Named::F10))) =>
                 {
-                    state.pointer.filter(|p| bounds.contains(*p))
+                    match self.keyed {
+                        Keyed::Here => {
+                            let at = Point::new(bounds.x, bounds.y + bounds.height) + KEYED_AT;
+                            state.open = Some(at - bounds.position());
+                            // By a key: its first entry lit, as a menu the keys open is.
+                            state.at = Some(0);
+                            shell.capture_event();
+                            shell.request_redraw();
+                            return;
+                        }
+                        Keyed::Elsewhere => None,
+                        Keyed::Away => state.pointer.filter(|p| bounds.contains(*p)),
+                    }
                 }
                 Event::Touch(iced::touch::Event::FingerPressed { position, .. }) if bounds.contains(*position) => {
                     state.touch = Some((*position, iced::time::Instant::now()));
@@ -445,6 +487,10 @@ mod tests {
     }
 
     fn row() -> Element<'static, Msg> {
+        keyed_row(Keyed::Away)
+    }
+
+    fn keyed_row(keyed: Keyed) -> Element<'static, Msg> {
         let items = vec![
             Item {
                 glyph: None,
@@ -466,7 +512,45 @@ mod tests {
             },
         ];
         let b = iced::widget::button(text("Checking")).on_press(Msg::Open).width(Length::Fill);
-        context_menu(container(b).width(Length::Fill).height(40), "Checking", items)
+        on_row(container(b).width(Length::Fill).height(40), "Checking", items, keyed)
+    }
+
+    /// The menu key, or Shift-F10.
+    fn menu_key(shift_f10: bool) -> Event {
+        let (key, modifiers) = match shift_f10 {
+            true => (Key::Named(Named::F10), iced::keyboard::Modifiers::SHIFT),
+            false => (Key::Named(Named::ContextMenu), iced::keyboard::Modifiers::empty()),
+        };
+        Event::Keyboard(iced::keyboard::Event::KeyPressed {
+            key: key.clone(),
+            modified_key: key,
+            physical_key: iced::keyboard::key::Physical::Unidentified(iced::keyboard::key::NativeCode::Unidentified),
+            location: iced::keyboard::Location::Standard,
+            modifiers,
+            text: None,
+            repeat: false,
+        })
+    }
+
+    /// On the cursor's row, Shift-F10 or the menu key opens its menu with
+    /// the pointer nowhere near, its first entry lit, so Enter runs it; on
+    /// a row the cursor is not on, the keys open nothing, even under the
+    /// pointer. Falsified by the pointer's rule alone (no menu with the
+    /// pointer away), or by every row opening at once.
+    #[test]
+    fn the_cursor_row_opens_its_menu_by_the_keys() {
+        for shift_f10 in [true, false] {
+            let mut ui = iced_test::simulator(keyed_row(Keyed::Here));
+            ui.point_at(Point::new(900.0, 900.0));
+            let _ = ui.simulate(vec![menu_key(shift_f10)]);
+            let _ = ui.tap_key(Key::Named(Named::Enter));
+            assert_eq!(ui.into_messages().collect::<Vec<_>>(), vec![Msg::Rename]);
+        }
+        let mut ui = iced_test::simulator(keyed_row(Keyed::Elsewhere));
+        ui.point_at(Point::new(20.0, 20.0));
+        let _ = ui.simulate(vec![menu_key(true)]);
+        let _ = ui.tap_key(Key::Named(Named::Enter));
+        assert!(ui.into_messages().next().is_none());
     }
 
     /// A right click opens the whole menu, and each entry runs its own
