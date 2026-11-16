@@ -83,6 +83,24 @@ pub enum HarkenRequest {
     Mute {
         muted: bool,
     },
+    /// A track of the queue, from its start; taken out; moved.
+    Jump {
+        index: i64,
+    },
+    Remove {
+        index: i64,
+    },
+    Move {
+        from: i64,
+        to: i64,
+    },
+    /// A device put in the group that plays, or taken out.
+    Join {
+        device: String,
+    },
+    Unjoin {
+        device: String,
+    },
     /// Settings, on the pane of this title: the shell's own on a phone, the
     /// window's place on the desktop and in the browser.
     Settings {

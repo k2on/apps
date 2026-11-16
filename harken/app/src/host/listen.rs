@@ -30,6 +30,8 @@ pub struct Listen {
     sound: Option<MediaSound>,
     /// What plays alone, as the player last drew it.
     pub own: Option<Playing>,
+    /// Its queue, as the player lists it.
+    pub queue: Vec<crate::player::QueueRow>,
     /// The clock the sound is timed by, which the player's timeline counts
     /// on from (the demo's day is not it).
     clock: ark_app::host::Clock,
@@ -79,6 +81,7 @@ impl Listen {
             core: Reconciler::new(&session.device, Some(Loaded::Nothing)),
             sound: None,
             own: None,
+            queue: vec![],
             clock: cx.place.clock(),
         };
         l.attach(&session.url, cx);
@@ -154,6 +157,10 @@ impl Listen {
             now: (self.clock)(),
         };
         self.core.reconcile(&v, sound, &mut Says { cx });
+        self.queue = match v.joined {
+            true => vec![],
+            false => crate::player::queue_rows(&covers, &sound.tracks(), sound.heard().at.map_or(-1, |a| a as i64)),
+        };
         self.own = match v.joined {
             true => None,
             false => own(&covers, sound, (self.clock)()),

@@ -11,6 +11,12 @@ pub fn rows<T: Encode>(data: &Data<'_, HarkenView>, key: &HarkenView) -> Vec<T> 
     data.rows::<Vec<u8>>(key).iter().filter_map(|b| T::from_bytes(b).ok()).collect()
 }
 
+/// The rows of `key` in a store, as `T` (a test's).
+#[cfg(test)]
+pub fn rows_of<T: Encode>(store: &ark_peer::store::Store<HarkenView>, key: &HarkenView) -> Vec<T> {
+    store.rows::<Vec<u8>>(key).iter().filter_map(|b| T::from_bytes(b).ok()).collect()
+}
+
 /// Where `art` (a path under the server's media root, or a whole URL) is
 /// fetched from: `server`'s `/media`, each segment percent-encoded; none
 /// for none.

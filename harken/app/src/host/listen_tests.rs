@@ -151,16 +151,18 @@ fn joined(fake: &Fake) -> Here {
         hub: Some((hub, c)),
     };
     here.carry();
-    let song = AddSong {
-        title: "Aria".into(),
-        artist: "Bach".into(),
-        album: "Goldberg Variations".into(),
-        file: "bach/aria.flac".into(),
-        duration_ms: 180_000,
-        ..AddSong::default()
-    };
-    here.peer.mutate("library.add_song", &song).unwrap();
-    here.carry();
+    for (title, file) in [("Aria", "bach/aria.flac"), ("Variatio 1", "bach/v1.flac"), ("Variatio 2", "bach/v2.flac")] {
+        let song = AddSong {
+            title: title.into(),
+            artist: "Bach".into(),
+            album: "Goldberg Variations".into(),
+            file: file.into(),
+            duration_ms: 180_000,
+            ..AddSong::default()
+        };
+        here.peer.mutate("library.add_song", &song).unwrap();
+        here.carry();
+    }
     here
 }
 
@@ -189,6 +191,38 @@ fn alone_a_play_is_this_devices_own_sound() {
     h.send::<Player>(PlayerMsg::Toggle, &mut place);
     assert!(fake.take().iter().any(|a| a == "pause"));
     assert!(!h.app().player.page(&place, NOW).now.playing);
+}
+
+/// Alone and joined, the queue is what plays and what follows: alone the
+/// host tells the player its sound's queue, joined the session's; a row
+/// jumped to plays, a row taken out is gone. Falsified by the host not
+/// telling the player its own queue (alone it was empty) or a jump that
+/// goes nowhere.
+#[test]
+fn the_queue_is_this_devices_alone_and_the_sessions_joined() {
+    for joined_ in [false, true] {
+        let fake = Fake::new();
+        let (mut h, mut place) = hosted(if joined_ { joined(&fake) } else { alone(&fake) });
+        let newest = h.app().home.page(&place, NOW).newest.clone();
+        h.send::<Home>(HomeMsg::PlayNew { id: newest[0].key.clone() }, &mut place);
+        h.moved(&mut place);
+        let p = h.app().player.page(&place, NOW);
+        assert_eq!(p.joined, joined_);
+        assert_eq!(p.queue.len(), newest.len(), "joined {joined_}: {p:?}");
+        assert!(p.queue[0].now && p.queue[0].title == newest[0].title);
+        assert!(newest.len() >= 3, "joined {joined_}: three songs at least");
+        h.send::<Player>(PlayerMsg::Jump { at: "2".into() }, &mut place);
+        h.moved(&mut place);
+        let p = h.app().player.page(&place, NOW);
+        assert_eq!(h.app().refused, None);
+        assert_eq!(p.now.title, newest[2].title, "joined {joined_}");
+        assert!(p.queue[2].now);
+        h.send::<Player>(PlayerMsg::Remove { at: "0".into() }, &mut place);
+        h.moved(&mut place);
+        let p = h.app().player.page(&place, NOW);
+        assert_eq!(p.queue.len(), newest.len() - 1, "joined {joined_}");
+        assert_eq!(p.now.title, newest[2].title);
+    }
 }
 
 /// A player registered after the session opened (a phone's screen hands

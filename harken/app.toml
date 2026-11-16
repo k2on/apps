@@ -147,7 +147,7 @@ harken_app = [
   "HarkenRequest",
   "home::LastPlayed",
   "library::{ArtTile, KindChip, NameForm, PlaylistItem, TrackItem}",
-  "player::{DeviceRow, Playing}",
+  "player::{DeviceRow, GroupRow, Line, Playing, QueueRow}",
   "sheets::{FollowForm, PlaylistChoice}",
   "shell::{Appearance, Facts}",
 ]

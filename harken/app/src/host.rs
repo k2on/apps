@@ -218,6 +218,11 @@ impl HostedApp for Harken {
             HarkenRequest::Transfer { to } => Press::Transfer { to },
             HarkenRequest::Volume { level } => self.listen.loud(Change::To { level }, cx),
             HarkenRequest::Mute { muted } => self.listen.loud(Change::Mute { muted }, cx),
+            HarkenRequest::Jump { index } => Press::Jump { index },
+            HarkenRequest::Remove { index } => Press::Remove { index },
+            HarkenRequest::Move { from, to } => Press::Move { from, to },
+            HarkenRequest::Join { device } => Press::Join { device },
+            HarkenRequest::Unjoin { device } => Press::Unjoin { device },
             HarkenRequest::AddTo { track } => return self.sheets.send(SheetsMsg::AddTo { track }, cx),
             HarkenRequest::Follow { kind } => return self.sheets.send(SheetsMsg::Follow { kind }, cx),
             HarkenRequest::Settings { pane } => return cx.native(ShellAsk::Settings { pane }),
@@ -308,10 +313,11 @@ impl Harken {
             };
             self.player.send(msg, cx);
         }
-        if self.player.state().own != self.listen.own {
+        if (&self.player.state().own, &self.player.state().own_queue) != (&self.listen.own, &self.listen.queue) {
             self.player.send(
                 PlayerMsg::Own {
                     own: self.listen.own.clone(),
+                    queue: self.listen.queue.clone(),
                 },
                 cx,
             );
@@ -320,7 +326,12 @@ impl Harken {
         if self.shell.state().facts != facts {
             self.shell.send(ShellMsg::Facts { facts }, cx);
         }
-        let playing = self.player.page(&*cx.place, cx.now_ms).has;
+        let page = self.player.page(&*cx.place, cx.now_ms);
+        let now = if page.has { page.now.key.clone() } else { String::new() };
+        if self.player.state().now != now {
+            self.player.send(PlayerMsg::Now { key: now }, cx);
+        }
+        let playing = page.has;
         if self.shell.state().playing != playing {
             self.shell.send(ShellMsg::Playing { on: playing }, cx);
         }

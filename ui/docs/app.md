@@ -1222,8 +1222,23 @@ device), beside harken-peer's walk; both pass against 77da9807.
    (`HostedApp::live`, above: harken's says a phone or a computer that can
    play, and relays the scrubber), checked against the deployed server by
    tests/deployed.rs: both devices stand in its session and each sees the
-   other's playback. The queue, the transcript and the groups' picker
-   the iced window drew are not views yet.
+   other's playback. The queue, the transcript and the group's picker
+   the iced window drew are the full player's (`player::view::player`,
+   shared parts only): rows under the transport put up a `form_sheet`
+   each — Devices (hand the sound over, and a Group section: a device in
+   the group that plays, or able to join it, pressed in or out:
+   `Press::Join`/`Unjoin`), Queue (what plays, then what comes after, as
+   media rows; a row pressed plays from there, its menu moves it up or
+   down or takes it out: `Press::Jump`, `Move`, `Remove`; the session's
+   queue while joined, the sound's own alone, which the host tells the
+   player) and Transcript (an episode's lines, who speaks over the first
+   of theirs, the line said at the position the player was last drawn at
+   in the accent; it moves on with the next message, not with the
+   clock). Covers: every screen joins a cover's path to the session's
+   `url` (the server's base URL; the server as shown has no scheme, so
+   the phones and the desktop drew derived squares), and a song is drawn
+   with its album's cover (`words::Covers`, from the songs' details and
+   the albums).
 5. Screenshots: harken/demo/shots.json is an in-app walk by ids (the
    first run — harken's now opens on Welcome to Harken, as money's on
    its page — Home, Search, Library, Albums, an album, the player grown
@@ -1250,9 +1265,10 @@ device), beside harken-peer's walk; both pass against 77da9807.
    memory" from CoreSimulator on the same Mac), so what holds the Mac's
    build is the next thing to find; the browser's are taken by hand
    (app-web.sh is not in CI). The covers on the phones and the desktop
-   are the derived squares: the server seeded by server.sh answers no
-   cover the clients draw (the browser's demo, playing from the
-   catalogue's addresses, has them). The open issue it waited on is
+   had the derived squares: the server seeded by server.sh serves every
+   cover, but the clients joined its path to the server as shown, with
+   no scheme (fixed: `Session::url`). The walk gains `queue`, the full
+   player's queue up (tap `player.row:queue`). The open issue it waited on is
    found and
    fixed: a hub opened on `harken_seed::seeded_disk` (a log standing at
    its start on a snapshot of rows) took a device at cursor 0 for one
