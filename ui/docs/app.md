@@ -1204,8 +1204,21 @@ device), beside harken-peer's walk; both pass against 77da9807.
    `ark_app::shots`, a hosted name carrying the modal it is in); the
    desktop has no player shot (its media player device is not wired,
    so nothing plays there); the iPhone's job hung in the Mac's install
-   of money's build and was cancelled with nothing taken. The open
-   issue it waited on is found and
+   of money's build and was cancelled with nothing taken. With that
+   fixed (app-screens 43786482522, a76729a6) Android's phone, tablet and
+   Fold and the desktop take every shot, light and dark, the player
+   included, and publish them. Not yet: the iPhone's, the iPad's and
+   the Mac's — the iOS job (43787509355) sat in "The apps, built by
+   nix" for over an hour, as 43771365729 did before it was cancelled
+   at its limit (that one's log ends in the install of money's
+   simulator build; the harken archive had logged "Cannot allocate
+   memory" from CoreSimulator on the same Mac), so what holds the Mac's
+   build is the next thing to find; the browser's are taken by hand
+   (app-web.sh is not in CI). The covers on the phones and the desktop
+   are the derived squares: the server seeded by server.sh answers no
+   cover the clients draw (the browser's demo, playing from the
+   catalogue's addresses, has them). The open issue it waited on is
+   found and
    fixed: a hub opened on `harken_seed::seeded_disk` (a log standing at
    its start on a snapshot of rows) took a device at cursor 0 for one
    that had it all, and the device took the fill's first part at seq 0
