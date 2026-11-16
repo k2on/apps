@@ -1125,6 +1125,7 @@ rec {
           "app" = [ "dep:ark-app" ];
           "clipboard" = [ "host" "dep:ark-clipboard" ];
           "host" = [ "app" "dep:ark" "dep:ark-peer" "dep:ark-auth" "dep:ark-secure-store" "dep:arkui-shots" "dep:serde_json" ];
+          "media-player" = [ "host" "dep:ark-media-player" ];
           "scanner" = [ "host" "dep:ark-scanner" ];
         };
         resolvedDefaultFeatures = [ "app" ];

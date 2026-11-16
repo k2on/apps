@@ -232,7 +232,8 @@ a cargo build of the page adds it to the workspace at `<app>/.web`
 (ignored by git). Its `main.rs` is one `arkui_web::WebHosted`, with the
 browser's device of each module its crate depends on whose module.toml
 says `[web]` (`device`, `port`: ark-scanner's file input, ark-clipboard's
-clipboard), and `arkui_web::host::start` for wasm32; natively, for an app
+clipboard; `optional` where the device made is an `Option`, none on a page
+without one: ark-media-player's `<audio>` and Media Session), and `arkui_web::host::start` for wasm32; natively, for an app
 whose pages are written ahead, `arkui_web::export::main` (Export, below).
 
 arkui-web's `host` is the rest, the same for every app: `WebPlace` (the
@@ -491,14 +492,19 @@ method that registers it, and how Swift and Kotlin make it): the generated
 library turns on from the same modules — `<id>-ffi`'s dependency on
 ark-ffi — links its crate and carries its UniFFI traits), and
 the activity puts a module's page at its root (ark-camera's
-`CameraPage`); an app writes nothing native for its modules. An answer
+`CameraPage`). A device made once for Android's process, not per activity
+(`kotlin-scope = "process"`: ark-media-player's, so an activity made
+again by a rotation or a theme never makes a second player), is
+registered by the generated Application (`ArkApplication.devices`,
+`context` the Application); an app writes nothing native for its modules. An answer
 that comes later (the camera's) wakes the app's host, which drains its
 runtimes. `checks.prebuild` holds that no app.toml lists modules, that
 every module's crate declares itself, and that ark-ffi has a feature for
 each device a module's `[phone]` registers. The desktop's devices are
 arkui's features, named by a module's `[desktop]` (`feature`), which an
 app's generated window turns on (`arkui::host`'s `devices`: ark-clipboard's
-`Queued`, ark-scanner's `Chosen`; the secure store always).
+`Queued`, ark-scanner's `Chosen`, ark-media-player's `Desktop` — rodio and
+MPRIS — under `media-player`; the secure store always).
 
 The iPhone typecheck (`checks.money-ios-typecheck`, ui/swift/typecheck.sh)
 compiles the app's modules' Swift and what of the app library Linux can
@@ -1204,20 +1210,19 @@ device), beside harken-peer's walk; both pass against 77da9807.
    The media player is a phone device as the camera is (its module.toml's
    `[phone]`, ark-ffi's `media-player`, `registerMediaPlayer`; `{accent}`
    in a `[phone]` device's Swift is app.toml's), registered by the
-   generated entry points, and the host takes it at its first step after
-   the open when the screen registered it later (Android's activity).
-   The browser's `<audio>` and the desktop's rodio are the module's but
-   not wired (its module.toml says no `[web]` or `[desktop]`: the
-   browser's `Browser::new()` may be none), so a page and a window play
-   nothing yet.
-   Not yet: the generated hosts open the peer with no live space
-   (`ark_peer::Config::of`), so a generated client does not stand in the
-   listening session — it plays alone, and the player's devices and the
-   group's volume wait on it. What it needs is the app's word for its
-   live space (what its `Hello` says it is, what it relays as ephemeral),
-   which ark-app cannot name (it is no adapter): a `[ffi] live` the
-   generated hosts read, or a `HostedApp` hook every host turns into an
-   `ark_peer::Live`. The queue, the transcript and the groups' picker
+   generated entry points — on Android by the Application, once for the
+   process (`kotlin-scope = "process"`) — and the host takes it at its
+   first step after the open if it came later.
+   The browser's `<audio>` with the Media Session API and the desktop's
+   rodio with MPRIS are the module's `[web]` (an optional device: a page
+   with no `<audio>` has none) and `[desktop]` (arkui's `media-player`),
+   so the page and the window play through the same port, and the
+   system's media keys and controls press the same presses.
+   Every generated host stands in the listening session
+   (`HostedApp::live`, above: harken's says a phone or a computer that can
+   play, and relays the scrubber), checked against the deployed server by
+   tests/deployed.rs: both devices stand in its session and each sees the
+   other's playback. The queue, the transcript and the groups' picker
    the iced window drew are not views yet.
 5. Screenshots: harken/demo/shots.json is an in-app walk by ids (the
    first run — harken's now opens on Welcome to Harken, as money's on

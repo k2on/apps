@@ -8,6 +8,9 @@
 //! - `scanner`: ark-scanner's `Chosen`: a scan or a photo asked for opens
 //!   the desktop's file chooser (`crate::files::choose`), or takes a photo
 //!   dropped on the window while it waits.
+//! - `media-player`: ark-media-player's `Desktop`, the sound card (rodio
+//!   over symphonia) and MPRIS on the session bus, as the app's name, so
+//!   the media keys and the desktop's now-playing widgets reach it.
 //! - The secure store, always: the Secret Service on Linux, where the
 //!   window keeps its logins (`live`) and an app keeps what it asks to.
 
@@ -55,6 +58,8 @@ impl Devices {
         let scanner = ark_scanner::Chosen::new();
         #[cfg(feature = "scanner")]
         modules.register::<dyn ark_scanner::Scanner>(Arc::new(scanner.clone()));
+        #[cfg(feature = "media-player")]
+        modules.register::<dyn ark_media_player::MediaPlayer>(Arc::new(ark_media_player::Desktop::new(W::SCHEME, W::NAME, W::SCHEME)));
         Devices {
             modules,
             bell: crate::wake::Bell::new(),

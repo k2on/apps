@@ -10,11 +10,26 @@ MediaOp = "()"
 # How the phone makes its player and hands it to the process (ark-ffi's
 # `devices`, ui/prebuild.py): AVPlayer with its placeholder artwork in the
 # app's palette (`{accent}`, app.toml's), and Media3 over the media session
-# service below.
+# service below — made once for the process, by the Application
+# (`kotlin-scope`, `context` the Application), so an activity made again
+# (a rotation, a theme or a size changed) never makes a second player.
 [phone]
 register = "registerMediaPlayer"
 swift = "PhoneMediaPlayer(squares: .{accent})"
-kotlin = "dev.arkui.modules.PhoneMediaPlayer(view.context)"
+kotlin = "dev.arkui.modules.PhoneMediaPlayer(context)"
+kotlin-scope = "process"
+
+# The browser's: an <audio> element and the Media Session API (`Browser`,
+# none on a page with no <audio>), registered by the app's generated page.
+[web]
+device = "ark_media_player::Browser::new()"
+port = "ark_media_player::MediaPlayer"
+optional = true
+
+# The Linux desktop's: rodio over symphonia and MPRIS (`Desktop`), arkui's
+# feature of the same name, registered by the window's devices.
+[desktop]
+feature = "media-player"
 
 # Playing on with the screen locked and the app in the background: only for
 # an app whose app.toml says `[background] playback = true` (ui/prebuild.py).

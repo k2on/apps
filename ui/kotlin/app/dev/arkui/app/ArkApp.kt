@@ -68,8 +68,15 @@ public abstract class ArkApplication : Application() {
 
     @Volatile private var app: ArkApp? = null
 
+    /**
+     * The device modules the process holds for its life, registered once as it starts (the app's
+     * generated Application: a media player): never again when an activity is made again.
+     */
+    protected open fun devices() {}
+
     override fun onCreate() {
         super.onCreate()
+        devices()
         // Only an app that declares `[background]`: the notifications' events into the process's
         // one runtime (a push or a notice's button a wake, an endpoint the session's push row).
         background?.listen(dev.arkdb.ffi.ArkProcess.shared().notices())

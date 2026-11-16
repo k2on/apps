@@ -35,6 +35,7 @@ serde_json = { workspace = true, optional = true }
 # on the module (module.toml's `[desktop]`).
 ark-clipboard = { path = "../../../modules/ark-clipboard", features = ["desktop"], optional = true }
 ark-scanner = { path = "../../../modules/ark-scanner", features = ["desktop"], optional = true }
+ark-media-player = { path = "../../../modules/ark-media-player", features = ["desktop"], optional = true }
 
 # iced is the desktop's alone: a browser is drawn by Leptos over the DOM
 # (ui/docs/app.md), never by iced in wasm.
@@ -86,3 +87,4 @@ host = ["app", "dep:ark", "dep:ark-peer", "dep:ark-auth", "dep:ark-secure-store"
 # The desktop's devices, by their module's name.
 clipboard = ["host", "dep:ark-clipboard"]
 scanner = ["host", "dep:ark-scanner"]
+media-player = ["host", "dep:ark-media-player"]

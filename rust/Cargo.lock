@@ -543,6 +543,7 @@ dependencies = [
  "ark-auth",
  "ark-clipboard",
  "ark-format",
+ "ark-media-player",
  "ark-peer",
  "ark-router",
  "ark-scanner",

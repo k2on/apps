@@ -1055,6 +1055,8 @@ def kotlin_devices(root, a):
     app that lists none."""
     made, calls, pages = [], [], []
     for n, ph in devices(root, a):
+        if "kotlin" in ph and ph.get("kotlin-scope") == "process":
+            continue
         if "kotlin" in ph:
             if "kotlin-page" in ph:
                 v = n.removeprefix("ark-").replace("-", "_")
@@ -1081,6 +1083,25 @@ private fun Devices() {{
 }}
 """
     return "        Devices()\n", fn
+
+
+def kotlin_process_devices(root, a):
+    """The Application's registration of the device modules made once for
+    the process (module.toml's `[phone] kotlin-scope = "process"`, their
+    `kotlin` over `context`, the Application): none for an app that lists
+    none."""
+    calls = [f"        process.{ph['register']}({ph['kotlin']})"
+             for n, ph in devices(root, a) if "kotlin" in ph and ph.get("kotlin-scope") == "process"]
+    if not calls:
+        return ""
+    body = "\n".join(["        val process = ArkProcess.shared()", "        val context: android.content.Context = this"] + calls)
+    return f"""
+
+    // The device modules its crate depends on that the process holds for its life (module.toml's
+    // `[phone] kotlin-scope`): made once, however often the activity is made again.
+    override fun devices() {{
+{body}
+    }}"""
 
 
 def swift_main(root, a):
@@ -1189,13 +1210,14 @@ def kotlin_app(root, a):
 
     // It declares `[background]`; its job and receivers are the manifest's.
     override val background: BackgroundHooks = BackgroundHooks()"""
+    process = kotlin_process_devices(root, a)
     return f"""// {HEADER.format(app=a['dir'])}
 // {a['name']}'s Application on the app library (ui/kotlin/app): its library, made at
 // the first launch and kept for the process.
 package {pkg}
 
 import dev.arkdb.ffi.ArkHost
-import dev.arkdb.ffi.Launch
+{"import dev.arkdb.ffi.ArkProcess" + chr(10) if process else ""}import dev.arkdb.ffi.Launch
 import dev.arkui.app.ArkApplication
 {"import dev.arkui.app.BackgroundHooks" + chr(10) if bg else ""}import {kotlin_namespace(a)}.{host}
 
@@ -1203,7 +1225,7 @@ class {a['name']}Application : ArkApplication() {{
     /** {a['name']}'s library: its screens' runtimes, what its shell is asked. */
     lateinit var library: {host}
 
-    override fun host(launch: Launch): ArkHost = {host}(launch, {store}).also {{ library = it }}.host(){hooks}
+    override fun host(launch: Launch): ArkHost = {host}(launch, {store}).also {{ library = it }}.host(){hooks}{process}
 }}
 """
 
@@ -1740,12 +1762,15 @@ def arkffi_features(root, a):
 
 def web_modules(root, a):
     """The browser's devices of the app's modules: (crate, device, port)
-    for each whose module.toml says `[web]`."""
+    for each whose module.toml says `[web]`. `device` is the expression
+    that makes it (a unit struct's name, `ark_clipboard::Browser`), and,
+    where `optional` says so, an `Option` of it: none, the page has no such
+    device (ark-media-player's `Browser::new()`)."""
     out = []
     for n in module_names(root, a):
         w = module(root, n).get("web")
         if w:
-            out.append((module(root, n)["crate"], w["device"], w["port"]))
+            out.append((module(root, n)["crate"], w["device"], w["port"], bool(w.get("optional"))))
     return out
 
 
@@ -1792,8 +1817,9 @@ def web_main(root, a):
     demo = w["demo"]
     seed = rust_name(demo) if demo else None
     devices = "".join(
-        f"            modules.register::<dyn {port}>(std::sync::Arc::new({device}));\n"
-        for _, device, port in web_modules(root, a))
+        f"            if let Some(d) = {device} {{\n                modules.register::<dyn {port}>(std::sync::Arc::new(d));\n            }}\n"
+        if optional else f"            modules.register::<dyn {port}>(std::sync::Arc::new({device}));\n"
+        for _, device, port, optional in web_modules(root, a))
     items = []
     if w["css"]:
         items.append("    const CSS: &'static str = concat!(" + ", ".join(f'include_str!("{os.path.basename(c)}"), "\\n"' for c in w["css"]) + ");\n")
@@ -1895,7 +1921,7 @@ def web_cargo(root, a):
     # prepares with), in the browser with none.
     plain = lambda c: c == "ark-peer" or (c == a["crate"] and web_static(a)) or bool(bare(a, c))
     deps = "".join(f'{c} = {{ path = "{rel(c)}"{", default-features = false" if plain(c) else ""} }}\n' for c in web_crates(a))
-    mods = "".join(f'{c} = {{ path = "{rel(c)}", features = ["web"] }}\n' for c, _, _ in web_modules(root, a))
+    mods = "".join(f'{c} = {{ path = "{rel(c)}", features = ["web"] }}\n' for c, _, _, _ in web_modules(root, a))
     web = rel("arkui-web")
     if web_static(a):
         native = f'arkui-web = {{ path = "{web}", default-features = false, features = ["ssr"] }}\n'

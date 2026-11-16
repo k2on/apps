@@ -2275,6 +2275,12 @@ rec {
             packageId = "ark-format";
           }
           {
+            name = "ark-media-player";
+            packageId = "ark-media-player";
+            optional = true;
+            features = [ "desktop" ];
+          }
+          {
             name = "ark-peer";
             packageId = "ark-peer";
             optional = true;
@@ -2374,9 +2380,10 @@ rec {
           "app" = [ "dep:ark-app" ];
           "clipboard" = [ "host" "dep:ark-clipboard" ];
           "host" = [ "app" "dep:ark" "dep:ark-peer" "dep:ark-auth" "dep:ark-secure-store" "dep:arkui-shots" "dep:serde_json" ];
+          "media-player" = [ "host" "dep:ark-media-player" ];
           "scanner" = [ "host" "dep:ark-scanner" ];
         };
-        resolvedDefaultFeatures = [ "app" "clipboard" "host" "scanner" ];
+        resolvedDefaultFeatures = [ "app" "clipboard" "host" "media-player" "scanner" ];
       };
       "arkui-glyphs" = rec {
         crateName = "arkui-glyphs";
