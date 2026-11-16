@@ -169,6 +169,27 @@ fn assigning_from_the_sheet() {
     assert_eq!(d.haptics.performed(), vec![Haptic::Success]);
 }
 
+/// A formula typed into Assign's amount: what it comes to said beside
+/// it as it is typed, and kept as that sum. Falsified by the field taking
+/// a plain amount alone (the sheet refused `120+35.50`), or by the sum not
+/// said.
+#[test]
+fn assigning_a_formula() {
+    let (mut d, mut rt) = Demo::new();
+    let id = d.line("Groceries").category_id.hex();
+    run(
+        &mut rt,
+        &mut d,
+        [BudgetMsg::Assign { id }, BudgetMsg::Typed { typed: "120+35.50".into() }],
+    );
+    let f = page(&rt, &d).assigning.unwrap();
+    assert_eq!((f.cents, f.gives.as_deref(), f.can_save), (15_550, Some("= $155.50"), true));
+    run(&mut rt, &mut d, [BudgetMsg::Typed { typed: "155.50".into() }]);
+    assert_eq!(page(&rt, &d).assigning.unwrap().gives, None, "a plain amount works nothing out");
+    run(&mut rt, &mut d, [BudgetMsg::Typed { typed: "3*12.50".into() }, BudgetMsg::Save]);
+    assert_eq!(d.line("Groceries").assigned, 3_750);
+}
+
 /// Move Money from a category to Ready to Assign, and Cover Overspending
 /// raised into an overspent one from Ready to Assign. Falsified by the
 /// ends the wrong way round, or money moved to where it came from.

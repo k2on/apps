@@ -20,7 +20,7 @@ use ark::file::FileRef;
 use ark_app::modules::haptics::{perform, Haptic};
 use ark_app::modules::scanner::{pick_photo, scan_page};
 use ark_app::{Answer, Command, Data};
-use ark_format::{amount_editable, parse_amount, NumberStyle};
+use ark_format::{amount_editable, formula_gives, parse_formula, NumberStyle};
 use money_core::*;
 
 use crate::sheets::{Sheets, SheetsMsg};
@@ -133,7 +133,7 @@ impl Draft {
     pub fn cents(typed: &str, style: &NumberStyle) -> Option<i64> {
         match typed.trim().is_empty() {
             true => None,
-            false => parse_amount(typed, style),
+            false => parse_formula(typed, style),
         }
     }
 
@@ -430,6 +430,8 @@ pub struct ReceiptForm {
     pub name: String,
     pub amount: String,
     pub amount_problem: Option<String>,
+    /// What a formula typed as its price comes to, while one is.
+    pub amount_gives: Option<String>,
     /// What the items come to.
     pub total: String,
     /// Why it can't be saved yet, or the domain's refusal; empty for none.
@@ -622,6 +624,7 @@ fn form(d: &Draft, style: &NumberStyle) -> ReceiptForm {
         amount_problem: editing
             .filter(|i| !i.amount.trim().is_empty() && Draft::cents(&i.amount, style).is_none())
             .map(|_| "That isn't an amount.".into()),
+        amount_gives: editing.and_then(|i| formula_gives(&i.amount, style)),
         total: amount_editable(d.total(style), style),
         note: d.refused.clone().or(problem.clone()).unwrap_or_default(),
         can_save: problem.is_none(),

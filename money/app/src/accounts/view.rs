@@ -49,15 +49,18 @@ pub fn accounts(p: &AccountsPage) -> View<AccountsMsg> {
                                 },
                             ),
                         )),
-                        form_section(amount_entry(
-                            form.balance_label,
-                            form.balance_prompt,
-                            form.typed,
-                            form.cents,
-                            form.balance_problem,
-                            |typed| AccountsMsg::DraftBalance { typed },
-                            |cents| AccountsMsg::DraftCents { cents },
-                        ))
+                        form_section(
+                            amount_entry(
+                                form.balance_label,
+                                form.balance_prompt,
+                                form.typed,
+                                form.cents,
+                                form.balance_problem,
+                                |typed| AccountsMsg::DraftBalance { typed },
+                                |cents| AccountsMsg::DraftCents { cents },
+                            )
+                            .gives(form.balance_gives),
+                        )
                         .header(form.balance_header),
                         form_section(switch("In the Budget", form.on_budget, |on_budget| AccountsMsg::DraftOnBudget {
                             on_budget,

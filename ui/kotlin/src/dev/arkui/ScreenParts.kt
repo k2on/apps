@@ -509,7 +509,10 @@ public fun PickerChoice(title: String, glyph: String, tag: String) {
     Chip(title, glyph = glyph, selected = selection == tag, onTap = { onChange(tag) })
 }
 
-/** An amount as Android takes it: typed in a text field; the core says what it means. */
+/**
+ * An amount as Android takes it: typed in a text field; the core says what it means,
+ * and what a formula typed comes to (`gives`, `= $155.50`), said under it.
+ */
 @Composable
 public fun AmountEntry(
     label: String,
@@ -517,10 +520,11 @@ public fun AmountEntry(
     text: String,
     cents: Long,
     problem: String?,
+    gives: String? = null,
     onType: (String) -> Unit,
     onCents: (Long) -> Unit,
 ) {
-    AmountField(label, text = text, problem = problem, onChange = onType)
+    AmountField(label, text = text, problem = problem, gives = gives, onChange = onType)
 }
 
 /** An alert with one text field, up for as long as it is composed. */
@@ -550,10 +554,10 @@ public fun NameField(label: String, text: String, problem: String?, onChange: (S
         modifier = Modifier.fillMaxWidth())
 }
 
-/** An amount typed as text; the core says what it means. */
+/** An amount typed as text, or a formula (`gives`, what it comes to, under it); the core says what it means. */
 @Composable
-public fun AmountField(label: String, text: String, problem: String?, onChange: (String) -> Unit) {
-    AmountField(text, onType = onChange, label = label, error = problem, modifier = Modifier.fillMaxWidth())
+public fun AmountField(label: String, text: String, problem: String?, gives: String? = null, onChange: (String) -> Unit) {
+    AmountField(text, onType = onChange, label = label, error = problem, supporting = gives, formula = true, modifier = Modifier.fillMaxWidth())
 }
 
 /** Chips in a row that scrolls sideways. */

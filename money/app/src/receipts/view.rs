@@ -116,7 +116,7 @@ pub fn receipt_fields(f: &ReceiptForm) -> View<SheetsMsg> {
         if f.typing {
             form_section((
                 name_field("Item", f.name, None, |name| SheetsMsg::ItemName { name }),
-                amount_field("Price", f.amount, f.amount_problem, |typed| SheetsMsg::ItemAmount { typed }),
+                amount_field("Price", f.amount, f.amount_problem, |typed| SheetsMsg::ItemAmount { typed }).gives(f.amount_gives),
                 list_row("Remove Item").glyph("trash").on_tap(SheetsMsg::RemoveItem),
             ))
             .header("Item")

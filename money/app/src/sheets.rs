@@ -309,6 +309,8 @@ pub struct TxnSheet {
     pub typed: String,
     pub cents: i64,
     pub amount_problem: Option<String>,
+    /// What a formula typed comes to (`= $155.50`), while one is.
+    pub gives: Option<String>,
     pub payee: String,
     /// A transfer has no payee of its own: its other account names it.
     pub has_payee: bool,
@@ -359,6 +361,7 @@ pub struct ReconcileSheet {
     pub typed: String,
     pub cents: i64,
     pub problem: Option<String>,
+    pub gives: Option<String>,
 }
 
 /// Every sheet's record; at most one is up.
@@ -713,6 +716,7 @@ impl Sheets {
                             None => Some("That isn't an amount.".into()),
                             Some(_) => None,
                         },
+                        gives: r.figure.gives(style),
                     }
                 }),
                 _ => None,
@@ -842,6 +846,7 @@ fn txn_sheet(s: &State, f: &TxnForm, data: &Data<'_, MoneyView>) -> TxnSheet {
         typed: f.figure.typed.clone(),
         cents: cents.unwrap_or(0),
         amount_problem: cents.is_none().then(|| "That isn't an amount.".into()),
+        gives: f.figure.gives(style),
         payee: d.payee.clone(),
         has_payee: d.transfer_to.is_none(),
         has_payees: !offered.is_empty(),

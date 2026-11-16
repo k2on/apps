@@ -580,17 +580,21 @@ extension NameField {
     }
 }
 
-/// An amount typed as text, the decimal pad; the core says what it means.
+/// An amount typed as text, the decimal pad; the core says what it means,
+/// and what a formula typed on a keyboard comes to (`gives`, `= $155.50`,
+/// `ark_format::formula_gives`), said under it.
 public struct AmountField: View {
     let label: String
     let text: String
     let problem: String?
+    let gives: String?
     let onChange: (String) -> Void
 
-    public init(_ label: String, text: String, problem: String?, onChange: @escaping (String) -> Void) {
+    public init(_ label: String, text: String, problem: String?, gives: String? = nil, onChange: @escaping (String) -> Void) {
         self.label = label
         self.text = text
         self.problem = problem
+        self.gives = gives
         self.onChange = onChange
     }
 
@@ -599,6 +603,9 @@ public struct AmountField: View {
             TextField(label, text: Binding(get: { text }, set: onChange))
                 .keypad(.decimal)
                 .monospacedDigit()
+            if let gives {
+                Text(gives).font(.caption).foregroundStyle(.quiet).monospacedDigit()
+            }
             if let problem {
                 Text(problem).font(.caption).foregroundStyle(Color.error)
             }
@@ -670,8 +677,10 @@ public struct PickerChoice: View {
 extension AmountEntry {
     /// The amount as money takes it on the iPhone: the figure over the
     /// keypad, in cents (`onCents`), `prompt` under it, in a form's row.
-    /// The label, the text and the problem are the text field's elsewhere.
-    public init(_ label: String, prompt: String, text: String, cents: Int64, problem: String?,
+    /// The label, the text and the problem are the text field's elsewhere,
+    /// as is what a formula typed comes to (`gives`): the keypad types
+    /// digits alone.
+    public init(_ label: String, prompt: String, text: String, cents: Int64, problem: String?, gives: String? = nil,
                 onType: @escaping (String) -> Void, onCents: @escaping (Int64) -> Void) {
         self.init(cents: Binding(get: { cents }, set: onCents), prompt: prompt, inset: Space.m)
     }

@@ -320,6 +320,12 @@
           },
           {
             "tap": "shell.new-transaction"
+          },
+          {
+            "tap": "sheets.typed"
+          },
+          {
+            "type": "120+35.50"
           }
         ]
       },

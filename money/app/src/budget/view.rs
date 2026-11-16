@@ -33,15 +33,18 @@ pub fn budget(p: &BudgetPage) -> View<BudgetMsg> {
                     form_sheet(
                         "Assign",
                         BudgetMsg::Dismiss,
-                        form_section(amount_entry(
-                            f.label,
-                            f.prompt,
-                            f.typed,
-                            f.cents,
-                            f.problem,
-                            |typed| BudgetMsg::Typed { typed },
-                            |cents| BudgetMsg::Cents { cents },
-                        ))
+                        form_section(
+                            amount_entry(
+                                f.label,
+                                f.prompt,
+                                f.typed,
+                                f.cents,
+                                f.problem,
+                                |typed| BudgetMsg::Typed { typed },
+                                |cents| BudgetMsg::Cents { cents },
+                            )
+                            .gives(f.gives),
+                        )
                         .header(f.subject)
                         .footer(f.note),
                     )
@@ -72,15 +75,18 @@ pub fn budget(p: &BudgetPage) -> View<BudgetMsg> {
                                 )
                                 .prompt("Search Categories"),
                             )),
-                            form_section(amount_entry(
-                                m.amount.label,
-                                m.amount.prompt,
-                                m.amount.typed,
-                                m.amount.cents,
-                                m.amount.problem,
-                                |typed| BudgetMsg::Typed { typed },
-                                |cents| BudgetMsg::Cents { cents },
-                            ))
+                            form_section(
+                                amount_entry(
+                                    m.amount.label,
+                                    m.amount.prompt,
+                                    m.amount.typed,
+                                    m.amount.cents,
+                                    m.amount.problem,
+                                    |typed| BudgetMsg::Typed { typed },
+                                    |cents| BudgetMsg::Cents { cents },
+                                )
+                                .gives(m.amount.gives),
+                            )
                             .footer(m.amount.note),
                         ),
                     )
@@ -90,15 +96,18 @@ pub fn budget(p: &BudgetPage) -> View<BudgetMsg> {
                     form_sheet(
                         "Target",
                         BudgetMsg::Dismiss,
-                        form_section(amount_entry(
-                            f.label,
-                            f.prompt,
-                            f.typed,
-                            f.cents,
-                            f.problem,
-                            |typed| BudgetMsg::Typed { typed },
-                            |cents| BudgetMsg::Cents { cents },
-                        ))
+                        form_section(
+                            amount_entry(
+                                f.label,
+                                f.prompt,
+                                f.typed,
+                                f.cents,
+                                f.problem,
+                                |typed| BudgetMsg::Typed { typed },
+                                |cents| BudgetMsg::Cents { cents },
+                            )
+                            .gives(f.gives),
+                        )
                         .header(f.subject)
                         .footer(f.note),
                     )

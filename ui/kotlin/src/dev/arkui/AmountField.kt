@@ -2,6 +2,8 @@
 // symbol before what is typed, and figures that line up. What is typed is
 // kept as typed — a half-typed `12.` is not an amount yet — and read with
 // [Amounts.parse] when it is used; `error` is the sentence under the field.
+// A formula field (`formula`) also keeps the arithmetic a hardware keyboard
+// types (`120+35.50`), which the core works out (`ark_format::parse_formula`).
 package dev.arkui
 
 import androidx.compose.foundation.text.KeyboardActions
@@ -27,12 +29,13 @@ public fun AmountField(
     imeAction: ImeAction = ImeAction.Done,
     onDone: () -> Unit = {},
     textStyle: TextStyle = LocalTextStyle.current,
+    formula: Boolean = false,
 ) {
     val a = LocalAmounts.current
     val note = error ?: supporting
     OutlinedTextField(
         value = typed,
-        onValueChange = { t -> onType(t.filter { it.isDigit() || it == '.' || it == ',' || it == '-' }) },
+        onValueChange = { t -> onType(t.filter { it.isDigit() || it == '.' || it == ',' || it == '-' || (formula && it in FORMULA) }) },
         label = { Text(label) },
         prefix = { Text(a.symbol) },
         isError = error != null,
@@ -44,3 +47,6 @@ public fun AmountField(
         modifier = modifier,
     )
 }
+
+/** What a formula field keeps beside the figures: its operators and brackets. */
+private const val FORMULA = "+*/×÷() "

@@ -46,11 +46,21 @@ pub struct Figure {
 
 impl Figure {
     /// In cents, never below nothing; none when what is typed is no amount.
+    /// What is typed may be arithmetic (`120+35.50`: a formula field's).
     pub fn cents(&self, style: &NumberStyle) -> Option<i64> {
         match (self.entered, self.typed.trim()) {
             (Some(c), _) => Some(c.abs()),
             (None, "") => Some(0),
-            (None, t) => ark_format::parse_amount(t, style).map(i64::abs),
+            (None, t) => ark_format::parse_formula(t, style).map(i64::abs),
+        }
+    }
+
+    /// What arithmetic typed comes to, as its field says it (`= $155.50`);
+    /// none for a plain amount, or one entered in cents.
+    pub fn gives(&self, style: &NumberStyle) -> Option<String> {
+        match self.entered {
+            Some(_) => None,
+            None => ark_format::formula_gives(&self.typed, style),
         }
     }
 
@@ -314,6 +324,8 @@ pub struct AmountForm {
     pub typed: String,
     pub cents: i64,
     pub problem: Option<String>,
+    /// What a formula typed comes to (`= $155.50`), while one is.
+    pub gives: Option<String>,
     pub note: String,
     pub can_save: bool,
 }
@@ -941,6 +953,7 @@ fn amount_form(subject: String, label: &str, prompt: &str, f: &Figure, note: Str
         typed: f.typed.clone(),
         cents: cents.unwrap_or(0),
         problem: cents.is_none().then(|| "That isn't an amount".into()),
+        gives: f.gives(style),
         note,
         can_save: cents.is_some(),
     }

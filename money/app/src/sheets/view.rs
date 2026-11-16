@@ -71,7 +71,8 @@ pub fn txn_fields(t: &TxnSheet) -> View<SheetsMsg> {
                 t.amount_problem,
                 |typed| SheetsMsg::Typed { typed },
                 |cents| SheetsMsg::Cents { cents },
-            ),
+            )
+            .gives(t.gives),
         )),
         form_section((
             if t.has_payee {
@@ -152,15 +153,18 @@ pub fn reconcile_fields(r: &ReconcileSheet) -> View<SheetsMsg> {
             ))
         },
         if r.differs {
-            form_section(amount_entry(
-                "Balance",
-                r.prompt,
-                r.typed,
-                r.cents,
-                r.problem,
-                |typed| SheetsMsg::ReconcileTyped { typed },
-                |cents| SheetsMsg::ReconcileCents { cents },
-            ))
+            form_section(
+                amount_entry(
+                    "Balance",
+                    r.prompt,
+                    r.typed,
+                    r.cents,
+                    r.problem,
+                    |typed| SheetsMsg::ReconcileTyped { typed },
+                    |cents| SheetsMsg::ReconcileCents { cents },
+                )
+                .gives(r.gives),
+            )
             .footer("The difference is entered as an adjustment, and everything cleared is locked.")
         },
     )

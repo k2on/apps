@@ -143,14 +143,21 @@ fn drawn<M: Clone + std::fmt::Debug + 'static>(v: View<M>) -> Option<AnyView> {
             problem,
             typed,
         } => field(label, value.get(), problem.get(), typed),
-        Part::AmountField { label, typed, problem, on } => field(&label.get(), typed.get(), problem.get(), on),
+        Part::AmountField {
+            label,
+            typed,
+            problem,
+            gives,
+            on,
+        } => formula_field(&label.get(), typed.get(), problem.get(), gives.get(), on),
         Part::AmountEntry {
             label,
             typed,
             problem,
+            gives,
             on_typed,
             ..
-        } => field(&label.get(), typed.get(), problem.get(), on_typed),
+        } => formula_field(&label.get(), typed.get(), problem.get(), gives.get(), on_typed),
         Part::Chips(c) => html::div().class("ark-chips").child(nodes(*c)).into_any(),
         Part::Chip { label, selected, tap, .. } => chip(label.get(), selected.get(), tap),
         Part::FormSection { header, footer, content } => html::div()
@@ -750,6 +757,24 @@ pub fn field<M: Clone + std::fmt::Debug + 'static>(label: &str, value: String, p
             .prop("value", value)
             .on(leptos::ev::input, move |e| send(typed.call(event_target_value(&e)))),
             problem.map(|p| html::span().class("ark-problem").child(p)),
+        ))
+        .into_any()
+}
+
+/// An amount's field, typed as a formula where one likes: what it comes
+/// to said quietly under it as it is typed (`= $155.50`), as the desktop's.
+pub fn formula_field<M: Clone + std::fmt::Debug + 'static>(
+    label: &str,
+    value: String,
+    problem: Option<String>,
+    gives: Option<String>,
+    typed: Input<String, M>,
+) -> AnyView {
+    html::div()
+        .class("ark-formula")
+        .child((
+            field(label, value, problem, typed),
+            gives.map(|g| html::span().class("ark-caption ark-quiet ark-gives").attr("aria-live", "polite").child(g)),
         ))
         .into_any()
 }

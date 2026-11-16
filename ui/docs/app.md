@@ -2046,7 +2046,7 @@ every toolkit where it applies, its numbers in `ui/theme.toml`:
 | Behaviour | Shared as |
 |---|---|
 | Drag to reorder a category or a group, and onto another group | the existing `arkui::reorder` on `card_section`, its drop a message (`MoveCategory`, `MoveGroup`), as the phones' Reorder already is |
-| A formula field: terms of a filter and a factor, what it gives as typed | `formula_field(terms, total, on_change)` over a record money-app works out; the parsing and the sum money-core's |
+| A formula field: an amount typed as arithmetic, what it gives as typed | done: `amount_entry(…)` and `amount_field(…)` take `.gives(…)` (`Part::AmountEntry`/`AmountField`'s `gives`), said under the field on the desktop, in the browser, on Android and in SwiftUI's `AmountField` (the iPhone's keypad types digits alone); the arithmetic `ark_format::parse_formula` and `formula_gives`; every money amount field is one. Left: money/iced's "Assign by formula" (terms of a saved filter and a factor), which waits for the register's filters |
 | A register's filter as chips, "Save as Filter…" | `filter_bar(chips)`, the conditions money-core's `Filter`, the words money-app's |
 | The category dropdown under a cell (YNAB's) | the search picker already drawn under its field (`arkui::search_picker`) |
 | Visual mode, the budget's bindings (`cc`, `cg`, `rc`, `rg`, `J`/`K`, `{`/`}`) | done: a menu item's keys (`MenuItem::keys`, `.keys("cc")`, `.keys_from_last("J")`) run it on the cursor's row or a visual selection (`v`, `vig`), on the desktop (`arkui::host::keys`, `view::cursor`) and in the browser (arkui-web's `keys`); money binds `cc`, `rg`, `{`, `}` on a group's heading and `K`/`J` on a category. Left: `cg` and `rc` (New Group is a command, a category has no Rename) |
