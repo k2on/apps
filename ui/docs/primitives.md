@@ -120,7 +120,7 @@ And on every primitive (the `Modify` trait):
 | `.background(Surface)` | `Surface::Card` (the card's container), `Surface::Raised` (a container above it) |
 | `.corner(Corner)` | `Corner::Card` (`card-corner`), `Corner::Small` (`corner`), `Corner::Circle` (round): clips |
 | `.width(Measure)` | as wide as a measure, what it holds kept to it (a tile's words under its cover) |
-| `.bleed(Space)` | out past its column's edges by the step on either side, on the page's ground, not a card (a shelf to the screen's edge, its content inset back): SwiftUI a negative padding on a clear row, Compose `Modifier.bleed` (measured wider than its column), the browser a negative margin; iced keeps it in its column |
+| `.bleed(Space)` | out past its column's edges by the step on either side, on the page's ground, not a card (a shelf to the screen's edge, its content inset back): SwiftUI a clear row, its sideways scroll's tiles drawn past its bounds (`.scrollClipDisabled()`), Compose `Modifier.bleed` (measured wider than its column), the browser a negative margin; iced keeps it in its column |
 | `.max_width(Measure)` | as wide as it is given up to the measure, at the leading edge (a row of wide buttons on a wide window) |
 | `.side(Measure)` | a square the measure a side; what it holds is laid into it |
 | `.square()` | as tall as it is wide, of the width it is given; what it holds is laid into that square (iced, which has no aspect-ratio layout, draws an `art-shelf` square) |

@@ -261,7 +261,7 @@ pub enum Modifier {
     /// Out past its column's edges by the step on either side, on the
     /// page's own ground rather than a card: a shelf that scrolls to the
     /// screen's edge. What it holds insets itself back by as much (SwiftUI
-    /// a negative padding on a clear row, Compose a layout wider than its
+    /// a clear row whose sideways scroll draws past its bounds, Compose a layout wider than its
     /// column, the browser a negative margin; iced, which lays nothing
     /// out past its parent, keeps it in its column).
     Bleed(Space),

@@ -167,6 +167,13 @@ fn prim<M: Debug>(o: &mut Out, l: &Layout<M>, ctx: Ctx) {
                 "VStack(spacing: 0) {"
             };
             o.block(head, "}", |o| o.block(stack, "}", |o| node(o, content, Ctx::In(along))));
+            // A shelf's tiles drawn as far as the screen's edge as they
+            // scroll, not cut at the scroll view's.
+            if along == Axis::Horizontal {
+                o.indent += 1;
+                o.line(".scrollClipDisabled()");
+                o.indent -= 1;
+            }
         }
         Prim::Text(w) => {
             o.line(format!("Text({})", value(&lit(&w.text), "nil")));
@@ -303,8 +310,12 @@ fn modifier(m: &Modifier) -> String {
         ),
         Modifier::Combine => ".accessibilityElement(children: .combine)".into(),
         Modifier::Width(m) => format!(".frame(width: {}, alignment: .leading)", measure(*m)),
-        // Out past the row's edges, on no card: a clear row's background.
-        Modifier::Bleed(s) => format!(".padding(.horizontal, -{}).listRowBackground(Color.clear)", space(*s)),
+        // On no card: a clear row. The list's row is already its section's
+        // width, so what bleeds is a sideways scroll's content, drawn past
+        // its bounds (below), not the row: a negative padding here put the
+        // shelf's heading and first tile past the screen's edge (app-screens
+        // on 76a7c15e, the iPhone's Home).
+        Modifier::Bleed(_) => ".listRowBackground(Color.clear)".into(),
         Modifier::MaxWidth(m) => format!(".frame(maxWidth: {}, alignment: .leading)", measure(*m)),
         // The square first, what it holds laid into it.
         Modifier::Side(m) => format!(".frame(width: {0}, height: {0})", measure(*m)),

@@ -101,6 +101,7 @@ struct CardView: View {
                     }
                 }
             }
+                .scrollClipDisabled()
                 .listRowInsets(EdgeInsets())
             Photo(p.picture, label: p.name, zoom: false)
                 .frame(maxWidth: .infinity, alignment: .center)
