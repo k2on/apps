@@ -1550,7 +1550,15 @@ fn meter_row<M: Clone + 'static>(r: MeterRow<M>) -> Element<'static, M> {
     let b = button(lit_row(line, keyed == Keyed::Here))
         .width(Length::Fill)
         .padding([2, 0])
-        .style(style::bare)
+        // A row with nothing to do on a tap is no disabled control:
+        // its words keep their colour (Insights' groups).
+        .style(|t, s| {
+            let s = match s {
+                iced::widget::button::Status::Disabled => iced::widget::button::Status::Active,
+                s => s,
+            };
+            style::bare(t, s)
+        })
         .on_press_maybe(r.tap);
     row_menu(b, r.title.get(), menu_of(r.menu), keyed)
 }

@@ -568,7 +568,7 @@ button.ark-sidebar-heading:hover, button.ark-sidebar-heading.ark-on { color: var
 .ark-search.ark-plain .ark-input { width: 100%; }
 
 /* * Figures (arkui::figures) */
-.ark-status { display: inline-flex; align-items: center; gap: 3px; padding: 1px 8px; border-radius: 999px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.ark-status { display: inline-flex; align-items: center; gap: 3px; white-space: nowrap; padding: 1px 8px; border-radius: 999px; font-weight: 600; font-variant-numeric: tabular-nums; }
 .ark-status.ark-tint-positive { background: color-mix(in srgb, var(--ark-positive) 18%, transparent); color: var(--ark-positive); }
 .ark-status.ark-tint-negative { background: var(--ark-error); color: var(--ark-on-error); }
 .ark-status.ark-tint-caution { background: var(--ark-caution-container); color: var(--ark-on-caution-container); }

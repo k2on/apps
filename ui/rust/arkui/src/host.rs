@@ -736,7 +736,7 @@ where
 
 /// Settings as a sheet over the page on a wide window, the browser's
 /// (arkui-web's `settings_window`) and the Mac's alike: its title, its
-/// panes under a hairline, Done at its foot; `layout_tokens::SHEET_WIDTH`
+/// panes under a hairline, Done filled at its foot, on the page's ground; `layout_tokens::SHEET_WIDTH`
 /// wide and `SHEET_HEIGHT` tall, in the middle of the window. Shown at
 /// once, as the shell's sheets are (motion.md).
 fn settings_sheet<'a, M: Clone + 'a>(panes: Element<'a, M>, done: M) -> Element<'a, M> {
@@ -752,7 +752,7 @@ fn settings_sheet<'a, M: Clone + 'a>(panes: Element<'a, M>, done: M) -> Element<
         Space::new().width(Length::Fill),
         iced::widget::button(text("Done").size(13).font(crate::hero::BOLD))
             .padding([5, 12])
-            .style(style::action)
+            .style(style::wide(true))
             .on_press(done)
     ]
     .padding(SPACE_XL - 4.0);
@@ -765,7 +765,12 @@ fn settings_sheet<'a, M: Clone + 'a>(panes: Element<'a, M>, done: M) -> Element<
     ])
     .width(SHEET_WIDTH)
     .height(SHEET_HEIGHT)
-    .style(crate::dialog::style);
+    // On the page's own ground, so its panes' cards stand off it as they
+    // do on the page, with a dialog's edge and corners.
+    .style(|t| iced::widget::container::Style {
+        background: Some(iced::Background::Color(style::page_color(t))),
+        ..crate::dialog::style(t)
+    });
     crate::dialog::present(panel, 1.0)
 }
 
