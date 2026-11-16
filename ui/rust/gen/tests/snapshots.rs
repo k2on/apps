@@ -190,44 +190,69 @@ pub struct MediaPage {
     pub open: bool,
 }
 
+/// Pictures and sounds of the primitives alone (no component of an app's):
+/// a filled picture laid into its square over the derived square, clipped
+/// to a corner or round; rows lit as they are pressed with their menus; a
+/// lazy grid of tiles each its column's width; and the native controls a
+/// player has, which stay ArkUI's (the scrubber, the hairline, the volume).
 #[view]
 pub fn media(p: &MediaPage) -> View<ListMsg> {
     detail_page((
-        media_header(
-            artwork(p.art, p.title, p.title),
+        hstack((
+            zstack((swatch(p.title), image(p.art, p.title).fill().decode(Measure::ArtHeader)))
+                .side(Measure::ArtHeader)
+                .corner(Corner::Small),
             title_stack(p.title).over("Album").under(p.by).under_ink(Ink::Accent),
-            play_shuffle(ListMsg::Play, ListMsg::Shuffle),
-        ),
+        ))
+        .spacing(Space::L)
+        .padding(Edges::Horizontal, Space::Page),
         card_section(for t in p.tracks {
-            media_row(t.title, ListMsg::Open { id: t.id })
-                .art(artwork(t.art, t.title, t.title))
-                .under(t.by)
-                .trailing(text(t.length).style(TextStyle::Caption).ink(Ink::Quiet))
-                .menu("Play Next", "list-start", ListMsg::Open { id: t.id })
-        }),
-        artwork_shelf(for t in p.tracks {
-            artwork_tile(
-                artwork(t.art, t.title, t.title).size(ArtSize::Shelf),
+            press_row(
                 t.title,
-                t.by,
                 ListMsg::Open { id: t.id },
+                hstack((
+                    zstack((swatch(t.title), image(t.art, t.title).fill().decode(Measure::ArtRow)))
+                        .side(Measure::ArtRow)
+                        .corner(Corner::Small),
+                    title_stack(t.title).under(t.by).plain().one_line(),
+                    spacer_min(Space::Xs),
+                    text(t.length).style(TextStyle::Caption).ink(Ink::Quiet),
+                ))
+                .spacing(Space::M)
+                .padding(Edges::Horizontal, Space::L)
+                .fill_width_at(Align::Start),
             )
+            .menu("Play Next", "list-start", ListMsg::Open { id: t.id })
         }),
-        artwork_grid(for t in p.tracks {
-            artwork_tile(
-                artwork(t.art, t.by, t.by).size(ArtSize::Fill).round(),
-                t.by,
-                "",
-                ListMsg::Open { id: t.id },
-            )
+        grid(
+            Measure::ArtShelf,
+            for t in p.tracks {
+                pressable(
+                    t.by,
+                    ListMsg::Open { id: t.id },
+                    vstack((
+                        zstack((swatch(t.by), image(t.art, t.by).fill())).square().corner(Corner::Circle),
+                        text(t.by).style(TextStyle::Subheadline).lines(1),
+                    ))
+                    .spacing(Space::Xs)
+                    .align(Align::Start)
+                    .fill_width_at(Align::Start),
+                )
+            },
+        )
+        .padding(Edges::Horizontal, Space::Page),
+        vstack(for t in p.tracks {
+            text(t.title).width(Measure::ArtShelf)
         }),
+        hstack((
+            wide_button("Play", true, true, false, ListMsg::Play),
+            wide_button("Shuffle", false, true, false, ListMsg::Shuffle),
+            pressable(p.play_label, ListMsg::Toggle, glyph(p.play_glyph).style(TextStyle::LargeTitle)),
+        ))
+        .spacing(Space::M),
         scrubber(p.at_ms, p.since_ms, p.playing, p.length_ms, |at_ms| ListMsg::Seek { at_ms }),
-        transport(p.play_glyph, p.play_label, ListMsg::Toggle, ListMsg::Back, ListMsg::Forward),
         hairline(p.at_ms, p.since_ms, p.playing, p.length_ms),
-        (
-            figure_label("Tracks", p.by),
-            volume("Volume", p.level, p.muted, |level| ListMsg::Volume { level }, ListMsg::Mute),
-        ),
+        volume("Volume", p.level, p.muted, |level| ListMsg::Volume { level }, ListMsg::Mute),
     ))
 }
 

@@ -3,6 +3,8 @@
 use ark_app::view;
 use ark_app::view::*;
 
+use crate::parts::*;
+
 use super::{PageMsg, RecordPage};
 
 /// Its header — the cover beside what it is, its title, who it is by and

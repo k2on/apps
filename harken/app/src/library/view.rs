@@ -4,6 +4,8 @@
 use ark_app::view;
 use ark_app::view::*;
 
+use crate::parts::*;
+
 use super::{LibraryMsg, LibraryPage};
 
 /// The chips, then what they choose: the playlists (New Playlist first),

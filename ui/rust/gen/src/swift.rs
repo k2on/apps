@@ -6,7 +6,7 @@
 use std::fmt::Debug;
 
 use ark_app::shell::CommandMenu;
-use ark_app::view::{Align, Axis, Call, Corner, Edges, Given, Ink, Layout, Modifier, Prim, Space, Surface, Val};
+use ark_app::view::{Align, Axis, Call, Corner, Edges, Given, Ink, Layout, Measure, Modifier, Prim, Space, Surface, Val};
 
 use crate::*;
 
@@ -190,11 +190,35 @@ fn prim<M: Debug>(o: &mut Out, l: &Layout<M>, ctx: Ctx) {
             o.line(".accessibilityHidden(true)");
             o.indent -= 1;
         }
-        Prim::Image { url, label } => o.line(format!(
+        Prim::Image { url, label, fill: false, .. } => o.line(format!(
             "Photo({}, label: {}, zoom: false)",
             value(&lit(url), "nil"),
             value(&lit(label), "nil")
         )),
+        // Exactly the frame it is given, the picture covering it and cut
+        // to it: never its own aspect.
+        Prim::Image {
+            url,
+            label,
+            fill: true,
+            decode,
+        } => o.line(format!(
+            "ArkPicture({}, label: {}, decode: {})",
+            value(&lit(url), "nil"),
+            value(&lit(label), "nil"),
+            decode.map(measure).unwrap_or_else(|| "nil".into())
+        )),
+        Prim::Swatch { seed } => o.line(format!("Square(seed: {})", value(&lit(seed), "nil"))),
+        Prim::Grid { min, across, down, content } => o.block(
+            format!(
+                "LazyVGrid(columns: [GridItem(.adaptive(minimum: {}), spacing: {}, alignment: .top)], alignment: .leading, spacing: {}) {{",
+                measure(*min),
+                space(*across),
+                space(*down)
+            ),
+            "}",
+            |o| node(o, content, Ctx::In(Axis::Vertical)),
+        ),
     }
     o.indent += 1;
     for m in &l.mods {
@@ -218,6 +242,10 @@ fn lit<T: Debug>(v: &Val<T>) -> String {
 
 fn space(s: Space) -> String {
     format!("Space.{}", s.case())
+}
+
+fn measure(m: Measure) -> String {
+    format!("ArkMeasure.{}", m.case())
 }
 
 fn horizontal(a: Align) -> &'static str {
@@ -265,15 +293,19 @@ fn modifier(m: &Modifier) -> String {
         Modifier::FillHeight => ".frame(maxHeight: .infinity)".into(),
         Modifier::Background(Surface::Card) => ".background(ArkSurface.card)".into(),
         Modifier::Background(Surface::Raised) => ".background(ArkSurface.raised)".into(),
+        Modifier::Corner(Corner::Circle) => ".clipShape(Circle())".into(),
         Modifier::Corner(c) => format!(
             ".clipShape(RoundedRectangle(cornerRadius: {}, style: .continuous))",
             match c {
                 Corner::Card => "ArkCorner.card",
-                Corner::Small => "ArkCorner.small",
+                _ => "ArkCorner.small",
             }
         ),
         Modifier::Combine => ".accessibilityElement(children: .combine)".into(),
-        Modifier::ArtWidth(a) => format!(".artWidth(.{})", a.case()),
+        Modifier::Width(m) => format!(".frame(width: {}, alignment: .leading)", measure(*m)),
+        // The square first, what it holds laid into it.
+        Modifier::Side(m) => format!(".frame(width: {0}, height: {0})", measure(*m)),
+        Modifier::Square => ".aspectRatio(1, contentMode: .fit)".into(),
     }
 }
 

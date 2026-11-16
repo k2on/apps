@@ -87,7 +87,10 @@ fn names<M>(v: &ark_app::view::View<M>, out: &mut Vec<&'static str>) {
             names(yes, out);
             names(no, out)
         }
-        View::Layout(l) => l.slots().into_iter().for_each(|s| names(s, out)),
+        View::Layout(l) => {
+            out.push(l.prim.kind());
+            l.slots().into_iter().for_each(|s| names(s, out))
+        }
         View::Part(p) => {
             let c = p.call();
             out.push(c.name);
@@ -103,19 +106,11 @@ fn the_view_draws_the_page_and_its_recording_has_every_way() {
     d.run(&mut rt, [LibraryMsg::Show { kind: "albums".into() }]);
     let mut drawn = vec![];
     names(&view::library::view(&d.page(&mut rt)), &mut drawn);
-    assert!(drawn.contains(&"ArtworkGrid") && drawn.contains(&"Artwork") && drawn.contains(&"Pressable"));
+    // A grid of covers, each a picture over its derived square: primitives.
+    assert!(drawn.contains(&"grid") && drawn.contains(&"image") && drawn.contains(&"swatch") && drawn.contains(&"Pressable"));
     let mut all = vec![];
     names(&view::library::record(), &mut all);
-    for part in [
-        "ChipRow",
-        "Chip",
-        "ListRow",
-        "ArtworkGrid",
-        "Pressable",
-        "Artwork",
-        "FormSheet",
-        "NameField",
-    ] {
+    for part in ["ChipRow", "Chip", "ListRow", "grid", "Pressable", "image", "FormSheet", "NameField"] {
         assert!(all.contains(&part), "{part} is not in {all:?}");
     }
 }

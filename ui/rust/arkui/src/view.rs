@@ -375,19 +375,6 @@ fn part<M: Clone + 'static>(v: View<M>) -> Option<Element<'static, M>> {
             .on_press(tap);
             row_menu(b, label.get(), menu_of(menu), keyed)
         }
-        Part::Artwork {
-            url,
-            seed,
-            size,
-            round,
-            ..
-        } => {
-            let side = layout::art_side(size).unwrap_or(crate::layout_tokens::ART_SHELF);
-            let corner = if round { side / 2.0 } else { crate::layout_tokens::CORNER };
-            let handle = crate::images::remote(&url.get(), "arkui/artwork");
-            crate::art::picture(&seed.get(), handle.as_ref(), side, corner)
-        }
-        Part::Grid(content) => row(nodes(*content)).spacing(12).wrap().into(),
         Part::Timeline {
             at_ms,
             since_ms,

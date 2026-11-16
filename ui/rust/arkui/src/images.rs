@@ -129,7 +129,7 @@ pub fn arrivals() -> &'static crate::wake::Bell {
 }
 
 /// A cover by its URL for a view that has no `update` of its own to fetch
-/// it (`ark_app::view`'s artwork, drawn by `arkui::view`): what is here, or
+/// it (`ark_app::view`'s filled `image`, drawn by `arkui::view`): what is here, or
 /// none — and, the first time it is asked, fetched on a thread of its own
 /// into `name`'s cache at most [`BOUND`] on its longest side, the window
 /// told by [`arrivals`] when it has come. A `file:` or `data:` URL is

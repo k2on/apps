@@ -14,16 +14,28 @@ Run the doc's Review Checklist on the diff before pushing, and say in the
 commit what was verified and what has not been seen on a device. Leave
 `ALWAYS_ANIMATE` / `alwaysAnimate` as they are unless the owner asks.
 
-Everything shared lives in arkui. Every motion value (stiffness, damping,
-fade, cap, flick speed, deceleration, press scale, entrance scale) is
-written once, in `ui/theme.toml`'s `[motion]`, and generated into
-`MotionTokens` for Kotlin and Swift and `arkui::motion_tokens` for Rust by
-`nix run .#update-theme` (`checks.theme` fails if they drift). The
-libraries' `Springs` / `arkui::motion` are built on those tokens, and an
-app uses only the libraries' springs, transitions, press and haptics: no
-number, curve, spring or component of its own that another app could
-share. One that is missing is added to arkui (and to `theme.toml` if it is a
-value), then used from there.
+arkui holds primitives, native containers and native controls, nothing
+else. A primitive is what the generator writes out as each toolkit's own
+layout (the stacks, spacer, scroll, text, glyph, image, swatch, grid and
+their modifiers, `ui/docs/primitives.md`); a native container or control
+is what carries the platform's behaviour and cannot be composed (a list, a
+section, navigation, tabs, sheets, menus, forms, fields, pickers, a press,
+the scrubber and volume, the now-playing accessory). A component is a Rust
+composition of those, never hand-written per toolkit: one app's own is a
+`#[view]`-able function in that app's `app/` crate (harken's covers and
+rows are `harken-app`'s `parts`), and one several apps really share is a
+composition in ark-app (`ark_app::view`'s components). Every value is a
+token: every motion value (stiffness, damping, fade, cap, flick speed,
+deceleration, press scale, entrance scale) is written once, in
+`ui/theme.toml`'s `[motion]`, every gap, corner and measure in its
+`[layout]`, and generated into `MotionTokens`/`LayoutTokens` for Kotlin
+and Swift and `arkui::motion_tokens`/`layout_tokens` for Rust by `nix run
+.#update-theme` (`checks.theme` fails if they drift). The libraries'
+`Springs` / `arkui::motion` are built on those tokens, and an app uses
+only the libraries' springs, transitions, press and haptics: no number,
+curve or spring of its own. A primitive, container or control that is
+missing is added to arkui on every toolkit (and to `theme.toml` if it is
+a value), then used from there.
 
 ## An App's Directory
 

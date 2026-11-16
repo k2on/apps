@@ -1,23 +1,29 @@
 # Layout Primitives Under the Parts
 
 `ark_app::view` (ui/rust/app/src/view.rs) lays a screen out of ArkUI's
-parts (ui/docs/parts.md): a tab's page, a card's section, a list's row, a
-sheet. Each part is written by hand four times — SwiftUI, Compose, iced and
-the browser — and the generator only calls it by name. This page adds a
-layer under them: a few **primitives** that the generator writes out as
-each toolkit's own layout, so a purely visual part is written once, in
-Rust, and drawn natively everywhere.
+**primitives**, which the generator writes out as each toolkit's own
+layout, and its **native containers and controls**, each written by hand
+once per toolkit — SwiftUI, Compose, iced and the browser — and called by
+name. Everything else is a **component**: a Rust composition of those,
+written once and drawn natively everywhere.
 
 The rule that decides which is which:
 
-- **A container that carries platform behaviour stays a native part**:
-  lists and sections (an inset-grouped `List` on the iPhone, with its
-  separators, swipe, reorder and VoiceOver's grouping), navigation, tabs,
-  sheets, menus, forms, toolbars, pickers, fields, a scrubber or a slider.
+- **A container or control that carries platform behaviour stays a native
+  part of ArkUI's**: lists and sections (an inset-grouped `List` on the
+  iPhone, with its separators, swipe, reorder and VoiceOver's grouping),
+  navigation, tabs, sheets, menus, forms, toolbars, pickers, fields, a
+  press with its menu, a scrubber or a slider, the now-playing accessory.
   Rebuilding one from stacks would lose what the platform gives it.
-- **What is only drawn moves to the primitives**: a header card's face, a
-  goal's bar and note, an empty list's sentence, a block of titles. Written
-  once in Rust from stacks, text and glyphs, with the theme's tokens.
+- **What is only drawn is a composition of the primitives**: a header
+  card's face, a goal's bar and note, an empty list's sentence, a block of
+  titles, a cover, a row of a song. Written once in Rust from stacks,
+  text, glyphs, pictures and frames, with the theme's tokens.
+- **A component lives with who uses it.** One app's own is that app's
+  (`harken-app`'s `parts`: its covers, tiles, rows, headers and player
+  controls); one several apps really share is ark-app's
+  (`ark_app::view`'s components: `title_stack`, `empty_state`). None is
+  ever hand-written per toolkit, and ArkUI holds none of an app's.
 
 ## What Harken Lays Out
 
@@ -43,49 +49,37 @@ out, and what that asked of ArkUI:
 | **Empty and waiting** (`ContentUnavailableView` ×8 on the iPhone, ArkUI's Kotlin `Empty`; `Fetching`) | — | a centred `VStack` of a large quiet glyph, a title, a quiet sentence; for `Fetching` a spinner under the words | **empty state** |
 | **Avatar** (`Avatar`, `PeopleLine`, `AccountButton`) | the account sheet; the face's picture loading (`Covers`) | a `ZStack` of a circle in the name's colour, the initials, the picture over them, clipped round | **avatar** — ArkUI already has it (`AccountFace` / `Part::Account`, money's toolbar); harken's `Avatar` is the same face at another size |
 
-What falls out, and who uses it:
+What falls out is harken's own, so it is harken's: Rust compositions in
+`harken/app/src/parts.rs`, used by its `#[view]`s like any part. Each is
+the primitives below and ArkUI's press; nothing of it is per toolkit.
 
-| Component | What it is | harken | money |
-|---|---|---|---|
-| **Empty state** (`empty_state`) | a quiet glyph, a title, a sentence, centred | Home, Library's tabs, Search, the queue, Devices | an empty register, no transactions to review, nothing spent yet |
-| **Title stack** (`title_stack`) | a kicker over a title over a subtitle over a caption, leading or centred, each only while it has words | the players, record headers, `Featured`, `LastCard`, rows, onboarding | the empty states' words (through `empty_state`) |
-| Glyph tile (`Part::Tile`, now a leaf the primitives can hold) | a glyph on a tinted rounded tile | onboarding's mark, the new-playlist row | the header card's glyph |
-| Status badge (`Part::StatusBadge`, a leaf) | a figure in a capsule of its tint | a download's state | a category's available |
-| Meter (`Part::Meter`, a leaf) | a bar of how far, in a tint | an episode's progress, the now-playing hairline | a goal's progress |
-| Artwork tile | artwork over a title and a caption | the shelves, the grids, search | — (receipts' photos, later) |
-| Media header | artwork beside a title stack, actions under | album, artist, show, playlist, recording | — |
-| Media row | artwork, a title stack, trailing glyph buttons | tracks, episodes, the now-playing bar, the queue | — (`list_row` is money's) |
-| Transport controls | shuffle, back, play, forward, repeat | the full player | — |
-| Progress scrubber | ArkUI's `Scrubber` (a native part: a drag) | the full player | — |
-| Chip row | ArkUI's `chip_row` (native: it wraps) | Library's tabs | filters |
-| Figure with label | a quiet label over a figure | diagnostics, a record's foot | the summary card's two facts |
-| Avatar | ArkUI's `Part::Account` face, generic | people, the account | the toolbar's account |
-
-The first two are built (`ui/rust/app/src/view/components.rs`) and used
-by money now — its register's, transactions' and insights' empty cards are
-`empty_state`s; the leaves are what the rebuilt parts needed. The media
-components are built for harken's port, each of the primitives over four
-new parts, on every toolkit:
-
-| Built | API (`ark_app::view`) | What it is drawn with |
+| Component (`harken_app::parts`) | API | Composed of |
 |---|---|---|
-| Pressed as one | `pressable(label, tap, content)` (a give), `press_row(label, tap, content)` (a row's light), `.menu(title, glyph, tap)` | `Part::Press`: SwiftUI's `Pressable` (a `Button` in `.press`/`.pressRow`, its `contextMenu`), Compose's `Pressable` (`Modifier.pressable` with `Press.Give`/`Highlight`, its menu held), iced's bare button (the pressed colour, no give), the browser's `<button class="ark-press">`; its walk id a row's by its label when it lights, else what it sends |
-| Artwork | `artwork(url, seed, label).size(ArtSize::Row \| Shelf \| Header \| Fill).round()` | `Part::Artwork`: the picture over ArkUI's derived square (`Square`, `Cover`, `art::picture`, the theme's `.ark-square-<n>`), decoded for its size (`ArtworkCache`, `UrlCovers`, `images::remote`), waited for by a screenshot; sizes `[layout]`'s `art-row`, `art-shelf`, `art-header` |
-| Artwork tile | `artwork_tile(art, title, caption, tap)` | a give over a `vstack` kept to its cover's width (`.art_width(size)`) |
-| Artwork shelf | `artwork_shelf(tiles)` | `scroll_across` at the page's margins |
-| Artwork grid | `artwork_grid(tiles)` | `Part::Grid`: `LazyVGrid(.adaptive(art-shelf))`, a `FlowRow` of cells, iced's wrapped row, a CSS grid |
-| Media row | `media_row(title, tap).art(..).under(..).trailing(..).menu(..)` | a lit row of an `hstack`: the art, a plain one-line `title_stack`, a spacer, the end |
-| Media header | `media_header(art, titles, actions)` | the cover at `art-header` beside the titles, the actions under both |
-| Play/shuffle pair | `play_shuffle(play, shuffle)` | two `wide_button`s |
-| Transport controls | `transport(play_glyph, play_label, toggle, back, forward).shuffle(tint, tap).repeat(glyph, tint, tap)` | `glyph_button`s (a give round a glyph) spaced across the width |
-| Scrubber, hairline | `scrubber(at_ms, since_ms, playing, length_ms, seek)`, `hairline(..)` | `Part::Timeline`: counted from its clock as it is drawn (`TimelineView`, a ticking state, iced's tick while one plays, an animation frame in the DOM), `seek` once on release (iced: as it is dragged), a `Selection` haptic at either end on the phones |
-| Figure with label | `figure_label(label, figure)` | a quiet caption over a headline, read as one |
-| Volume | `volume(label, level, muted, change, mute)` | `Part::Volume`: `VolumePart` over `VolumeSlider` on the phones (a level from elsewhere sprung to, `change` once on release), iced's slider (a level as it is dragged), the browser's `<input type="range">` (on `change`); its loudspeaker sends `mute` |
-| Now-playing accessory | `adaptive_tabs(..).accessory(bar, full, open, close).showing(on).expanded(on).skips(next, previous)` | the shell's `Part::Tabs` with an `Accessory`: SwiftUI's `expandingCard` (`tabViewBottomAccessory` zooming into a `fullScreenCover`, iOS 26.1's `isEnabled` while nothing plays, the bar swiped by `SkippingBar`; the Mac's bar at the window's foot and a sheet), Compose's `ExpandingCard` over the navigation bar (its settle told back as `open`/`close`), iced's bar at the foot of what is shown and the full window over it, the browser's bar and a page rising from the foot; the full face's close a chevron at its top on every toolkit |
+| Artwork | `artwork(url, seed, label).size(ArtSize::Row \| Shelf \| Header \| Fill).round()` | `zstack((swatch(seed), image(url, label).fill().decode(m)))`, then the square first — `.side(m)` at `art-row`, `art-shelf` or `art-header`, or `.square()` of the width it is given — then `.corner(Corner::Small)` or `Corner::Circle` (a person). The picture covers its square and is cut to it on every toolkit; the derived square shows until it comes; a screenshot waits for it |
+| Artwork tile | `artwork_tile(art, title, caption, tap)` | `pressable` (a give) round a leading `vstack` of the cover, a one-line subheadline and a quiet one-line caption, `.width(m)` its cover's measure, or `.fill_width_at(Start)` in a grid's cell |
+| Artwork shelf | `artwork_shelf(tiles)` | `scroll_across(hstack(tiles).spacing(M).align(Start).padding(Horizontal, Page))` |
+| Artwork grid | `artwork_grid(tiles)` | `grid(Measure::ArtShelf, tiles).spacing(M).line_spacing(L).padding(Horizontal, Page)` |
+| Media row | `media_row(title, tap).art(..).under(..).trailing(..).menu(..)` | `press_row` (a row's light, its menu) round an `hstack` of the art, a plain one-line `title_stack`, `spacer_min(Xs)` and the end |
+| Media header | `media_header(art, titles, actions)` | a `vstack` of an `hstack` of the cover at `art-header` and the titles, the actions under both, at the page's margins |
+| Play/shuffle pair | `play_shuffle(play, shuffle)` | two `wide_button`s in an `hstack` |
+| Glyph button | `glyph_button(name, label, style, ink, tap)` | `pressable` round a padded `glyph` |
+| Transport controls | `transport(play_glyph, play_label, toggle, back, forward).shuffle(tint, tap).repeat(glyph, tint, tap)` | glyph buttons and `spacer`s across the width |
+| Figure with label | `figure_label(label, figure)` | a quiet caption over a one-line headline, `.combine()`d |
 
-ui/rust/gen/tests/snapshots holds what the emitters write for all of
-them (`MediaView.swift`, `MediaScreen.kt`, `TabsView.swift`,
-`TabsScreen.kt`).
+What stays ArkUI's, because it is native:
+
+| Native | API (`ark_app::view`) | Why it is not composed |
+|---|---|---|
+| Pressed as one | `pressable(label, tap, content)` (a give), `press_row(label, tap, content)` (a row's light), `.menu(title, glyph, tap)` | `Part::Press`: the platform's button and context menu (SwiftUI's `Pressable`, a `Button` in `.press`/`.pressRow`; Compose's `Modifier.pressable` with `Press.Give`/`Highlight`, its menu held; iced's bare button; the browser's `<button class="ark-press">`); its walk id a row's by its label when it lights, else what it sends |
+| Scrubber, hairline | `scrubber(at_ms, since_ms, playing, length_ms, seek)`, `hairline(..)` | `Part::Timeline`: counted from its clock as it is drawn (`TimelineView`, a ticking state, iced's tick while one plays, an animation frame in the DOM), a drag with a `Selection` haptic at either end, `seek` once on release — a time-driven control and a gesture |
+| Volume | `volume(label, level, muted, change, mute)` | `Part::Volume`: `VolumeSlider` on the phones (a level from elsewhere sprung to), iced's slider, the browser's `<input type="range">` — a slider |
+| Now-playing accessory | `adaptive_tabs(..).accessory(bar, full, open, close).showing(on).expanded(on).skips(next, previous)` | the shell's `Part::Tabs` with an `Accessory`: SwiftUI's `expandingCard` (`tabViewBottomAccessory` zooming into a `fullScreenCover`), Compose's `ExpandingCard`, iced's bar at the foot and the full window over it, the browser's — a shell container |
+
+ui/rust/gen/tests/snapshots holds what the emitters write for the
+primitives a cover and a grid are made of, and for the native controls
+(`MediaView.swift`, `MediaScreen.kt`, `TabsView.swift`, `TabsScreen.kt`);
+harken's compositions are checked by app-screens' sheets, not by tests of
+their views.
 
 ## The Primitives
 
@@ -111,7 +105,9 @@ vstack((
 | `scroll(content)`, `scroll_across(content)` | what scrolls | vertical, or sideways |
 | `text(words)` | words read or written (a field, never a `for`'s item itself: `#[view]` takes a bare binding for a sub-view's record) | `.style(TextStyle)`, `.ink(Ink)`, `.lines(n)`, `.centred()`, `.if_any()` (nothing while empty) |
 | `glyph(name)` | a Lucide name (an SF Symbol on Apple's) | `.style(TextStyle)` (its size), `.ink(Ink)` |
-| `image(url, label)` | a picture by URL | as `photo` |
+| `image(url, label)` | a picture by URL (`file:`, `data:`, `https:`), said as `label` (nothing when empty) | fitted until told: its own shape at the width given, as `photo`. `.fill()`: exactly the frame it is given, the picture covering it and cut to it — never its own aspect — fetched and kept by the toolkit, decoded once per size, nothing drawn until it has come (what is under it shows), a screenshot waiting for it to come or fail. `.decode(Measure)`: decoded for that side, not the most a filling picture is drawn at |
+| `swatch(seed)` | a name | the theme's derived square for it (`art` gradients, `arkui::art::hash` on every toolkit), filling the frame it is given: what stands under a picture until it comes |
+| `grid(min: Measure, content)` | its cells | a native, lazy where the toolkit has one, container of as many equal columns as fit at least `min` wide, each cell a column's width; `.spacing(Space)` between columns (`space-m` until told), `.line_spacing(Space)` between rows (`space-l`) |
 | `tile(glyph, tint)`, `status_badge(figure, tint)`, `meter(fraction, tint)` | leaves the primitives hold: ArkUI's `Tile`, `StatusBadge`, a bar | — |
 
 And on every primitive (the `Modify` trait):
@@ -121,7 +117,10 @@ And on every primitive (the `Modify` trait):
 | `.padding(Edges, Space)` | `Edges::All`, `Horizontal`, `Vertical`, `Top`, `Bottom`, `Leading`, `Trailing` |
 | `.fill_width()`, `.fill_width_at(Align)`, `.fill_height()` | as wide (tall) as it is given, its content centred or at `Align` |
 | `.background(Surface)` | `Surface::Card` (the card's container), `Surface::Raised` (a container above it) |
-| `.corner(Corner)` | `Corner::Card` (`card-corner`), `Corner::Small` (`corner`): clips |
+| `.corner(Corner)` | `Corner::Card` (`card-corner`), `Corner::Small` (`corner`), `Corner::Circle` (round): clips |
+| `.width(Measure)` | as wide as a measure, what it holds kept to it (a tile's words under its cover) |
+| `.side(Measure)` | a square the measure a side; what it holds is laid into it |
+| `.square()` | as tall as it is wide, of the width it is given; what it holds is laid into that square (iced, which has no aspect-ratio layout, draws an `art-shelf` square) |
 | `.combine()` | one element to a screen reader, its words in order |
 
 A method of another primitive (`.spacing` on words) panics when the view
@@ -135,7 +134,8 @@ a `Corner`, every colour an `Ink` or a `Surface`, every face a `TextStyle`:
 | Token | Is | SwiftUI | Compose | iced | Browser |
 |---|---|---|---|---|---|
 | `Space::Xs` … `Xxl`, `Page`, `Section` | `[layout]`'s `space-*`, `page-margin`, `section-gap` | `Space.xs` … | `Space.xs` … | `layout_tokens::SPACE_XS` … | `var(--ark-space-xs)` … |
-| `Corner::Card`, `Small` | `card-corner`, `corner` | `LayoutTokens.cardCorner` | `LayoutTokens.CARD_CORNER.dp` | `CARD_CORNER` — the desktop's card is 8 (`style::card`) | `var(--ark-card-corner)` |
+| `Corner::Card`, `Small`, `Circle` | `card-corner`, `corner`, round | `LayoutTokens.cardCorner` | `LayoutTokens.CARD_CORNER.dp` | `CARD_CORNER` — the desktop's card is 8 (`style::card`) | `var(--ark-card-corner)` |
+| `Measure::ArtRow`, `ArtShelf`, `ArtHeader` | `[layout]`'s `art-row`, `art-shelf`, `art-header` | `ArkMeasure.artRow` … | `ArkMeasure.artRow` … | `layout_tokens::ART_ROW` … | `var(--ark-art-row)` … |
 | `TextStyle::LargeTitle`, `Title`, `Headline`, `Body`, `Subheadline`, `Footnote`, `Caption`, `Figure` | the system's named styles on the phones (they follow Dynamic Type and the font scale); the desktop's sizes, `[layout]`'s `type-*` | `.arkType(_:)`: `.largeTitle`, `.title2`, `.headline`, `.body`, `.subheadline`, `.footnote`, `.caption`, the large rounded bold figure | `ArkType.*.style`: `headlineLarge`, `titleLarge`, `titleMedium`, `bodyLarge`, `bodyMedium`, `bodySmall`, `labelSmall`, `displaySmall` bold | `layout_tokens::TYPE_*`, bold for the headline, titles and the figure | `.ark-type-*` over `var(--ark-type-*)` |
 | `Ink::Ink`, `Quiet`, `Accent`, `Tint(name)`, `Figure(name)` | the theme's roles; a tint by name (`neutral` is quiet), or as a figure (`neutral` is the ink) | `Color.ink`, `.quiet`, `.accentText`, `Tint(named:).color`, `.figure` | `ArkInk.*` over the scheme, `tintInk` | `theme::of(t)…`, `parts::Tint` | `.ark-ink-*`, `.ark-tint-*` |
 | `Surface::Card`, `Raised` | `container-low`, `container-high` | `Color.surfaceContainerLow`… via `ArkSurface` | `surfaceContainerLow`, `surfaceContainerHigh` | `style::card`'s colours | `var(--ark-container-low)` |
@@ -153,7 +153,9 @@ written once, in `ui/theme.toml`, and a view names it.
 | `form_sheet`, `form_section`, the fields, pickers, `switch_row`, `date_field` | the keyboard, focus, the system's pickers |
 | `tabs`, `toolbar`, `split`, `push`, `inspector`, `searchable` | navigation |
 | `confirm`, `alert`, `prompt` | the system's dialogs |
-| `photo`, `zoom_photo`, `scrubber`, the charts | gestures, decoding, drawing |
+| `photo`, `zoom_photo`, `scrubber`, `hairline`, `volume`, the charts | gestures, a clock, decoding, drawing |
+| `pressable`, `press_row` (`Part::Press`) | the platform's button, its press feedback and its context menu |
+| the shell's accessory (`Tabs::accessory`), `ExpandingCard` | the tab view's bottom accessory, its zoom, the system's sheet |
 
 | Moves to the primitives | Built in `view.rs` as |
 |---|---|
@@ -178,6 +180,11 @@ written once, in `ui/theme.toml`, and a view names it.
 | `.fill_width` | `.frame(maxWidth: .infinity, alignment:)` | `.fillMaxWidth().wrapContentWidth(align)` | `width(Fill)`, aligned | `.ark-fill-w` |
 | `.background`, `.corner` | `.background(…)`, `.clipShape(.rect(cornerRadius:))` | `.clip(RoundedCornerShape).background()` | `container::Style` | `.ark-surface-*`, `.ark-corner-*` |
 | `.combine` | `.accessibilityElement(children: .combine)` | `.semantics(mergeDescendants = true) {}` | — (iced has no screen reader yet) | `role="group"` |
+| `image(..).fill()` | `ArkPicture`: `Color.clear.overlay { picture.scaledToFill() }.clipped()` (so it is the frame proposed, never the picture's aspect), `PictureCache` (ImageIO's thumbnail at the size drawn), `readyWhile` | `ArkPicture`: a `Box` of the modifier's size, `Image(ContentScale.Crop)` clipped to it, over `UrlCovers` (disk and memory, decoded by a power-of-two shrink, `Ready.waiting`) | `images::remote` drawn `ContentFit::Cover` at the square it is in, rounded in its pixels for a circle | `<img class="ark-picture">` `object-fit: cover`, absolutely over its box |
+| `swatch` | `Square(seed:)` (a `Canvas`) | `Square(seed, Modifier.fillMaxSize())` | `art::square` at the square it is in | `div.ark-swatch.ark-square-<n>` |
+| `grid` | `LazyVGrid(.adaptive(minimum:))` | `ArkGrid` (a `Layout` of equal columns, each cell measured a column's width; inside a page's lazy list) | a wrapped `row` of cells a column's least width | `display: grid`, `repeat(auto-fill, minmax(…, 1fr))` |
+| `.width`, `.side`, `.square` | `.frame(width:)`, `.frame(width:height:)`, `.aspectRatio(1, contentMode: .fit)` | `.width()`, `.size()`, `.aspectRatio(1f)` | a fixed `container` (`.square` an `art-shelf` one) | `.ark-w-*`, `.ark-side-*`, `.ark-square` (`aspect-ratio: 1`) |
+| `Corner::Circle` | `.clipShape(Circle())` | `.clip(CircleShape)` | the leaves' radius half the side | `.ark-corner-circle` |
 
 SwiftUI applies modifiers inside out and Compose's `Modifier` chain
 outside in, so the generator writes a primitive's modifiers in its order
@@ -228,10 +235,45 @@ both phones, as Compose's `GroupCard` adds none.
   and notes are three. `paper` stays a part until its record gives a list
   of lines.
 
+## Inventory
+
+Every part of ArkUI's, and every helper of the hand-written toolkits, by
+what it is. *Primitive*: written out by the generator as the toolkit's
+own layout. *Native*: a container or control written once per toolkit
+because it carries the platform's behaviour. *Shared*: a Rust composition
+in ark-app that several apps use. *One app's*: a component only one app
+uses, which belongs in that app's `app/` crate as a Rust composition of
+the primitives — moved, or still to move.
+
+| Part / helper (`ark_app::view`) | Toolkits' own | Is | Who uses it |
+|---|---|---|---|
+| `vstack`, `hstack`, `zstack`, `spacer`, `scroll`, `text`, `glyph`, `image` (fit and fill), `swatch`, `grid`, and the modifiers | SwiftUI's and Compose's own layout; `ArkPicture`, `PictureCache`, `UrlCovers`, `ArkGrid`, `Square` | primitive | every app |
+| `tile`, `status_badge`, `meter` (`Part::Tile`, `StatusBadge`, `Meter`) | `Tile`, `StatusBadge`, `MeterBar` | primitive (leaves) | money (a header card's glyph, a category's badge, a goal's bar), harken (an episode's progress) |
+| `tab_page`, `detail_page` (`Part::Page`), `Part::Detail` | `TabPage`, `DetailPage` | native container | every app |
+| `card_section` (`Part::Section`), `list_row` (`Part::Row`), `chip_row`/`chip` | `CardSection`, `ListRow`, `ChipRow`, `Chip` | native container | every app |
+| `form_sheet`, `form_section`, `prompt`, `confirm`, `alert` | `FormSheet`, `FormSection`, the system's dialogs | native container | every app |
+| `name_field`, `amount_field`, `date_field`, `address_field`, `picker`/`choice`, `search_picker`, `switch_row`, `form_button`, `wide_button`, `status_line` | the fields, pickers, toggles and buttons | native control | money, harken, the first run |
+| `tabs`, `adaptive_tabs`, `section_tab`, `tab_group`, `push`, `split`, `toolbar`, `bar_item`, `account_item`, `inspector`, `searchable`, `hosted`, `settings_panes` | ArkShell's, `ExpandingCard`, the accessory | native container (the shell) | every app |
+| `pressable`, `press_row` (`Part::Press`) | `Pressable` (Controls.swift, Controls.kt), a bare button, `<button class="ark-press">` | native control | harken; any app |
+| `scrubber`, `hairline` (`Part::Timeline`), `volume` (`Part::Volume`) | `ClockScrubber`, `ClockHairline`, `VolumePart`, `Scrubber`, `VolumeSlider` | native control | harken |
+| `photo`, `zoom_photo` (`Part::Photo`) | `Photo`, `Zoomed` | native control (decoding, pinch to zoom) | money (a receipt) |
+| `code_image` (`Part::CodeImage`) | `QrCode` | native (drawn) | the first run's pairing |
+| `bar_chart`, `data_table`, `table_row`, `table_heading` (`Part::BarChart`, `Table`, `TableRow`, `TableHeading`) | `Charts`, `TableParts` | native (drawn; the table that becomes a list) | money |
+| `writing`, `specimen` (`Part::Writing`, `Specimen`) | the markdown and the toolkit's specimens | native | the docs |
+| `first_run_page` (`Part::FirstRunPage`) | `FirstRunParts` | native container (the first run's page) | every app's first run |
+| `title_stack`, `empty_state` | — | shared composition | harken, money |
+| `artwork`, `artwork_tile`, `artwork_shelf`, `artwork_grid`, `media_row`, `media_header`, `play_shuffle`, `glyph_button`, `transport`, `figure_label` | — (the hand-written `Artwork`, `ArtworkGrid`, `ArtSize`, `artWidth`, `ArtworkCache`, `LocalGridCell`, `art::picture` callers and `.ark-art*` are gone) | one app's: **moved**, `harken-app`'s `parts` | harken |
+| `header_card` (`Part::Section` of a composed face), `goal_progress` | — | one app's (a Rust composition in ark-app, still to move to money-app) | money |
+| `summary_card` (`Part::Summary`), `hero_figure` (`Part::Hero`), `headline` (`Part::Headline`), `meter_row` (`Part::MeterRow`), `paper` (`Part::Paper`), `amount_entry` (`Part::AmountEntry`'s face) | `Summary`/`SummaryCard`, `HeroFigure`, `Headline`, `MeterRow`, `Paper` (FigureParts, PhotoParts, Parts) | one app's, hand-written per toolkit: **still to move** to money-app as compositions (they need what Hard Cases names: a figure in cents, "fits", parallel lists) | money |
+| `Cover`, `CoverLoader`, `HeroBanner`, `Components.kt`'s covers (Kotlin), `HeroParts.swift`/`.kt` | — | one app's (harken's old native screens'), hand-written: **still to move or delete** once nothing calls them | harken (old) |
+| `MarkTile`, the account face (`Part::Account`) | `MarkTile`, `AccountFace` | native (the shell's mark and account) | every app |
+
 ## What Is Verified
 
 The view model and the components by `cargo test -p ark-app`
-(`view/layout.rs`, `view/components.rs`); the generated SwiftUI and Compose
+(`view/layout.rs`, `view/components.rs`); harken's compositions (a cover
+its square first, the picture filled over the derived square) by
+app-screens' sheets on every platform; the generated SwiftUI and Compose
 by `ui/rust/gen/tests/snapshots` (`CardView.swift`, `CardScreen.kt`: the
 rebuilt header card and goal, an empty state, a row of a glyph, words and a
 spacer, a sideways shelf, an image — and a test that neither holds a number);

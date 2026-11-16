@@ -4,6 +4,8 @@ use ark_app::shell::*;
 use ark_app::view;
 use ark_app::view::*;
 
+use crate::parts::*;
+
 use super::{ShellMsg, ShellPage};
 
 /// Home, Library and Search, each its toolbar over what it hosts, and a record's

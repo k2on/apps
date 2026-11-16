@@ -6,7 +6,7 @@
 use std::fmt::Debug;
 
 use ark_app::shell::CommandMenu;
-use ark_app::view::{Align, Axis, Call, Corner, Edges, Given, Ink, Layout, Modifier, Prim, Space, Surface, Val};
+use ark_app::view::{Align, Axis, Call, Corner, Edges, Given, Ink, Layout, Measure, Modifier, Prim, Space, Surface, Val};
 
 use crate::*;
 
@@ -59,14 +59,19 @@ const LAYOUT_IMPORTS: &[&str] = &[
     "androidx.compose.foundation.layout.Column",
     "androidx.compose.foundation.layout.Row",
     "androidx.compose.foundation.layout.Spacer",
+    "androidx.compose.foundation.layout.aspectRatio",
     "androidx.compose.foundation.layout.fillMaxHeight",
+    "androidx.compose.foundation.layout.fillMaxSize",
     "androidx.compose.foundation.layout.fillMaxWidth",
     "androidx.compose.foundation.layout.height",
     "androidx.compose.foundation.layout.heightIn",
     "androidx.compose.foundation.layout.padding",
+    "androidx.compose.foundation.layout.size",
+    "androidx.compose.foundation.layout.width",
     "androidx.compose.foundation.layout.widthIn",
     "androidx.compose.foundation.layout.wrapContentWidth",
     "androidx.compose.foundation.rememberScrollState",
+    "androidx.compose.foundation.shape.CircleShape",
     "androidx.compose.foundation.shape.RoundedCornerShape",
     "androidx.compose.foundation.verticalScroll",
     "androidx.compose.material3.Text",
@@ -218,7 +223,31 @@ fn prim<M: Debug>(o: &mut Out, l: &Layout<M>, ty: &str, axis: Option<Axis>) {
             }
             o.line(format!("ArkGlyph({})", args.join(", ")));
         }
-        Prim::Image { url, label } => {
+        // Exactly the frame it is given (its box's), the picture covering it
+        // and cut to it.
+        Prim::Image {
+            url,
+            label,
+            fill: true,
+            decode,
+        } => o.line(format!(
+            "ArkPicture({}, label = {}, decode = {}, modifier = {})",
+            value(&lit(url), "null"),
+            value(&lit(label), "null"),
+            decode.map(measure).unwrap_or_else(|| "null".into()),
+            filling(&chain)
+        )),
+        Prim::Swatch { seed } => o.line(format!("Square({}, modifier = {})", value(&lit(seed), "null"), filling(&chain))),
+        Prim::Grid { min, across, down, content } => {
+            let mut args = vec![
+                format!("min = {}", measure(*min)),
+                format!("across = {}", space(*across)),
+                format!("down = {}", space(*down)),
+            ];
+            with(&mut args);
+            o.block(format!("ArkGrid({}) {{", args.join(", ")), "}", |o| node(o, content, ty, None));
+        }
+        Prim::Image { url, label, .. } => {
             let photo = format!(
                 "Photo({}, label = {}, zoom = false)",
                 value(&lit(url), "null"),
@@ -242,6 +271,18 @@ fn lit<T: Debug>(v: &Val<T>) -> String {
 
 fn space(s: Space) -> String {
     format!("Space.{}", s.case())
+}
+
+fn measure(m: Measure) -> String {
+    format!("ArkMeasure.{}", m.case())
+}
+
+/// A leaf that fills its box: its chain, then as large as the box.
+fn filling(chain: &Option<String>) -> String {
+    match chain {
+        Some(c) => format!("{c}.fillMaxSize()"),
+        None => "Modifier.fillMaxSize()".into(),
+    }
 }
 
 fn horizontal(a: Align) -> &'static str {
@@ -306,8 +347,11 @@ fn chain(mods: &[Modifier]) -> Option<String> {
             Modifier::Background(Surface::Raised) => "background(ArkSurface.raised)".into(),
             Modifier::Corner(Corner::Card) => "clip(RoundedCornerShape(ArkCorner.card))".into(),
             Modifier::Corner(Corner::Small) => "clip(RoundedCornerShape(ArkCorner.small))".into(),
+            Modifier::Corner(Corner::Circle) => "clip(CircleShape)".into(),
             Modifier::Combine => "semantics(mergeDescendants = true) {}".into(),
-            Modifier::ArtWidth(a) => format!("artWidth(ArtSize.{})", pascal(a.case())),
+            Modifier::Width(m) => format!("width({})", measure(*m)),
+            Modifier::Side(m) => format!("size({})", measure(*m)),
+            Modifier::Square => "aspectRatio(1f)".into(),
         })
         .collect();
     Some(format!("Modifier.{}", links.join(".")))

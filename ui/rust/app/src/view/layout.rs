@@ -14,7 +14,7 @@
 
 use std::fmt::Debug;
 
-use super::{ArtSize, Part, Val, View};
+use super::{Part, Val, View};
 
 // * The tokens
 
@@ -69,11 +69,45 @@ impl Space {
     }
 }
 
-/// A corner: `card-corner` or `corner`.
+/// A corner: `card-corner` or `corner`, or round (half the side: a circle
+/// of a square, a capsule of anything else).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Corner {
     Card,
     Small,
+    Circle,
+}
+
+/// A fixed measure: one of `ui/theme.toml`'s `[layout]` `art-*` lengths, a
+/// picture's side or a column's least width.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Measure {
+    /// `art-row`: beside a row's words.
+    ArtRow,
+    /// `art-shelf`: a tile on a shelf; a grid's least column.
+    ArtShelf,
+    /// `art-header`: beside a page's title.
+    ArtHeader,
+}
+
+impl Measure {
+    /// As the phones' `ArkMeasure` spells it: `ArkMeasure.artRow`.
+    pub fn case(self) -> &'static str {
+        match self {
+            Measure::ArtRow => "artRow",
+            Measure::ArtShelf => "artShelf",
+            Measure::ArtHeader => "artHeader",
+        }
+    }
+
+    /// As `ui/theme.toml` names it: the browser's `--ark-<name>`.
+    pub fn token(self) -> &'static str {
+        match self {
+            Measure::ArtRow => "art-row",
+            Measure::ArtShelf => "art-shelf",
+            Measure::ArtHeader => "art-header",
+        }
+    }
 }
 
 /// A face words are set in: the system's named styles on the phones (so
@@ -214,9 +248,16 @@ pub enum Modifier {
     Corner(Corner),
     /// One element to a screen reader, its words in order.
     Combine,
-    /// As wide as artwork of this size (`art-*`), what it holds kept to it:
-    /// a tile's words under its cover. [`ArtSize::Fill`] is as wide as given.
-    ArtWidth(ArtSize),
+    /// As wide as the measure, what it holds kept to it: a tile's words
+    /// under its cover.
+    Width(Measure),
+    /// A square the measure a side: what it holds is laid into that frame.
+    Side(Measure),
+    /// As tall as it is wide, of the width it is given: what it holds is
+    /// laid into that square (SwiftUI's `aspectRatio(1, .fit)`, Compose's
+    /// `aspectRatio(1f)`, CSS's `aspect-ratio: 1`; iced, which has no
+    /// aspect-ratio layout, an `art-shelf` square).
+    Square,
 }
 
 // * The primitives
@@ -257,10 +298,35 @@ pub enum Prim<M> {
         style: TextStyle,
         ink: Ink,
     },
-    /// A picture by its URL, fitted to its width (`photo`'s).
+    /// A picture by its URL. Fitted (`photo`'s), it is its own shape at
+    /// the width it is given. Filled ([`Layout::fill`]), it is exactly the
+    /// frame it is given and the picture covers it, cut to it: fetched and
+    /// kept by the toolkit (decoded for `decode`'s side, or the most a
+    /// filling picture is drawn at), nothing drawn until it has come —
+    /// what is under it in a `zstack` shows — and a screenshot waits for
+    /// it to come or fail.
     Image {
         url: Val<String>,
         label: Val<String>,
+        fill: bool,
+        decode: Option<Measure>,
+    },
+    /// The square ArkUI derives from `seed` (the theme's `art` gradients,
+    /// picked by `arkui::art::hash` the same on every toolkit), filling the
+    /// frame it is given: what stands for a picture that has not come.
+    Swatch {
+        seed: Val<String>,
+    },
+    /// Its content in as many columns as fit at least `min` wide, `across`
+    /// apart, its rows `down` apart, lazily where the toolkit has a lazy
+    /// grid: a native container (SwiftUI's `LazyVGrid(.adaptive)`, a
+    /// Compose layout of equal columns, iced's wrapped row, a CSS grid).
+    /// Each cell is a column's width.
+    Grid {
+        min: Measure,
+        across: Space,
+        down: Space,
+        content: Box<View<M>>,
     },
 }
 
@@ -288,6 +354,8 @@ impl<M> Prim<M> {
             Prim::Text(_) => "text",
             Prim::Glyph { .. } => "glyph",
             Prim::Image { .. } => "image",
+            Prim::Swatch { .. } => "swatch",
+            Prim::Grid { .. } => "grid",
         }
     }
 }
@@ -300,7 +368,7 @@ impl<M> Layout<M> {
     /// The views it holds.
     pub fn slots(&self) -> Vec<&View<M>> {
         match &self.prim {
-            Prim::Stack { content, .. } | Prim::Scroll { content, .. } => vec![&**content],
+            Prim::Stack { content, .. } | Prim::Scroll { content, .. } | Prim::Grid { content, .. } => vec![&**content],
             _ => vec![],
         }
     }
@@ -315,13 +383,52 @@ impl<M> Layout<M> {
 
     // A stack's.
 
-    /// Its content `s` apart (a stack's).
+    /// Its content `s` apart (a stack's; a grid's columns).
     pub fn spacing(mut self, s: Space) -> Self {
         match &mut self.prim {
             Prim::Stack { spacing, .. } => *spacing = Some(s),
-            p => panic!("`.spacing` is a stack's, not a {}", p.kind()),
+            Prim::Grid { across, .. } => *across = s,
+            p => panic!("`.spacing` is a stack's or a grid's, not a {}", p.kind()),
         }
         self
+    }
+
+    /// Its rows `s` apart (a grid's).
+    pub fn line_spacing(mut self, s: Space) -> Self {
+        match &mut self.prim {
+            Prim::Grid { down, .. } => *down = s,
+            p => panic!("`.line_spacing` is a grid's, not a {}", p.kind()),
+        }
+        self
+    }
+
+    // A picture's.
+
+    /// Exactly the frame it is given, the picture covering it and cut to
+    /// it (an image's).
+    pub fn fill(mut self) -> Self {
+        *self.image("fill").0 = true;
+        self
+    }
+
+    /// Its own shape at the width it is given (an image's; the default).
+    pub fn fit(mut self) -> Self {
+        *self.image("fit").0 = false;
+        self
+    }
+
+    /// Decoded for a side of `m`, not the most a picture is drawn at (an
+    /// image's): a row's cover is never decoded at a player's size.
+    pub fn decode(mut self, m: Measure) -> Self {
+        *self.image("decode").1 = Some(m);
+        self
+    }
+
+    fn image(&mut self, what: &str) -> (&mut bool, &mut Option<Measure>) {
+        match &mut self.prim {
+            Prim::Image { fill, decode, .. } => (fill, decode),
+            p => panic!("`.{what}` is an image's, not a {}", p.kind()),
+        }
     }
 
     /// Its content at `a` across its axis (a stack's).
@@ -413,9 +520,17 @@ pub trait Modify: Sized {
     fn combine(self) -> Self {
         self.modify(Modifier::Combine)
     }
-    /// As wide as artwork of size `a`.
-    fn art_width(self, a: ArtSize) -> Self {
-        self.modify(Modifier::ArtWidth(a))
+    /// As wide as `m`, what it holds kept to it.
+    fn width(self, m: Measure) -> Self {
+        self.modify(Modifier::Width(m))
+    }
+    /// A square `m` a side, what it holds laid into it.
+    fn side(self, m: Measure) -> Self {
+        self.modify(Modifier::Side(m))
+    }
+    /// As tall as it is wide, what it holds laid into that square.
+    fn square(self) -> Self {
+        self.modify(Modifier::Square)
     }
 }
 
@@ -503,11 +618,30 @@ pub fn glyph<M>(name: impl Into<Val<String>>) -> Layout<M> {
     })
 }
 
-/// A picture by its URL (`file:`, `data:` or `https:`), `label` said for it.
+/// A picture by its URL (`file:`, `data:` or `https:`), `label` said for
+/// it (none when empty: a decoration), fitted until [`Layout::fill`].
 pub fn image<M>(url: impl Into<Val<String>>, label: impl Into<Val<String>>) -> Layout<M> {
     Layout::of(Prim::Image {
         url: url.into(),
         label: label.into(),
+        fill: false,
+        decode: None,
+    })
+}
+
+/// The square derived from `seed`, filling the frame it is given.
+pub fn swatch<M>(seed: impl Into<Val<String>>) -> Layout<M> {
+    Layout::of(Prim::Swatch { seed: seed.into() })
+}
+
+/// Its content in as many columns as fit at least `min` wide, `space-m`
+/// apart and its rows `space-l` apart until told otherwise.
+pub fn grid<M>(min: Measure, content: impl Into<View<M>>) -> Layout<M> {
+    Layout::of(Prim::Grid {
+        min,
+        across: Space::M,
+        down: Space::L,
+        content: Box::new(content.into()),
     })
 }
 
@@ -563,7 +697,14 @@ impl<M: 'static> Layout<M> {
                 Prim::Scroll { axis, content } => Prim::Scroll { axis, content: b(content) },
                 Prim::Text(w) => Prim::Text(w),
                 Prim::Glyph { name, style, ink } => Prim::Glyph { name, style, ink },
-                Prim::Image { url, label } => Prim::Image { url, label },
+                Prim::Image { url, label, fill, decode } => Prim::Image { url, label, fill, decode },
+                Prim::Swatch { seed } => Prim::Swatch { seed },
+                Prim::Grid { min, across, down, content } => Prim::Grid {
+                    min,
+                    across,
+                    down,
+                    content: b(content),
+                },
             },
             mods: self.mods,
         }

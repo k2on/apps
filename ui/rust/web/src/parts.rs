@@ -357,14 +357,6 @@ fn drawn<M: Clone + std::fmt::Debug + 'static>(v: View<M>) -> Option<AnyView> {
             menu,
             content,
         } => pressed(press, label.get(), tap, &menu, *content),
-        Part::Artwork {
-            url,
-            seed,
-            label,
-            size,
-            round,
-        } => artwork(url.get(), &seed.get(), label.get(), size, round),
-        Part::Grid(content) => html::div().class("ark-art-grid").child(nodes(*content)).into_any(),
         Part::Timeline {
             at_ms,
             since_ms,
@@ -1126,36 +1118,3 @@ fn volume<M: Clone + std::fmt::Debug + 'static>(label: String, level: i64, muted
         ))
         .into_any()
 }
-
-/// A cover (`Part::Artwork`): the picture at `url` over the square `seed`
-/// derives (`.ark-square-<n>`, the theme's set for the page's accent and
-/// appearance, picked as every toolkit's `Art.pick` picks), at `size`.
-fn artwork(url: String, seed: &str, label: String, size: ark_app::view::ArtSize, round: bool) -> AnyView {
-    // FNV-1a over UTF-16, as `arkui::art::hash`.
-    let mut h: u32 = 0x811c_9dc5;
-    for unit in seed.encode_utf16() {
-        h ^= u32::from(unit);
-        h = h.wrapping_mul(0x0100_0193);
-    }
-    let class = format!(
-        "ark-art ark-art-{} ark-square-{}{}",
-        size.case(),
-        h % SQUARES,
-        if round { " ark-art-round" } else { "" }
-    );
-    html::div()
-        .class(class)
-        .attr("role", "img")
-        .attr("aria-label", label)
-        .child((!url.is_empty()).then(|| {
-            html::img()
-                .attr("src", url)
-                .attr("alt", "")
-                .attr("loading", "lazy")
-                .attr("onerror", "this.remove()")
-        }))
-        .into_any()
-}
-
-/// How many square classes theme.css writes (ui/theme.py's `SQUARES`).
-const SQUARES: u32 = 12;

@@ -784,7 +784,7 @@ def spring_curve(stiffness, damping, rest):
 
 
 # The browser's derived squares: a seed's FNV-1a modulo this picks one of
-# `.ark-square-0` … (arkui-web's `artwork`), which each accent's set maps to
+# `.ark-square-0` … (arkui-web's `swatch`), which each accent's set maps to
 # its own square, `i` modulo its length; so every set's length divides it.
 SQUARES = 12
 

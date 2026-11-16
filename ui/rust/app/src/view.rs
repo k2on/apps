@@ -46,13 +46,10 @@ mod components;
 pub mod layout;
 pub mod search;
 
-pub use components::{
-    artwork_shelf, artwork_tile, empty_state, figure_label, glyph_button, goal_progress, media_header, media_row, play_shuffle, title_stack,
-    transport, MediaRow, TitleStack, Transport,
-};
+pub use components::{empty_state, goal_progress, title_stack, TitleStack};
 pub use layout::{
-    glyph, hstack, image, meter, scroll, scroll_across, spacer, spacer_min, status_badge, text, tile, vstack, zstack, Align, Axis, Corner, Edges,
-    Ink, Layout, Modifier, Modify, Prim, Space, Surface, TextStyle, Words,
+    glyph, grid, hstack, image, meter, scroll, scroll_across, spacer, spacer_min, status_badge, swatch, text, tile, vstack, zstack, Align, Axis,
+    Corner, Edges, Ink, Layout, Measure, Modifier, Modify, Prim, Space, Surface, TextStyle, Words,
 };
 
 /// A value a view reads: plain data.
@@ -574,22 +571,6 @@ pub enum Part<M> {
         menu: Vec<MenuItem<M>>,
         content: Box<View<M>>,
     },
-    /// A cover by its URL over the square derived from `seed` (ArkUI's
-    /// `Square`, shown while the picture comes or when there is none), at
-    /// `size`, its corner the theme's `corner` or round (a person), `label`
-    /// said for it. A screenshot waits for it to come or fail (`Ready`).
-    Artwork {
-        url: Val<String>,
-        seed: Val<String>,
-        label: Val<String>,
-        size: ArtSize,
-        round: bool,
-    },
-    /// Its content (artwork tiles) in as many columns as fit at least
-    /// `art-shelf` wide, lazily (SwiftUI's `LazyVGrid(.adaptive)`,
-    /// Compose's `LazyVerticalGrid(GridCells.Adaptive)`, iced's wrapped
-    /// rows, the browser's `grid-template-columns: repeat(auto-fill, …)`).
-    Grid(Box<View<M>>),
     /// Where a sound is along its length, counted from a clock as it is
     /// drawn (`at_ms` when the clock was read at `since_ms`, the device's
     /// epoch milliseconds, running while `playing`), so it moves with no
@@ -794,33 +775,6 @@ impl Press {
         match self {
             Press::Give => "give",
             Press::Highlight => "highlight",
-        }
-    }
-}
-
-/// How large a piece of artwork is drawn: one of `ui/theme.toml`'s
-/// `[layout]` `art-*` measures (each toolkit's `LayoutTokens`), or as wide
-/// as it is given.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ArtSize {
-    /// `art-row`: beside a row's words.
-    Row,
-    /// `art-shelf`: a tile on a shelf.
-    Shelf,
-    /// `art-header`: beside a page's title.
-    Header,
-    /// As wide as it is given, square: a grid's tile, the player's cover.
-    Fill,
-}
-
-impl ArtSize {
-    /// As the phones' `ArtSize` spells it.
-    pub fn case(self) -> &'static str {
-        match self {
-            ArtSize::Row => "row",
-            ArtSize::Shelf => "shelf",
-            ArtSize::Header => "header",
-            ArtSize::Fill => "fill",
         }
     }
 }
@@ -2421,58 +2375,6 @@ impl<M> From<Pressed<M>> for View<M> {
     }
 }
 
-/// A cover ([`Part::Artwork`]): the picture at `url` over the square of
-/// `seed`, at [`ArtSize::Row`] until [`Artwork::size`] says otherwise.
-pub fn artwork(url: impl Into<Val<String>>, seed: impl Into<Val<String>>, label: impl Into<Val<String>>) -> Artwork {
-    Artwork {
-        url: url.into(),
-        seed: seed.into(),
-        label: label.into(),
-        size: ArtSize::Row,
-        round: false,
-    }
-}
-
-/// A cover being built ([`artwork`]).
-#[derive(Clone, Debug)]
-pub struct Artwork {
-    pub url: Val<String>,
-    pub seed: Val<String>,
-    pub label: Val<String>,
-    pub size: ArtSize,
-    pub round: bool,
-}
-
-impl Artwork {
-    pub fn size(mut self, s: ArtSize) -> Self {
-        self.size = s;
-        self
-    }
-    /// Round: a person.
-    pub fn round(mut self) -> Self {
-        self.round = true;
-        self
-    }
-}
-
-impl<M> From<Artwork> for View<M> {
-    fn from(a: Artwork) -> View<M> {
-        Part::Artwork {
-            url: a.url,
-            seed: a.seed,
-            label: a.label,
-            size: a.size,
-            round: a.round,
-        }
-        .into()
-    }
-}
-
-/// Artwork tiles in as many columns as fit ([`Part::Grid`]).
-pub fn artwork_grid<M>(tiles: impl Into<View<M>>) -> View<M> {
-    Part::Grid(Box::new(tiles.into())).into()
-}
-
 /// Where a sound is, dragged to seek ([`Part::Timeline`]): `at_ms` read at
 /// `since_ms` (the device's clock), counting on while `playing`.
 pub fn scrubber<M: 'static>(
@@ -3029,30 +2931,6 @@ impl<M> Part<M> {
                 args.push(("onTap", G::Act(tap)));
                 c("Pressable", Some(G::Val(lit(label))), args, vec![("", &**content)])
             }
-            Part::Artwork {
-                url,
-                seed,
-                label,
-                size,
-                round,
-            } => c(
-                "Artwork",
-                Some(G::Val(lit(url))),
-                vec![
-                    ("seed", G::Val(lit(seed))),
-                    ("label", G::Val(lit(label))),
-                    (
-                        "size",
-                        G::Case {
-                            of: "ArtSize",
-                            case: size.case(),
-                        },
-                    ),
-                    ("round", G::Val(round.to_string())),
-                ],
-                vec![],
-            ),
-            Part::Grid(content) => c("ArtworkGrid", None, vec![], vec![("", &**content)]),
             Part::Timeline {
                 at_ms,
                 since_ms,
@@ -3701,20 +3579,6 @@ impl<M: 'static> Part<M> {
                 menu: map_menu(menu, f),
                 content: b(content),
             },
-            Part::Artwork {
-                url,
-                seed,
-                label,
-                size,
-                round,
-            } => Part::Artwork {
-                url,
-                seed,
-                label,
-                size,
-                round,
-            },
-            Part::Grid(content) => Part::Grid(b(content)),
             Part::Timeline {
                 at_ms,
                 since_ms,

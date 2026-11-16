@@ -9,14 +9,19 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
@@ -36,25 +41,18 @@ import uniffi.things_app.ListMsg
 fun MediaScreen(screen: MediaHolder) {
     val p by screen.page.collectAsStateWithLifecycle()
     DetailPage {
-        Column(modifier = Modifier.fillMaxWidth().wrapContentWidth(Alignment.Start).padding(vertical = Space.m).padding(horizontal = Space.page), verticalArrangement = Arrangement.spacedBy(Space.l), horizontalAlignment = Alignment.Start) {
-            Row(horizontalArrangement = Arrangement.spacedBy(Space.l), verticalAlignment = Alignment.CenterVertically) {
-                Artwork(p.art, seed = p.title, label = p.title, size = ArtSize.Header, round = false)
-                Column(verticalArrangement = Arrangement.spacedBy(Space.xs), horizontalAlignment = Alignment.Start) {
-                    Text("Album", style = ArkType.Caption.style, color = ArkInk.quiet)
-                    if (p.title.isNotEmpty()) {
-                        Text(p.title, style = ArkType.Headline.style, color = ArkInk.ink)
-                    }
-                    if (p.by.isNotEmpty()) {
-                        Text(p.by, style = ArkType.Subheadline.style, color = ArkInk.accent)
-                    }
-                }
+        Row(modifier = Modifier.padding(horizontal = Space.page), horizontalArrangement = Arrangement.spacedBy(Space.l), verticalAlignment = Alignment.CenterVertically) {
+            Box(modifier = Modifier.clip(RoundedCornerShape(ArkCorner.small)).size(ArkMeasure.artHeader), contentAlignment = Alignment.Center) {
+                Square(p.title, modifier = Modifier.fillMaxSize())
+                ArkPicture(p.art, label = p.title, decode = ArkMeasure.artHeader, modifier = Modifier.fillMaxSize())
             }
-            Row(horizontalArrangement = Arrangement.spacedBy(Space.m), verticalAlignment = Alignment.CenterVertically) {
-                ArkId("list.play") {
-                    WideButton("Play", prominent = true, enabled = true, busy = false, onTap = { screen.send(ListMsg.Play) })
+            Column(verticalArrangement = Arrangement.spacedBy(Space.xs), horizontalAlignment = Alignment.Start) {
+                Text("Album", style = ArkType.Caption.style, color = ArkInk.quiet)
+                if (p.title.isNotEmpty()) {
+                    Text(p.title, style = ArkType.Headline.style, color = ArkInk.ink)
                 }
-                ArkId("list.shuffle") {
-                    WideButton("Shuffle", prominent = false, enabled = true, busy = false, onTap = { screen.send(ListMsg.Shuffle) })
+                if (p.by.isNotEmpty()) {
+                    Text(p.by, style = ArkType.Subheadline.style, color = ArkInk.accent)
                 }
             }
         }
@@ -62,8 +60,11 @@ fun MediaScreen(screen: MediaHolder) {
             for (t in p.tracks) {
                 ArkId("list.row:" + arkSlug(t.title)) {
                     Pressable(t.title, press = PressKind.Highlight, menu = listOf(MenuAction("Play Next", glyph = "list-start", destructive = false, onTap = { screen.send(ListMsg.Open(id = t.id)) })), onTap = { screen.send(ListMsg.Open(id = t.id)) }) {
-                        Row(modifier = Modifier.fillMaxWidth().wrapContentWidth(Alignment.Start).padding(vertical = Space.s).padding(horizontal = Space.l), horizontalArrangement = Arrangement.spacedBy(Space.m), verticalAlignment = Alignment.CenterVertically) {
-                            Artwork(t.art, seed = t.title, label = t.title, size = ArtSize.Row, round = false)
+                        Row(modifier = Modifier.fillMaxWidth().wrapContentWidth(Alignment.Start).padding(horizontal = Space.l), horizontalArrangement = Arrangement.spacedBy(Space.m), verticalAlignment = Alignment.CenterVertically) {
+                            Box(modifier = Modifier.clip(RoundedCornerShape(ArkCorner.small)).size(ArkMeasure.artRow), contentAlignment = Alignment.Center) {
+                                Square(t.title, modifier = Modifier.fillMaxSize())
+                                ArkPicture(t.art, label = t.title, decode = ArkMeasure.artRow, modifier = Modifier.fillMaxSize())
+                            }
                             Column(horizontalAlignment = Alignment.Start) {
                                 if (t.title.isNotEmpty()) {
                                     Text(t.title, style = ArkType.Body.style, color = ArkInk.ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -79,60 +80,41 @@ fun MediaScreen(screen: MediaHolder) {
                 }
             }
         }
-        Row(Modifier.horizontalScroll(rememberScrollState())) {
-            Row(modifier = Modifier.padding(horizontal = Space.page), horizontalArrangement = Arrangement.spacedBy(Space.m), verticalAlignment = Alignment.Top) {
-                for (t in p.tracks) {
-                    ArkId("list.open:" + arkSlug(t.title)) {
-                        Pressable(t.title, press = PressKind.Give, onTap = { screen.send(ListMsg.Open(id = t.id)) }) {
-                            Column(modifier = Modifier.artWidth(ArtSize.Shelf), verticalArrangement = Arrangement.spacedBy(Space.xs), horizontalAlignment = Alignment.Start) {
-                                Artwork(t.art, seed = t.title, label = t.title, size = ArtSize.Shelf, round = false)
-                                Text(t.title, style = ArkType.Subheadline.style, color = ArkInk.ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                if (t.by.isNotEmpty()) {
-                                    Text(t.by, style = ArkType.Caption.style, color = ArkInk.quiet, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        ArtworkGrid {
+        ArkGrid(modifier = Modifier.padding(horizontal = Space.page), min = ArkMeasure.artShelf, across = Space.m, down = Space.l) {
             for (t in p.tracks) {
                 ArkId("list.open:" + arkSlug(t.by)) {
                     Pressable(t.by, press = PressKind.Give, onTap = { screen.send(ListMsg.Open(id = t.id)) }) {
-                        Column(modifier = Modifier.artWidth(ArtSize.Fill), verticalArrangement = Arrangement.spacedBy(Space.xs), horizontalAlignment = Alignment.Start) {
-                            Artwork(t.art, seed = t.by, label = t.by, size = ArtSize.Fill, round = true)
+                        Column(modifier = Modifier.fillMaxWidth().wrapContentWidth(Alignment.Start), verticalArrangement = Arrangement.spacedBy(Space.xs), horizontalAlignment = Alignment.Start) {
+                            Box(modifier = Modifier.clip(CircleShape).aspectRatio(1f), contentAlignment = Alignment.Center) {
+                                Square(t.by, modifier = Modifier.fillMaxSize())
+                                ArkPicture(t.art, label = t.by, decode = null, modifier = Modifier.fillMaxSize())
+                            }
                             Text(t.by, style = ArkType.Subheadline.style, color = ArkInk.ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
                     }
                 }
             }
         }
-        ClockScrubber(p.atMs, since = p.sinceMs, playing = p.playing, length = p.lengthMs, onSeek = { screen.send(ListMsg.Seek(atMs = it)) })
-        Row(modifier = Modifier.fillMaxWidth().wrapContentWidth(Alignment.CenterHorizontally).padding(horizontal = Space.l), verticalAlignment = Alignment.CenterVertically) {
-            ArkId("list.back") {
-                Pressable("Previous", press = PressKind.Give, onTap = { screen.send(ListMsg.Back) }) {
-                    ArkGlyph("skip-back", ArkType.Title, color = ArkInk.ink, modifier = Modifier.padding(Space.s))
-                }
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            for (t in p.tracks) {
+                Text(t.title, style = ArkType.Body.style, color = ArkInk.ink, modifier = Modifier.width(ArkMeasure.artShelf))
             }
-            Spacer(Modifier.weight(1f))
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(Space.m), verticalAlignment = Alignment.CenterVertically) {
+            ArkId("list.play") {
+                WideButton("Play", prominent = true, enabled = true, busy = false, onTap = { screen.send(ListMsg.Play) })
+            }
+            ArkId("list.shuffle") {
+                WideButton("Shuffle", prominent = false, enabled = true, busy = false, onTap = { screen.send(ListMsg.Shuffle) })
+            }
             ArkId("list.toggle") {
                 Pressable(p.playLabel, press = PressKind.Give, onTap = { screen.send(ListMsg.Toggle) }) {
-                    ArkGlyph(p.playGlyph, ArkType.LargeTitle, color = ArkInk.ink, modifier = Modifier.padding(Space.s))
-                }
-            }
-            Spacer(Modifier.weight(1f))
-            ArkId("list.forward") {
-                Pressable("Next", press = PressKind.Give, onTap = { screen.send(ListMsg.Forward) }) {
-                    ArkGlyph("skip-forward", ArkType.Title, color = ArkInk.ink, modifier = Modifier.padding(Space.s))
+                    ArkGlyph(p.playGlyph, ArkType.LargeTitle, color = ArkInk.ink)
                 }
             }
         }
+        ClockScrubber(p.atMs, since = p.sinceMs, playing = p.playing, length = p.lengthMs, onSeek = { screen.send(ListMsg.Seek(atMs = it)) })
         ClockHairline(p.atMs, since = p.sinceMs, playing = p.playing, length = p.lengthMs)
-        Column(modifier = Modifier.semantics(mergeDescendants = true) {}, verticalArrangement = Arrangement.spacedBy(Space.xs), horizontalAlignment = Alignment.Start) {
-            Text("Tracks", style = ArkType.Caption.style, color = ArkInk.quiet)
-            Text(p.by, style = ArkType.Headline.style, color = ArkInk.ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        }
         VolumePart(p.level, muted = p.muted, about = "Volume", onChange = { screen.send(ListMsg.Volume(level = it)) }, onMute = { screen.send(ListMsg.Mute) })
     }
 }

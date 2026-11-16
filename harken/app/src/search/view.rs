@@ -4,6 +4,8 @@ use ark_app::shell::*;
 use ark_app::view;
 use ark_app::view::*;
 
+use crate::parts::*;
+
 use super::{SearchMsg, SearchPage};
 
 /// The search field over what holds what is typed: albums and people as

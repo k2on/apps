@@ -659,24 +659,40 @@ button.ark-sidebar-heading:hover, button.ark-sidebar-heading.ark-on { color: var
 .ark-press-row.ark-cursor { background: var(--ark-container-high); }
 .ark-press:focus-visible { outline: 2px solid var(--ark-accent); outline-offset: 2px; }
 
-/* A cover (`Part::Artwork`): the derived square under the picture. */
-.ark-art { position: relative; flex: none; overflow: hidden; border-radius: var(--ark-corner); background: linear-gradient(135deg, var(--ark-square-a, var(--ark-container-high)), var(--ark-square-b, var(--ark-container))); box-shadow: inset 0 0 0 0.5px var(--ark-hairline); }
-.ark-art img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
-.ark-art-round { border-radius: 50%; }
-.ark-art-row { width: var(--ark-art-row); height: var(--ark-art-row); }
-.ark-art-shelf { width: var(--ark-art-shelf); height: var(--ark-art-shelf); }
-.ark-art-header { width: var(--ark-art-header); height: var(--ark-art-header); }
-.ark-art-fill { width: 100%; aspect-ratio: 1; }
-.ark-art-w-row { width: var(--ark-art-row); }
-.ark-art-w-shelf { width: var(--ark-art-shelf); }
-.ark-art-w-header { width: var(--ark-art-header); }
-.ark-art-w-fill { width: 100%; }
-.ark-art-w-row, .ark-art-w-shelf, .ark-art-w-header { min-width: 0; }
-.ark-art-w-row > *, .ark-art-w-shelf > *, .ark-art-w-header > * { max-width: 100%; }
+/* A frame a primitive is laid into (`Measure`, `.width`, `.side`, `.square`):
+   the frame first, what it holds inside it. */
+.ark-w-art-row { width: var(--ark-art-row); }
+.ark-w-art-shelf { width: var(--ark-art-shelf); }
+.ark-w-art-header { width: var(--ark-art-header); }
+.ark-w-art-row, .ark-w-art-shelf, .ark-w-art-header { min-width: 0; flex: none; }
+.ark-w-art-row > *, .ark-w-art-shelf > *, .ark-w-art-header > * { max-width: 100%; }
+.ark-side-art-row { width: var(--ark-art-row); height: var(--ark-art-row); }
+.ark-side-art-shelf { width: var(--ark-art-shelf); height: var(--ark-art-shelf); }
+.ark-side-art-header { width: var(--ark-art-header); height: var(--ark-art-header); }
+.ark-side-art-row, .ark-side-art-shelf, .ark-side-art-header { flex: none; overflow: hidden; }
+.ark-square { width: 100%; aspect-ratio: 1; min-height: 0; overflow: hidden; }
+.ark-corner-circle { border-radius: 50%; overflow: hidden; }
 
-/* Tiles in as many columns as fit (`Part::Grid`). */
-.ark-art-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(var(--ark-art-shelf), 1fr)); gap: var(--ark-space-l) var(--ark-space-m); padding: 0 var(--ark-page-margin); }
-.ark-art-grid > .ark-press { min-width: 0; }
+/* A filled picture (`image(..).fill()`): exactly its box, covering it and cut
+   to it, never sizing anything by its own aspect; the derived square
+   (`swatch`) under it until it comes. */
+.ark-picture { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block; }
+.ark-swatch { align-self: stretch; justify-self: stretch; min-width: 0; min-height: 0; background: linear-gradient(135deg, var(--ark-square-a, var(--ark-container-high)), var(--ark-square-b, var(--ark-container))); }
+
+/* As many columns as fit at least a measure (`grid`). */
+.ark-grid { display: grid; }
+.ark-grid > * { min-width: 0; }
+.ark-grid-art-row { grid-template-columns: repeat(auto-fill, minmax(var(--ark-art-row), 1fr)); }
+.ark-grid-art-shelf { grid-template-columns: repeat(auto-fill, minmax(var(--ark-art-shelf), 1fr)); }
+.ark-grid-art-header { grid-template-columns: repeat(auto-fill, minmax(var(--ark-art-header), 1fr)); }
+.ark-line-gap-xs { row-gap: var(--ark-space-xs); }
+.ark-line-gap-s { row-gap: var(--ark-space-s); }
+.ark-line-gap-m { row-gap: var(--ark-space-m); }
+.ark-line-gap-l { row-gap: var(--ark-space-l); }
+.ark-line-gap-xl { row-gap: var(--ark-space-xl); }
+.ark-line-gap-xxl { row-gap: var(--ark-space-xxl); }
+.ark-line-gap-page { row-gap: var(--ark-page-margin); }
+.ark-line-gap-section { row-gap: var(--ark-section-gap); }
 
 /* Where a sound is (`Part::Timeline`). */
 .ark-timeline { width: 100%; }

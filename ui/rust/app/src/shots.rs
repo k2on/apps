@@ -187,9 +187,9 @@ impl<M: Clone + Debug + 'static> Walk<M> {
 
     fn layout(&mut self, l: &Layout<M>, shown: bool, modal: u32) {
         match &l.prim {
-            Prim::Stack { content, .. } | Prim::Scroll { content, .. } => self.view(content, shown, modal),
+            Prim::Stack { content, .. } | Prim::Scroll { content, .. } | Prim::Grid { content, .. } => self.view(content, shown, modal),
             Prim::Text(w) => self.text(shown, modal, w.text.get()),
-            Prim::Spacer { .. } | Prim::Glyph { .. } | Prim::Image { .. } => {}
+            Prim::Spacer { .. } | Prim::Glyph { .. } | Prim::Image { .. } | Prim::Swatch { .. } => {}
         }
     }
 
@@ -201,7 +201,7 @@ impl<M: Clone + Debug + 'static> Walk<M> {
                 self.view(top, shown, modal);
                 self.view(content, shown, modal);
             }
-            P::Detail { content } | P::Chips(content) | P::Grid(content) => self.view(content, shown, modal),
+            P::Detail { content } | P::Chips(content) => self.view(content, shown, modal),
             // Pressed as one: a row by its label, else a button by what it sends.
             P::Press {
                 press,
@@ -460,7 +460,6 @@ impl<M: Clone + Debug + 'static> Walk<M> {
             P::SettingsPane { content, .. } => self.view(content, shown, modal),
             P::Hero { label, .. } | P::Summary { label, .. } => self.text(shown, modal, label.to_string()),
             P::Tile { .. }
-            | P::Artwork { .. }
             | P::Timeline { .. }
             | P::Volume { .. }
             | P::StatusBadge { .. }

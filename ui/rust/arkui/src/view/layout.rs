@@ -2,10 +2,14 @@
 //! as iced's own: a stack a `column`, `row` or `stack`, a spacer a `Space`
 //! filling its stack's axis, a scroll a `scrollable`, words `text` at the
 //! desktop's size for their style (`[layout]`'s `type-*`), a glyph the
-//! Lucide shape, and each modifier a `container` around it. Every gap is a
-//! `[layout]` step, as on the phones; a card's corner is the desktop's.
+//! Lucide shape, a filled picture and the derived square drawn to the
+//! square they are laid into (iced has no aspect-ratio layout: a square of
+//! what it is given is `art-shelf` across, a grid's columns that wide), a
+//! grid a wrapped row of cells, and each modifier a `container` around it.
+//! Every gap is a `[layout]` step, as on the phones; a card's corner is the
+//! desktop's.
 
-use ark_app::view::{Align, Axis, Corner, Edges, Ink, Layout, Modifier, Part, Prim, Space as Step, Surface, TextStyle, Val, View};
+use ark_app::view::{Align, Axis, Corner, Edges, Ink, Layout, Measure, Modifier, Part, Prim, Space as Step, Surface, TextStyle, Val, View};
 use iced::widget::{column, container, row, scrollable, svg, Space};
 use iced::{Alignment, Background, Border, Color, Element, Length, Padding, Theme};
 
@@ -27,12 +31,31 @@ pub(super) fn layout<M: Clone + 'static>(l: Layout<M>, axis: Option<Axis>) -> Op
             spacing,
             content,
         } => {
-            let children = held(*content, along);
             let gap = spacing.map(step).unwrap_or(0.0);
             match along {
-                Axis::Vertical => column(children).spacing(gap).align_x(alignment(align)).into(),
-                Axis::Horizontal => row(children).spacing(gap).align_y(alignment(align)).into(),
-                Axis::Depth => iced::widget::Stack::with_children(children).into(),
+                Axis::Vertical => column(held(*content, along)).spacing(gap).align_x(alignment(align)).into(),
+                Axis::Horizontal => row(held(*content, along)).spacing(gap).align_y(alignment(align)).into(),
+                // A square's leaves are drawn to it, round as it is, a
+                // hairline over its edge (`style::outline`).
+                Axis::Depth => match framed(&l.mods) {
+                    Some(f) => {
+                        let mut children = FRAME.with(|c| {
+                            let was = c.replace(Some(f));
+                            let children = held(*content, along);
+                            c.set(was);
+                            children
+                        });
+                        children.push(
+                            container(Space::new())
+                                .width(Length::Fixed(f.side))
+                                .height(Length::Fixed(f.side))
+                                .style(crate::style::outline(f.radius))
+                                .into(),
+                        );
+                        iced::widget::Stack::with_children(children).into()
+                    }
+                    None => iced::widget::Stack::with_children(held(*content, along)).into(),
+                },
             }
         }
         Prim::Spacer { min } => {
@@ -84,7 +107,47 @@ pub(super) fn layout<M: Clone + 'static>(l: Layout<M>, axis: Option<Axis>) -> Op
                 .style(move |th, _| svg::Style { color: Some(ink(th)) })
                 .into()
         }
-        Prim::Image { url, label } => part(View::Part(Part::Photo { url, label, zoom: false }))?,
+        Prim::Image { url, label, fill: false, .. } => part(View::Part(Part::Photo { url, label, zoom: false }))?,
+        // What has come of it, covering its square and cut to it; nothing
+        // until then (what is under it shows).
+        Prim::Image { url, fill: true, .. } => {
+            let f = FRAME.with(|c| c.get());
+            let (side, radius) = f.map(|f| (Length::Fixed(f.side), f.radius)).unwrap_or((Length::Fill, 0.0));
+            match crate::images::remote(&url.get(), "arkui/picture") {
+                Some(h) => {
+                    // A person — half the side a corner — is made round in
+                    // the picture's pixels, so it is a circle on every renderer.
+                    let h = match f {
+                        Some(f) if f.radius * 2.0 >= f.side - 0.5 => crate::images::round(&h, f.side),
+                        _ => h,
+                    };
+                    iced::widget::image(h)
+                        .width(side)
+                        .height(side)
+                        .content_fit(iced::ContentFit::Cover)
+                        .border_radius(radius)
+                        .into()
+                }
+                None => Space::new().width(side).height(side).into(),
+            }
+        }
+        Prim::Swatch { seed } => {
+            let f = FRAME.with(|c| c.get()).unwrap_or(Frame {
+                side: tokens::ART_SHELF,
+                radius: 0.0,
+            });
+            crate::art::square(&seed.get(), f.side, f.radius)
+        }
+        // Cells a column's least width each, wrapped: iced lays out no
+        // equal columns of what is left.
+        Prim::Grid { min, across, down, content } => {
+            let w = measure(min);
+            let cells: Vec<Element<'static, M>> = held(*content, Axis::Vertical)
+                .into_iter()
+                .map(|c| container(c).width(Length::Fixed(w)).into())
+                .collect();
+            row(cells).spacing(step(across)).wrap().vertical_spacing(step(down)).into()
+        }
     };
     Some(modified(el, &l.mods))
 }
@@ -129,15 +192,16 @@ fn modified<M: 'static>(mut el: Element<'static, M>, mods: &[Modifier]) -> Eleme
                     })
                     .into()
             }
-            // A corner on nothing filled rounds nothing iced draws.
+            // A corner on nothing filled rounds nothing iced draws; a
+            // square's is its leaves' (above).
             Modifier::Corner(_) => el,
             // iced has no screen reader yet.
             Modifier::Combine => el,
-            // The desktop's filling cover is a shelf's (a grid's tiles wrap at it).
-            Modifier::ArtWidth(a) => container(el)
-                .width(art_side(*a).unwrap_or(crate::layout_tokens::ART_SHELF))
-                .clip(true)
-                .into(),
+            Modifier::Width(m) => container(el).width(measure(*m)).clip(true).into(),
+            Modifier::Side(m) => container(el).width(measure(*m)).height(measure(*m)).clip(true).into(),
+            // iced has no aspect-ratio layout: a square of what it is given
+            // is a shelf's (a grid's columns are that wide).
+            Modifier::Square => container(el).width(tokens::ART_SHELF).height(tokens::ART_SHELF).clip(true).into(),
         };
         i += 1;
     }
@@ -177,6 +241,8 @@ fn size(s: TextStyle) -> f32 {
 fn corner(c: Corner) -> f32 {
     match c {
         Corner::Card | Corner::Small => tokens::CORNER,
+        // Round: as round as anything iced rounds gets.
+        Corner::Circle => 1.0e4,
     }
 }
 
@@ -231,14 +297,44 @@ fn colour(i: Ink) -> impl Fn(&Theme) -> Color + Copy + 'static {
     }
 }
 
-/// Artwork's side at `a` (`[layout]`'s `art-*`); none when it fills.
-pub(crate) fn art_side(a: ark_app::view::ArtSize) -> Option<f32> {
-    use crate::layout_tokens::{ART_HEADER, ART_ROW, ART_SHELF};
-    use ark_app::view::ArtSize;
-    match a {
-        ArtSize::Row => Some(ART_ROW),
-        ArtSize::Shelf => Some(ART_SHELF),
-        ArtSize::Header => Some(ART_HEADER),
-        ArtSize::Fill => None,
+/// A `[layout]` measure (`art-*`).
+fn measure(m: Measure) -> f32 {
+    match m {
+        Measure::ArtRow => tokens::ART_ROW,
+        Measure::ArtShelf => tokens::ART_SHELF,
+        Measure::ArtHeader => tokens::ART_HEADER,
     }
+}
+
+/// The square a `zstack` is laid into and its corner, which its leaves (a
+/// filled picture, the derived square) are drawn to.
+#[derive(Clone, Copy)]
+struct Frame {
+    side: f32,
+    radius: f32,
+}
+
+thread_local! {
+    /// The square the leaves being drawn are in, while a framed stack's
+    /// content is drawn.
+    static FRAME: std::cell::Cell<Option<Frame>> = const { std::cell::Cell::new(None) };
+}
+
+/// The square `mods` lay a stack into, if they do: a side, or a square of
+/// what it is given (a shelf's here), and its corner.
+fn framed(mods: &[Modifier]) -> Option<Frame> {
+    let side = mods.iter().find_map(|m| match m {
+        Modifier::Side(m) => Some(measure(*m)),
+        Modifier::Square => Some(tokens::ART_SHELF),
+        _ => None,
+    })?;
+    let radius = mods
+        .iter()
+        .find_map(|m| match m {
+            Modifier::Corner(Corner::Circle) => Some(side / 2.0),
+            Modifier::Corner(c) => Some(corner(*c)),
+            _ => None,
+        })
+        .unwrap_or(0.0);
+    Some(Frame { side, radius })
 }

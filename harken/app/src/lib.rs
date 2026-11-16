@@ -15,6 +15,7 @@ pub mod home;
 pub mod host;
 pub mod library;
 pub mod page;
+pub mod parts;
 pub mod player;
 pub mod routes;
 pub mod search;

@@ -3,6 +3,8 @@
 use ark_app::view;
 use ark_app::view::*;
 
+use crate::parts::*;
+
 use super::{HomeMsg, HomePage};
 
 /// What was played last on a card, with its way back; then the newest

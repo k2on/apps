@@ -4,6 +4,8 @@
 use ark_app::view;
 use ark_app::view::*;
 
+use crate::parts::*;
+
 use super::{PlayerMsg, PlayerPage};
 
 /// What plays, on the bar over the sections: its cover, its title over

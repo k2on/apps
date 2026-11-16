@@ -1050,14 +1050,23 @@ before harken uses it (ui/docs/primitives.md lists the components).
   `subscribe`, as now.
 - *Recent searches*, kept on the device only: a durable local row of the
   domain (ark's local instance, as the plays the reconciler counts are).
-- *Covers*: `/media/<key>/cover?size=` as today; ArkUI's cover loaders
-  (`CoverLoader`, `Covers`) behind the **artwork** part, the derived
-  square of its seed while none has come, a screenshot waiting on it
-  (`Ready`).
+- *Covers*: `/media/<key>/cover?size=` as today; harken's `artwork`
+  (harken-app's `parts`) a filled `image` primitive — fetched, decoded
+  for its size and kept by each toolkit (`ArkPicture`, `UrlCovers`,
+  `images::remote`, the browser's `<img>`), a screenshot waiting on it
+  (`Ready`) — over the `swatch` of its seed, laid into its square.
 - *Diagnostics*: the shell's (`Session`'s facts: version, pending, the
   peer's numbers through the place).
 
 ### Shared Parts to Add (ArkUI, every toolkit)
+
+(The plan as it was. Since then the covers, tiles, shelf, grid, media row
+and header, play/shuffle, transport and figure with label are
+`harken-app`'s `parts`, Rust compositions of ArkUI's primitives — a
+filled `image` over a `swatch` laid into a `side`/`square` frame and
+clipped, a `grid` — since only harken uses them; ArkUI keeps the press,
+the scrubber, the hairline, the volume and the accessory, which are
+native: ui/docs/primitives.md.)
 
 Laid out once, in `ark_app::view`, of the primitives where nothing native
 is needed, and as native parts where a gesture, a decoder or a timeline
@@ -1385,10 +1394,18 @@ is gone: the phones' generator's main is written from app.toml's
 If you are an agent, or anyone, about to add to one of these:
 
 - **A screen, or what a screen shows:** write it in `app/` (state,
-  message, `update`, a `#[view]` from ArkUI's parts), never as SwiftUI or
-  Compose of the app's, and not as an export of the phones' library for
-  a native screen to read. A part another app could use goes in ArkUI, in
-  every toolkit.
+  message, `update`, a `#[view]` from ArkUI's primitives, native
+  containers and controls), never as SwiftUI or Compose of the app's, and
+  not as an export of the phones' library for a native screen to read.
+- **A component** (a card, a row, a header, a tile — anything drawn of
+  primitives): a Rust composition, never hand-written per toolkit. One
+  app's own lives in that app's `app/` crate (harken's covers, rows,
+  headers and controls are `harken-app`'s `parts`); one several apps
+  really share is a composition in ark-app (`ark_app::view`'s
+  components: `title_stack`, `empty_state`). ArkUI itself holds only
+  primitives, native containers and native controls
+  (ui/docs/primitives.md, "Inventory"); what a composition needs that
+  they cannot do is added there as a primitive, on every toolkit.
 - **Something of the shell** (a section, a tab's glyph, a toolbar, an
   inspector, what is hosted where, Settings): the shell's `#[view]` in
   `app/` and app.toml's `[shell]`; what every app's shell does goes in
@@ -1555,9 +1572,10 @@ resources in `revelation/native/android`.
 
 ## Rules
 
-- The source of a layout is the Rust view; the source of a part is its
-  hand-written file per toolkit; generated files are composition and
-  never edited.
+- The source of a layout is the Rust view, and of a component its Rust
+  composition (the app's, or ark-app's when apps share it); only a
+  primitive, a native container or a native control has a hand-written
+  file per toolkit; generated files are composition and never edited.
 - Every colour, measure and spring a part uses is the theme's
   (`ui/theme.toml`, `ui/docs/motion.md`); a generated view has no
   literals but words.
