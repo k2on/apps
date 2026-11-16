@@ -478,8 +478,26 @@ public enum ShotsWindow {
         let alone = drawn.count <= 1
         var found: [UIView] = []
         for w in ws { bars(w, &found) }
+        // A bar under what is presented over it (harken's full player over
+        // the iPad's album page) is not what the picture shows there: its
+        // band is the cover's (the album's art, light in the dark,
+        // 43957415743). Only a bar in front at its middle is judged by.
+        func inFront(_ v: UIView) -> Bool {
+            guard let w = v.window else { return false }
+            var top = w.rootViewController
+            while let p = top?.presentedViewController, !p.isBeingDismissed { top = p }
+            // Nothing presented, or the bar is the presented one's.
+            guard let over = top?.view, top !== w.rootViewController, over.window === w else { return true }
+            if v.isDescendant(of: over) { return true }
+            let mid = v.convert(CGPoint(x: v.bounds.midX, y: v.bounds.midY), to: over)
+            return !over.bounds.contains(mid)
+        }
         let sized = found.filter { $0.bounds.width > 40 && $0.bounds.height > 20 && $0.window != nil }
-        let bar = sized.first(where: { $0 is UITabBar }) ?? sized.first
+        let front = sized.filter(inFront)
+        // Bars there, none in front: what covers them is not a bar, and
+        // its colours are its own; nothing to judge the theme by.
+        if !sized.isEmpty && front.isEmpty { return nil }
+        let bar = front.first(where: { $0 is UITabBar }) ?? front.first
         guard let w = bar?.window ?? ws.first else { return nil }
         let keep = drawn
         defer { drawn = keep }

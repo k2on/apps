@@ -120,6 +120,16 @@ public enum ArkAppearance {
             if let n = vc as? UINavigationController {
                 n.navigationBar.updateTraitsIfNeeded()
                 redraw(n.navigationBar)
+                // Its bar taken down and put up again, as a column's change
+                // does: what it holds made again in the new style. Drawn
+                // again alone, money's on the iPad on its side kept the old
+                // one (its large title white on the light page, the glass
+                // of its items dark, 43957415743) until an inspector put up
+                // or away laid the bar out anew.
+                if !n.isNavigationBarHidden {
+                    n.setNavigationBarHidden(true, animated: false)
+                    n.setNavigationBarHidden(false, animated: false)
+                }
                 n.navigationBar.layoutIfNeeded()
             }
         }
@@ -202,6 +212,38 @@ public enum ArkAppearance {
         case .light: "light"
         default: "unspecified"
         }
+    }
+
+    /// What in a bar on the screen is not in the style asked for (none
+    /// asked: nothing): each view whose traits say the other style or that
+    /// has a style of its own, and each label whose colour, as its traits
+    /// resolve it, is the other theme's. A walk logs it beside a picture.
+    public static func stale() -> String? {
+        guard let dark = Self.dark else { return nil }
+        let want: UIUserInterfaceStyle = dark ? .dark : .light
+        var out: [String] = []
+        func walk(_ v: UIView, _ bar: String) {
+            if v.isHidden || v.alpha == 0 { return }
+            var why: [String] = []
+            if v.traitCollection.userInterfaceStyle != want { why.append("traits \(name(v.traitCollection.userInterfaceStyle))") }
+            if let own = ownStyle(v) { why.append("own \(own)") }
+            if let l = v as? UILabel, let c = l.textColor {
+                var white: CGFloat = 0
+                c.resolvedColor(with: l.traitCollection).getWhite(&white, alpha: nil)
+                if (white > 0.5) != dark { why.append("label \"\(l.text ?? "")\" \(String(format: "%.2f", white))") }
+            }
+            if !why.isEmpty, out.count < 24 { out.append("\(bar) \(type(of: v)): \(why.joined(separator: ", "))") }
+            for s in v.subviews { walk(s, bar) }
+        }
+        func bars(_ v: UIView) {
+            if v.isHidden { return }
+            if v is UITabBar || v is UINavigationBar || v is UIToolbar { walk(v, "\(type(of: v))"); return }
+            for s in v.subviews { bars(s) }
+        }
+        for scene in UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }) {
+            for w in scene.windows { bars(w) }
+        }
+        return out.isEmpty ? nil : out.joined(separator: "\n")
     }
 
     /// Each bar of every window, as the system has it now: its kind, the

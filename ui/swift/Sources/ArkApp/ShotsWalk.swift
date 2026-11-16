@@ -201,6 +201,10 @@ final class ShotsWalk {
                 try await settled("\(id) \(name(at)), its \(b.what) still \(String(format: "%.2f", b.lightness))")
             }
             guard let png = image.pngData() else { throw Stop(why: "\(id): no picture") }
+            // What in a bar is still the other theme's, said, not failed:
+            // a bar can hold the old one where the band judged above does
+            // not show it (a large title, the glass of its items).
+            if one == nil, let s = ArkAppearance.stale() { say("  \(id) \(name(at)): in the bars, not \(theme):\n\(s)") }
             // More than one window drawn (a dialog's, a menu's): how each was.
             var bar = windows.count > 1 ? ", windows: " + windows.joined(separator: "; ") : ""
             bar += seen + (waited > 0 ? " after \(waited) waits for the theme" : "")
