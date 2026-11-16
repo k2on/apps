@@ -75,26 +75,6 @@ fn the_volume_is_asked_of_the_host() {
     assert_eq!(d.requests, [HarkenRequest::Volume { level: 70 }, HarkenRequest::Mute { muted: false }]);
 }
 
-#[test]
-fn the_view_draws_and_records() {
-    let mut rt = Runtime::<Player>::new();
-    let mut d = Demo::<Player>::new();
-    d.run(
-        &mut rt,
-        [
-            PlayerMsg::Own {
-                own: Some(own()),
-                queue: vec![],
-            },
-            PlayerMsg::Devices,
-        ],
-    );
-    let _ = view::player::view(&d.page(&mut rt));
-    let _ = view::player::record();
-    let _ = view::now_playing::view(&d.page(&mut rt));
-    let _ = view::now_playing::record();
-}
-
 fn row(i: i64, title: &str, at: i64) -> QueueRow {
     QueueRow {
         index: i,

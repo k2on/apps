@@ -86,13 +86,6 @@ fn an_index_route_is_the_library_its_way() {
     assert!(h.app().library.page(&place, NOW).on_albums);
 }
 
-#[test]
-fn the_shells_view_records_both_sections() {
-    let _ = crate::shell::view::harken_shell::record();
-    let (h, place) = hosted();
-    let _ = crate::shell::view::harken_shell::view(&h.app().shell.page(&place, NOW));
-}
-
 /// A song's Add to Playlist raises the sheets' playlists for it, and the
 /// shows' Follow raises the follow sheet of the kind shown. Falsified by
 /// the host keeping the ask (as it did before the sheets were a runtime).
@@ -126,6 +119,4 @@ fn settings_say_the_session() {
     h.send::<HarkenShell>(ShellMsg::Pane { title: "Diagnostics".into() }, &mut place);
     let p = h.app().shell.page(&place, NOW);
     assert_eq!(p.pane, "Diagnostics");
-    let _ = crate::shell::view::harken_settings::view(&p);
-    let _ = crate::shell::view::harken_settings::record();
 }

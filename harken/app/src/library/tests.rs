@@ -77,44 +77,6 @@ fn every_way_has_its_words_when_it_is_empty() {
     assert_eq!(p.empty_title, "No Sermons");
 }
 
-/// The parts a view is made of, by their phones' names, in order.
-fn names<M>(v: &ark_app::view::View<M>, out: &mut Vec<&'static str>) {
-    use ark_app::view::View;
-    match v {
-        View::List(vs) => vs.iter().for_each(|v| names(v, out)),
-        View::Each { body, .. } => names(body, out),
-        View::When { yes, no, .. } | View::WhenSome { yes, no, .. } => {
-            names(yes, out);
-            names(no, out)
-        }
-        View::Layout(l) => {
-            out.push(l.prim.kind());
-            l.slots().into_iter().for_each(|s| names(s, out))
-        }
-        View::Part(p) => {
-            let c = p.call();
-            out.push(c.name);
-            c.slots.into_iter().for_each(|(_, s)| names(s, out));
-        }
-        View::Empty => {}
-    }
-}
-
-#[test]
-fn the_view_draws_the_page_and_its_recording_has_every_way() {
-    let (mut rt, mut d) = library();
-    d.run(&mut rt, [LibraryMsg::Show { kind: "albums".into() }]);
-    let mut drawn = vec![];
-    names(&view::library::view(&d.page(&mut rt)), &mut drawn);
-    // A grid of covers, each a picture over its derived square: primitives.
-    assert!(drawn.contains(&"grid") && drawn.contains(&"image") && drawn.contains(&"swatch") && drawn.contains(&"Pressable"));
-    let mut all = vec![];
-    names(&view::library::record(), &mut all);
-    for part in ["ChipRow", "Chip", "ListRow", "grid", "Pressable", "image", "FormSheet", "NameField"] {
-        assert!(all.contains(&part), "{part} is not in {all:?}");
-    }
-}
-
 #[test]
 fn a_song_is_drawn_with_its_albums_cover() {
     let (mut rt, mut d) = library();

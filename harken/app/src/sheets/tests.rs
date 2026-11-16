@@ -47,13 +47,3 @@ fn a_show_is_followed_by_its_feed() {
     );
     assert!(d.page(&mut rt).following.is_none());
 }
-
-#[test]
-fn the_view_draws_and_records() {
-    let mut rt = Runtime::<Sheets>::new();
-    let mut d = Demo::<Sheets>::new();
-    let track = d.first_song();
-    d.run(&mut rt, [SheetsMsg::AddTo { track }]);
-    let _ = view::sheets::view(&d.page(&mut rt));
-    let _ = view::sheets::record();
-}

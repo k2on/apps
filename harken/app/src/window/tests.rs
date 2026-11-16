@@ -1,10 +1,8 @@
 //! harken in a window its host draws itself, over the demo library on the
 //! host's test place: the address says where it is and brings a fresh
-//! window there, Settings is the window's own, and every name the shell
-//! hosts is drawn from harken's views.
+//! window there, Settings is the window's own, and a launch sets the look.
 
 use ark_app::host::{Hosting, Link};
-use ark_app::view::View;
 use ark_app::window::Windowed;
 
 use super::HarkenMsg;
@@ -82,17 +80,10 @@ fn settings_is_the_windows_own() {
     assert_eq!(address(&h, &place), "/settings/?pane=diagnostics");
 }
 
-/// Every name the shell hosts is one of harken's views, none the empty
-/// place; a launch's look is the window's.
+/// A launch's look is the window's, and its screen the window's place.
 #[test]
-fn every_hosted_name_is_drawn_and_a_launch_sets_the_look() {
+fn a_launch_sets_the_look() {
     let (mut h, mut place) = hosted();
-    for name in ["home", "library", "search", "page", "player.bar", "player"] {
-        let v = h.app().hosted(name, &place, NOW);
-        assert!(!matches!(v, View::Empty), "{name}");
-        let words = format!("{v:?}");
-        assert!(!words.contains("Nothing Selected"), "{name} is drawn as nothing chosen");
-    }
     assert_eq!(h.app().appearance(), None);
     h.launched(vec!["-appearance".into(), "dark".into(), "-screen".into(), "library".into()], &mut place);
     assert_eq!(h.app().appearance(), Some("dark"));

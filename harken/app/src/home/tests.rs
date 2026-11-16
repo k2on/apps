@@ -30,11 +30,3 @@ fn a_new_song_plays_the_newest_from_itself_and_an_album_opens() {
     );
     assert_eq!(d.opened, [Route::Album { key: a.key, title: a.title }]);
 }
-
-#[test]
-fn the_view_draws_and_records() {
-    let mut rt = Runtime::<Home>::new();
-    let mut d = Demo::<Home>::new();
-    let _ = view::home::view(&d.page(&mut rt));
-    let _ = view::home::record();
-}

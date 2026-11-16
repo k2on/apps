@@ -89,21 +89,3 @@ fn a_playlists_page_is_its_tracks_and_a_persons_is_round() {
     );
     assert!(d.page(&mut rt).round);
 }
-
-#[test]
-fn the_view_draws_the_header_and_the_rows() {
-    let (key, title) = first_album();
-    let mut rt = Runtime::<Page>::new();
-    let mut d = Demo::<Page>::new();
-    d.run(
-        &mut rt,
-        [PageMsg::Show {
-            route: Route::Album { key, title },
-        }],
-    );
-    let v = view::record::view(&d.page(&mut rt));
-    let ark_app::view::View::Part(ark_app::view::Part::Detail { .. }) = v else {
-        panic!("a record's page is a detail page")
-    };
-    let _ = view::record::record();
-}

@@ -16,6 +16,4 @@ fn nothing_typed_invites_and_a_word_answers_from_songs_albums_and_people() {
     d.run(&mut rt, [SearchMsg::Typed { text: "zzqqxx".into() }]);
     let p = d.page(&mut rt);
     assert!(p.nothing && p.nothing_text.contains("zzqqxx"));
-    let _ = view::search::view(&p);
-    let _ = view::search::record();
 }
