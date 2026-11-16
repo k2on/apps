@@ -46,7 +46,7 @@ mod components;
 pub mod layout;
 pub mod search;
 
-pub use components::{empty_state, goal_progress, title_stack, TitleStack};
+pub use components::{empty_state, title_stack, TitleStack};
 pub use layout::{
     glyph, grid, hstack, image, meter, scroll, scroll_across, spacer, spacer_min, status_badge, swatch, text, tile, vstack, zstack, Align, Axis,
     Corner, Edges, Ink, Layout, Measure, Modifier, Modify, Prim, Space, Surface, TextStyle, Words,
@@ -956,70 +956,6 @@ pub struct Columns {
     pub titles: [&'static str; 3],
     pub first: Val<i64>,
     pub second: Val<i64>,
-}
-
-/// ArkUI's `HeaderCard` ([`Part::HeaderCard`]).
-#[derive(Clone, Debug)]
-pub struct HeaderCard<M> {
-    pub title: Val<String>,
-    pub figure: Val<String>,
-    /// `neutral`, `positive`, `caution`, `negative` or `accent`.
-    pub tint: Val<String>,
-    pub glyph: Option<Val<String>>,
-    /// The figure in a status badge; else large and bold.
-    pub badge: bool,
-    pub line: Option<Val<String>>,
-    pub caption: Option<Val<String>>,
-    pub actions: Box<View<M>>,
-}
-
-/// A card at the top of an inspector or a detail: `title` (none: the empty
-/// text, the glyph alone), `figure` in `tint` ([`HeaderCard`]).
-pub fn header_card<M>(title: impl Into<Val<String>>, figure: impl Into<Val<String>>, tint: impl Into<Val<String>>) -> HeaderCard<M> {
-    HeaderCard {
-        title: title.into(),
-        figure: figure.into(),
-        tint: tint.into(),
-        glyph: None,
-        badge: false,
-        line: None,
-        caption: None,
-        actions: Box::new(View::Empty),
-    }
-}
-
-impl<M> HeaderCard<M> {
-    pub fn glyph(mut self, g: impl Into<Val<String>>) -> Self {
-        self.glyph = Some(g.into());
-        self
-    }
-    /// The figure in a status badge (a category's available).
-    pub fn badge(mut self) -> Self {
-        self.badge = true;
-        self
-    }
-    /// What needs attention, in the tint: "Overspent by $21.02".
-    pub fn line(mut self, l: impl Into<Val<String>>) -> Self {
-        self.line = Some(l.into());
-        self
-    }
-    /// A quiet word under it: the group, the account.
-    pub fn caption(mut self, c: impl Into<Val<String>>) -> Self {
-        self.caption = Some(c.into());
-        self
-    }
-    /// Its actions, rows under a divider in the card.
-    pub fn actions(mut self, a: impl Into<View<M>>) -> Self {
-        self.actions = Box::new(a.into());
-        self
-    }
-}
-
-impl<M> From<HeaderCard<M>> for View<M> {
-    /// Laid out of the primitives (`components`).
-    fn from(h: HeaderCard<M>) -> View<M> {
-        components::header_card(h)
-    }
 }
 
 /// An inspector's or a detail's page of cards ([`Part::Detail`]).

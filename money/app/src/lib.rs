@@ -18,6 +18,7 @@ pub mod budget;
 pub mod host;
 pub mod insights;
 pub mod look;
+pub mod parts;
 pub mod receipts;
 pub mod register;
 pub mod routes;

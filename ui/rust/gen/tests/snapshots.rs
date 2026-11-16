@@ -130,14 +130,52 @@ pub struct Tag {
     pub name: String,
 }
 
+/// A header card as an app composes one (money's `header_card`): a card
+/// whose first row is its face, centred and read as one, then its action.
+fn header<M>(
+    title: impl Into<Val<String>>,
+    figure: impl Into<Val<String>>,
+    tint: impl Into<Val<String>>,
+    line: impl Into<Val<String>>,
+    action: impl Into<View<M>>,
+) -> View<M> {
+    let tint = tint.into();
+    let face = vstack((
+        tile("target", tint.clone()),
+        text(title).style(TextStyle::Headline).centred().if_any(),
+        text(figure).style(TextStyle::Figure).ink(Ink::Figure(tint.clone())).centred(),
+        text(line).style(TextStyle::Subheadline).ink(Ink::Tint(tint)).centred().if_any(),
+    ))
+    .spacing(Space::Xs)
+    .padding(Edges::Horizontal, Space::L)
+    .padding(Edges::Vertical, Space::Xl)
+    .fill_width()
+    .combine();
+    card_section((face, action.into())).into()
+}
+
+/// A goal's bar and its note under it (money's `goal_progress`).
+fn goal<M>(fraction: impl Into<Val<f64>>, tint: impl Into<Val<String>>, note: impl Into<Val<String>>) -> View<M> {
+    vstack((meter(fraction, tint), text(note).style(TextStyle::Footnote).ink(Ink::Quiet)))
+        .spacing(Space::Xs)
+        .align(Align::Start)
+        .padding(Edges::Horizontal, Space::L)
+        .padding(Edges::Vertical, Space::M)
+        .fill_width_at(Align::Start)
+        .into()
+}
+
 #[view]
 pub fn card(p: &CardPage) -> View<ListMsg> {
     detail_page((
-        header_card(p.name, p.figure, p.tint)
-            .glyph("target")
-            .line(p.attention)
-            .actions(list_row("Add Thing").glyph("circle-plus").accent().on_tap(ListMsg::Add)),
-        card_section(goal_progress(p.fraction, p.tint, p.note)).header("Goal"),
+        header(
+            p.name,
+            p.figure,
+            p.tint,
+            p.attention,
+            list_row("Add Thing").glyph("circle-plus").accent().on_tap(ListMsg::Add),
+        ),
+        card_section(goal(p.fraction, p.tint, p.note)).header("Goal"),
         if p.empty {
             card_section(empty_state("list", "No Things", "Add one with the button above."))
         },

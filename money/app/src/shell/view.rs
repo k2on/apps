@@ -7,6 +7,8 @@ use ark_app::shell::*;
 use ark_app::view;
 use ark_app::view::*;
 
+use crate::parts::*;
+
 use super::{AskItem, BankPage, CategoryInspector, ShellMsg, ShellPage, TransactionInspector};
 
 /// The main window: the four sections, then each account in the sidebar

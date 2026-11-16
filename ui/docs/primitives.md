@@ -159,8 +159,8 @@ written once, in `ui/theme.toml`, and a view names it.
 
 | Moves to the primitives | Built in `view.rs` as |
 |---|---|
-| `header_card` | a `card_section` holding a centred `vstack` (tile, title stack, figure, line, caption), then its actions as rows |
-| `goal_progress` | a leading `vstack` of a `meter` and a quiet footnote, at the row's inset |
+| `header_card` (money-app's `parts`) | a `card_section` holding a centred `vstack` (tile, title stack, figure, line, caption), then its actions as rows |
+| `goal_progress` (money-app's `parts`) | a leading `vstack` of a `meter` and a quiet footnote, at the row's inset |
 | `empty_state` (new) | a centred `vstack` of a quiet glyph and a title stack |
 | `title_stack` (new) | a `vstack` of up to four `text`s, each only while it has words |
 | next: `summary_card`, `hero_figure`, `headline`, `paper` | they need what is below under Hard Cases (a figure in cents, "fits", parallel lists) |
@@ -263,7 +263,7 @@ the primitives — moved, or still to move.
 | `first_run_page` (`Part::FirstRunPage`) | `FirstRunParts` | native container (the first run's page) | every app's first run |
 | `title_stack`, `empty_state` | — | shared composition | harken, money |
 | `artwork`, `artwork_tile`, `artwork_shelf`, `artwork_grid`, `media_row`, `media_header`, `play_shuffle`, `glyph_button`, `transport`, `figure_label` | — (the hand-written `Artwork`, `ArtworkGrid`, `ArtSize`, `artWidth`, `ArtworkCache`, `LocalGridCell`, `art::picture` callers and `.ark-art*` are gone) | one app's: **moved**, `harken-app`'s `parts` | harken |
-| `header_card` (`Part::Section` of a composed face), `goal_progress` | — | one app's (a Rust composition in ark-app, still to move to money-app) | money |
+| `header_card` (`Part::Section` of a composed face), `goal_progress` | — | one app's: **moved**, `money-app`'s `parts` | money |
 | `summary_card` (`Part::Summary`), `hero_figure` (`Part::Hero`), `headline` (`Part::Headline`), `meter_row` (`Part::MeterRow`), `paper` (`Part::Paper`), `amount_entry` (`Part::AmountEntry`'s face) | `Summary`/`SummaryCard`, `HeroFigure`, `Headline`, `MeterRow`, `Paper` (FigureParts, PhotoParts, Parts) | one app's, hand-written per toolkit: **still to move** to money-app as compositions (they need what Hard Cases names: a figure in cents, "fits", parallel lists) | money |
 | `Cover`, `CoverLoader`, `HeroBanner`, `Components.kt`'s covers (Kotlin), `HeroParts.swift`/`.kt` | — | one app's (harken's old native screens'), hand-written: **still to move or delete** once nothing calls them | harken (old) |
 | `MarkTile`, the account face (`Part::Account`) | `MarkTile`, `AccountFace` | native (the shell's mark and account) | every app |
