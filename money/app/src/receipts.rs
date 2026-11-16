@@ -430,8 +430,8 @@ pub struct ReceiptForm {
     pub name: String,
     pub amount: String,
     pub amount_problem: Option<String>,
-    /// What a formula typed as its price comes to, while one is.
-    pub amount_gives: Option<String>,
+    /// What a formula typed as its price comes to; empty while none is.
+    pub amount_gives: String,
     /// What the items come to.
     pub total: String,
     /// Why it can't be saved yet, or the domain's refusal; empty for none.
@@ -624,7 +624,7 @@ fn form(d: &Draft, style: &NumberStyle) -> ReceiptForm {
         amount_problem: editing
             .filter(|i| !i.amount.trim().is_empty() && Draft::cents(&i.amount, style).is_none())
             .map(|_| "That isn't an amount.".into()),
-        amount_gives: editing.and_then(|i| formula_gives(&i.amount, style)),
+        amount_gives: editing.and_then(|i| formula_gives(&i.amount, style)).unwrap_or_default(),
         total: amount_editable(d.total(style), style),
         note: d.refused.clone().or(problem.clone()).unwrap_or_default(),
         can_save: problem.is_none(),

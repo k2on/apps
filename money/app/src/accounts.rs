@@ -237,8 +237,8 @@ pub struct AddForm {
     /// What the amount entry says under its figure.
     pub balance_prompt: String,
     pub balance_problem: Option<String>,
-    /// What a formula typed comes to (`= $155.50`), while one is.
-    pub balance_gives: Option<String>,
+    /// What a formula typed comes to (`= $155.50`); empty while none is.
+    pub balance_gives: String,
     pub can_save: bool,
 }
 
@@ -613,7 +613,12 @@ fn form(d: &Draft, style: &NumberStyle) -> AddForm {
         balance_header: if d.kind.owes() { "Balance Owed" } else { "Balance" }.into(),
         balance_prompt: if d.kind.owes() { "Owed on it today" } else { "In it today" }.into(),
         balance_problem: balance.is_none().then(|| "That isn't an amount".into()),
-        balance_gives: d.entered.is_none().then(|| ark_format::formula_gives(&d.typed, style)).flatten(),
+        balance_gives: d
+            .entered
+            .is_none()
+            .then(|| ark_format::formula_gives(&d.typed, style))
+            .flatten()
+            .unwrap_or_default(),
         can_save: !d.name.trim().is_empty() && name_problem.is_none() && balance.is_some(),
         name_problem,
     }

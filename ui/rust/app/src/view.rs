@@ -418,16 +418,12 @@ pub enum Part<M> {
     /// An amount entered the app's way: the iPhone's large figure over its
     /// own keypad (ArkUI's `AmountEntry`, in cents, `prompt` under it), a
     /// text field elsewhere (`label`, what was typed, the problem with it).
-    /// Where it is typed it is a formula field: what arithmetic typed comes
-    /// to (`gives`, `= $155.50`, `ark_format::formula_gives`) is said
-    /// beside it as it is typed.
     AmountEntry {
         label: Val<String>,
         prompt: Val<String>,
         typed: Val<String>,
         cents: Val<i64>,
         problem: Val<Option<String>>,
-        gives: Val<Option<String>>,
         on_typed: Input<String, M>,
         on_cents: Input<i64, M>,
     },
@@ -446,12 +442,10 @@ pub enum Part<M> {
         problem: Val<Option<String>>,
         typed: Input<String, M>,
     },
-    /// An amount typed, a formula field as [`Part::AmountEntry`] is.
     AmountField {
         label: Val<String>,
         typed: Val<String>,
         problem: Val<Option<String>>,
-        gives: Val<Option<String>>,
         on: Input<String, M>,
     },
     /// Choices in a wrapping row.
@@ -1804,37 +1798,51 @@ pub fn amount_entry<M: 'static>(
     on_typed: fn(String) -> M,
     on_cents: fn(i64) -> M,
 ) -> Amount<M> {
-    Amount(Part::AmountEntry {
-        label: label.into(),
-        prompt: prompt.into(),
-        typed: typed.into(),
-        cents: cents.into(),
-        problem: problem.into(),
-        gives: Val::Is(None),
-        on_typed: Input::new(on_typed),
-        on_cents: Input::new(on_cents),
-    })
+    Amount(
+        Part::AmountEntry {
+            label: label.into(),
+            prompt: prompt.into(),
+            typed: typed.into(),
+            cents: cents.into(),
+            problem: problem.into(),
+            on_typed: Input::new(on_typed),
+            on_cents: Input::new(on_cents),
+        },
+        None,
+    )
 }
 
 /// An amount's field ([`amount_entry`], [`amount_field`]), as it is built.
-pub struct Amount<M>(Part<M>);
+pub struct Amount<M>(Part<M>, Option<Val<String>>);
 
 impl<M> Amount<M> {
-    /// A formula field: what arithmetic typed into it comes to, said beside
-    /// it as it is typed (`= $155.50`, `ark_format::formula_gives`; none
-    /// while what is typed is a plain amount). The arithmetic is the app's
-    /// to read (`ark_format::parse_formula`).
-    pub fn gives(mut self, g: impl Into<Val<Option<String>>>) -> Self {
-        if let Part::AmountEntry { gives, .. } | Part::AmountField { gives, .. } = &mut self.0 {
-            *gives = g.into();
-        }
+    /// A formula field: what arithmetic typed into it comes to, said under
+    /// it as it is typed (`= $155.50`, `ark_format::formula_gives`; empty
+    /// while what is typed is a plain amount). The field is the toolkit's
+    /// own; the sum is the primitives' (a quiet footnote, only while it
+    /// has words), so every toolkit draws it from this. The arithmetic is
+    /// the app's to read (`ark_format::parse_formula`).
+    pub fn gives(mut self, g: impl Into<Val<String>>) -> Self {
+        self.1 = Some(g.into());
         self
     }
 }
 
 impl<M> From<Amount<M>> for View<M> {
     fn from(a: Amount<M>) -> View<M> {
-        a.0.into()
+        let field: View<M> = a.0.into();
+        match a.1 {
+            None => field,
+            Some(g) => View::List(vec![
+                field,
+                text(g)
+                    .style(TextStyle::Footnote)
+                    .ink(Ink::Quiet)
+                    .if_any()
+                    .padding(Edges::Horizontal, Space::L)
+                    .into(),
+            ]),
+        }
     }
 }
 
@@ -1881,13 +1889,15 @@ pub fn amount_field<M: 'static>(
     problem: impl Into<Val<Option<String>>>,
     on: fn(String) -> M,
 ) -> Amount<M> {
-    Amount(Part::AmountField {
-        label: label.into(),
-        typed: typed.into(),
-        problem: problem.into(),
-        gives: Val::Is(None),
-        on: Input::new(on),
-    })
+    Amount(
+        Part::AmountField {
+            label: label.into(),
+            typed: typed.into(),
+            problem: problem.into(),
+            on: Input::new(on),
+        },
+        None,
+    )
 }
 
 /// Choices in a wrapping row.
@@ -2860,7 +2870,6 @@ impl<M> Part<M> {
                 typed,
                 cents,
                 problem,
-                gives,
                 on_typed,
                 on_cents,
             } => c(
@@ -2871,7 +2880,6 @@ impl<M> Part<M> {
                     ("text", G::Val(lit(typed))),
                     ("cents", G::Val(lit(cents))),
                     ("problem", G::Val(lit(problem))),
-                    ("gives", G::Val(lit(gives))),
                     ("onType", G::Typed(on_typed)),
                     ("onCents", G::Counted(on_cents)),
                 ],
@@ -2911,19 +2919,12 @@ impl<M> Part<M> {
                 ],
                 vec![],
             ),
-            Part::AmountField {
-                label,
-                typed,
-                problem,
-                gives,
-                on,
-            } => c(
+            Part::AmountField { label, typed, problem, on } => c(
                 "AmountField",
                 Some(G::Val(lit(label))),
                 vec![
                     ("text", G::Val(lit(typed))),
                     ("problem", G::Val(lit(problem))),
-                    ("gives", G::Val(lit(gives))),
                     ("onChange", G::Typed(on)),
                 ],
                 vec![],
@@ -3585,7 +3586,6 @@ impl<M: 'static> Part<M> {
                 typed,
                 cents,
                 problem,
-                gives,
                 on_typed,
                 on_cents,
             } => Part::AmountEntry {
@@ -3594,7 +3594,6 @@ impl<M: 'static> Part<M> {
                 typed,
                 cents,
                 problem,
-                gives,
                 on_typed: input(on_typed, f),
                 on_cents: input(on_cents, f),
             },
@@ -3624,17 +3623,10 @@ impl<M: 'static> Part<M> {
                 problem,
                 typed: input(typed, f),
             },
-            Part::AmountField {
+            Part::AmountField { label, typed, problem, on } => Part::AmountField {
                 label,
                 typed,
                 problem,
-                gives,
-                on,
-            } => Part::AmountField {
-                label,
-                typed,
-                problem,
-                gives,
                 on: input(on, f),
             },
             Part::Chips(c) => Part::Chips(b(c)),

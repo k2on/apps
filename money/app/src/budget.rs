@@ -324,8 +324,8 @@ pub struct AmountForm {
     pub typed: String,
     pub cents: i64,
     pub problem: Option<String>,
-    /// What a formula typed comes to (`= $155.50`), while one is.
-    pub gives: Option<String>,
+    /// What a formula typed comes to (`= $155.50`); empty while none is.
+    pub gives: String,
     pub note: String,
     pub can_save: bool,
 }
@@ -953,7 +953,7 @@ fn amount_form(subject: String, label: &str, prompt: &str, f: &Figure, note: Str
         typed: f.typed.clone(),
         cents: cents.unwrap_or(0),
         problem: cents.is_none().then(|| "That isn't an amount".into()),
-        gives: f.gives(style),
+        gives: f.gives(style).unwrap_or_default(),
         note,
         can_save: cents.is_some(),
     }

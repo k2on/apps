@@ -183,9 +183,9 @@ fn assigning_a_formula() {
         [BudgetMsg::Assign { id }, BudgetMsg::Typed { typed: "120+35.50".into() }],
     );
     let f = page(&rt, &d).assigning.unwrap();
-    assert_eq!((f.cents, f.gives.as_deref(), f.can_save), (15_550, Some("= $155.50"), true));
+    assert_eq!((f.cents, f.gives.as_str(), f.can_save), (15_550, "= $155.50", true));
     run(&mut rt, &mut d, [BudgetMsg::Typed { typed: "155.50".into() }]);
-    assert_eq!(page(&rt, &d).assigning.unwrap().gives, None, "a plain amount works nothing out");
+    assert_eq!(page(&rt, &d).assigning.unwrap().gives, "", "a plain amount works nothing out");
     run(&mut rt, &mut d, [BudgetMsg::Typed { typed: "3*12.50".into() }, BudgetMsg::Save]);
     assert_eq!(d.line("Groceries").assigned, 3_750);
 }

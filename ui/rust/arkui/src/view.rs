@@ -192,13 +192,7 @@ fn part<M: Clone + 'static>(v: View<M>) -> Option<Element<'static, M>> {
             problem,
             typed,
         } => field(label, value.get(), problem.get(), typed),
-        Part::AmountField {
-            label,
-            typed,
-            problem,
-            gives,
-            on,
-        } => formula_field(&label.get(), typed.get(), problem.get(), gives.get(), on),
+        Part::AmountField { label, typed, problem, on } => field(&label.get(), typed.get(), problem.get(), on),
         Part::Chips(c) => row(nodes(*c)).spacing(4).wrap().into(),
         Part::FormSection { header, footer, content } => {
             let mut c = column![].spacing(6);
@@ -235,10 +229,9 @@ fn part<M: Clone + 'static>(v: View<M>) -> Option<Element<'static, M>> {
             label,
             typed,
             problem,
-            gives,
             on_typed,
             ..
-        } => formula_field(&label.get(), typed.get(), problem.get(), gives.get(), on_typed),
+        } => field(&label.get(), typed.get(), problem.get(), on_typed),
         Part::Chip { label, selected, tap, .. } => parts::chip(&label.get(), selected.get(), tap),
         Part::Toggle { title, note, on, change } => {
             let mut c = column![checkbox(on.get()).label(title).on_toggle(move |b| change.call(b))].spacing(2);
@@ -1566,33 +1559,6 @@ fn field<M: Clone + 'static>(label: &str, value: String, problem: Option<String>
         text_input(label, &value).on_input(move |s| typed.call(s)).style(style::field)
     ]
     .spacing(4);
-    if let Some(p) = problem {
-        c = c.push(text(p).size(12).style(|t| text::Style {
-            color: Some(crate::theme::of(t).danger.base.color),
-            ..Default::default()
-        }));
-    }
-    c.into()
-}
-
-/// An amount's field, typed as a formula where one likes: what it comes
-/// to said quietly under it as it is typed (`= $155.50`), before any
-/// problem with it.
-fn formula_field<M: Clone + 'static>(
-    label: &str,
-    value: String,
-    problem: Option<String>,
-    gives: Option<String>,
-    typed: Input<String, M>,
-) -> Element<'static, M> {
-    let mut c = column![
-        text(label.to_string()).size(12).style(style::dim),
-        text_input(label, &value).on_input(move |s| typed.call(s)).style(style::field)
-    ]
-    .spacing(4);
-    if let Some(g) = gives {
-        c = c.push(text(g).size(12).style(style::dim));
-    }
     if let Some(p) = problem {
         c = c.push(text(p).size(12).style(|t| text::Style {
             color: Some(crate::theme::of(t).danger.base.color),

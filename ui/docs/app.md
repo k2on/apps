@@ -2039,19 +2039,19 @@ and demo. arkui's `host` (feature `host`) is the browser's host over iced:
   its views (`ark_app::shots`), as the phones' walks are; keys and waits
   stay the driver's. money's `desktop.shots` are such a walk.
 
-**What money/iced had that the shared views do not yet**, each to come
-back as a shared part with a message of the app's (never a closure), on
+**What money/iced had that the shared views do not yet** (those marked
+done are back), each to come back as a shared part with a message of the app's (never a closure), on
 every toolkit where it applies, its numbers in `ui/theme.toml`:
 
 | Behaviour | Shared as |
 |---|---|
 | Drag to reorder a category or a group, and onto another group | the existing `arkui::reorder` on `card_section`, its drop a message (`MoveCategory`, `MoveGroup`), as the phones' Reorder already is |
-| A formula field: an amount typed as arithmetic, what it gives as typed | done: `amount_entry(…)` and `amount_field(…)` take `.gives(…)` (`Part::AmountEntry`/`AmountField`'s `gives`), said under the field on the desktop, in the browser, on Android and in SwiftUI's `AmountField` (the iPhone's keypad types digits alone); the arithmetic `ark_format::parse_formula` and `formula_gives`; every money amount field is one. Left: money/iced's "Assign by formula" (terms of a saved filter and a factor), which waits for the register's filters |
+| A formula field: an amount typed as arithmetic, what it gives as typed | done: `amount_entry(…)` and `amount_field(…)` take `.gives(…)`, the toolkit's own field with what it comes to under it as primitives (a quiet footnote, only while it has words), so no toolkit has code of its own for it; Android's field keeps the operators a hardware keyboard types (the iPhone's keypad types digits alone); the arithmetic `ark_format::parse_formula` and `formula_gives`; every money amount field is one. Left: money/iced's "Assign by formula" (terms of a saved filter and a factor), which waits for the register's filters |
 | A register's filter as chips, "Save as Filter…" | `filter_bar(chips)`, the conditions money-core's `Filter`, the words money-app's |
 | The category dropdown under a cell (YNAB's) | the search picker already drawn under its field (`arkui::search_picker`) |
 | Visual mode, the budget's bindings (`cc`, `cg`, `rc`, `rg`, `J`/`K`, `{`/`}`) | done: a menu item's keys (`MenuItem::keys`, `.keys("cc")`, `.keys_from_last("J")`) run it on the cursor's row or a visual selection (`v`, `vig`), on the desktop (`arkui::host::keys`, `view::cursor`) and in the browser (arkui-web's `keys`); money binds `cc`, `rg`, `{`, `}` on a group's heading and `K`/`J` on a category. Left: `cg` and `rc` (New Group is a command, a category has no Rename) |
 | A receipt's paper on the desktop, a photo dropped with no scan asked | done: the paper is `Part::Paper`, drawn by iced as by every toolkit (the desktop's `transaction` shot, the Target receipt); a photo dropped with no scan waiting is held, the app asked `Windowed::dropped` for the message that asks for one where the window is (money: Choose Photo for the open transaction's receipt), and the held photo answers it in the chooser's place (`host::devices`) |
-| Settings' stores pane | a pane of money's `money_settings` over money-core's `setup` calls |
+| Settings' stores pane | a pane of money's `money_settings` over money-core's `setup` calls. Not yet: those are calls of the server's own (a password goes to it and to no row), and an app's part has no way to make one — `ark_app::host::Place` needs a call and its answer (`call(name, input)`, taken as a message), on the desktop (`Peer::request`), the browser and ark-ffi's host, first |
 | The appearance a launch or Settings asks (`Windowed::appearance`) | done: the window's theme over the system's (`DesktopHost::theme`) |
 | `Esc` to put a sheet away; `Shift-F10` and the menu key on the cursor's row | done: the sheet or question on top recorded as it is drawn (`cursor::modal_drawn`), and `context_menu::on_row`'s `Keyed` |
 | The notice's and confirm's buttons | done: ArkUI's (`style::quiet`, `action`, `destructive`), not iced's own |
