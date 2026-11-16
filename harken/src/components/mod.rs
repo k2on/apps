@@ -110,15 +110,28 @@ pub fn artwork_tile<M>(art: Artwork, title: impl Into<Val<String>>, caption: imp
     pressable(title, tap, face).into()
 }
 
-/// Tiles in a row that scrolls sideways, at the page's margins: a shelf
-/// (Home's shelves, search's albums).
-pub fn artwork_shelf<M>(tiles: impl Into<View<M>>) -> View<M> {
-    scroll_across(
-        hstack(tiles)
-            .spacing(Space::M)
-            .align(Align::Start)
+/// A shelf: its heading, then its tiles in a row that scrolls sideways,
+/// on the page's ground rather than a card, out to the screen's edge
+/// (`.bleed`), the heading and the first tile inset back to the column's
+/// edge and the last able to scroll to the screen's (Home's Recently
+/// Added and Albums, search's albums and people).
+pub fn artwork_shelf<M>(title: impl Into<Val<String>>, tiles: impl Into<View<M>>) -> View<M> {
+    vstack((
+        text(title)
+            .style(TextStyle::Headline)
+            .ink(Ink::Quiet)
             .padding(Edges::Horizontal, Space::Page),
-    )
+        scroll_across(
+            hstack(tiles)
+                .spacing(Space::M)
+                .align(Align::Start)
+                .padding(Edges::Horizontal, Space::Page),
+        ),
+    ))
+    .spacing(Space::S)
+    .align(Align::Start)
+    .fill_width_at(Align::Start)
+    .bleed(Space::Page)
     .into()
 }
 

@@ -350,6 +350,7 @@ fn chain(mods: &[Modifier]) -> Option<String> {
             Modifier::Corner(Corner::Circle) => "clip(CircleShape)".into(),
             Modifier::Combine => "semantics(mergeDescendants = true) {}".into(),
             Modifier::Width(m) => format!("width({})", measure(*m)),
+            Modifier::Bleed(s) => format!("bleed({})", space(*s)),
             Modifier::MaxWidth(m) => format!("widthIn(max = {})", measure(*m)),
             Modifier::Side(m) => format!("size({})", measure(*m)),
             Modifier::Square => "aspectRatio(1f)".into(),

@@ -23,15 +23,17 @@ pub fn home(p: &HomePage) -> View<HomeMsg> {
                 )
                 .header("Last Played")
             },
-            card_section(artwork_shelf(for t in p.newest {
-                artwork_tile(
-                    artwork(t.art, t.seed, t.title).size(ArtSize::Shelf),
-                    t.title,
-                    t.caption,
-                    HomeMsg::OpenNew { key: t.key },
-                )
-            }))
-            .header("Recently Added"),
+            artwork_shelf(
+                "Recently Added",
+                for t in p.newest {
+                    artwork_tile(
+                        artwork(t.art, t.seed, t.title).size(ArtSize::Shelf),
+                        t.title,
+                        t.caption,
+                        HomeMsg::OpenNew { key: t.key },
+                    )
+                },
+            ),
             if p.has_playlists {
                 card_section(for l in p.playlists {
                     list_row(l.name)
@@ -42,15 +44,17 @@ pub fn home(p: &HomePage) -> View<HomeMsg> {
                 .header("Playlists")
             },
             if p.has_albums {
-                card_section(artwork_shelf(for a in p.albums {
-                    artwork_tile(
-                        artwork(a.art, a.seed, a.title).size(ArtSize::Shelf),
-                        a.title,
-                        a.caption,
-                        HomeMsg::OpenAlbum { key: a.key, title: a.title },
-                    )
-                }))
-                .header("Albums")
+                artwork_shelf(
+                    "Albums",
+                    for a in p.albums {
+                        artwork_tile(
+                            artwork(a.art, a.seed, a.title).size(ArtSize::Shelf),
+                            a.title,
+                            a.caption,
+                            HomeMsg::OpenAlbum { key: a.key, title: a.title },
+                        )
+                    },
+                )
             },
             if p.empty {
                 card_section(empty_state("music", "Nothing Here Yet", "What your server finds shows here."))

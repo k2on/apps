@@ -57,7 +57,7 @@ the primitives below and ArkUI's press; nothing of it is per toolkit.
 |---|---|---|
 | Artwork | `artwork(url, seed, label).size(ArtSize::Row \| Shelf \| Header \| Fill).round()` | `zstack((swatch(seed), image(url, label).fill().decode(m)))`, then the square first — `.side(m)` at `art-row`, `art-shelf` or `art-header`, or `.square()` of the width it is given — then `.corner(Corner::Small)` or `Corner::Circle` (a person). The picture covers its square and is cut to it on every toolkit; the derived square shows until it comes; a screenshot waits for it |
 | Artwork tile | `artwork_tile(art, title, caption, tap)` | `pressable` (a give) round a leading `vstack` of the cover, a one-line subheadline and a quiet one-line caption, `.width(m)` its cover's measure, or `.fill_width_at(Start)` in a grid's cell |
-| Artwork shelf | `artwork_shelf(tiles)` | `scroll_across(hstack(tiles).spacing(M).align(Start).padding(Horizontal, Page))` |
+| Artwork shelf | `artwork_shelf(title, tiles)` | a quiet headline over `scroll_across(hstack(tiles).spacing(M).padding(Horizontal, Page))`, the two `.bleed(Space::Page)`: on the page, not a card, the tiles running to the screen's edge and the first in line with the heading |
 | Artwork grid | `artwork_grid(tiles)` | `grid(Measure::ArtShelf, tiles).spacing(M).line_spacing(L).padding(Horizontal, Page)` |
 | Media row | `media_row(title, tap).art(..).under(..).trailing(..).menu(..)` | `press_row` (a row's light, its menu) round an `hstack` of the art, a plain one-line `title_stack`, `spacer_min(Xs)` and the end |
 | Media header | `media_header(art, titles, actions)` | a `vstack` of an `hstack` of the cover at `art-header` and the titles, the actions under both, at the page's margins |
@@ -120,6 +120,7 @@ And on every primitive (the `Modify` trait):
 | `.background(Surface)` | `Surface::Card` (the card's container), `Surface::Raised` (a container above it) |
 | `.corner(Corner)` | `Corner::Card` (`card-corner`), `Corner::Small` (`corner`), `Corner::Circle` (round): clips |
 | `.width(Measure)` | as wide as a measure, what it holds kept to it (a tile's words under its cover) |
+| `.bleed(Space)` | out past its column's edges by the step on either side, on the page's ground, not a card (a shelf to the screen's edge, its content inset back): SwiftUI a negative padding on a clear row, Compose `Modifier.bleed` (measured wider than its column), the browser a negative margin; iced keeps it in its column |
 | `.max_width(Measure)` | as wide as it is given up to the measure, at the leading edge (a row of wide buttons on a wide window) |
 | `.side(Measure)` | a square the measure a side; what it holds is laid into it |
 | `.square()` | as tall as it is wide, of the width it is given; what it holds is laid into that square (iced, which has no aspect-ratio layout, draws an `art-shelf` square) |

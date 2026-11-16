@@ -23,6 +23,7 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -85,6 +86,22 @@ public fun ArkPicture(url: String, label: String, decode: Dp?, modifier: Modifie
             bitmap?.let { Image(it, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize()) }
         }
     }
+}
+
+/**
+ * Out past its column's edges by [by] on either side (`.bleed(..)`): measured that much wider than
+ * the width it is given and placed that much before it, so a shelf runs to the screen's edge while
+ * what it holds insets itself back. Given no bound across, it is as it was.
+ */
+public fun Modifier.bleed(by: Dp): Modifier = layout { measurable, constraints ->
+    if (!constraints.hasBoundedWidth) {
+        val p = measurable.measure(constraints)
+        return@layout layout(p.width, p.height) { p.placeRelative(0, 0) }
+    }
+    val extra = by.roundToPx()
+    val wide = constraints.maxWidth + extra * 2
+    val p = measurable.measure(constraints.copy(minWidth = wide, maxWidth = wide))
+    layout(constraints.maxWidth, p.height) { p.placeRelative(-extra, 0) }
 }
 
 /**

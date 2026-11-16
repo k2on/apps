@@ -198,6 +198,8 @@ fn modified<M: 'static>(mut el: Element<'static, M>, mods: &[Modifier]) -> Eleme
             // iced has no screen reader yet.
             Modifier::Combine => el,
             Modifier::Width(m) => container(el).width(measure(*m)).clip(true).into(),
+            // iced lays nothing out past its parent: in its column.
+            Modifier::Bleed(_) => el,
             Modifier::MaxWidth(m) => container(el).width(Length::Fill).max_width(measure(*m)).into(),
             Modifier::Side(m) => container(el).width(measure(*m)).height(measure(*m)).clip(true).into(),
             // iced has no aspect-ratio layout: a square of what it is given

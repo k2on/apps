@@ -258,6 +258,13 @@ pub enum Modifier {
     /// As wide as it is given up to the measure, at the leading edge: a
     /// row of wide buttons on a wide window.
     MaxWidth(Measure),
+    /// Out past its column's edges by the step on either side, on the
+    /// page's own ground rather than a card: a shelf that scrolls to the
+    /// screen's edge. What it holds insets itself back by as much (SwiftUI
+    /// a negative padding on a clear row, Compose a layout wider than its
+    /// column, the browser a negative margin; iced, which lays nothing
+    /// out past its parent, keeps it in its column).
+    Bleed(Space),
     /// A square the measure a side: what it holds is laid into that frame.
     Side(Measure),
     /// As tall as it is wide, of the width it is given: what it holds is
@@ -537,6 +544,10 @@ pub trait Modify: Sized {
     /// As wide as `m`, what it holds kept to it.
     fn width(self, m: Measure) -> Self {
         self.modify(Modifier::Width(m))
+    }
+    /// Out past its column's edges by `s`, on the page's ground.
+    fn bleed(self, s: Space) -> Self {
+        self.modify(Modifier::Bleed(s))
     }
     /// As wide as it is given, at most `m`.
     fn max_width(self, m: Measure) -> Self {

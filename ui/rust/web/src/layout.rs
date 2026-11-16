@@ -32,6 +32,7 @@ pub(crate) fn layout<M: Clone + std::fmt::Debug + 'static>(l: Layout<M>) -> Opti
             Modifier::Corner(Corner::Circle) => class.push("ark-corner-circle".into()),
             Modifier::Combine => group = true,
             Modifier::Width(m) => class.push(format!("ark-w-{}", m.token())),
+            Modifier::Bleed(s) => class.push(format!("ark-bleed-{}", s.case())),
             Modifier::MaxWidth(m) => class.push(format!("ark-max-w-{}", m.token())),
             Modifier::Side(m) => class.push(format!("ark-side-{}", m.token())),
             Modifier::Square => class.push("ark-square".into()),
