@@ -7,10 +7,11 @@ figure a view kept up to date by the rows a change touched.
 
 ```
 app.toml        what money is to every platform: its name, id, accent,
-                platforms, its phones' shell (`[shell]`) and what it asks of
-                each (ui/docs/app.md, "Generated, Not Committed"); every
-                native project is generated from it and the Rust views:
-                `nix run .#money-prebuild` writes them into .native/
+                platforms and what it asks of each (ui/docs/app.md,
+                "Generated, Not Committed"); every native project is
+                generated from it, its crate's declaration (app/src/lib.rs)
+                and the Rust views: `nix run .#money-prebuild` writes them
+                into .native/
 icon.svg        its icon, every platform's
 core/           the domain, in plain Rust (spec/AUTHORING.md): src/schema.rs,
                 types.rs, dates.rs; accounts.rs, categories.rs, budget.rs,
@@ -35,12 +36,13 @@ debug.keystore  the one key every Android build signs with (below)
 ## The phones
 
 Nothing of money's phones is written by hand. Their library is generated
-from app.toml (`[ffi]`), their screens from money-app's views, and their
+from money-app's declaration (`ark_app::app!`), their screens from its
+views, and their
 shell is the app library's (ArkApp's and ark-app-android's `ArkShell`):
 the sections and their tabs, toolbars, search and inspectors are the
 shell's view (`app/src/shell/view.rs`); which screen is hosted where, what
 goes over every section (the sheets), Settings and the menu bar's commands
-are app.toml's `[shell]`. A route is one of the shell's places on every
+are its declaration's (`#[shell]`, `#[over]`, the shell's further views). A route is one of the shell's places on every
 platform: an account is its section (Accounts pushes it on a phone), a
 bank Connected Banks in Settings. The look is arkui's in money's green, an
 account's mark its kind's glyph in its chart slot's colour (`accounts::

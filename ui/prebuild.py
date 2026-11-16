@@ -2,8 +2,12 @@
 # An Ark app's native projects, generated (ui/docs/app.md, "Generated, Not
 # Committed"): nothing native of an app is committed; this writes it from
 #
-#   <app>/app.toml            its name, id, accent, platforms, modules, and
-#                             what it asks of each platform itself
+#   <app>/app.toml            its configuration: name, id, accent,
+#                             platforms, what it asks of each platform itself
+#   its crates' Cargo.toml    its app crate, domain and demo, its modules
+#   its manifest              what its crate declares (`ark_app::app!`): its
+#                             screens, views, shell and what crosses, printed
+#                             by its generator (`<id>-gen manifest`)
 #   modules/<name>/module.toml  what each module it lists asks of each
 #                             platform (Info.plist keys, entitlements,
 #                             background modes; permissions, services,
@@ -15,7 +19,7 @@
 #   prebuild.py write <app> [--views DIR] [--icon-png FILE] [--bundle-prefix P] [--root ROOT]
 #   prebuild.py files <app>    what it writes, one a line
 #   prebuild.py check          every app's app.toml and modules hold together
-#   prebuild.py views <app> [--out FILE] [--written DIR]
+#   prebuild.py views <app> [--out FILE] [--written DIR --manifest M]
 #                              the views' generator's main; or that DIR,
 #                              what it wrote, has every view's two files
 #
@@ -63,10 +67,60 @@ def apps(root):
     return sorted(os.path.dirname(os.path.relpath(p, root)) for p in glob.glob(os.path.join(root, "*", "app.toml")))
 
 
-def app_of(root, app):
+# What an app's app.toml no longer says: its crate, its scheme, its
+# screens, views, shell and phones' library are its Rust's and its Cargo's
+# (ui/docs/app.md, "The App's Declaration"). `check` refuses them.
+DERIVED = ("crate", "scheme", "screens", "views", "shell", "ffi")
+
+
+def package_at(root, d):
+    """The package name of the crate at `d` (from the repository's root),
+    or none where there is no crate."""
+    path = os.path.join(root, d, "Cargo.toml")
+    return load(path)["package"]["name"] if os.path.exists(path) else None
+
+
+def app_of(root, app, manifest=None):
+    """An app: its app.toml, and what is derived beside it — from its
+    crates (its app crate `<app>/app`, else `<app>` itself; its domain
+    `<app>/core`; its demo `<app>/demo`), its modules, and, where one is
+    given (`manifest`, else `ARK_MANIFEST`), its manifest: what its crate
+    declares (`ark_app::app!`), printed by its generator (`<id>-gen
+    manifest`)."""
     a = load(os.path.join(root, app, "app.toml"))
     a["dir"] = app
+    a["toml"] = {k for k in a if k != "dir"}
+    crate = package_at(root, os.path.join(app, "app")) or package_at(root, app)
+    if not crate:
+        return a
+    a["crate"] = crate
+    core = package_at(root, os.path.join(app, "core"))
+    if core:
+        # An app with data: its domain (`<core>::shared`), its demo, the
+        # scheme the server's sign-in sends the code back on (its id),
+        # and the object its phones hold (`<Name>Host`).
+        a["scheme"] = a["id"]
+        ffi = {"host": f"{a['name']}Host", "domain": f"{rust_name(core)}::shared", "app": "App", "route": "Route", "twins": []}
+        demo = package_at(root, os.path.join(app, "demo"))
+        if demo:
+            ffi["demo"] = demo
+        a["ffi"] = ffi
+    manifest = manifest or os.environ.get("ARK_MANIFEST")
+    if manifest:
+        with open(manifest) as f:
+            m = json.load(f)
+        for k in ("screens", "views", "shell"):
+            if m.get(k):
+                a[k] = m[k]
+        if "ffi" in a:
+            a["ffi"].update(m["ffi"])
     return a
+
+
+def declared(a):
+    """Whether the app's manifest was read: what its phones' code is
+    written from."""
+    return "screens" in a
 
 
 def module(root, name):
@@ -1275,9 +1329,6 @@ class MainActivity : ArkActivity() {{
 # the root it is drawn from (the scenes on Apple's, the composable the
 # activity draws on Android).
 
-SHELL_KEYS = ("screen", "settings", "commands", "over", "account", "section", "appearance", "household", "browse", "closed")
-
-
 def camel(name):
     """`account_title` as Swift and Kotlin name a field: `accountTitle`."""
     head, *rest = name.split("_")
@@ -1501,16 +1552,15 @@ fun ArkAppRoot(app: ArkApp, library: {host}) {{
 
 # ------------------------------------------------------------- the views' generator
 
-# The phones' views are written by ark-ui-gen from the app's #[view]s. Its
-# main, which names each one with its runtime's holders and the names it is
-# written under, is generated from app.toml's `[screens]` and `[views]`
-# (nix/ark-app.nix builds it as `<id>-gen`, linked with the app's crate):
+# The phones' views are written by ark-ui-gen from the app's #[view]s, as
+# its crate declares them (`ark_app::app!`). Its main is one line over that
+# declaration, which also prints the app's manifest (nix/ark-app.nix builds
+# it as `<id>-gen`, linked with the app's crate, and runs it for both):
 # nothing of it is committed.
 
-# The first run's screen, every Ark app's (ark_app::welcome), over its host's
-# `WelcomeApp` (the app library's holders).
-WELCOME_VIEW = {"view": "ark_app::welcome::welcome", "source": "ui/rust/app/src/welcome.rs", "msg": "WelcomeMsg",
-                "swift": "WelcomeView", "swift_holder": "FirstRunScreen", "kotlin": "WelcomeScreen", "kotlin_holder": "FirstRunHolder"}
+# The first run's screen, every Ark app's (ark_app::welcome), as ark-ui-gen
+# writes it.
+WELCOME_VIEW = {"swift": "WelcomeView", "kotlin": "WelcomeScreen"}
 
 
 def rust_name(crate):
@@ -1518,50 +1568,24 @@ def rust_name(crate):
 
 
 def generated_views(a):
-    """Every view the generator writes for the app, in order: its screens',
-    the first run's, then the screens' further views."""
-    crate = rust_name(a["crate"])
-
-    def of(path, sc, screen, kind="view"):
-        module = path.rsplit("::", 1)[0]
-        return {"kind": kind, "view": f"{crate}::{path}", "source": f"{a['dir']}/app/src/{module.replace('::', '/')}.rs",
-                "msg": sc["msg"], "swift_holder": sc["swift"], "kotlin_holder": sc["kotlin"], "screen": screen}
-
-    # Each view's walk name (its screen's `[screens]` key; a further view's,
-    # the screen it is over): its elements' ids are under it.
-    out = []
-    for name, sc in a.get("screens", {}).items():
-        out.append(of(sc["view"], sc, name) | {"swift": sc["swift-view"], "kotlin": sc["kotlin-view"]})
-    out.append(WELCOME_VIEW | {"kind": "view", "screen": "welcome"})
-    for name, v in a.get("views", {}).items():
-        sc = a["screens"][v["screen"]]
-        kind = "commands" if "commands" in v else "view"
-        out.append(of(v[kind], sc, v["screen"], kind) | {"swift": v["swift-view"], "kotlin": v["kotlin-view"]})
-    return out
+    """Every view the generator writes for the app, by the names its
+    manifest gives them: its screens', the first run's, then the screens'
+    further views."""
+    out = [(sc["swift-view"], sc["kotlin-view"]) for sc in a.get("screens", {}).values()]
+    out.append((WELCOME_VIEW["swift"], WELCOME_VIEW["kotlin"]))
+    out += [(v["swift-view"], v["kotlin-view"]) for v in a.get("views", {}).values()]
+    return [{"swift": sw, "kotlin": kt} for sw, kt in out]
 
 
-def views_main(a):
-    """The generator's main for the app: its views named, handed to
-    ark-ui-gen's command line."""
-    def entry(g):
-        names = (f'Names {{ swift: "{g["swift"]}", swift_holder: "{g["swift_holder"]}", kotlin: "{g["kotlin"]}", '
-                 f'kotlin_holder: "{g["kotlin_holder"]}", source: "{g["source"]}", msg: "{g["msg"]}", screen: "{g["screen"]}" }}')
-        fn = g["view"] if g["kind"] == "commands" else g["view"] + "::record"
-        return f"            Generated::{g['kind']}({fn}, {names}),"
-    body = "\n".join(entry(g) for g in generated_views(a))
+def views_main(root, a):
+    """The generator's main for the app: ark-ui-gen's command line over its
+    crate's declaration (`App`), which writes its views and prints its
+    manifest."""
     return f"""//! {HEADER.format(app=a['dir'])}
-//! {a['name']}'s views written as SwiftUI and Compose (ark_ui_gen::app), from
-//! app.toml's `[screens]` and `[views]`. Never committed.
-use ark_ui_gen::app::{{App, Generated, Names}};
-
+//! {a['name']}'s generator (ark_ui_gen::app::run): its views written as SwiftUI
+//! and Compose, and its manifest, from its crate's declaration. Never committed.
 fn main() {{
-    ark_ui_gen::app::main(App {{
-        // The phones' library's namespace, where the messages' twins are.
-        namespace: "{ffi_namespace(a)}",
-        screens: vec![
-{body}
-        ],
-    }})
+    ark_ui_gen::app::run::<{rust_name(a['crate'])}::App>("{ffi_namespace(a)}", "{crate_dir(root, a)}")
 }}
 """
 
@@ -1577,12 +1601,6 @@ fn main() {{
 # `phone_host!`). nix/ark-app.nix builds it (`<id>-ffi`), and a cargo build
 # of the phones' (the iPhone's) adds it to the workspace at `<app>/.ffi`.
 
-# The first run's records, every Ark app's (ark_app::welcome), and who is
-# signed in as the shell's account face says it (ark_app::shell).
-WELCOME_TWINS = "welcome::{AddDeviceMsg, AddDevicePage, ConfirmPage, IntroPage, OpeningPage, ServerPage, SignInPage, WelcomeMsg, WelcomePage}"
-SHELL_TWINS = "shell::Household"
-
-
 def ffi_namespace(a):
     """The UniFFI namespace of the app's library: its lib's name."""
     return f"{a['id']}_ffi"
@@ -1590,25 +1608,30 @@ def ffi_namespace(a):
 
 def ffi_twins(a):
     """Every type that crosses, by crate (its lib's name), as `use` names
-    them: `[ffi.twins]`, then the app's screens' pages and messages, its
-    route, and the first run's and the shell's records. What only the
-    phone's shell does is ark-ffi's own (`ShellAsk`), every app's."""
-    crate = rust_name(a["crate"])
-    out = {k: list(v) for k, v in a["ffi"].get("twins", {}).items()}
-    mine = out.setdefault(crate, [])
-    for sc in a.get("screens", {}).values():
-        module = sc["app"].rsplit("::", 1)[0]
-        mine.append(f"{module}::{{{sc['page']}, {sc['msg']}}}")
-    mine.append(a["ffi"]["route"])
-    out.setdefault("ark_app", []).extend([WELCOME_TWINS, SHELL_TWINS])
-    return out
+    them, a module's types together: what the manifest found its screens'
+    pages and messages, its route and its request reach, and the first
+    run's and the shell's records (`ark::twin::Reach`)."""
+    out = {}
+    for path in a["ffi"]["twins"]:
+        krate, rest = path.split("::", 1)
+        module, _, name = rest.rpartition("::")
+        out.setdefault(krate, {}).setdefault(module, []).append(name)
+    trees = {}
+    for krate, modules in out.items():
+        trees[krate] = []
+        for module, names in modules.items():
+            names = sorted(names)
+            one = names[0] if len(names) == 1 else "{" + ", ".join(names) + "}"
+            trees[krate].append(f"{module}::{one}" if module else one)
+    return trees
 
 
 def ffi_crates(a):
     """The crates the library names, by their packages' names (a lib's name
-    with dashes): the app's, every twin's, its domain's and its demo's."""
-    names = [a["crate"]] + [k.replace("_", "-") for k in ffi_twins(a)]
-    names.append(a["ffi"]["domain"].split("::", 1)[0].replace("_", "-"))
+    with dashes): the app's, its domain's and its demo's, and the
+    runtime's; every twin is of one of them (`ffi` holds it), as nix knows
+    them while it evaluates (nix/ark-app.nix's `ffiCrates`)."""
+    names = [a["crate"], a["ffi"]["domain"].split("::", 1)[0].replace("_", "-")]
     if a["ffi"].get("demo"):
         names.append(a["ffi"]["demo"])
     return list(dict.fromkeys(names + ["ark", "ark-app"]))
@@ -1645,8 +1668,8 @@ def ffi_lib(a):
 
 uniffi::setup_scaffolding!();
 
-// What crosses: app.toml's `[ffi.twins]`, the screens' pages and messages,
-// the route, and the first run's and the shell's records.
+// What crosses: what the screens' pages and messages, the route and the
+// request reach, and the first run's and the shell's records (its manifest).
 ark::twins!(
 {twins}
 );
@@ -1704,7 +1727,7 @@ def ffi_cargo(root, a):
     # what it fetches with), as every generated target links it.
     deps = "".join(f'{c} = {{ path = "{os.path.relpath(dirs[c], here)}"{bare(a, c)} }}\n' for c in ffi_crates(a))
     feats = ", ".join(json.dumps(f) for f in arkffi_features(root, a))
-    android = ", ".join(json.dumps(f"ark-ffi/{f}") for f in a["ffi"].get("android", []))
+    android = ", ".join(json.dumps(f"ark-ffi/{f}") for f in ffi_features(root, a, "android"))
     return f"""# {HEADER.format(app=a['dir'])}
 [package]
 name = "{a['id']}-ffi"
@@ -1726,6 +1749,12 @@ uniffi = {{ version = "0.32.2", default-features = false }}
 # Android's are its default; the iPhone's build takes none.
 default = [{android}]
 """
+
+
+def ffi_features(root, a, platform):
+    """ark-ffi's features the library links on `platform` (`android`,
+    `apple`): its modules' (module.toml's `[phone] <platform>-features`)."""
+    return [f for n in module_names(root, a) for f in module(root, n).get("phone", {}).get(f"{platform}-features", [])]
 
 
 def bare(a, crate):
@@ -1780,7 +1809,8 @@ def web_of(a):
     modes."""
     w, f = a.get("web", {}), a.get("ffi", {})
     return {
-        "app": w.get("app") or f.get("app"),
+        # Its part of its host, named at its crate's root by its declaration.
+        "app": "App",
         "domain": f.get("domain"),
         "demo": f.get("demo"),
         "modes": w.get("modes", ["spa"]),
@@ -2042,14 +2072,14 @@ def desktop_main(a):
     seed = rust_name(demo) if demo else None
     return f"""//! {HEADER.format(app=a['dir'])}
 //! {a['name']} on the desktop (ui/docs/app.md, "The Desktop's Window"): its
-//! crate's part of its host ({crate}::{f['app']}) run in a window by arkui's
+//! crate's part of its host ({crate}::App) run in a window by arkui's
 //! `DesktopHost`, on its server or (`-demo`) its demo. Never committed.
 
 /// {a['name']} on the desktop: its name, scheme, accent, domain and demo.
 struct Desk;
 
 impl arkui::host::Desktop for Desk {{
-    type App = {crate}::{f['app']};
+    type App = {crate}::App;
     const NAME: &'static str = {json.dumps(a['name'])};
     const SCHEME: &'static str = {json.dumps(a.get('scheme', a['id']))};
     const PALETTE: arkui::theme::Palette = arkui::tokens::{a['accent'].upper()};
@@ -2128,8 +2158,10 @@ def ffi_lib_name(a):
     return f"{a['id']}_ffi"
 
 
-def write(root, app, views=None, icon_png=None, prefix=BUNDLE_PREFIX, out=None):
-    a = app_of(REPO, app)
+def write(root, app, views=None, icon_png=None, prefix=BUNDLE_PREFIX, out=None, manifest=None):
+    a = app_of(REPO, app, manifest)
+    if ark_entry(a) and not declared(a):
+        sys.exit(f"prebuild.py write {app}: no manifest (--manifest, or ARK_MANIFEST: `<id>-gen manifest`), which its phones' entry points are written from")
     out = out or os.path.join(root, app, NATIVE)
     written = []
     if apple_targets(a):
@@ -2248,65 +2280,18 @@ def check(root):
         # An app's modules are its crate's dependencies, and nowhere else.
         if "modules" in a:
             problems.append(f"{app}/app.toml lists modules: an app takes a module on by depending on its crate (ui/docs/app.md, How an App Opts In)")
-        # Each screen and further view says its #[view] and the names it is
-        # written under: the views' generator's main is made of them.
-        if a.get("crate"):
-            for n, sc in a.get("screens", {}).items():
-                for k in ("view", "swift-view", "kotlin-view"):
-                    if k not in sc:
-                        problems.append(f"{app}/app.toml's screen {n} says no `{k}`")
-            for n, v in a.get("views", {}).items():
-                if v.get("screen") not in a.get("screens", {}):
-                    problems.append(f"{app}/app.toml's view {n} is over no screen of [screens]")
-                if ("view" in v) == ("commands" in v):
-                    problems.append(f"{app}/app.toml's view {n} says one of `view` and `commands`")
-        # The shell is the app library's, drawn from `[shell]`'s names
-        # (`swift_shell`, `kotlin_shell`): each must name what is there.
-        if "shell" in a:
-            sh = a["shell"]
-            for k in SHELL_KEYS:
-                if k not in sh:
-                    problems.append(f"{app}/app.toml's [shell] says no `{k}`")
-            for k in ("screen", "over"):
-                if k in sh and sh[k] not in a.get("screens", {}):
-                    problems.append(f"{app}/app.toml's [shell] {k} {sh[k]} is no screen of [screens]")
-            for k in ("settings", "commands"):
-                if k in sh and sh[k] not in a.get("views", {}):
-                    problems.append(f"{app}/app.toml's [shell] {k} {sh[k]} is no view of [views]")
-            for name, target in sh.get("hosted", {}).items():
-                # A screen's own view, or a further view of one ([views]).
-                view = a.get("views", {}).get(target)
-                screen = view.get("screen") if view and target not in a.get("screens", {}) else target
-                if view and target not in a.get("screens", {}) and "view" not in view:
-                    problems.append(f"{app}/app.toml's [shell.hosted] {name} is {target}, a [views] entry that is no view")
-                if screen not in a.get("screens", {}) or a["screens"][screen].get("beside"):
-                    problems.append(f"{app}/app.toml's [shell.hosted] {name} is over {target}, no screen of [screens] the shell holds, nor a view of one")
-        # The phones' library is written from `[ffi]` and `[screens]`
-        # (`ffi_lib`), its crates named by their libs' names with dashes.
-        if a.get("crate") and "ffi" in a:
-            for k in ("host", "app", "route", "domain"):
-                if k not in a["ffi"]:
-                    problems.append(f"{app}/app.toml's [ffi] says no `{k}`")
-            for n, sc in a.get("screens", {}).items():
-                if "app" not in sc:
-                    problems.append(f"{app}/app.toml's screen {n} says no `app`, the type it runs in {a['crate']}")
-            if all(k in a["ffi"] for k in ("route", "domain")) and all("app" in sc for sc in a.get("screens", {}).values()):
-                # A twin is named as its type in Kotlin and Swift: never as
-                # one UniFFI's Kotlin already imports (JNA's `Native`).
-                for k in ("route",):
-                    if a["ffi"][k].rsplit("::", 1)[-1] in ("Native", "Pointer", "Structure", "Library"):
-                        problems.append(f"{app}/app.toml's [ffi] {k} is named as a JNA class its Kotlin imports")
-                names = {p["name"] for p in cargo_metadata(root)["packages"]}
-                for c in ffi_crates(a):
-                    if c not in names:
-                        problems.append(f"{app}/app.toml's [ffi] names {c.replace('-', '_')}, whose package is no {c} of the workspace")
+        # What its Rust and its Cargo say is never said again here
+        # (ui/docs/app.md, "The App's Declaration").
+        for k in DERIVED:
+            if k in a["toml"]:
+                problems.append(f"{app}/app.toml says `{k}`, which is derived: its crate's declaration (`ark_app::app!`) and its Cargo say it")
+        if "app" in a.get("web", {}):
+            problems.append(f"{app}/app.toml's [web] says `app`: its part of its host is its crate's declared `App`")
         # The browser's page is written from app.toml (`web_main`): the
         # app's part (`[web] app`, else `[ffi]`'s), its domain where it has
         # data, and each module's browser device names its type and the
         # port it is for.
         if a.get("crate") and has(a, "web"):
-            if not web_of(a)["app"]:
-                problems.append(f"{app}/app.toml has web and says no `app` in [web] or [ffi], which its page is written from")
             for m in web_of(a)["modes"]:
                 if m not in ("spa", "ssg", "ssr"):
                     problems.append(f"{app}/app.toml's [web] modes says `{m}`, which is none of spa, ssg, ssr")
@@ -2317,9 +2302,8 @@ def check(root):
         # The desktop's window is written from app.toml (`desktop_main`) the
         # same way, and each module's desktop device is a feature of arkui's.
         if a.get("crate") and has(a, "desktop"):
-            for k in ("app", "domain"):
-                if k not in a.get("ffi", {}):
-                    problems.append(f"{app}/app.toml has desktop and its [ffi] says no `{k}`, which its window is written from")
+            if "ffi" not in a:
+                problems.append(f"{app} has desktop and no domain (`{app}/core`), which its window is written from")
             arkui = load(os.path.join(root, "ui", "rust", "arkui", "Cargo.toml"))
             for f in desktop_features(root, a):
                 if f not in arkui.get("features", {}):
@@ -2451,6 +2435,7 @@ def main(argv):
     w.add_argument("--bundle-prefix", default=BUNDLE_PREFIX)
     w.add_argument("--root", default=REPO)
     w.add_argument("--out")
+    w.add_argument("--manifest", help="the app's manifest (`<id>-gen manifest`); else ARK_MANIFEST")
     f = sub.add_parser("files")
     f.add_argument("app")
     sub.add_parser("check")
@@ -2465,10 +2450,12 @@ def main(argv):
     vm.add_argument("--root", default=REPO)
     vm.add_argument("--out")
     vm.add_argument("--written")
+    vm.add_argument("--manifest", help="the app's manifest, which --written is held to")
     ff = sub.add_parser("ffi")
     ff.add_argument("app")
     ff.add_argument("--root", default=REPO)
     ff.add_argument("--out", help="the directory its lib.rs and Cargo.toml are written in (the app's .ffi)")
+    ff.add_argument("--manifest", help="the app's manifest (`<id>-gen manifest`); else ARK_MANIFEST")
     wb = sub.add_parser("web")
     wb.add_argument("app")
     wb.add_argument("--root", default=REPO)
@@ -2483,7 +2470,7 @@ def main(argv):
     fd.add_argument("--out")
     args = p.parse_args(argv)
     if args.cmd == "write":
-        for d in write(args.root, args.app, args.views, args.icon_png, args.bundle_prefix, args.out):
+        for d in write(args.root, args.app, args.views, args.icon_png, args.bundle_prefix, args.out, args.manifest):
             print(f"wrote {os.path.relpath(d, args.root)}")
     elif args.cmd == "files":
         a = app_of(REPO, args.app)
@@ -2497,19 +2484,27 @@ def main(argv):
     elif args.cmd == "modules":
         print("\n".join(module_names(REPO, app_of(REPO, args.app))))
     elif args.cmd == "views" and args.written:
-        missing = [f for g in generated_views(app_of(args.root, args.app)) for f in (g["swift"] + ".swift", g["kotlin"] + ".kt")
+        missing = [f for g in generated_views(app_of(args.root, args.app, args.manifest)) for f in (g["swift"] + ".swift", g["kotlin"] + ".kt")
                    if not os.path.exists(os.path.join(args.written, f))]
         for f in missing:
             print(f"{args.written}: no {f}, which app.toml's views name", file=sys.stderr)
         sys.exit(1 if missing else 0)
     elif args.cmd == "views":
-        text = views_main(app_of(args.root, args.app))
+        text = views_main(args.root, app_of(args.root, args.app))
         if args.out:
             write_file(args.out, text)
         else:
             sys.stdout.write(text)
     elif args.cmd == "ffi":
-        a = app_of(args.root, args.app)
+        a = app_of(args.root, args.app, args.manifest)
+        if not declared(a):
+            sys.exit(f"prebuild.py ffi {args.app}: no manifest (--manifest, or ARK_MANIFEST: `<id>-gen manifest`)")
+        # Every twin is of a crate the library names (nix knows them before
+        # any manifest is read).
+        names = {c.replace("-", "_") for c in ffi_crates(a)}
+        for k in ffi_twins(a):
+            if k not in names:
+                sys.exit(f"prebuild.py ffi {args.app}: a twin is of {k}, which is none of the app's, its domain's, its demo's or the runtime's crates")
         out = args.out or os.path.join(args.root, args.app, ".ffi")
         write_file(os.path.join(out, "lib.rs"), ffi_lib(a))
         write_file(os.path.join(out, "Cargo.toml"), ffi_cargo(args.root, a))

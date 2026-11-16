@@ -5,10 +5,10 @@
 #
 #   crates      the app's generated crates, in crate2nix's form, for
 #               nix/rust.nix to resolve and build beside the workspace's:
-#               `<id>-gen`, a main (ui/prebuild.py's `views`, from app.toml's
-#               `[screens]` and `[views]`) linking the app's crate with
-#               ark-ui-gen's command line, which writes its #[view]s as
-#               SwiftUI and Compose; `<id>-ffi`, the phones' library;
+#               `<id>-gen`, a main (ui/prebuild.py's `views`) linking the
+#               app's crate with ark-ui-gen's command line over its
+#               declaration, which writes its #[view]s as SwiftUI and
+#               Compose and prints its manifest (`manifest`); `<id>-ffi`, the phones' library;
 #               `<id>-web` (`webCrate`), the browser's page: its module,
 #               and natively its export (`webSrc`); and `<id>-desktop`, the
 #               desktop's window (`desktopSrc`).
@@ -29,19 +29,55 @@
 # `<app>-macos`) are flake.nix's, over `native`.
 { lib, self }:
 let
-  read = dir: (builtins.fromTOML (builtins.readFile (self + "/${dir}/app.toml"))) // { inherit dir; };
+  toml = path: builtins.fromTOML (builtins.readFile (self + "/${path}"));
+  # The package at `d` (from the repository's root), or null.
+  packageAt = d: if builtins.pathExists (self + "/${d}/Cargo.toml") then (toml "${d}/Cargo.toml").package.name else null;
+  # An app: its app.toml, and what its Cargo says beside it, as
+  # ui/prebuild.py's `app_of` derives it — its crate (`<dir>/app`, else
+  # `<dir>`), and for an app with data its domain (`<dir>/core`'s
+  # `shared`), its demo (`<dir>/demo`), its scheme (its id) and the object
+  # its phones hold (`<Name>Host`). What its crate declares (its screens,
+  # what crosses) is its manifest's, read by ui/prebuild.py, never here.
+  read = dir:
+    let
+      a = toml "${dir}/app.toml" // { inherit dir; };
+      crate = if packageAt "${dir}/app" != null then packageAt "${dir}/app" else packageAt dir;
+      core = packageAt "${dir}/core";
+      demo = packageAt "${dir}/demo";
+    in
+    a // lib.optionalAttrs (crate != null) { inherit crate; }
+    // lib.optionalAttrs (crate != null && core != null) {
+      scheme = a.id;
+      ffi = { host = "${a.name}Host"; domain = "${lib.replaceStrings [ "-" ] [ "_" ] core}::shared"; } // lib.optionalAttrs (demo != null) { inherit demo; };
+    };
 in
 rec {
   inherit read;
 
-  # The generator's main for the app in `dir`: its source, one file,
-  # written by ui/prebuild.py (`views`) from app.toml's `[screens]` and
-  # `[views]`: each #[view] of the app's crate named with its runtime's
-  # holders and the names ark-ui-gen writes it under, the first run's
-  # among them. No crate of the app's is committed for it.
+  # The Cargo manifests ui/prebuild.py reads of an app beside its app.toml:
+  # its crate's, its domain's and its demo's.
+  cargoFiles = a: lib.filter (f: builtins.pathExists (self + "/${f}"))
+    [ "${crateDir a}/Cargo.toml" "${a.dir}/core/Cargo.toml" "${a.dir}/demo/Cargo.toml" ];
+
+  # The app's manifest (ui/docs/app.md, "The App's Declaration"): what its
+  # crate declares (`ark_app::app!`) — its screens and their views, its
+  # shell, what crosses to its phones — as JSON, printed by its generator
+  # (`<id>-gen manifest`, built by `build`), which ui/prebuild.py reads
+  # (`ARK_MANIFEST`) for its phones' library and entry points.
+  manifest = pkgs: build: a:
+    let gen = build { packageId = "${a.id}-gen"; }; in
+    pkgs.runCommand "${a.id}-manifest.json" { } ''
+      ${gen}/bin/${a.id}-gen manifest > $out
+    '';
+
+  # The generator's main for the app in `dir`: its source, one line,
+  # written by ui/prebuild.py (`views`): ark-ui-gen's command line over its
+  # crate's declaration (`App`), which writes its #[view]s as SwiftUI and
+  # Compose and prints its manifest. No crate of the app's is committed for
+  # it.
   genMain = pkgs: a:
     let
-      files = [ "ui/prebuild.py" "ui/theme.py" "ui/theme.toml" "${a.dir}/app.toml" ];
+      files = [ "ui/prebuild.py" "ui/theme.py" "ui/theme.toml" "${a.dir}/app.toml" ] ++ cargoFiles a;
       src = lib.cleanSourceWith {
         src = self;
         filter = path: _:
@@ -54,18 +90,18 @@ rec {
       python3 ui/prebuild.py views ${a.dir} --root . --out $out/src/main.rs
     '';
 
-  # The phones' library, generated (ui/prebuild.py's `ffi`, from app.toml's
-  # `[ffi]` and `[screens]`): `<id>-ffi` (lib and UniFFI namespace
+  # The phones' library, generated (ui/prebuild.py's `ffi`, from the app's
+  # manifest): `<id>-ffi` (lib and UniFFI namespace
   # `<id>_ffi`), the UniFFI twins of what crosses and the objects the phone
   # holds over the app's crate, run by ark-ffi's `Hosted`, as a static
   # library (the iPhone, the Mac) and a shared one (Android). Its `lib.rs`,
   # and the Cargo.toml the iPhone's cargo build adds to the workspace at
   # `<dir>/.ffi` (nix/rust.nix builds the same crate from `crates` below).
   # Nothing of it is committed.
-  ffiSrc = pkgs: cargoMetadata: a:
+  ffiSrc = pkgs: cargoMetadata: manifest: a:
     let
       members = map (m: normal "rust/${m}") (builtins.fromTOML (builtins.readFile (self + "/rust/Cargo.toml"))).workspace.members;
-      files = [ "ui/prebuild.py" "ui/theme.py" "ui/theme.toml" "${a.dir}/app.toml" "rust/Cargo.toml" ] ++ map (m: "${m}/Cargo.toml") members;
+      files = [ "ui/prebuild.py" "ui/theme.py" "ui/theme.toml" "${a.dir}/app.toml" "rust/Cargo.toml" ] ++ cargoFiles a ++ map (m: "${m}/Cargo.toml") members;
       src = lib.cleanSourceWith {
         src = self;
         filter = path: _:
@@ -77,11 +113,12 @@ rec {
     pkgs.runCommand "${a.id}-ffi-src" { nativeBuildInputs = [ pkgs.python3 ]; } ''
       cd ${src}
       export ARK_CARGO_METADATA=${cargoMetadata}
-      python3 ui/prebuild.py ffi ${a.dir} --root . --out $out
+      python3 ui/prebuild.py ffi ${a.dir} --root . --manifest ${manifest} --out $out
     '';
-  # The browser's page, generated (ui/prebuild.py's `web`, from app.toml,
-  # the phones' library's twin): `<id>-web`'s main.rs and Cargo.toml, run by
-  # arkui-web's `WebHost` over the app's part of its host with the browser's
+  # The browser's page, generated (ui/prebuild.py's `web`, from app.toml and
+  # the app's Cargo, the phones' library's twin): `<id>-web`'s main.rs and
+  # Cargo.toml, run by arkui-web's `WebHost` over the app's part of its host
+  # (its crate's declared `App`) with the browser's
   # device of each module whose module.toml says `[web]`, its icon and the
   # look and files its `[web]` names beside it; and, for an app drawn in the
   # browser alone, the page that loads it, index.html, with favicon.svg.
@@ -93,7 +130,7 @@ rec {
       w = a.web or { };
       look = map (f: "${a.dir}/${f}") ((w.css or [ ]) ++ (w.files or [ ]) ++ lib.optional (w ? head) w.head);
       files = [ "ui/prebuild.py" "ui/theme.py" "ui/theme.toml" "${a.dir}/app.toml" "${a.dir}/${a.icon.svg or "icon.svg"}" "rust/Cargo.toml" ]
-        ++ look ++ map (m: "${m}/Cargo.toml") members;
+        ++ look ++ cargoFiles a ++ map (m: "${m}/Cargo.toml") members;
       src = lib.cleanSourceWith {
         src = self;
         filter = path: _:
@@ -117,7 +154,7 @@ rec {
   desktopSrc = pkgs: cargoMetadata: a:
     let
       members = map (m: normal "rust/${m}") (builtins.fromTOML (builtins.readFile (self + "/rust/Cargo.toml"))).workspace.members;
-      files = [ "ui/prebuild.py" "ui/theme.py" "ui/theme.toml" "${a.dir}/app.toml" "${a.dir}/${a.icon.svg or "icon.svg"}" "rust/Cargo.toml" ] ++ map (m: "${m}/Cargo.toml") members;
+      files = [ "ui/prebuild.py" "ui/theme.py" "ui/theme.toml" "${a.dir}/app.toml" "${a.dir}/${a.icon.svg or "icon.svg"}" "rust/Cargo.toml" ] ++ cargoFiles a ++ map (m: "${m}/Cargo.toml") members;
       src = lib.cleanSourceWith {
         src = self;
         filter = path: _:
@@ -221,27 +258,29 @@ rec {
 
   ffiName = a: "${a.id}-ffi";
   ffiLib = a: "${a.id}_ffi";
-  # The crates the library names, by their packages' names (a lib's name
-  # with dashes, which ui/prebuild.py's check holds): the app's, every
-  # twin's, its domain's and its demo's (ui/prebuild.py's `ffi_crates`).
+  # The crates the library names, by their packages' names: the app's, its
+  # domain's and its demo's, and the runtime's (ui/prebuild.py's
+  # `ffi_crates`, which holds every twin to one of them).
   ffiCrates = a: lib.unique ([ a.crate ]
-    ++ map (lib.replaceStrings [ "_" ] [ "-" ]) (lib.attrNames (a.ffi.twins or { }) ++ [ "ark_app" ])
     ++ [ (lib.replaceStrings [ "_" ] [ "-" ] (lib.head (lib.splitString "::" a.ffi.domain))) ]
     ++ lib.optional (a.ffi ? demo) a.ffi.demo
     ++ [ "ark" "ark-app" ]);
-  # Android's features are the library's default; the iPhone's build takes none.
-  ffiFeatures = a: platform: map (f: "ark-ffi/${f}") ((a.ffi or { }).${platform} or [ ]);
+  # Android's features are the library's default; the iPhone's build takes
+  # none. Each is a module's (module.toml's `[phone] <platform>-features`:
+  # the scanner's corner model on Android).
+  ffiFeatures = a: platform: map (f: "ark-ffi/${f}") (lib.concatMap (m: (m.toml.phone or { })."${platform}-features" or [ ]) (modulesOf a));
 
   # The app's generated crates, in crate2nix's form (nix/rust.nix's
-  # `extraCrates`).
-  # An app of Kotlin alone (no `crate`: revelation) has none.
-  crates = pkgs: cargoMetadata: dir:
+  # `extraCrates`); `manifestOf` gives an app's manifest, which its phones'
+  # library is written from. An app of Kotlin alone (no `crate`:
+  # revelation) has none.
+  crates = pkgs: cargoMetadata: manifestOf: dir:
     let a = read dir; in lib.optionalAttrs (a ? crate && a ? ffi) {
       "${ffiName a}" = {
         crateName = ffiName a;
         version = "0.1.0";
         edition = "2021";
-        src = ffiSrc pkgs cargoMetadata a;
+        src = ffiSrc pkgs cargoMetadata (manifestOf a) a;
         libPath = "lib.rs";
         libName = ffiLib a;
         type = [ "lib" "cdylib" "staticlib" ];
@@ -266,7 +305,7 @@ rec {
         ];
         features = { };
       };
-    } // lib.optionalAttrs (a ? crate && a ? screens) {
+    } // lib.optionalAttrs (a ? crate && a ? ffi) {
       "${a.id}-gen" = {
         crateName = "${a.id}-gen";
         version = "0.1.0";
@@ -288,13 +327,15 @@ rec {
     let
       a = read dir;
       gen = build { packageId = "${a.id}-gen"; };
-      # Its screens' SwiftUI and Compose; none for an app with no crate.
-      # Every view app.toml names is among them (what money/views' test
-      # held when the generator's main was a crate of its own).
-      ui = if a ? crate then pkgs.runCommand "${a.id}-ui" { nativeBuildInputs = [ pkgs.python3 ]; } ''
+      # What its crate declares, for its phones' entry points and library.
+      declared = if a ? ffi then manifest pkgs build a else null;
+      # Its screens' SwiftUI and Compose; none for an app with no data.
+      # Every view its manifest names is among them.
+      ui = if declared != null then pkgs.runCommand "${a.id}-ui" { nativeBuildInputs = [ pkgs.python3 ]; } ''
         ${gen}/bin/${a.id}-gen write $out --package ${a.android.package or "dev.${a.id}.android"}
-        cd ${only [ "ui/prebuild.py" "ui/theme.py" "ui/theme.toml" "${dir}/app.toml" ]}
-        python3 ui/prebuild.py views ${dir} --root . --written $out
+        cd ${only ([ "ui/prebuild.py" "ui/theme.py" "ui/theme.toml" "${dir}/app.toml" ] ++ cargoFiles a)}
+        export ARK_CARGO_METADATA=${cargoMetadata}
+        python3 ui/prebuild.py views ${dir} --root . --manifest ${declared} --written $out
       '' else null;
       native = pkgs.runCommand "${a.id}-native" {
         nativeBuildInputs = [ pkgs.python3 pkgs.librsvg ];
@@ -303,17 +344,18 @@ rec {
         # resources) and its own modules; not its Rust, its server or its
         # seed, an edit to which would otherwise write the same projects
         # again and build every phone's app over them.
-        src = only [ "ui/prebuild.py" "ui/theme.py" "ui/theme.toml" "modules"
-          "${dir}/app.toml" "${dir}/${a.icon.svg or "icon.svg"}" "${dir}/native" "${dir}/modules" ];
+        src = only ([ "ui/prebuild.py" "ui/theme.py" "ui/theme.toml" "modules"
+          "${dir}/app.toml" "${dir}/${a.icon.svg or "icon.svg"}" "${dir}/native" "${dir}/modules" ] ++ cargoFiles a);
       } ''
         cd $src
         # Its device modules: its crate's dependencies, in the workspace's metadata.
         export ARK_CARGO_METADATA=${cargoMetadata}
-        python3 ui/prebuild.py write ${dir} ${lib.optionalString (ui != null) "--views ${ui}"} --bundle-prefix ${bundlePrefix} --out $out/${dir}/.native
+        python3 ui/prebuild.py write ${dir} ${lib.optionalString (ui != null) "--views ${ui} --manifest ${declared}"} --bundle-prefix ${bundlePrefix} --out $out/${dir}/.native
       '';
     in
     {
       inherit a gen ui native;
+      manifest = declared;
       # From the repository's root: the projects, writable, and the phones'
       # libraries where the projects look for them (`../ffi/<platform>`),
       # when `libs` names them.

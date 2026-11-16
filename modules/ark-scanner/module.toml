@@ -15,6 +15,11 @@ PickPhoto = "Option<Vec<u8>>"
 # device of its own on either phone.
 [phone]
 register = "registerScanner"
+# ark-ffi's features an Android app's library links for it: Android's camera
+# gives the scanner's eyes a colour square, which the corner model reads
+# (`model`); the iPhone and the Mac find the page by its bright region, so
+# take none (`apple-features`).
+android-features = ["model"]
 
 # The browser's device (the page's own file input; the crate's feature `web`): an app's
 # generated page registers it for its port when the app's crate depends on

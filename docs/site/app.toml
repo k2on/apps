@@ -10,9 +10,8 @@ version = "0.1"
 # ui/theme.toml's [accent.blue].
 accent = "blue"
 platforms = ["web"]
-# The Rust crate that is the app: this directory's (no core, server or
-# demo beside it).
-crate = "docs"
+# Its crate is this directory's (no core, server or demo beside it), and
+# its part of its host is the `App` it declares (src/lib.rs).
 
 [icon]
 svg = "icon.svg"
@@ -21,9 +20,6 @@ svg = "icon.svg"
 # Every page written ahead, whole without script, and taken over by its
 # module (ui/docs/app.md, "The Browser's Modes").
 modes = ["ssg"]
-# Its part of its host, in its crate (`ark_app::host::HostedApp`, drawn in
-# a window: `ark_app::window::Windowed`).
-app = "app::Docs"
 # Its own styles after ArkUI's, what every page's <head> says besides, and
 # the files its pages load, written beside them as they are (Expo's
 # `public/`).

@@ -42,10 +42,21 @@ a value), then used from there.
 An ark app's committed shape is `app.toml`, `icon.svg`, `core/`, `app/`,
 `server/` and `demo/`, and the one Android debug key its app.toml names.
 Nothing native of an app is committed: its phones' shell is the app
-library's (ArkApp's and ark-app-android's `ArkShell`), drawn from app.toml's
-`[shell]` names and its Rust views; its theme, glyphs and marks are arkui's;
-its page and its desktop window are generated from app.toml too (`.web/`,
+library's (ArkApp's and ark-app-android's `ArkShell`), drawn from its
+crate's declaration and its Rust views; its theme, glyphs and marks are
+arkui's; its page and its desktop window are generated too (`.web/`,
 `.desktop/`: arkui-web's and arkui's hosts over its `Windowed`).
+app.toml is configuration only (name, id, version, accent, platforms,
+icon, Apple and Android settings, web modes, store listing, channels,
+background, keystore). What is said in Rust or Cargo is never said in it
+again: the app's screens, their views, its shell and what crosses to the
+phones are its declaration at its crate's root (`ark_app::app!` in
+`app/src/lib.rs`), its domain and demo are its `core/` and `demo/`
+crates, its modules its crate's dependencies; ui/prebuild.py reads the
+declaration as the manifest its generator prints (`<id>-gen manifest`),
+and its check refuses the old keys. A new screen is a field of the host,
+an `App` and a `#[view]`, and a line in the declaration
+(ui/docs/app.md, "The App's Declaration").
 Its `bridge/`, `views/`, `native/`, `iced/` and `web/` are being removed
 and must not grow (money has none of them: its folder is app.toml,
 icon.svg, core/, app/, server/, demo/, README.md, .gitignore and the

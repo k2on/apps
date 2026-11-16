@@ -124,8 +124,11 @@
             buildRust = rust;
             # Each Ark app's generated crates (its generator's main, its
             # phones' library, its page and its window: nix/ark-app.nix).
-            extraCrates = lib.foldl' (acc: dir: acc // arkApp.crates pkgs cargoMetadata dir) { } arkApps;
+            extraCrates = lib.foldl' (acc: dir: acc // arkApp.crates pkgs cargoMetadata arkManifest dir) { } arkApps;
           };
+          # An Ark app's manifest: what its crate declares, printed by its
+          # generator built here (nix/ark-app.nix's `manifest`).
+          arkManifest = arkApp.manifest pkgs crate;
           # The root crate `packageId` of the workspace, for the host unless
           # `pkgs` and `rust` say another target; its binaries under `bin/`,
           # its library under its `lib` output.
@@ -777,7 +780,7 @@
             dir = "ui/kotlin/app";
             shots = arkui-kotlin-shots;
             carryShots = false;
-            extraSrc = [ "rust/ark-ffi/kotlin" "modules" "ui/prebuild.py" "ui/theme.py" "ui/theme.toml" "money/app.toml" "money/icon.svg" ];
+            extraSrc = [ "rust/ark-ffi/kotlin" "modules" "ui/prebuild.py" "ui/theme.py" "ui/theme.toml" "money/app.toml" "money/icon.svg" ] ++ arkApp.cargoFiles (arkApp.read "money");
             flags = [ "-ParkuiLib=${arkui-kotlin}" "-ParkBindings=${self.checks.${system}.ffi}/money/kotlin" ];
             # The fixture's generated Kotlin, written where `:fixture` compiles it.
             preGradle = "ARK_CARGO_METADATA=${cargoMetadata} python3 ../../prebuild.py fixture --kotlin fixture/generated";
@@ -1059,7 +1062,7 @@
               (cd source && ${stubs (lib.subtractLists real rustMembers)})
             '' + lib.optionalString (ark != null) ''
               mkdir -p source/${ark.dir}/.ffi
-              cp ${arkApp.ffiSrc pkgs cargoMetadata ark}/{Cargo.toml,lib.rs} source/${ark.dir}/.ffi/
+              cp ${arkApp.ffiSrc pkgs cargoMetadata (arkManifest ark) ark}/{Cargo.toml,lib.rs} source/${ark.dir}/.ffi/
               sed -i 's|^members = \[|members = ["../${ark.dir}/.ffi", |' source/rust/Cargo.toml
             '';
           };
@@ -1732,7 +1735,7 @@
                 deps = [ app.bindings ];
               };
               written = pkgs.runCommand "ark-app-fixture-swift" { nativeBuildInputs = [ pkgs.python3 ]; } ''
-                cd ${only [ "ui/prebuild.py" "ui/theme.py" "ui/theme.toml" "modules" "money/app.toml" "money/icon.svg" ]}
+                cd ${only ([ "ui/prebuild.py" "ui/theme.py" "ui/theme.toml" "modules" "money/app.toml" "money/icon.svg" ] ++ arkApp.cargoFiles (arkApp.read "money"))}
                 ARK_CARGO_METADATA=${cargoMetadata} python3 ui/prebuild.py fixture --swift $out
               '';
             in
@@ -2168,11 +2171,13 @@
             # module that declares itself, and ark-ffi registers each device.
             prebuild = pkgs.runCommand "prebuild-check" { nativeBuildInputs = [ pkgs.python3 ]; } ''
               # The modules, their ports (ark-module's src), each app's
-              # app.toml, ark-ffi's, which registers the phones' devices, and
+              # app.toml and its crates' manifests (what is derived beside
+              # it), ark-ffi's, which registers the phones' devices, and
               # arkui's, whose features are the desktop's.
               cd ${only ([ "ui/prebuild.py" "ui/theme.py" "ui/theme.toml" "modules" "ui/rust/module/src" "rust/ark-ffi/Cargo.toml" "ui/rust/arkui/Cargo.toml" ]
                 ++ lib.filter (p: builtins.pathExists (./. + "/${p}"))
-                  (lib.concatMap (d: [ "${d}/app.toml" "${d}/icon.svg" ]) arkApps))}
+                  (lib.concatMap (d: [ "${d}/app.toml" "${d}/icon.svg" ]) arkApps)
+                ++ lib.concatMap (d: arkApp.cargoFiles (arkApp.read d)) arkApps)}
               export ARK_CARGO_METADATA=${cargoMetadata}
               python3 ui/prebuild.py check
               touch $out
@@ -2291,7 +2296,11 @@
                     grep -q "func formatLength" "$TMPDIR/${f.name}/swift/ark_format.swift"
                     grep -q 'fun `formatLength`' "$TMPDIR/${f.name}/kotlin/uniffi/ark_format/ark_format.kt"
                   '') [ harkenFfi moneyFfi ]}
-                  grep -q "class MoneyChange" "$TMPDIR/money/kotlin/uniffi/money_ffi/money_ffi.kt"
+                  # What crosses is what its screens reach (its manifest): a
+                  # page and what it holds, never the domain's changes.
+                  grep -q "class AccountsPage" "$TMPDIR/money/kotlin/uniffi/money_ffi/money_ffi.kt"
+                  grep -q "class AccountKind" "$TMPDIR/money/kotlin/uniffi/money_ffi/money_ffi.kt"
+                  ! grep -q "class MoneyChange" "$TMPDIR/money/kotlin/uniffi/money_ffi/money_ffi.kt"
                 '';
                 # The bindings it wrote, each app's under its name, which its
                 # iOS type-check and its Android build read.
