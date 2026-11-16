@@ -77,14 +77,6 @@ fn drawn<M: Clone + std::fmt::Debug + 'static>(v: View<M>) -> Option<AnyView> {
         _ => return None,
     };
     Some(match p {
-        Part::Hero { label, cents, note } => html::div()
-            .class("ark-hero")
-            .child((
-                html::div().class("ark-hero-label").child(label),
-                html::div().class("ark-hero-figure").child(amount(cents.get(), false)),
-                html::div().class("ark-hero-note").child(note),
-            ))
-            .into_any(),
         Part::Summary {
             label,
             cents,
@@ -126,17 +118,12 @@ fn drawn<M: Clone + std::fmt::Debug + 'static>(v: View<M>) -> Option<AnyView> {
         Part::Section(s) => section(s),
         Part::Row(r) => list_row(*r),
         Part::MeterRow(r) => meter_row(*r),
-        Part::Headline(h) => {
-            let ark_app::view::Headline {
-                label,
-                figure,
-                tint,
-                caption,
-                action,
-            } = *h;
-            let act = action.map(|(title, glyph, tap)| crate::figures::capsule_button(Some(glyph), title, true, tap));
-            crate::figures::headline(&label.get(), figure.get(), crate::figures::Tint::named(&tint.get()), &caption.get(), act)
-        }
+        Part::CapsuleButton {
+            title,
+            glyph,
+            prominent,
+            tap,
+        } => crate::figures::capsule_button(glyph.map(|g| g.get()).as_deref(), &title.get(), prominent, tap),
         Part::NameField {
             label,
             value,

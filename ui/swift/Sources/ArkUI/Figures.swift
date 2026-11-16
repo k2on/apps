@@ -1,8 +1,6 @@
 // Figures, as Apple's own apps draw them: an amount in the locale's currency
 // (`CentsText`) and one something else sets, with its mark (`MarkedCents`),
-// the one figure a screen is about, large on glass the way
-// Wallet draws a card's balance (`HeroFigure`), a figure's state in a tinted
-// capsule (`Pill`), an amount typed on the keypad the way Apple Cash takes
+// a figure's state in a tinted capsule (`Pill`), an amount typed on the keypad the way Apple Cash takes
 // one (`AmountEntry`), and a step back and forth through something ordered —
 // a month, a week — with its name between (`Pager`). Nothing of any app:
 // the amounts are cents (ArkUICore's `Cents`).
@@ -100,73 +98,6 @@ extension Pill where Content == CentsText {
     /// An amount in its capsule.
     public init(cents: Int64, tint: Tint) {
         self.init(tint) { CentsText(cents) }
-    }
-}
-
-@available(iOS 26.0, *)
-/// The one figure a screen is about: its caption, the amount large and
-/// rounded, a line under it, on glass tinted by what it says — Wallet's
-/// balance, Apple Card's. Tapping it is `action`, when there is one.
-public struct HeroFigure<Footer: View>: View {
-    let caption: String
-    let cents: Int64
-    let tint: Tint
-    let note: String
-    let action: (() -> Void)?
-    let footer: Footer
-
-    public init(_ caption: String, cents: Int64, tint: Tint, note: String = "", action: (() -> Void)? = nil, @ViewBuilder footer: () -> Footer) {
-        self.caption = caption
-        self.cents = cents
-        self.tint = tint
-        self.note = note
-        self.action = action
-        self.footer = footer()
-    }
-
-    public var body: some View {
-        let face = VStack(alignment: .leading, spacing: Space.xs) {
-            Text(caption)
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(.quiet)
-            CentsText(cents)
-                .scaledFont(44, weight: .bold, design: .rounded)
-                .foregroundStyle(tint == .neutral ? Color.ink : tint.color)
-                .contentTransition(.numericText(value: Double(cents)))
-                .minimumScaleFactor(0.5)
-                .lineLimit(1)
-            if !note.isEmpty {
-                Text(note).font(.footnote).foregroundStyle(.quiet)
-            }
-            footer.padding(.top, Space.s)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(Space.xl)
-        .background {
-            LinearGradient(colors: [tint.color.opacity(0.22), tint.color.opacity(0.04)], startPoint: .topLeading, endPoint: .bottomTrailing)
-                .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
-        }
-        .surface(in: RoundedRectangle(cornerRadius: 28, style: .continuous))
-        .motion(Springs.move, value: cents)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(caption)
-        .accessibilityValue(CentsText.string(cents) + (note.isEmpty ? "" : ", " + note))
-
-        if let action {
-            Button(action: action) { face.contentShape(Rectangle()) }
-                .buttonStyle(.press)
-                .accessibilityAddTraits(.isButton)
-        } else {
-            face
-        }
-    }
-}
-
-@available(iOS 26.0, *)
-extension HeroFigure where Footer == EmptyView {
-    /// The figure alone, nothing under it and nothing to tap.
-    public init(_ caption: String, cents: Int64, tint: Tint, note: String = "") {
-        self.init(caption, cents: cents, tint: tint, note: note, action: nil) { EmptyView() }
     }
 }
 

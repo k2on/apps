@@ -244,12 +244,7 @@ impl<M: Clone + Debug + 'static> Walk<M> {
                 let label = first.unwrap_or_else(|| r.said.as_ref().map(|s| s.get()).unwrap_or_default());
                 self.push((shown, modal), label, Role::Row, r.tap.as_ref(), None, &r.menu);
             }
-            P::Headline(h) => {
-                self.text(shown, modal, h.label.get());
-                if let Some((title, _, m)) = &h.action {
-                    self.push((shown, modal), title.to_string(), Role::Button, Some(m), None, &[]);
-                }
-            }
+            P::CapsuleButton { title, tap, .. } => self.push((shown, modal), title.get(), Role::Button, Some(tap), None, &[]),
             P::Sheet {
                 title,
                 dismiss,
@@ -458,7 +453,7 @@ impl<M: Clone + Debug + 'static> Walk<M> {
                 }
             }
             P::SettingsPane { content, .. } => self.view(content, shown, modal),
-            P::Hero { label, .. } | P::Summary { label, .. } => self.text(shown, modal, label.to_string()),
+            P::Summary { label, .. } => self.text(shown, modal, label.to_string()),
             P::ClockWords { text, .. } => self.text(shown, modal, text.get()),
             P::Tile { .. }
             | P::Timeline { .. }
@@ -602,7 +597,7 @@ pub fn recorded<M: Debug>(screen: &str, p: &Part<M>) -> Option<Vec<Piece>> {
             Some(format!("{tap:?}")),
         ),
         Part::Button { title, tap, .. } => of(Role::Button, &Val::Is(title.to_string()), Some(format!("{tap:?}"))),
-        Part::WideButton { title, tap, .. } => of(Role::Button, title, Some(format!("{tap:?}"))),
+        Part::WideButton { title, tap, .. } | Part::CapsuleButton { title, tap, .. } => of(Role::Button, title, Some(format!("{tap:?}"))),
         Part::Toggle { title, change, .. } => of(Role::Button, &Val::Is(title.to_string()), Some(format!("{:?}", change.call(true)))),
         Part::NameField { label, typed: t, .. } | Part::DateField { label, typed: t, .. } | Part::AddressField { label, typed: t, .. } => {
             of(Role::Field, &Val::Is(label.to_string()), typed(t))

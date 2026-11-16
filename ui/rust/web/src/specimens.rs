@@ -246,7 +246,14 @@ fn view(name: &str, s: &State) -> Option<View<Said>> {
             card_section(list_row("Fuel").glyph("fuel").amount(6_100).on_tap(press("Fuel"))).header("Getting Around"),
         )
             .into(),
-        "headers" => hero_figure("Net Worth", 1_631_751, "Every open account, less what's owed"),
+        "headers" => vstack((
+            text("Net Worth").style(TextStyle::Subheadline).ink(Ink::Quiet),
+            text("$16,317.51").style(TextStyle::Figure).lines(1),
+            text("Every open account, less what's owed").style(TextStyle::Footnote).ink(Ink::Quiet),
+        ))
+        .align(Align::Start)
+        .padding(Edges::Horizontal, Space::Page)
+        .into(),
         "menu" => card_section(
             list_row("Harbour")
                 .subtitle("Right-click, or press the menu key, for its menu")

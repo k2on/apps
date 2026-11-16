@@ -101,34 +101,6 @@ public fun TabPage(title: String, onRefresh: (() -> Unit)? = null, top: @Composa
 }
 
 /**
- * The page's one large figure: its caption, the amount large, a line under it, on a card washed
- * from the neutral tint at its top corner to almost nothing.
- */
-@Composable
-public fun HeroFigure(caption: String, cents: Long, note: String) {
-    val a = LocalAmounts.current
-    val ink = tintInk(Tint.Neutral)
-    Column(
-        Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(28.dp))
-            .background(MaterialTheme.colorScheme.surfaceContainerLow)
-            .background(Brush.linearGradient(listOf(ink.copy(alpha = 0.22f), ink.copy(alpha = 0.04f))))
-            .padding(Space.xl)
-            .semantics(mergeDescendants = true) { contentDescription = "$caption, ${a.format(cents)}, $note" },
-        verticalArrangement = Arrangement.spacedBy(Space.xs),
-    ) {
-        Text(caption, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        AmountText(
-            cents,
-            style = MaterialTheme.typography.displaySmall.copy(fontWeight = FontWeight.Bold, fontSize = 40.sp, lineHeight = 48.sp),
-            color = MaterialTheme.colorScheme.onSurface,
-        )
-        Text(note, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-    }
-}
-
-/**
  * A section's card under its heading: a total at its end (the error's red below nothing) or words in
  * the caution's tint in its place, and, short of compact, two more figures before it under their
  * columns' titles; a note under it. A collapsible one's heading toggles it, its rows shown while
@@ -293,26 +265,6 @@ public fun MeterRow(
             StatusBadge(status, tintNamed(statusTint))
         }
         MenuOf(offered, open) { open = false }
-    }
-}
-
-/** A view's headline (`ark_app::view::headline`): its tint by name, its one action a prominent capsule at its end. */
-@Composable
-public fun Headline(label: String, figure: String, tint: String, caption: String, actionTitle: String? = null, actionGlyph: String? = null, onAction: (() -> Unit)? = null) {
-    GroupCard {
-        Box(Modifier.padding(horizontal = Space.l, vertical = Space.m)) {
-            Headline(label, figure, tintNamed(tint), caption) {
-                if (onAction != null) {
-                    Button(onClick = onAction) {
-                        if (actionGlyph != null) {
-                            Icon(glyph(actionGlyph), contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(Modifier.width(Space.s))
-                        }
-                        Text(actionTitle ?: "")
-                    }
-                }
-            }
-        }
     }
 }
 

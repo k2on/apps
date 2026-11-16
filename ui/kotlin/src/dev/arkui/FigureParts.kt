@@ -76,23 +76,6 @@ public fun GoalBar(fraction: Float, tint: Tint) {
     ProgressBar(fraction, Modifier.widthIn(max = LayoutTokens.PROGRESS_WIDTH.dp), color = tintInk(if (tint == Tint.Neutral) Tint.Positive else tint), height = 4.dp)
 }
 
-/** A page's headline figure: what it is, the figure large and bold in its tint, a caption; `trailing` at its end. */
-@Composable
-public fun Headline(label: String, figure: String, tint: Tint, caption: String, trailing: @Composable () -> Unit = {}) {
-    Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-        Column(Modifier.weight(1f).semantics(mergeDescendants = true) {}) {
-            Text(label, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Text(
-                figure,
-                style = MaterialTheme.typography.headlineLarge.copy(fontWeight = FontWeight.Bold, fontSize = 34.sp),
-                color = if (tint == Tint.Neutral) MaterialTheme.colorScheme.onSurface else tintInk(tint),
-            )
-            Text(caption, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-        trailing()
-    }
-}
-
 /** A button in a capsule: an action that sits on a page; `prominent` fills it. */
 @Composable
 public fun CapsuleButton(title: String, glyph: String? = null, prominent: Boolean = false, onTap: () -> Unit) {

@@ -139,13 +139,6 @@ fn part<M: Clone + 'static>(v: View<M>) -> Option<Element<'static, M>> {
         _ => return None,
     };
     Some(match p {
-        Part::Hero { label, cents, note } => column![
-            text(label).size(13).style(style::faint(0.55)),
-            amount(cents.get(), 34, false),
-            text(note).size(12).style(style::dim),
-        ]
-        .spacing(2)
-        .into(),
         Part::Summary {
             label,
             cents,
@@ -197,17 +190,12 @@ fn part<M: Clone + 'static>(v: View<M>) -> Option<Element<'static, M>> {
         Part::Section(s) => section(s),
         Part::Row(r) => list_row(*r),
         Part::MeterRow(r) => meter_row(*r),
-        Part::Headline(h) => {
-            let ark_app::view::Headline {
-                label,
-                figure,
-                tint,
-                caption,
-                action,
-            } = *h;
-            let act = action.map(|(title, glyph, tap)| crate::figures::capsule_button(glyphs::named(glyph), title, true, tap));
-            crate::figures::headline(&label.get(), figure.get(), parts::Tint::named(&tint.get()), &caption.get(), act)
-        }
+        Part::CapsuleButton {
+            title,
+            glyph,
+            prominent,
+            tap,
+        } => crate::figures::capsule_button(glyph.and_then(|g| glyphs::named(&g.get())), &title.get(), prominent, tap),
         Part::NameField {
             label,
             value,

@@ -129,9 +129,6 @@ button.ark-sidebar-heading:hover, button.ark-sidebar-heading.ark-on { color: var
 /* * A page */
 .ark-page { height: 100%; min-height: 0; overflow-y: auto; overscroll-behavior-y: contain; }
 .ark-page-column { max-width: var(--ark-page-width); margin: 0 auto; padding: 18px; display: flex; flex-direction: column; gap: 10px; }
-.ark-hero-label { font-size: 13px; color: color-mix(in srgb, var(--ark-ink) 55%, transparent); }
-.ark-hero-figure { font-size: 34px; }
-.ark-hero-note { font-size: 12px; color: var(--ark-quiet); }
 .ark-card { background: var(--ark-container-low); border: 1px solid var(--ark-hairline); border-radius: 8px; }
 .ark-summary { padding: 12px 14px; display: flex; flex-direction: column; gap: 4px; }
 .ark-headline { font-size: 28px; font-weight: 700; font-variant-numeric: tabular-nums; }

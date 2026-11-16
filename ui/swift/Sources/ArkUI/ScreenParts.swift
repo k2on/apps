@@ -371,13 +371,6 @@ public struct MeterRow: View {
     }
 }
 
-extension HeroFigure where Footer == EmptyView {
-    /// The figure in the neutral tint.
-    public init(_ caption: String, cents: Int64, note: String) {
-        self.init(caption, cents: cents, tint: .neutral, note: note)
-    }
-}
-
 // MARK: rows
 
 /// One thing a row's menu offers.

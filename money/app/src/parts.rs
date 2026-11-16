@@ -108,3 +108,62 @@ pub fn goal_progress<M>(fraction: impl Into<Val<f64>>, tint: impl Into<Val<Strin
         .fill_width_at(Align::Start)
         .into()
 }
+
+/// A page's headline: what it is (quiet), its figure large in its tint,
+/// a caption, and its one action at its end ([`Headline::action`]), on a
+/// card — Budget's Ready to Assign with Auto-Assign.
+pub struct Headline<M> {
+    pub label: Val<String>,
+    pub figure: Val<String>,
+    pub tint: Val<String>,
+    pub caption: Val<String>,
+    pub action: Option<(&'static str, &'static str, M)>,
+}
+
+/// A headline of `label`, `figure` in `tint`, `caption` under it.
+pub fn headline<M>(
+    label: impl Into<Val<String>>,
+    figure: impl Into<Val<String>>,
+    tint: impl Into<Val<String>>,
+    caption: impl Into<Val<String>>,
+) -> Headline<M> {
+    Headline {
+        label: label.into(),
+        figure: figure.into(),
+        tint: tint.into(),
+        caption: caption.into(),
+        action: None,
+    }
+}
+
+impl<M> Headline<M> {
+    /// Its one action at its end: `title` with `glyph`, sending `tap`.
+    pub fn action(mut self, title: &'static str, glyph: &'static str, tap: M) -> Self {
+        self.action = Some((title, glyph, tap));
+        self
+    }
+}
+
+impl<M> From<Headline<M>> for View<M> {
+    fn from(h: Headline<M>) -> View<M> {
+        let words = vstack((
+            text(h.label).style(TextStyle::Subheadline).ink(Ink::Quiet),
+            text(h.figure).style(TextStyle::Figure).ink(Ink::Figure(h.tint)).lines(1),
+            text(h.caption).style(TextStyle::Footnote).ink(Ink::Quiet).if_any(),
+        ))
+        .align(Align::Start)
+        .combine();
+        let action: View<M> = match h.action {
+            Some((title, glyph, tap)) => capsule_button(title, true, tap).glyph(glyph).into(),
+            None => View::Empty,
+        };
+        card_section(
+            hstack((View::from(words), spacer_min(Space::S), action))
+                .spacing(Space::L)
+                .padding(Edges::Horizontal, Space::L)
+                .padding(Edges::Vertical, Space::M)
+                .fill_width_at(Align::Start),
+        )
+        .into()
+    }
+}

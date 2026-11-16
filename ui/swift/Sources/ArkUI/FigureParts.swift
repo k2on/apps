@@ -1,8 +1,8 @@
 // The parts a page of figures is laid out of, with the same names and
 // inputs as the desktop's (`arkui::figures`) and Android's (`dev.arkui`,
 // `FigureParts.kt`); ui/docs/parts.md, "Figures", lists them: a figure in
-// a capsule of its state, a slim bar toward a goal, a page's headline
-// figure, a button in a capsule, a notice bar with its actions, a strip of
+// a capsule of its state, a slim bar toward a goal, a button
+// in a capsule, a notice bar with its actions, a strip of
 // labelled figures, a stat tile, a chart's card, and the charts (bars
 // labelled over them, columns in groups with a legend, a line over its
 // area, a sparkline), as Swift Charts draws them. Nothing here names a
@@ -92,77 +92,39 @@ public struct DetailPage<Content: View>: View {
     }
 }
 
-/// A page's headline figure: what it is (small, quiet), the figure large,
-/// bold and rounded in its tint, a caption; `trailing` at its end, at its
-/// own size (a capsule button), or under it at the accessibility sizes.
-public struct Headline<Trailing: View>: View {
-    let label: String
-    let figure: String
-    let tint: Tint
-    let caption: String
-    let trailing: Trailing
-    @Environment(\.dynamicTypeSize) private var type
-
-    public init(_ label: String, figure: String, tint: Tint, caption: String, @ViewBuilder trailing: () -> Trailing) {
-        self.label = label
-        self.figure = figure
-        self.tint = tint
-        self.caption = caption
-        self.trailing = trailing()
-    }
-
-    public var body: some View {
-        // Not ViewThatFits: under it, Budget's Auto-Assign menu was seen
-        // drawn as a tall, empty capsule on the iPhone.
-        let stacked = type.isAccessibilitySize
-        let layout = stacked
-            ? AnyLayout(VStackLayout(alignment: .leading, spacing: Space.m))
-            : AnyLayout(HStackLayout(alignment: .center, spacing: Space.l))
-        layout {
-            words
-            if !stacked { Spacer(minLength: 0) }
-            trailing.fixedSize()
-        }
-        .padding(.vertical, 6)
-    }
-
-    private var words: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(label).font(.subheadline.weight(.medium)).foregroundStyle(.quiet)
-            Text(figure)
-                .font(.system(.largeTitle, design: .rounded, weight: .bold))
-                .monospacedDigit()
-                // One line beside its control, as small as it must be
-                // ($1,284.50 broke after its point on the iPhone).
-                .lineLimit(1)
-                .minimumScaleFactor(0.6)
-                .foregroundStyle(tint == .neutral ? Color.ink : tint.color)
-            Text(caption).font(.footnote).foregroundStyle(.quiet)
-        }
-        .accessibilityElement(children: .combine)
-    }
-}
-
 /// A button in a capsule: an action that sits on a page (Auto-Assign by
 /// the headline, Review on a notice bar); `prominent` fills it.
 public struct CapsuleButton: View {
     let title: String
     let glyph: String?
     let prominent: Bool
+    let small: Bool
     let action: () -> Void
 
     public init(_ title: String, glyph: String? = nil, prominent: Bool = false, action: @escaping () -> Void) {
         self.title = title
         self.glyph = glyph
         self.prominent = prominent
+        self.small = true
         self.action = action
+    }
+
+    /// A view's capsule (`ark_app::view::capsule_button`): at the control's
+    /// own size, its glyph and its title whatever the label style around it.
+    public init(_ title: String, glyph: String? = nil, prominent: Bool, onTap: @escaping () -> Void) {
+        self.title = title
+        self.glyph = glyph
+        self.prominent = prominent
+        self.small = false
+        self.action = onTap
     }
 
     public var body: some View {
         let b = Button(action: action) {
             if let glyph { Label(title, systemImage: ArkGlyphs.sf(glyph)) } else { Text(title) }
         }
-        .controlSize(.small)
+        .labelStyle(.titleAndIcon)
+        .controlSize(small ? .small : .regular)
         if prominent { b.buttonStyle(.borderedProminent) } else { b.buttonStyle(.bordered) }
     }
 }
@@ -401,26 +363,3 @@ public struct Sparkline: View {
 }
 #endif
 
-/// A headline's one action: a prominent capsule of its glyph and title.
-public struct HeadlineAction: View {
-    let title: String
-    let glyph: String
-    let onTap: () -> Void
-
-    public var body: some View {
-        Button(action: onTap) { Label(title, systemImage: ArkGlyphs.sf(glyph)) }
-            // Its glyph and its title, whatever the row's label style.
-            .labelStyle(.titleAndIcon)
-            .buttonStyle(.borderedProminent)
-    }
-}
-
-extension Headline where Trailing == HeadlineAction? {
-    /// A view's headline (`ark_app::view::headline`): its tint by name, its
-    /// action at its end while it has one.
-    public init(_ label: String, figure: String, tint: String, caption: String,
-                actionTitle: String? = nil, actionGlyph: String? = nil, onAction: (() -> Void)? = nil) {
-        let action = onAction.map { HeadlineAction(title: actionTitle ?? "", glyph: actionGlyph ?? "", onTap: $0) }
-        self.init(label, figure: figure, tint: Tint(named: tint), caption: caption) { action }
-    }
-}

@@ -6,6 +6,8 @@ use ark_app::shell::*;
 use ark_app::view;
 use ark_app::view::*;
 
+use crate::parts::*;
+
 use super::{BudgetMsg, BudgetPage, CategoryItem, GroupItem, COLUMNS};
 
 /// The tab: its month the large title; Ready to Assign in its card with

@@ -300,12 +300,6 @@ pub enum Part<M> {
         top: Box<View<M>>,
         content: Box<View<M>>,
     },
-    /// The page's one large figure.
-    Hero {
-        label: &'static str,
-        cents: Val<i64>,
-        note: &'static str,
-    },
     /// The page's figure in a card: its label, the amount large, the two
     /// it is made of under it (what is owned, what is owed), and a
     /// sparkline of how it went (oldest first).
@@ -347,10 +341,6 @@ pub enum Part<M> {
     /// under it in a tint and quiet ones at their end; on a regular width
     /// two figures in columns; its figure in a status badge at its end.
     MeterRow(Box<MeterRow<M>>),
-    /// A page's headline: what it is, its figure large in its tint, a
-    /// caption under it, and its one action at its end (a prominent
-    /// capsule).
-    Headline(Box<Headline<M>>),
     /// A sheet: its title, its content; put away, `dismiss`; kept with
     /// its confirming action, while there is one (the iPhone's checkmark in
     /// the sheet's bar, a full-width button under the form elsewhere).
@@ -521,6 +511,16 @@ pub enum Part<M> {
         enabled: Val<bool>,
         typed: Input<String, M>,
         submit: M,
+    },
+    /// A button in a capsule at its own size, its glyph before its title:
+    /// an action that sits on a page (money's Auto-Assign); `prominent`
+    /// fills it in the accent (SwiftUI's `.borderedProminent`, Compose's
+    /// `Button`; else `.bordered`, `OutlinedButton`).
+    CapsuleButton {
+        title: Val<String>,
+        glyph: Option<Val<String>>,
+        prominent: bool,
+        tap: M,
     },
     /// A button the width of its page: the accent filled (`prominent`) or
     /// glass; while `busy`, a spinner before its title and no press.
@@ -912,16 +912,6 @@ impl<M> From<PageBuilder<M>> for View<M> {
     }
 }
 
-/// The page's one large figure.
-pub fn hero_figure<M>(label: &'static str, cents: impl Into<Val<i64>>, note: &'static str) -> View<M> {
-    Part::Hero {
-        label,
-        cents: cents.into(),
-        note,
-    }
-    .into()
-}
-
 /// The page's figure in a card, made of `first` and `second` (what is
 /// owned and what is owed), with a sparkline of `trend`, oldest first.
 pub fn summary_card<M>(
@@ -1173,50 +1163,6 @@ impl<M> MeterRow<M> {
 impl<M> From<MeterRow<M>> for View<M> {
     fn from(r: MeterRow<M>) -> View<M> {
         Part::MeterRow(Box::new(r)).into()
-    }
-}
-
-/// A page's headline ([`Part::Headline`]).
-#[derive(Clone, Debug)]
-pub struct Headline<M> {
-    pub label: Val<String>,
-    pub figure: Val<String>,
-    pub tint: Val<String>,
-    pub caption: Val<String>,
-    /// Its one action: its title, its glyph, its message.
-    pub action: Option<(&'static str, &'static str, M)>,
-}
-
-/// What [`headline`] builds.
-pub type HeadlineBuilder<M> = Headline<M>;
-
-/// A page's headline: `label`, `figure` large in `tint`, `caption` under it.
-pub fn headline<M>(
-    label: impl Into<Val<String>>,
-    figure: impl Into<Val<String>>,
-    tint: impl Into<Val<String>>,
-    caption: impl Into<Val<String>>,
-) -> HeadlineBuilder<M> {
-    Headline {
-        label: label.into(),
-        figure: figure.into(),
-        tint: tint.into(),
-        caption: caption.into(),
-        action: None,
-    }
-}
-
-impl<M> HeadlineBuilder<M> {
-    /// Its one action at its end: `title` with `glyph`, tapped `tap`.
-    pub fn action(mut self, title: &'static str, glyph: &'static str, tap: M) -> Self {
-        self.action = Some((title, glyph, tap));
-        self
-    }
-}
-
-impl<M> From<Headline<M>> for View<M> {
-    fn from(h: Headline<M>) -> View<M> {
-        Part::Headline(Box::new(h)).into()
     }
 }
 
@@ -2218,6 +2164,45 @@ pub fn address_field<M: 'static>(
     .into()
 }
 
+/// A button in a capsule sending `tap`: `prominent` filled in the accent
+/// ([`Part::CapsuleButton`]); [`Capsule::glyph`] puts a glyph before its title.
+pub fn capsule_button<M>(title: impl Into<Val<String>>, prominent: bool, tap: M) -> Capsule<M> {
+    Capsule {
+        title: title.into(),
+        glyph: None,
+        prominent,
+        tap,
+    }
+}
+
+/// A capsule button being built ([`capsule_button`]).
+pub struct Capsule<M> {
+    pub title: Val<String>,
+    pub glyph: Option<Val<String>>,
+    pub prominent: bool,
+    pub tap: M,
+}
+
+impl<M> Capsule<M> {
+    /// A glyph (a Lucide name) before its title.
+    pub fn glyph(mut self, g: impl Into<Val<String>>) -> Self {
+        self.glyph = Some(g.into());
+        self
+    }
+}
+
+impl<M> From<Capsule<M>> for View<M> {
+    fn from(c: Capsule<M>) -> View<M> {
+        Part::CapsuleButton {
+            title: c.title,
+            glyph: c.glyph,
+            prominent: c.prominent,
+            tap: c.tap,
+        }
+        .into()
+    }
+}
+
 /// A page-wide button: `prominent` the accent filled, glass otherwise.
 pub fn wide_button<M>(title: impl Into<Val<String>>, prominent: bool, enabled: impl Into<Val<bool>>, busy: impl Into<Val<bool>>, tap: M) -> View<M> {
     Part::WideButton {
@@ -2540,12 +2525,6 @@ impl<M> Part<M> {
                 ],
                 vec![],
             ),
-            Part::Hero { label, cents, note } => c(
-                "HeroFigure",
-                Some(G::Text(label)),
-                vec![("cents", G::Val(lit(cents))), ("note", G::Text(note))],
-                vec![],
-            ),
             Part::Tile { glyph, tint } => c("Tile", Some(G::Val(lit(glyph))), vec![("tint", G::Val(lit(tint)))], vec![]),
             Part::StatusBadge { figure, tint } => c("StatusBadge", Some(G::Val(lit(figure))), vec![("tint", G::Val(lit(tint)))], vec![]),
             Part::Meter { fraction, tint } => c("MeterBar", Some(G::Val(lit(fraction))), vec![("tint", G::Val(lit(tint)))], vec![]),
@@ -2617,19 +2596,6 @@ impl<M> Part<M> {
                     args.push(("onTap", G::Act(t)));
                 }
                 c("MeterRow", Some(G::Val(lit(&r.title))), args, vec![])
-            }
-            Part::Headline(h) => {
-                let mut args = vec![
-                    ("figure", G::Val(lit(&h.figure))),
-                    ("tint", G::Val(lit(&h.tint))),
-                    ("caption", G::Val(lit(&h.caption))),
-                ];
-                if let Some((title, glyph, tap)) = &h.action {
-                    args.push(("actionTitle", G::Text(title)));
-                    args.push(("actionGlyph", G::Text(glyph)));
-                    args.push(("onAction", G::Act(tap)));
-                }
-                c("Headline", Some(G::Val(lit(&h.label))), args, vec![])
             }
             Part::Row(r) => {
                 let mut args = vec![];
@@ -2864,6 +2830,20 @@ impl<M> Part<M> {
                 ],
                 vec![],
             ),
+            Part::CapsuleButton {
+                title,
+                glyph,
+                prominent,
+                tap,
+            } => {
+                let mut args = vec![];
+                if let Some(g) = glyph {
+                    args.push(("glyph", G::Val(lit(g))));
+                }
+                args.push(("prominent", G::Val(prominent.to_string())));
+                args.push(("onTap", G::Act(tap)));
+                c("CapsuleButton", Some(G::Val(lit(title))), args, vec![])
+            }
             Part::WideButton {
                 title,
                 prominent,
@@ -3308,7 +3288,6 @@ impl<M: 'static> Part<M> {
                 top: b(top),
                 content: b(content),
             },
-            Part::Hero { label, cents, note } => Part::Hero { label, cents, note },
             Part::Summary {
                 label,
                 cents,
@@ -3358,16 +3337,6 @@ impl<M: 'static> Part<M> {
                     said: r.said,
                     tap: r.tap.map(|m| f(m)),
                     menu: map_menu(r.menu, f),
-                }))
-            }
-            Part::Headline(h) => {
-                let h = *h;
-                Part::Headline(Box::new(Headline {
-                    label: h.label,
-                    figure: h.figure,
-                    tint: h.tint,
-                    caption: h.caption,
-                    action: h.action.map(|(t, g, m)| (t, g, f(m))),
                 }))
             }
             Part::Row(r) => {
@@ -3551,6 +3520,17 @@ impl<M: 'static> Part<M> {
                 enabled,
                 typed: input(typed, f),
                 submit: f(submit),
+            },
+            Part::CapsuleButton {
+                title,
+                glyph,
+                prominent,
+                tap,
+            } => Part::CapsuleButton {
+                title,
+                glyph,
+                prominent,
+                tap: f(tap),
             },
             Part::WideButton {
                 title,
