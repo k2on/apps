@@ -301,7 +301,7 @@ struct ArkAccountButton<Library: ArkAppHost, Shell: ArkRuntime>: View {
     var body: some View {
         let h = shell.page.household(screen.page)
         let wanting = Int(h.wanting)
-        AccountFace(name: h.who, picture: h.picture, attention: wanting > 0 ? h.wantingSaid : nil) { showing = true }
+        face(h, attention: wanting > 0 ? h.wantingSaid : nil)
             .sheet(isPresented: $showing, onDismiss: after) {
                 AccountSheet(name: h.who, picture: h.picture, detail: h.detail, server: h.server, linked: h.linked,
                              signOut: h.demo ? "Leave the Demo" : "Sign Out",
@@ -328,6 +328,16 @@ struct ArkAccountButton<Library: ArkAppHost, Shell: ArkRuntime>: View {
                 }
                 .presentationDetents([.medium, .large])
             }
+    }
+
+    /// Their name as a sidebar row at a Mac's sidebar's foot, as the
+    /// desktop's and the browser's are; their face elsewhere.
+    @ViewBuilder private func face(_ h: Household, attention: String?) -> some View {
+        #if os(macOS)
+        SidebarAccount(name: h.who, attention: attention) { showing = true }
+        #else
+        AccountFace(name: h.who, picture: h.picture, attention: attention) { showing = true }
+        #endif
     }
 
     private func leave(_ t: Then) {

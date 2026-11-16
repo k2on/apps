@@ -21,8 +21,8 @@ use crate::{glyphs, icon, style};
 /// The size of a page's headline figure, and of a tile's.
 pub const HEADLINE: f32 = 28.0;
 pub const TILE_FIGURE: f32 = 22.0;
-/// A slim bar under a row's name.
-pub const GOAL_GIRTH: f32 = 4.0;
+/// A slim bar under a row's name (`progress-height`).
+pub const GOAL_GIRTH: f32 = crate::layout_tokens::PROGRESS_HEIGHT;
 
 /// A figure in a capsule of its state: wrong is filled in the error's
 /// colour with its warning glyph, worth a look carries a clock, good and
@@ -45,10 +45,17 @@ pub fn status_badge<'a, M: 'a>(figure: impl Into<String>, tint: Tint) -> Element
             _ => tint_of(p, tint),
         }));
     }
-    line = line.push(text(figure.into()).size(13).font(crate::hero::BOLD).style(move |t| text::Style {
-        color: Some(ink(t)),
-        ..Default::default()
-    }));
+    // A figure is never broken across lines ("$805.86 of $1,030.00").
+    line = line.push(
+        text(figure.into())
+            .size(13)
+            .font(crate::hero::BOLD)
+            .wrapping(text::Wrapping::None)
+            .style(move |t| text::Style {
+                color: Some(ink(t)),
+                ..Default::default()
+            }),
+    );
     container(line)
         .padding([2, 8])
         .style(move |t: &Theme| container::Style {

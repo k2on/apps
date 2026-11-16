@@ -21,20 +21,30 @@ here=$(cd "$(dirname "$0")" && pwd)
 [ -f "$site/index.html" ] || { echo "::error::no index.html in $site"; exit 1; }
 
 # What it is drawn with, pinned so that every run draws the same: DejaVu,
-# the desktop's shots' sans-serif (app-desktop.sh), as the only font
-# fontconfig knows; the flake's nixpkgs' when nix is here, else the
+# the desktop's shots' sans-serif (app-desktop.sh), as the only font for
+# words fontconfig knows; the flake's nixpkgs' when nix is here, else the
 # system's.
 fonts=/usr/share/fonts/truetype/dejavu
 if command -v nix > /dev/null; then
   pinned=$(nix build --no-link --print-out-paths --inputs-from . nixpkgs#dejavu_fonts 2> /dev/null) && fonts=$pinned/share/fonts
 fi
 [ -d "$fonts" ] || { echo "::error::no DejaVu at $fonts"; exit 1; }
+# And Noto's colour emoji, the desktop's (app-desktop.sh): with DejaVu
+# alone a category's emoji was drawn as a box. The system's where nix is
+# not, and none where neither has one.
+emoji=/usr/share/fonts/truetype/noto
+if command -v nix > /dev/null; then
+  pinned=$(nix build --no-link --print-out-paths --inputs-from . nixpkgs#noto-fonts-color-emoji 2> /dev/null) && emoji=$pinned/share/fonts
+fi
+emoji_dir=""
+[ -d "$emoji" ] && emoji_dir="<dir>$emoji</dir>"
 conf=$(mktemp -d)
 cat > "$conf/fonts.conf" <<EOF
 <?xml version="1.0"?>
 <!DOCTYPE fontconfig SYSTEM "fonts.dtd">
 <fontconfig>
   <dir>$fonts</dir>
+  $emoji_dir
   <cachedir>$conf/cache</cachedir>
   <!-- Every family the page names is DejaVu Sans: fontconfig answers any
        name with its nearest font, and a name it has never heard of

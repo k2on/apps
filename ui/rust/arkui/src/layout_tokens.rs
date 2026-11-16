@@ -30,6 +30,8 @@ pub const AMOUNT_COLUMN_WIDTH: f32 = 112.0;
 pub const MARK_COLUMN_WIDTH: f32 = 28.0;
 /// The bar under a row's name that fills toward its goal, beside columns.
 pub const PROGRESS_WIDTH: f32 = 220.0;
+/// How thick that bar is: a slim line, on every toolkit.
+pub const PROGRESS_HEIGHT: f32 = 4.0;
 /// A line of text as tall as this many times its size (the desktop's: iced's).
 pub const LINE_HEIGHT: f32 = 1.3;
 /// The least gap: a figure from its label.

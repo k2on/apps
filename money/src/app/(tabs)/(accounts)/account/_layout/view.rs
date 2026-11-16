@@ -13,7 +13,7 @@ use super::{RegisterDay, RegisterMsg, RegisterPage, RegisterRow};
 #[view]
 pub fn register(p: &RegisterPage) -> View<RegisterMsg> {
     tab_page(
-        "Register",
+        p.title,
         (
             if p.owed {
                 summary_card("Working Balance", p.balance, "Cleared", p.cleared, "Uncleared", p.uncleared, p.trend)

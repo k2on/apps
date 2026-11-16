@@ -126,6 +126,9 @@ pub struct RegisterRow {
 /// Everything a register shows.
 #[derive(Clone, Debug, PartialEq, ark::twin::Twin)]
 pub struct RegisterPage {
+    /// Its title: the account's name, as its place in the sidebar says
+    /// it, or All Accounts.
+    pub title: String,
     /// An account's (its balances over it), or every account's.
     pub one: bool,
     pub all: bool,
@@ -304,6 +307,7 @@ impl App for Register {
         let waiting = all.iter().filter(|t| !t.approved).count();
         let owes = a.and_then(|a| a.account_kind()).is_some_and(|k| k.owes());
         RegisterPage {
+            title: a.map(|a| a.name.clone()).unwrap_or_else(|| "All Accounts".into()),
             one: !every,
             all: every,
             owes: !every && owes,

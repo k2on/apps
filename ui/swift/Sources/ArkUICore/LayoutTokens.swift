@@ -31,6 +31,8 @@ public enum LayoutTokens {
     public static let markColumnWidth: Double = 28.0
     /// The bar under a row's name that fills toward its goal, beside columns.
     public static let progressWidth: Double = 220.0
+    /// How thick that bar is: a slim line, on every toolkit.
+    public static let progressHeight: Double = 4.0
     /// A line of text as tall as this many times its size (the desktop's: iced's).
     public static let lineHeight: Double = 1.3
     /// The least gap: a figure from its label.

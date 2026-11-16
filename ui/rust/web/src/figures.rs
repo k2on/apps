@@ -178,25 +178,25 @@ pub struct Bar {
     pub said: String,
 }
 
-/// Bars, each its label, its share of the largest and its figure, in the
-/// chart's colours in turn.
+/// Bars against the largest, each its label over it and its figure at its
+/// end, in the chart's first colour: one hue for magnitude, as the
+/// desktop's, the Mac's and Android's are.
 pub fn labelled_bars(bars: &[Bar]) -> AnyView {
     let most = bars.iter().map(|b| b.value).max().unwrap_or(1).max(1) as f64;
     let rows: Vec<AnyView> = bars
         .iter()
-        .enumerate()
-        .map(|(i, b)| {
-            let share = (b.value as f64 / most).clamp(0.0, 1.0) * 100.0;
+        .map(|b| {
+            let share = (b.value as f64 / most).clamp(0.0, 1.0);
             html::div()
                 .class("ark-lbar")
                 .child((
                     html::span().class("ark-lbar-label").child(b.label.clone()),
-                    html::span().class("ark-lbar-track").child(
+                    html::span().class("ark-lbar-line").child((
                         html::span()
                             .class("ark-lbar-fill")
-                            .attr("style", format!("width:{share:.1}%;background:var(--ark-chart-{})", i % 6)),
-                    ),
-                    html::span().class("ark-lbar-said").child(b.said.clone()),
+                            .attr("style", format!("width:calc((100% - var(--ark-amount-column-width)) * {share:.3})")),
+                        html::span().class("ark-lbar-said").child(b.said.clone()),
+                    )),
                 ))
                 .into_any()
         })

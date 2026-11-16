@@ -39,7 +39,7 @@ use ark_peer::store::Store;
 use ark_peer::Peer;
 use iced::keyboard::{Key as Pressed, Modifiers};
 use iced::widget::{column, container, row, stack, Space};
-use iced::{Alignment, Element, Length, Size, Subscription, Task};
+use iced::{Alignment, Element, Length, Padding, Size, Subscription, Task};
 
 use crate::shell::{Frame, Keyboard, Pane};
 use crate::style;
@@ -654,8 +654,23 @@ where
             focus: self.cursor.get().focus,
         };
         let mut hosts = |name: &'static str| -> Element<'static, Msg<AppMsg<W>>> { crate::view::element(app.hosted(name, &seen, now).map(Msg::App)) };
-        let base = match app.settings(&seen, now) {
-            Some((panes, done)) => settings_window(crate::view::shell(panes.map(Msg::App), frame, &mut hosts), Msg::App(done)),
+        let settings = app.settings(&seen, now);
+        let wide = self.width >= crate::layout_tokens::COMPACT_WIDTH;
+        // Narrow, Settings takes the window's place; wide, it is a sheet
+        // over the page, as the browser's and the Mac's are.
+        let base = match settings {
+            Some((panes, done)) if !wide => settings_window(crate::view::shell(panes.map(Msg::App), frame, &mut hosts), Msg::App(done)),
+            Some((panes, done)) => {
+                let page = crate::view::shell(app.window(&seen, now).map(Msg::App), frame, &mut hosts);
+                let panes = crate::view::shell(panes.map(Msg::App), frame, &mut hosts);
+                let done = Msg::App(done);
+                stack![
+                    page,
+                    crate::dialog::backdrop(done.clone(), Msg::Swallow, 1.0),
+                    settings_sheet(panes, done)
+                ]
+                .into()
+            }
             None => crate::view::shell(app.window(&seen, now).map(Msg::App), frame, &mut hosts),
         };
         let over = app.over(&seen, now);
@@ -719,9 +734,43 @@ where
     }
 }
 
-/// Settings in the window's place: its panes under a bar with its title
-/// and Done, as a Mac's Settings window is (the browser's is a window of
-/// its own: arkui-web's `settings_window`).
+/// Settings as a sheet over the page on a wide window, the browser's
+/// (arkui-web's `settings_window`) and the Mac's alike: its title, its
+/// panes under a hairline, Done at its foot; `layout_tokens::SHEET_WIDTH`
+/// wide and `SHEET_HEIGHT` tall, in the middle of the window. Shown at
+/// once, as the shell's sheets are (motion.md).
+fn settings_sheet<'a, M: Clone + 'a>(panes: Element<'a, M>, done: M) -> Element<'a, M> {
+    use crate::layout_tokens::{SHEET_HEIGHT, SHEET_WIDTH, SPACE_M, SPACE_XL};
+    // A dialog's title and its inset (`view`'s sheets').
+    let title = container(text("Settings").size(18).font(crate::hero::BOLD)).padding(Padding {
+        top: SPACE_XL - 4.0,
+        right: SPACE_XL - 4.0,
+        bottom: SPACE_M,
+        left: SPACE_XL - 4.0,
+    });
+    let foot = row![
+        Space::new().width(Length::Fill),
+        iced::widget::button(text("Done").size(13).font(crate::hero::BOLD))
+            .padding([5, 12])
+            .style(style::action)
+            .on_press(done)
+    ]
+    .padding(SPACE_XL - 4.0);
+    let panel = container(column![
+        title,
+        iced::widget::rule::horizontal(1).style(style::edge),
+        container(panes).height(Length::Fill),
+        iced::widget::rule::horizontal(1).style(style::edge),
+        foot
+    ])
+    .width(SHEET_WIDTH)
+    .height(SHEET_HEIGHT)
+    .style(crate::dialog::style);
+    crate::dialog::present(panel, 1.0)
+}
+
+/// Settings in the window's place on a narrow window: its panes under a
+/// bar with its title and Done.
 fn settings_window<'a, M: Clone + 'a>(panes: Element<'a, M>, done: M) -> Element<'a, M> {
     let bar = row![
         text("Settings").size(15).font(crate::hero::BOLD),

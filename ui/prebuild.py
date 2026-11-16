@@ -1438,14 +1438,22 @@ struct ArkScenes: Scene {{
         // The size the launch asks for (the Mac's screenshots: 1440×900).
         .launchWindowSize()
         // The menu bar's commands: the Mac's menus, the iPad's hardware keyboard.
-        .commands {{ {views[sh['commands']]['swift-view']}(screen: screens.shell.screen) }}
-        // Settings: the Mac's Settings window (⌘,); on the iPhone and the
-        // iPad, a sheet the shell puts up.
+        .commands {{
+            {views[sh['commands']]['swift-view']}(screen: screens.shell.screen)
+            #if os(macOS)
+            // Settings… (⌘,): the sheet the shell puts up over the window.
+            SettingsCommand {{ screens.shell.settings = true }}
+            #endif
+        }}
+        #if !os(macOS)
+        // Settings: a window the iPad can open; on the iPhone and the iPad,
+        // and on the Mac over its window, a sheet the shell puts up.
         ArkSettings {{
             {views[sh['settings']]['swift-view']}()
                 .arkSettings(screens.shell)
                 .tint(Color.accent)
         }}
+        #endif
     }}
 }}
 """

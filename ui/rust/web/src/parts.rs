@@ -301,7 +301,7 @@ fn drawn<M: Clone + std::fmt::Debug + 'static>(v: View<M>) -> Option<AnyView> {
                 .into_any()
         }
         Part::StatusLine { text, busy, problem } => html::div()
-            .class("ark-status")
+            .class("ark-status-line")
             .child((
                 text.get().map(|t| {
                     html::p()
@@ -803,13 +803,19 @@ pub(crate) fn dialog<M: Clone + std::fmt::Debug + 'static>(p: Part<M>) -> AnyVie
             actions,
             cancel,
         } => {
-            let mut b = vec![push_button("Cancel", true, false, cancel.clone())];
+            // Its choices one under another, as wide as the dialog, as the
+            // Mac's and the desktop's are: the first that goes ahead in the
+            // accent, the rest plain, one that cannot be undone in the
+            // danger colour, Cancel last.
+            let mut b = vec![];
+            let mut lead = true;
             for a in actions {
-                let class = if a.destructive {
-                    "ark-push ark-destructive"
-                } else {
-                    "ark-push ark-default"
+                let class = match (a.destructive, lead) {
+                    (true, _) => "ark-push ark-choice ark-destructive",
+                    (false, true) => "ark-push ark-choice ark-default",
+                    (false, false) => "ark-push ark-choice",
                 };
+                lead &= a.destructive;
                 let tap = a.tap;
                 let words = a.title.get();
                 b.push(
@@ -820,6 +826,14 @@ pub(crate) fn dialog<M: Clone + std::fmt::Debug + 'static>(p: Part<M>) -> AnyVie
                         .into_any(),
                 );
             }
+            let away = cancel.clone();
+            b.push(
+                crate::wired!(html::button(), crate::tapped("Cancel", &away))
+                    .class("ark-push ark-choice")
+                    .on(leptos::ev::click, move |_| send(away.clone()))
+                    .child("Cancel")
+                    .into_any(),
+            );
             (
                 cancel,
                 title.get(),
@@ -838,9 +852,10 @@ pub(crate) fn dialog<M: Clone + std::fmt::Debug + 'static>(p: Part<M>) -> AnyVie
     modal(title, body, buttons, Rc::new(move || send(dismiss.clone())))
 }
 
-/// An app's Settings in the browser, a window of its own over the app's
-/// (a Mac's `Settings` scene): its panes' view (`settings_panes`), whose
-/// hosted names `hosts` draws, in a modal with Done, which sends `done`.
+/// An app's Settings in the browser, a sheet over the page the theme's
+/// sheet's size, as the desktop's and the Mac's are: its panes' view
+/// (`settings_panes`), whose hosted names `hosts` draws, in a modal with
+/// Done, which sends `done`.
 pub fn settings_window<M: Clone + std::fmt::Debug + 'static>(panes: View<M>, hosts: &dyn Fn(&'static str) -> AnyView, done: M) -> AnyView {
     let away = done.clone();
     modal(

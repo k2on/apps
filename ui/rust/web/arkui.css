@@ -9,7 +9,8 @@ html, body { margin: 0; height: 100%; }
 body {
   background: var(--ark-background);
   color: var(--ark-ink);
-  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, "Segoe UI", "DejaVu Sans", sans-serif;
+  /* The emoji faces after the words' (a category's emoji): the system's colour one wherever it is. */
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, "Segoe UI", "DejaVu Sans", sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji";
   font-size: 13px;
   line-height: var(--ark-line-height);
   -webkit-font-smoothing: antialiased;
@@ -122,8 +123,12 @@ button.ark-sidebar-heading:hover, button.ark-sidebar-heading.ark-on { color: var
 .ark-pane-tab { flex: none; white-space: nowrap; display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 4px 12px; border-radius: 8px; font-size: 11px; color: color-mix(in srgb, var(--ark-ink) 65%, transparent); }
 .ark-pane-tab.ark-on { color: var(--ark-accent); background: var(--ark-container); }
 .ark-settings-body { flex: 1; min-height: 0; overflow: auto; }
-/* An app's Settings in a window of its own (`parts::settings_window`): its panes edge to edge under the modal's title. */
-.ark-settings-window { height: 420px; margin: -8px -20px; border-top: 1px solid var(--ark-hairline); }
+/* An app's Settings (`parts::settings_window`): a sheet over the page, the theme's sheet's size as the desktop's and the Mac's
+   are; its panes edge to edge under the modal's title, Done at its foot. */
+.ark-dialog:has(.ark-settings-window) { height: min(var(--ark-sheet-height), calc(100vh - 32px)); }
+.ark-dialog:not(.ark-dialog-sheet):has(.ark-settings-window) { width: var(--ark-sheet-width); }
+.ark-dialog:has(.ark-settings-window) > .ark-dialog-body { flex: 1 1 auto; }
+.ark-settings-window { flex: 1 1 auto; min-height: 0; margin: -8px -20px; border-top: 1px solid var(--ark-hairline); border-bottom: 1px solid var(--ark-hairline); }
 .ark-settings-window .ark-shell-root { height: 100%; width: 100%; }
 
 /* * A page */
@@ -179,6 +184,9 @@ button.ark-sidebar-heading:hover, button.ark-sidebar-heading.ark-on { color: var
 .ark-push.ark-default { background: var(--ark-accent); color: var(--ark-on-accent); border-color: transparent; }
 .ark-push.ark-destructive { color: var(--ark-error); }
 .ark-push:disabled:not([data-ark-off]) { opacity: 0.5; }
+/* A confirmation's choices: one under another, as wide as the dialog. */
+.ark-dialog-buttons:has(> .ark-choice) { flex-direction: column; align-items: stretch; }
+.ark-push.ark-choice { padding-block: 6px; }
 
 /* * Search, and what it suggests */
 .ark-search { position: relative; display: flex; align-items: center; }
@@ -370,8 +378,9 @@ button.ark-sidebar-heading:hover, button.ark-sidebar-heading.ark-on { color: var
 .ark-welcome-mark { width: 72px; height: 72px; display: flex; align-items: center; justify-content: center; border-radius: 20px; color: var(--ark-accent); background: color-mix(in srgb, var(--ark-accent) 15%, transparent); margin-bottom: 12px; }
 .ark-welcome-sentence { font-size: 15px; }
 .ark-wide { width: 100%; }
-.ark-status { display: flex; flex-direction: column; gap: 4px; text-align: center; }
-.ark-status:empty { display: none; }
+/* A first-run page's status line; not `.ark-status`, a figure's badge, whose glyph it stacked over its figure. */
+.ark-status-line { display: flex; flex-direction: column; gap: 4px; text-align: center; }
+.ark-status-line:empty { display: none; }
 .ark-code { width: 220px; height: 220px; align-self: center; }
 /* A code is dark on light in every theme: a scanner reads no other. */
 .ark-code-ground { fill: #ffffff; }
@@ -565,8 +574,8 @@ button.ark-sidebar-heading:hover, button.ark-sidebar-heading.ark-on { color: var
 .ark-status.ark-tint-caution { background: var(--ark-caution-container); color: var(--ark-on-caution-container); }
 .ark-status.ark-tint-neutral { background: var(--ark-container-high); color: var(--ark-quiet); }
 .ark-status.ark-tint-accent { background: var(--ark-accent-container); color: var(--ark-on-accent-container); }
-.ark-goal { width: var(--ark-progress-width); max-width: 100%; height: 4px; border-radius: 2px; background: var(--ark-container-highest); overflow: hidden; }
-.ark-goal-fill { height: 100%; border-radius: 2px; background: var(--ark-positive); }
+.ark-goal { width: var(--ark-progress-width); max-width: 100%; height: var(--ark-progress-height); border-radius: calc(var(--ark-progress-height) / 2); background: var(--ark-container-highest); overflow: hidden; }
+.ark-goal-fill { height: 100%; border-radius: calc(var(--ark-progress-height) / 2); background: var(--ark-positive); }
 .ark-goal.ark-tint-negative .ark-goal-fill { background: var(--ark-error); }
 .ark-goal.ark-tint-caution .ark-goal-fill { background: var(--ark-caution); }
 .ark-goal.ark-tint-accent .ark-goal-fill { background: var(--ark-accent); }
@@ -592,11 +601,13 @@ button.ark-sidebar-heading:hover, button.ark-sidebar-heading.ark-on { color: var
 .ark-chart-title { font-weight: 700; }
 .ark-chart-body { padding: 10px; }
 .ark-grid { display: grid; }
-.ark-lbars { display: flex; flex-direction: column; gap: 10px; }
-.ark-lbar { display: grid; grid-template-columns: 160px 1fr 110px; gap: 12px; align-items: center; }
-.ark-lbar-track { height: 10px; border-radius: 5px; background: var(--ark-container-high); overflow: hidden; }
-.ark-lbar-fill { display: block; height: 100%; border-radius: 5px; }
-.ark-lbar-said { text-align: right; font-variant-numeric: tabular-nums; }
+/* Bars against the largest: each its label over it, its figure at its end, the chart's first colour (the desktop's, the Mac's). */
+.ark-lbars { display: flex; flex-direction: column; gap: 6px; }
+.ark-lbar { display: flex; flex-direction: column; gap: 1px; }
+.ark-lbar-label, .ark-lbar-said { font-size: 11px; color: var(--ark-quiet); }
+.ark-lbar-line { display: flex; align-items: center; gap: 6px; }
+.ark-lbar-fill { display: block; flex: none; min-width: 6px; height: 6px; border-radius: 3px; background: var(--ark-chart-0); }
+.ark-lbar-said { white-space: nowrap; font-variant-numeric: tabular-nums; }
 .ark-columns { display: flex; flex-direction: column; gap: 8px; }
 .ark-legends { display: flex; gap: 14px; }
 .ark-legend { display: inline-flex; gap: 6px; align-items: center; font-size: 12px; color: var(--ark-quiet); }
@@ -657,6 +668,8 @@ button.ark-sidebar-heading:hover, button.ark-sidebar-heading.ark-on { color: var
 .ark-figure-col { display: inline-flex; flex-direction: column; align-items: flex-end; width: var(--ark-amount-column-width, 96px); flex: none; }
 .ark-figure-col-title { font-size: 10px; font-weight: 400; opacity: .7; }
 .ark-caution-words { color: var(--ark-caution); }
+/* A heading with columns: its title on the line of their figures, not of their titles, as the desktop's and the Mac's. */
+.ark-section-header:has(.ark-figure-cols) { align-items: flex-end; }
 .ark-meter-row { align-items: center; gap: 12px; }
 .ark-meter-row .ark-row-words { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
 .ark-meter-row .ark-row-title { display: flex; align-items: center; gap: 8px; }

@@ -47,6 +47,7 @@ LAYOUT = {
     "amount-column-width": "A column of figures in a table or a budget's row.",
     "mark-column-width": "A table's column of one mark: a row's cleared mark, a receipt's.",
     "progress-width": "The bar under a row's name that fills toward its goal, beside columns.",
+    "progress-height": "How thick that bar is: a slim line, on every toolkit.",
     "line-height": "A line of text as tall as this many times its size (the desktop's: iced's).",
     "space-xs": "The least gap: a figure from its label.",
     "space-s": "A small gap: a glyph from its words, chips from each other.",

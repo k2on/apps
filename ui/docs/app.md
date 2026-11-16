@@ -2183,9 +2183,10 @@ and demo. arkui's `host` (feature `host`) is the browser's host over iced:
   browser back on a loopback port, the login kept in the Secret Service;
   the session shown once the server's data is here, as the page's.
 - **The window**: `Windowed::window` drawn by `arkui::view::shell`, each
-  name it hosts its `hosted` view, `over` above it, `settings` in its
-  place under a bar with Done (a Mac's Settings window is a window of its
-  own; here it is the window's place, as before).
+  name it hosts its `hosted` view, `over` above it, `settings` a sheet
+  over it on a wide window (the browser's and the Mac's alike: the
+  theme's `sheet-width` by `sheet-height`, its title, its panes, Done at
+  its foot), in the window's place under a bar with Done on a narrow one.
 - **The keys** (`keys`): the existing layer, not a new one. The app's
   commands (`Windowed::commands`) by their shortcuts and in the command box
   (`arkui::command`, `:` or Ctrl-K, a group per menu); `arkui::shell::

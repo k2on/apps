@@ -11,8 +11,8 @@
 # 43796348626), then asks for it (`<plan>/out/want`: the window's number,
 # the theme, the id); this takes it with `screencapture -l` (the window
 # alone, no shadow) and takes the ask away. And first, `welcome`: the
-# first run's page, the app opened with no demo, light and dark
-# (`-AppleInterfaceStyle Dark`), a Mac addition the others have no page of.
+# first run's page, the app opened with no demo, light and dark (the
+# system's dark mode), a Mac addition the others have no page of.
 #
 #   app-mac.sh <out> <Foo.app> <app>
 #
@@ -82,7 +82,11 @@ welcome() {
 }
 failed=0
 welcome light || failed=1
-welcome dark -AppleInterfaceStyle Dark || failed=1
+# Dark by the system's own dark mode: on macOS 26 a launch's
+# `-AppleInterfaceStyle Dark` left the page white (app-screens 43926273208).
+events "tell appearance preferences to set dark mode to true" || true
+welcome dark || failed=1
+events "tell appearance preferences to set dark mode to false" || true
 
 # The walk's plan: the Mac's of `wide` (a shot or a step `on` others alone
 # left out), in the app's reach.

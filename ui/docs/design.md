@@ -51,7 +51,7 @@ parts', never an app's: SwiftUI's compact and regular).
 | SwiftUI (the design) | Compose (Android) | iced (desktop) | Leptos (the DOM) |
 |---|---|---|---|
 | `App` + `WindowGroup` | the activity's root | the main window (`arkui::window`) | the page |
-| `Settings` scene | a settings screen | a second window | a route, shown as a dialog over the page |
+| `Settings` scene (on the Mac a sheet over the window, raised by ⌘,) | a settings screen | a sheet over the window (the window's place when compact) | a route, shown as a sheet over the page |
 | `Commands`, `.keyboardShortcut` | hardware-keyboard shortcuts; the app bar's overflow menu | key bindings (the vim layer and chords), an in-window menu (the command box, `arkui::command`) | key listeners on the document, the same command box |
 | `TabView` + `.tabViewStyle(.sidebarAdaptable)` | `NavigationSuiteScaffold` (bar, rail, drawer by window size class) | a sidebar (`arkui::sidebar`), bottom tabs below the compact width | a sidebar, bottom tabs below the compact width |
 | `NavigationSplitView(sidebar:content:detail:)`, a stack when compact | `ListDetailPaneScaffold` (material3-adaptive; hinge-aware panes on a foldable through Jetpack WindowManager) | panes side by side, one at a time when narrow | the same, in CSS grid |

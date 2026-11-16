@@ -104,6 +104,45 @@ public struct AccountFace: View {
     }
 }
 
+/// Who is signed in at the foot of a Mac's sidebar: their name beside the
+/// people glyph, as a sidebar row, the desktop's and the browser's alike
+/// (an app's `household_foot`); marked in the error colour while
+/// `attention` says what wants a look, raising the account sheet on a tap.
+public struct SidebarAccount: View {
+    let name: String
+    let attention: String?
+    let action: () -> Void
+
+    public init(name: String, attention: String? = nil, action: @escaping () -> Void) {
+        self.name = name
+        self.attention = attention
+        self.action = action
+    }
+
+    public var body: some View {
+        Button(action: action) {
+            HStack(spacing: Space.s) {
+                Image(systemName: ArkGlyphs.sf("users")).foregroundStyle(Color.accent)
+                Text(name.isEmpty ? "?" : name).foregroundStyle(Color.ink).lineLimit(1)
+                Spacer(minLength: 0)
+                if attention != nil {
+                    Circle().fill(Color.error)
+                        .frame(width: AccountSizes.badge, height: AccountSizes.badge)
+                        .motionTransition(.enter)
+                }
+            }
+            .motion(Springs.move, value: attention != nil)
+            .padding(.horizontal, Space.s)
+            .padding(.vertical, Space.xs)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.pressRow)
+        .accessibilityLabel(AccountSizes.label(name))
+        .accessibilityHint(AccountSizes.hint)
+        .accessibilityValue(attention ?? "")
+    }
+}
+
 /// A tab's large title as the first row of its page: the title, full size
 /// and bold, at the leading edge, and `trailing` — a menu where the tab has
 /// one, then its `AccountFace`; never a + — at the trailing edge of the same

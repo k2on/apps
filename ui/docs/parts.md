@@ -61,7 +61,7 @@ shapes and an SVG line on the desktop, in the theme's `[chart]` palette.
 | Part | Inputs | Compose | SwiftUI | iced |
 |---|---|---|---|---|
 | StatusBadge | figure, tint (negative filled with a warning, caution a clock) | `StatusBadge` | `StatusBadge` | `figures::status_badge` |
-| GoalBar | fraction, tint (`progress-width` wide beside columns) | `GoalBar` | `GoalBar` (`ProgressView`) | `figures::goal_bar` |
+| GoalBar | fraction, tint (`progress-width` wide beside columns, `progress-height` thick) | `GoalBar` | `GoalBar` (a capsule, not `ProgressView`) | `figures::goal_bar` |
 | Headline | label, figure, tint, caption, trailing | `Headline` | `Headline` (large, bold, rounded) | `figures::headline` |
 | CapsuleButton | title, glyph?, prominent, action | `CapsuleButton` | `CapsuleButton` (bordered / prominent) | `figures::capsule_button` |
 | NoticeBar | glyph, text, actions | `NoticeBar` | `NoticeBar` (on `.bar`) | `figures::notice_bar` |

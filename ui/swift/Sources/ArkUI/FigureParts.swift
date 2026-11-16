@@ -58,11 +58,25 @@ public struct GoalBar: View {
         self.tint = tint
     }
 
+    /// A slim line on the container's highest step, filled in the tint,
+    /// as thick as the theme says (`progress-height`) on every toolkit: a
+    /// linear `ProgressView` is the platform's own bar, twice as thick on
+    /// the Mac.
     public var body: some View {
-        ProgressView(value: min(max(fraction, 0), 1))
-            .progressViewStyle(.linear)
-            .tint(tint == .neutral ? Tint.positive.color : tint.color)
+        let done = min(max(fraction, 0), 1)
+        Capsule()
+            .fill(Color.containerHighest)
+            .overlay(alignment: .leading) {
+                GeometryReader { box in
+                    Capsule()
+                        .fill(tint == .neutral ? Tint.positive.color : tint.color)
+                        .frame(width: box.size.width * done)
+                }
+            }
+            .frame(height: CGFloat(LayoutTokens.progressHeight))
             .frame(maxWidth: compact ? .infinity : LayoutTokens.progressWidth)
+            .accessibilityElement()
+            .accessibilityValue(Text(done, format: .percent.precision(.fractionLength(0))))
     }
 }
 
@@ -259,18 +273,32 @@ public struct LabelledBars: View {
 
     public init(_ bars: [LabelledBar]) { self.bars = bars }
 
+    /// Each bar's label over it and its figure just past its end, as the
+    /// desktop's, the browser's and Android's are: a chart's axis labels
+    /// drew over the bars on the Mac. The bars are shares of the width
+    /// less a figure's column (`amount-column-width`).
     public var body: some View {
-        Chart(bars) { b in
-            BarMark(x: .value("Amount", b.value), y: .value("Category", b.label))
-                .foregroundStyle(Color.chart[0])
-                .clipShape(Capsule())
-                .annotation(position: .trailing) { Text(b.said).font(.caption2).foregroundStyle(.quiet) }
+        let most = Double(max(bars.map(\.value).max() ?? 1, 1))
+        VStack(alignment: .leading, spacing: 6) {
+            ForEach(bars) { b in
+                let share = min(max(Double(b.value) / most, 0), 1)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(b.label).font(.caption2).foregroundStyle(.quiet).lineLimit(1)
+                    GeometryReader { box in
+                        HStack(spacing: 6) {
+                            Capsule()
+                                .fill(Color.chart[0])
+                                .frame(width: max((box.size.width - CGFloat(LayoutTokens.amountColumnWidth)) * share, 6), height: 6)
+                            Text(b.said).font(.caption2).monospacedDigit().foregroundStyle(.quiet).lineLimit(1).fixedSize()
+                        }
+                        .frame(maxHeight: .infinity)
+                    }
+                    .frame(height: 14)
+                }
+                .accessibilityElement(children: .combine)
+            }
         }
-        .chartXAxis(.hidden)
-        .chartYAxis {
-            AxisMarks { _ in AxisValueLabel(anchor: .bottomLeading) }
-        }
-        .frame(height: CGFloat(bars.count) * 34)
+        .padding(.vertical, Space.xs)
     }
 }
 

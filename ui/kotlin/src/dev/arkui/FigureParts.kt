@@ -73,7 +73,7 @@ public fun StatusBadge(figure: String, tint: Tint) {
 /** A slim bar toward a goal under a row's name, `LayoutTokens.PROGRESS_WIDTH` wide at most. */
 @Composable
 public fun GoalBar(fraction: Float, tint: Tint) {
-    ProgressBar(fraction, Modifier.widthIn(max = LayoutTokens.PROGRESS_WIDTH.dp), color = tintInk(if (tint == Tint.Neutral) Tint.Positive else tint), height = 4.dp)
+    ProgressBar(fraction, Modifier.widthIn(max = LayoutTokens.PROGRESS_WIDTH.dp), color = tintInk(if (tint == Tint.Neutral) Tint.Positive else tint), height = LayoutTokens.PROGRESS_HEIGHT.dp)
 }
 
 /** A button in a capsule: an action that sits on a page; `prominent` fills it. */

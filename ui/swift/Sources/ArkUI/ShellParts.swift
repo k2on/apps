@@ -174,13 +174,34 @@ public struct AdaptiveTabs<Tabs: TabContent<String>, Footer: View, Account: View
         return String(selection[..<slash])
     }
 
+    /// Whether the account item stands at the sidebar's foot in the
+    /// footer's place: on the Mac, for an app that gives no footer, as the
+    /// desktop's and the browser's sidebars have it (harken's face).
+    private var accountAtFoot: Bool {
+        #if os(macOS)
+        hasAccount && !hasFooter
+        #else
+        false
+        #endif
+    }
+
+    @ViewBuilder private var foot: some View {
+        if accountAtFoot { account } else { footer }
+    }
+
     public var body: some View {
         TabView(selection: Binding(get: { shown }, set: onSelect)) { tabs }
             .tabViewStyle(.sidebarAdaptable)
-            .tabViewSidebarBottomBar { footer }
+            .tabViewSidebarBottomBar { foot.sidebarFoot() }
+            #if os(macOS)
+            // No scroll edge drawn under the sidebar's foot: in the light
+            // it was a white patch at the window's corner, on a sidebar
+            // that is not white (the Mac's pages have no bar at their foot).
+            .scrollEdgeEffectHidden(true, for: .bottom)
+            #endif
             .nowPlaying(accessory, bar: bar, full: full)
             .environment(\.shellFooter, compact && !hasAccount ? AnyView(footer) : nil)
-            .environment(\.shellAccount, hasAccount && (compact || !hasFooter) ? AnyView(account) : nil)
+            .environment(\.shellAccount, hasAccount && (compact || !hasFooter) && !accountAtFoot ? AnyView(account) : nil)
             .environment(\.shownSection, shown)
     }
 }
@@ -214,6 +235,20 @@ extension AdaptiveTabs where Account == EmptyView, Bar == EmptyView, Full == Emp
         @ViewBuilder footer: () -> Footer
     ) {
         self.init(selection: selection, onSelect: onSelect, tabs, footer: footer, account: { EmptyView() })
+    }
+}
+
+extension View {
+    /// The sidebar's foot on the Mac: as wide as the theme's sidebar
+    /// (`sidebar-width`, less its insets), which holds the sidebar open to
+    /// it, as the desktop's and the browser's are, so a section's name
+    /// ("Transactions") is not cut short. Elsewhere, as it is.
+    @ViewBuilder func sidebarFoot() -> some View {
+        #if os(macOS)
+        frame(minWidth: CGFloat(LayoutTokens.sidebarWidth) - 2 * Space.s, maxWidth: .infinity, alignment: .leading)
+        #else
+        self
+        #endif
     }
 }
 
@@ -701,9 +736,11 @@ public struct NoticeAlert: View {
 
 // MARK: Settings
 
-/// The Settings scene's panes: a window of tabs on the Mac (the one
-/// shown by its title, `selection`), a list of screens on the iPhone and
-/// the iPad.
+/// The Settings scene's panes: on the Mac, a sheet's (`settingsShown`)
+/// row of its panes' glyphs and titles across the top, the chosen one lit
+/// (shown by its title, `selection`), and only its content under them, as
+/// the desktop's and the browser's are; a list of screens on the iPhone
+/// and the iPad.
 public struct SettingsPanes<Panes: View>: View {
     let selection: String
     let onSelect: (String) -> Void
@@ -717,8 +754,24 @@ public struct SettingsPanes<Panes: View>: View {
 
     public var body: some View {
         #if os(macOS)
-        TabView(selection: Binding(get: { selection }, set: onSelect)) { panes }
-            .frame(minWidth: 520, minHeight: 360)
+        Group(subviews: panes) { subviews in
+            let chosen = subviews.first { $0.containerValues.settingsPane?.title == selection } ?? subviews.first
+            VStack(spacing: 0) {
+                HStack(spacing: Space.xs) {
+                    ForEach(subviews) { pane in
+                        if let p = pane.containerValues.settingsPane {
+                            PaneTab(title: p.title, glyph: p.glyph, on: pane.id == chosen?.id) { onSelect(p.title) }
+                        }
+                    }
+                }
+                .padding(.vertical, Space.s)
+                .frame(maxWidth: .infinity)
+                Divider()
+                if let chosen {
+                    chosen.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                }
+            }
+        }
         #else
         NavigationStack {
             List { panes }
@@ -728,8 +781,52 @@ public struct SettingsPanes<Panes: View>: View {
     }
 }
 
-/// One pane of Settings: a tab on the Mac, tagged by its title; a row that
-/// opens it elsewhere.
+#if os(macOS)
+/// A pane as its `SettingsPanes` reads it: its title and its glyph.
+struct SettingsPaneValue: Hashable, Sendable {
+    let title: String
+    let glyph: String
+}
+
+private struct SettingsPaneKey: ContainerValueKey {
+    static let defaultValue: SettingsPaneValue? = nil
+}
+
+extension ContainerValues {
+    var settingsPane: SettingsPaneValue? {
+        get { self[SettingsPaneKey.self] }
+        set { self[SettingsPaneKey.self] = newValue }
+    }
+}
+
+/// One pane's tab across the top of Settings: its glyph over its title,
+/// in the accent on the container's step while it is the one shown.
+private struct PaneTab: View {
+    let title: String
+    let glyph: String
+    let on: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: 3) {
+                Image(systemName: ArkGlyphs.sf(glyph)).font(.title3)
+                Text(title).font(.caption).lineLimit(1)
+            }
+            .foregroundStyle(on ? Color.accent : Color.quiet)
+            .padding(.horizontal, Space.m)
+            .padding(.vertical, Space.xs)
+            .background(on ? Color.container : Color.clear, in: RoundedRectangle(cornerRadius: CGFloat(LayoutTokens.corner), style: .continuous))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.pressRow)
+        .accessibilityAddTraits(on ? [.isSelected] : [])
+    }
+}
+#endif
+
+/// One pane of Settings: on the Mac, its content under its tab
+/// (`SettingsPanes`), tagged by its title; a row that opens it elsewhere.
 public struct SettingsPane<Content: View>: View {
     let title: String
     let glyph: String
@@ -746,9 +843,7 @@ public struct SettingsPane<Content: View>: View {
         // A stack of its own, so a pane's page can push another (a
         // connected bank's, from Connected Banks) as it does elsewhere.
         NavigationStack { content }
-            .padding()
-            .tabItem { Label(title, systemImage: ArkGlyphs.sf(glyph)) }
-            .tag(title)
+            .containerValue(\.settingsPane, SettingsPaneValue(title: title, glyph: glyph))
         #else
         NavigationLink {
             content.navigationTitle(title)
@@ -761,27 +856,44 @@ public struct SettingsPane<Content: View>: View {
 
 // MARK: the Settings scene
 
-/// The app's Settings: the Mac's Settings window (⌘,), and a window the
-/// iPad can open (`openWindow(id: "settings")`); the iPhone reaches its
-/// Settings inside the app.
+#if !os(macOS)
+/// The app's Settings as a window the iPad can open
+/// (`openWindow(id: "settings")`); the iPhone reaches its Settings inside
+/// the app. The Mac's is a sheet over its window (`settingsShown`), as the
+/// desktop's and the browser's are, raised by ⌘, (`SettingsCommand`).
 public struct ArkSettings<Content: View>: Scene {
     let content: () -> Content
 
     public init(@ViewBuilder _ content: @escaping () -> Content) { self.content = content }
 
     public var body: some Scene {
-        #if os(macOS)
-        Settings { content() }
-        #else
         WindowGroup(id: "settings") { content() }
-        #endif
     }
 }
+#endif
+
+#if os(macOS)
+/// The app menu's Settings… (⌘,): the sheet over the window, not a window
+/// of its own.
+public struct SettingsCommand: Commands {
+    let open: () -> Void
+
+    public init(open: @escaping () -> Void) { self.open = open }
+
+    public var body: some Commands {
+        CommandGroup(replacing: .appSettings) {
+            Button("Settings\u{2026}", action: open).keyboardShortcut(",", modifiers: .command)
+        }
+    }
+}
+#endif
 
 extension View {
-    /// The app's Settings shown while `shown` is: the Mac's Settings window
-    /// (opened, and `shown` put back), a sheet on the iPhone and the iPad,
-    /// as the HIG has Settings in an app that has no window for it.
+    /// The app's Settings shown while `shown` is: a sheet over the window
+    /// on the Mac, the theme's sheet's size, its title over its panes and
+    /// Done at its foot (the desktop's and the browser's alike); a sheet
+    /// on the iPhone and the iPad, as the HIG has Settings in an app that
+    /// has no window for it.
     public func settingsShown<Content: View>(_ shown: Binding<Bool>, @ViewBuilder content: @escaping () -> Content) -> some View {
         modifier(SettingsShown(shown: shown, content: content))
     }
@@ -790,17 +902,28 @@ extension View {
 private struct SettingsShown<Panes: View>: ViewModifier {
     @Binding var shown: Bool
     let content: () -> Panes
-    #if os(macOS)
-    @Environment(\.openSettings) private var openSettings
-    #endif
 
     func body(content view: Content) -> some View {
         #if os(macOS)
-        view.onChange(of: shown) {
-            if shown {
-                openSettings()
-                shown = false
+        view.sheet(isPresented: $shown) {
+            VStack(spacing: 0) {
+                Text("Settings")
+                    .font(.title3.bold())
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, Space.l)
+                    .padding(.vertical, Space.m)
+                Divider()
+                content()
+                Divider()
+                HStack {
+                    Spacer()
+                    Button("Done") { shown = false }
+                        .keyboardShortcut(.defaultAction)
+                        .buttonStyle(.borderedProminent)
+                }
+                .padding(Space.l)
             }
+            .frame(width: CGFloat(LayoutTokens.sheetWidth), height: CGFloat(LayoutTokens.sheetHeight))
         }
         #else
         view.sheet(isPresented: $shown) {

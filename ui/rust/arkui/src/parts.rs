@@ -99,12 +99,15 @@ pub fn page_header<'a, M: 'a>(
 
 /// A section's heading over its card: its name, quiet, and what it adds up
 /// to — or an action — at its end.
-pub fn section_header<'a, M: 'a>(title: &str, trailing: Option<Element<'a, M>>) -> Element<'a, M> {
-    let mut line = row![
-        text(title.to_string()).size(13).font(crate::hero::BOLD).style(style::faint(0.55)),
-        Space::new().width(Length::Fill)
-    ]
-    .align_y(Alignment::Center);
+pub fn section_header<'a, M: 'a>(title: &str, lead: Option<Element<'a, M>>, trailing: Option<Element<'a, M>>) -> Element<'a, M> {
+    // A folding section's chevron beside its title, the two on the line
+    // of the figures' foot, as the browser's and the Mac's are.
+    let mut words = row![].spacing(4).align_y(Alignment::Center);
+    if let Some(l) = lead {
+        words = words.push(l);
+    }
+    words = words.push(text(title.to_string()).size(13).font(crate::hero::BOLD).style(style::faint(0.55)));
+    let mut line = row![words, Space::new().width(Length::Fill)].align_y(Alignment::End);
     if let Some(t) = trailing {
         line = line.push(t);
     }

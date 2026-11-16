@@ -31,6 +31,8 @@ public object LayoutTokens {
     public const val MARK_COLUMN_WIDTH: Float = 28.0f
     /** The bar under a row's name that fills toward its goal, beside columns. */
     public const val PROGRESS_WIDTH: Float = 220.0f
+    /** How thick that bar is: a slim line, on every toolkit. */
+    public const val PROGRESS_HEIGHT: Float = 4.0f
     /** A line of text as tall as this many times its size (the desktop's: iced's). */
     public const val LINE_HEIGHT: Float = 1.3f
     /** The least gap: a figure from its label. */

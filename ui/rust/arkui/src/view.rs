@@ -906,7 +906,7 @@ fn shell_part<'a, M: Clone + 'static>(p: Part<M>, ctx: &mut Ctx<'a, '_, M>) -> E
         }
         Part::Hosted { name } => (ctx.hosts)(name),
         Part::SettingsPanes { selected, select, panes } => {
-            // A Mac's Settings window: its panes' glyphs and titles across
+            // Settings' sheet, as the Mac's and the browser's: its panes' glyphs and titles across
             // the top, the chosen one lit, and only its content under them.
             let chosen = selected.get();
             let mut heads = vec![];
@@ -1240,15 +1240,22 @@ fn notice<M: Clone + 'static>(p: Part<M>) -> Option<(M, Element<'static, M>)> {
             actions,
             cancel,
         } => {
-            let mut buttons = row![
-                Space::new().width(Length::Fill),
-                dialog_button("Cancel", Role::Cancel, Some(cancel.clone()))
-            ]
-            .spacing(8);
+            // Its choices one under another, as wide as the dialog, as the
+            // Mac's and the browser's are: the first that goes ahead filled
+            // in the accent, the rest plain, one that cannot be undone in
+            // the danger colour, Cancel last.
+            let mut buttons = column![].spacing(6);
+            let mut lead = true;
             for a in actions {
-                let role = if a.destructive { Role::Destructive } else { Role::Default };
-                buttons = buttons.push(dialog_button(a.title.get(), role, Some(a.tap)));
+                let role = match (a.destructive, lead) {
+                    (true, _) => Role::Destructive,
+                    (false, true) => Role::Lead,
+                    (false, false) => Role::Default,
+                };
+                lead &= a.destructive;
+                buttons = buttons.push(choice_button(a.title.get(), role, a.tap));
             }
+            buttons = buttons.push(choice_button("Cancel", Role::Cancel, cancel.clone()));
             (
                 cancel,
                 column![
@@ -1280,6 +1287,30 @@ enum Role {
     Cancel,
     Default,
     Destructive,
+    /// A confirmation's first choice that goes ahead: filled.
+    Lead,
+}
+
+/// A confirmation's choice, as wide as its dialog, its words in the
+/// middle: the lead filled in the accent ([`style::wide`]), the rest on
+/// the surface in the accent, the danger colour or the ink (Cancel).
+fn choice_button<'a, M: Clone + 'a>(title: impl Into<String>, role: Role, press: M) -> Element<'a, M> {
+    let title: String = title.into();
+    let words = text(title).size(13).font(crate::hero::BOLD).center().width(Length::Fill);
+    let b = button(words).padding([6, 12]).width(Length::Fill).on_press(press);
+    match role {
+        Role::Lead => b.style(style::wide(true)),
+        Role::Destructive => b.style(|t, s| iced::widget::button::Style {
+            text_color: crate::theme::of(t).danger.base.color,
+            ..style::wide(false)(t, s)
+        }),
+        Role::Cancel => b.style(|t, s| iced::widget::button::Style {
+            text_color: crate::theme::of(t).background.base.text,
+            ..style::wide(false)(t, s)
+        }),
+        Role::Default => b.style(style::wide(false)),
+    }
+    .into()
 }
 
 /// A dialog's button, pressable while it has a message.
@@ -1293,7 +1324,7 @@ fn dialog_button<'a, M: Clone + 'a>(title: impl Into<String>, role: Role, press:
         .padding([5, 12])
         .style(match role {
             Role::Cancel => style::quiet,
-            Role::Default => style::action,
+            Role::Default | Role::Lead => style::action,
             Role::Destructive => style::destructive,
         })
         .on_press_maybe(press)
@@ -1414,15 +1445,13 @@ fn section<M: Clone + 'static>(s: Section<M>) -> Element<'static, M> {
     let mut out = column![].spacing(0);
     if let Some(t) = s.title {
         let title = t.get();
-        let mut head = parts::section_header(&title, trailing);
+        let chevron = s
+            .open
+            .is_some()
+            .then(|| icon::plain(if open { glyphs::DOWN } else { glyphs::CHEVRON }, true));
+        let mut head = parts::section_header(&title, chevron, trailing);
         if let Some((_, toggle)) = s.open.clone() {
-            let chevron = icon::plain(if open { glyphs::DOWN } else { glyphs::CHEVRON }, true);
-            head = button(row![chevron, head].spacing(4).align_y(Alignment::End))
-                .padding(0)
-                .width(Length::Fill)
-                .style(style::bare)
-                .on_press(toggle)
-                .into();
+            head = button(head).padding(0).width(Length::Fill).style(style::bare).on_press(toggle).into();
         }
         let items = menu_of(s.menu.clone());
         out = out.push(match items.is_empty() {
@@ -1512,7 +1541,11 @@ fn meter_row<M: Clone + 'static>(r: MeterRow<M>) -> Element<'static, M> {
             .push(container(amount(b.get(), 14, true)).width(METER_COLUMN).align_right(METER_COLUMN));
     }
     let badge = crate::figures::status_badge(r.status.get(), parts::Tint::named(&r.status_tint.get()));
-    line = line.push(container(badge).width(METER_COLUMN).align_right(METER_COLUMN));
+    // In its column beside the figures; alone, as wide as its figure.
+    line = line.push(match r.columns.is_some() {
+        true => container(badge).width(METER_COLUMN).align_right(METER_COLUMN),
+        false => container(badge),
+    });
     let keyed = cursor::row_bound(&r.title.get(), r.tap.as_ref(), cursor::bound(&r.menu));
     let b = button(lit_row(line, keyed == Keyed::Here))
         .width(Length::Fill)

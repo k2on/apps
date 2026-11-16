@@ -141,7 +141,12 @@ public struct SummaryCard: View {
                 }
             }
             .padding(.vertical, Space.xs)
+            #if os(macOS)
+            .padding(.horizontal, Space.m)
+            .padding(.vertical, Space.s)
+            #endif
             .accessibilityElement(children: .combine)
+            .macCard()
         }
     }
 
@@ -208,7 +213,7 @@ public struct CardSection<Content: View>: View {
 
     public var body: some View {
         Section {
-            if open { content }
+            if open { CardRows(content) }
         } header: {
             if let title {
                 if let onToggle {
@@ -259,6 +264,56 @@ public struct CardSection<Content: View>: View {
             v()
         }
         .frame(width: LayoutTokens.amountColumnWidth, alignment: .trailing)
+    }
+}
+
+/// A section's rows in their card: the inset grouped list's own on the
+/// iPhone and the iPad; on the Mac, whose inset list draws none, a card
+/// of their own (`macCard`) with a hairline between each, as the desktop's
+/// and the browser's cards are. Nothing at all while there are no rows.
+struct CardRows<Content: View>: View {
+    let content: Content
+
+    init(_ content: Content) { self.content = content }
+
+    var body: some View {
+        #if os(macOS)
+        Group(subviews: content) { rows in
+            if !rows.isEmpty {
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(rows) { row in
+                        if row.id != rows.first?.id { Divider() }
+                        row.padding(.vertical, Space.s)
+                    }
+                }
+                .padding(.horizontal, Space.m)
+                .padding(.vertical, Space.xs)
+                .macCard()
+            }
+        }
+        #else
+        content
+        #endif
+    }
+}
+
+extension View {
+    /// On the Mac, one row of an inset list that is a card: the page's
+    /// lowest container step under a hairline, rounded by the theme's
+    /// `corner`, edge to edge of the list's column (the desktop's
+    /// `group_card`, the browser's `.ark-card`). Elsewhere, as it is.
+    @ViewBuilder public func macCard() -> some View {
+        #if os(macOS)
+        let shape = RoundedRectangle(cornerRadius: CGFloat(LayoutTokens.corner), style: .continuous)
+        frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.containerLow, in: shape)
+            .overlay(shape.strokeBorder(Color.hairline))
+            .listRowInsets(EdgeInsets(top: Space.xs, leading: 0, bottom: Space.xs, trailing: 0))
+            .listRowSeparator(.hidden)
+            .listRowBackground(Color.clear)
+        #else
+        self
+        #endif
     }
 }
 
