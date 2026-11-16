@@ -13,13 +13,34 @@ fn home_shows_the_newest_songs_the_playlists_and_the_albums() {
     assert!(p.has_playlists && p.has_albums);
 }
 
+/// What was added most recently is each album once, with its cover and
+/// its newest songs under it: never the same cover again and again.
+/// Pressed, an album opens its page. Falsified by a tile a song (the
+/// demo's songs are all on albums), or an album twice.
 #[test]
-fn a_new_song_plays_the_newest_from_itself_and_an_album_opens() {
+fn the_newest_are_each_album_once_and_open_it() {
     let mut rt = Runtime::<Home>::new();
     let mut d = Demo::<Home>::new();
     let p = d.page(&mut rt);
-    d.run(&mut rt, [HomeMsg::PlayNew { id: p.newest[1].key.clone() }]);
-    assert!(matches!(d.requests.as_slice(), [HarkenRequest::Play { at: 1, .. }]), "{:?}", d.requests);
+    assert!(p.newest.iter().all(|t| t.key.starts_with("album:")), "{:?}", p.newest);
+    let mut keys: Vec<&str> = p.newest.iter().map(|t| t.key.as_str()).collect();
+    keys.dedup();
+    assert_eq!(keys.len(), p.newest.len(), "an album twice");
+    let mut arts: Vec<&str> = p.newest.iter().map(|t| t.art.as_str()).collect();
+    arts.sort();
+    arts.dedup();
+    assert_eq!(arts.len(), p.newest.len(), "a cover twice");
+    let first = p.newest[0].clone();
+    assert!(p.albums.iter().any(|a| first.key == format!("album:{}", a.key) && a.title == first.title));
+    d.run(&mut rt, [HomeMsg::OpenNew { key: first.key.clone() }]);
+    assert_eq!(
+        d.opened,
+        [Route::Album {
+            key: first.key.trim_start_matches("album:").into(),
+            title: first.title.clone()
+        }]
+    );
+    d.opened.clear();
     let a = p.albums[0].clone();
     d.run(
         &mut rt,

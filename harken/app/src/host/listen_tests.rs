@@ -166,6 +166,13 @@ fn joined(fake: &Fake) -> Here {
     here
 }
 
+/// Library's songs, as its Songs show them: what a test plays from.
+fn songs(h: &mut Hosting<Harken>, place: &mut Here) -> Vec<crate::library::TrackItem> {
+    h.send::<Library>(LibraryMsg::Show { kind: "songs".into() }, place);
+    place.carry();
+    h.app().library.page(&*place, NOW).songs
+}
+
 fn hosted(mut place: Here) -> (Hosting<Harken>, Here) {
     let h = Hosting::open(&place.session(), &mut place);
     place.carry();
@@ -180,8 +187,8 @@ fn hosted(mut place: Here) -> (Hosting<Harken>, Here) {
 fn alone_a_play_is_this_devices_own_sound() {
     let fake = Fake::new();
     let (mut h, mut place) = hosted(alone(&fake));
-    let first = h.app().home.page(&place, NOW).newest[0].clone();
-    h.send::<Home>(HomeMsg::PlayNew { id: first.key.clone() }, &mut place);
+    let first = songs(&mut h, &mut place)[0].clone();
+    h.send::<Library>(LibraryMsg::Play { id: first.id.clone() }, &mut place);
     let asked = fake.take();
     assert!(asked.iter().any(|a| a.starts_with("load ")), "{asked:?}");
     assert!(asked.iter().any(|a| a == "play"), "{asked:?}");
@@ -203,8 +210,8 @@ fn the_queue_is_this_devices_alone_and_the_sessions_joined() {
     for joined_ in [false, true] {
         let fake = Fake::new();
         let (mut h, mut place) = hosted(if joined_ { joined(&fake) } else { alone(&fake) });
-        let newest = h.app().home.page(&place, NOW).newest.clone();
-        h.send::<Home>(HomeMsg::PlayNew { id: newest[0].key.clone() }, &mut place);
+        let newest = songs(&mut h, &mut place);
+        h.send::<Library>(LibraryMsg::Play { id: newest[0].id.clone() }, &mut place);
         h.moved(&mut place);
         let p = h.app().player.page(&place, NOW);
         assert_eq!(p.joined, joined_);
@@ -236,8 +243,8 @@ fn a_player_registered_after_the_open_is_the_one_played() {
     place.modules = Modules::new();
     let (mut h, mut place) = hosted(place);
     fake.register(&mut place.modules);
-    let first = h.app().home.page(&place, NOW).newest[0].clone();
-    h.send::<Home>(HomeMsg::PlayNew { id: first.key.clone() }, &mut place);
+    let first = songs(&mut h, &mut place)[0].clone();
+    h.send::<Library>(LibraryMsg::Play { id: first.id.clone() }, &mut place);
     let asked = fake.take();
     assert!(asked.iter().any(|a| a.starts_with("load ")), "{asked:?}");
     assert!(h.app().player.page(&place, NOW).has);
@@ -253,8 +260,8 @@ fn a_player_registered_after_the_open_is_the_one_played() {
 fn joined_a_play_starts_the_session_and_this_device_plays_it() {
     let fake = Fake::new();
     let (mut h, mut place) = hosted(joined(&fake));
-    let first = h.app().home.page(&place, NOW).newest[0].clone();
-    h.send::<Home>(HomeMsg::PlayNew { id: first.key.clone() }, &mut place);
+    let first = songs(&mut h, &mut place)[0].clone();
+    h.send::<Library>(LibraryMsg::Play { id: first.id.clone() }, &mut place);
     assert_eq!(h.app().refused, None);
     h.moved(&mut place);
     let p = h.app().player.page(&place, NOW);
@@ -282,8 +289,8 @@ fn the_accessory_and_the_volume_follow_the_player() {
     h.send::<HarkenShell>(ShellMsg::OpenPlayer, &mut place);
     let shell = h.app().shell.page(&place, NOW);
     assert!(!shell.playing && !shell.player_open, "{shell:?}");
-    let first = h.app().home.page(&place, NOW).newest[0].key.clone();
-    h.send::<Home>(HomeMsg::PlayNew { id: first }, &mut place);
+    let first = songs(&mut h, &mut place)[0].id.clone();
+    h.send::<Library>(LibraryMsg::Play { id: first }, &mut place);
     assert!(h.app().shell.page(&place, NOW).playing);
     h.send::<HarkenShell>(ShellMsg::OpenPlayer, &mut place);
     assert!(h.app().shell.page(&place, NOW).player_open);

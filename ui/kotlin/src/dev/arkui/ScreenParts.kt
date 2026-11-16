@@ -416,8 +416,14 @@ public fun FormSheet(
 ) {
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
         SheetBar(title, onClose = onDismiss, confirm = confirm, canConfirm = canConfirm, onConfirm = onConfirm)
+        // Never taller than the sheet: its bar stays, and what is under it scrolls.
         Column(
-            Modifier.padding(horizontal = Space.page).navigationBarsPadding().imePadding().padding(top = Space.s, bottom = Space.xl),
+            Modifier.weight(1f, fill = false)
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = Space.page)
+                .navigationBarsPadding()
+                .imePadding()
+                .padding(top = Space.s, bottom = Space.xl),
             verticalArrangement = Arrangement.spacedBy(Space.section),
         ) {
             content()

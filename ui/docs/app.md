@@ -1253,7 +1253,13 @@ device), beside harken-peer's walk; both pass against 77da9807.
    `url` (the server's base URL; the server as shown has no scheme, so
    the phones and the desktop drew derived squares), and a song is drawn
    with its album's cover (`words::Covers`, from the songs' details and
-   the albums).
+   the albums). Home's Recently Added is each album once — its cover, its
+   newest songs under it ("Gigue, Menuet, 4 more"), pressed its page —
+   and a song on no album as itself, so a shelf never shows one cover
+   again and again. A sheet is never taller than the window on any
+   toolkit: its title (and its buttons) stay and what is between scrolls
+   (arkui-web's `.ark-dialog-body`, iced's sheet, Compose's `FormSheet`;
+   SwiftUI's is a `Form` already).
 5. Screenshots: harken/demo/shots.json is an in-app walk by ids (the
    first run — harken's now opens on Welcome to Harken, as money's on
    its page — Home, Search, Library, Albums, an album, the player grown

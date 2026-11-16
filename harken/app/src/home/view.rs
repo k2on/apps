@@ -28,7 +28,7 @@ pub fn home(p: &HomePage) -> View<HomeMsg> {
                     artwork(t.art, t.seed, t.title).size(ArtSize::Shelf),
                     t.title,
                     t.caption,
-                    HomeMsg::PlayNew { id: t.key },
+                    HomeMsg::OpenNew { key: t.key },
                 )
             }))
             .header("Recently Added"),

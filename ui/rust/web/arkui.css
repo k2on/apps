@@ -277,16 +277,17 @@ button.ark-sidebar-heading:hover, button.ark-sidebar-heading.ark-on { color: var
 .ark-scrim { position: absolute; inset: 0; background: color-mix(in srgb, var(--ark-scrim) 32%, transparent); animation: ark-fade var(--ark-fade-ms) var(--ark-fade); }
 .ark-scrim.ark-clear { background: transparent; }
 .ark-dialog {
-  position: relative; width: 420px; max-width: calc(100vw - 32px);
+  position: relative; width: 420px; max-width: calc(100vw - 32px); max-height: calc(100vh - 32px); box-sizing: border-box;
   background: var(--ark-surface); border: 1px solid var(--ark-hairline); border-radius: 10px; padding: 20px;
   display: flex; flex-direction: column; gap: 12px; box-shadow: 0 16px 48px rgb(0 0 0 / 0.25);
 }
 .ark-modal-layer:has(.ark-dialog-sheet) { align-items: flex-end; }
 .ark-dialog.ark-dialog-sheet { width: 100%; max-width: 100%; max-height: 92vh; border-radius: 12px 12px 0 0; border-bottom: 0; }
-.ark-dialog-title { font-size: 18px; font-weight: 700; }
+.ark-dialog-title { font-size: 18px; font-weight: 700; flex: none; margin: 0; }
 .ark-dialog-message { color: var(--ark-quiet); }
-.ark-dialog-body { display: flex; flex-direction: column; gap: 12px; }
-.ark-dialog-buttons { display: flex; justify-content: flex-end; gap: 8px; }
+/* Never taller than the window: the title and the buttons stay, the body scrolls. */
+.ark-dialog-body { display: flex; flex-direction: column; gap: 12px; flex: 0 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+.ark-dialog-buttons { display: flex; justify-content: flex-end; gap: 8px; flex: none; }
 .ark-inspector-sheet {
   position: absolute; left: 0; right: 0; bottom: 0; height: 75%; background: var(--ark-surface);
   border-radius: 12px 12px 0 0; display: flex; flex-direction: column; box-shadow: 0 -8px 32px rgb(0 0 0 / 0.2);

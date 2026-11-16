@@ -1327,7 +1327,10 @@ fn dialog<M: Clone + 'static>(v: View<M>) -> Option<(M, Element<'static, M>)> {
                 let View::Part(over) = parts.swap_remove(i) else { return None };
                 return notice(over);
             }
-            let mut c = column![text(title).size(18).font(crate::hero::BOLD)].extend(parts.into_iter().flat_map(nodes));
+            // Never taller than the window: the title (and the buttons) stay,
+            // what is between them scrolls.
+            let body = scrollable(column(parts.into_iter().flat_map(nodes)).spacing(12)).height(Length::Shrink);
+            let mut c = column![text(title).size(18).font(crate::hero::BOLD), body];
             if let Some(Confirm { title, enabled, tap }) = confirm {
                 c = c.push(
                     row![
@@ -1366,7 +1369,8 @@ fn dialog<M: Clone + 'static>(v: View<M>) -> Option<(M, Element<'static, M>)> {
         _ => return None,
     };
     let panel = container(content.spacing(12)).padding(20).width(DIALOG).style(style::card);
-    Some((dismiss, panel.into()))
+    // A margin to the window's edges, so a tall one is never cut at them.
+    Some((dismiss, container(panel).padding(PAD).into()))
 }
 
 fn section<M: Clone + 'static>(s: Section<M>) -> Element<'static, M> {
