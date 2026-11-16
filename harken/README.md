@@ -8,7 +8,7 @@ linked by the server and every client, and every
 query a view a client keeps up to date by the rows a change touched.
 
 ```
-domain/    the domain, in plain Rust (spec/AUTHORING.md): src/schema.rs,
+src/core/  the domain, in plain Rust (spec/AUTHORING.md): src/schema.rs,
            types.rs, keys.rs, library.rs, browse.rs, playlists.rs;
            listening.rs, queue.rs, devices.rs and groups.rs, the listening
            session as volatile tables (never the log); plays.rs (the log);
@@ -20,12 +20,15 @@ server/    an ark-peer that listens, with harken's own parts: the scanner, the H
            bridge, sign-in, /media, a web directory when given one;
            the NixOS module (server/README.md); the peers' configuration
            (src/config.rs), and in its tests a hall, the hub in the process
-app/       harken as an Ark app (ui/docs/app.md, "harken's Port"): every
-           screen's state, messages, update and #[view], the shell and
-           Settings, the player and this device's sound, the car's
-           browse tree, and its host's part (`host::Harken`, and
-           `window` for the desktop and the browser)
-demo/      harken-seed: the demo library (the classical catalogue, the
+Cargo.toml harken-app, harken as an Ark app (ui/docs/app.md, "harken's
+           Port"): this device's sound, the car's browse tree, and its
+           host's part (`src/host.rs`, and `window` for the desktop and
+           the browser)
+src/app/   its routes and screens (ark_router's `routes!`): every
+           screen's state, messages, update and #[view] — the shell and
+           Settings, the tabs, a record's page, the player, the sheets
+src/components/  its covers, rows, headers and controls
+src/demo/  harken-seed: the demo library (the classical catalogue, the
            shows, the covers), shots.json, server.sh
 app.toml   what it is, from which every client is generated: the
            phones' library and projects, the browser's page, the

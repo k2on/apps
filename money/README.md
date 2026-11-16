@@ -9,22 +9,26 @@ figure a view kept up to date by the rows a change touched.
 app.toml        what money is to every platform: its name, id, accent,
                 platforms and what it asks of each (ui/docs/app.md,
                 "Generated, Not Committed"); every native project is
-                generated from it, its crate's declaration (app/src/lib.rs)
+                generated from it, its crate's src/app folder
                 and the Rust views: `nix run .#money-prebuild` writes them
                 into .native/
 icon.svg        its icon, every platform's
-core/           the domain, in plain Rust (spec/AUTHORING.md): src/schema.rs,
+Cargo.toml      money-app, money as an Ark app: its part of every host
+                (src/host.rs), drawn by iced on the desktop and Leptos in
+                the browser and generated as SwiftUI and Compose
+src/app/        its routes and screens, Expo Router's way (ark_router's
+                `routes!`): _layout.rs the shell, (modals) the sheets, each
+                group of (tabs) a tab and its screen, each other file a
+                route; a screen's state, messages, update and #[view]s
+src/components/ its own components, compositions of arkui's primitives
+src/core/       the domain, in plain Rust (spec/AUTHORING.md): src/schema.rs,
                 types.rs, dates.rs; accounts.rs, categories.rs, budget.rs,
                 transactions.rs; plaid.rs, the bank import; receipts.rs and
                 stores.rs, the stores' receipts; migrations.rs
-app/            money as an Ark app: the screens' state, messages, update and
-                #[view]s, drawn by iced on the desktop and Leptos in the
-                browser and generated as SwiftUI and Compose; its part of
-                every host (src/host.rs)
 server/         money-server: the hub, sign-in, a web directory if given one,
                 the bank importer (src/importer.rs, Plaid over src/plaid.rs);
                 nix/module.nix is services.money
-demo/           the demo's household on a peer and a disk (`money-seed DATA`),
+src/demo/       the demo's household on a peer and a disk (`money-seed DATA`),
                 the screenshots' shots.json and server.sh
 README.md       this
 .gitignore      what is generated here and never committed: .native/ (the
@@ -36,11 +40,11 @@ debug.keystore  the one key every Android build signs with (below)
 ## The phones
 
 Nothing of money's phones is written by hand. Their library is generated
-from money-app's declaration (`ark_app::app!`), their screens from its
+from money-app's declaration (its src/app, `ark_router::routes!`), their screens from its
 views, and their
 shell is the app library's (ArkApp's and ark-app-android's `ArkShell`):
 the sections and their tabs, toolbars, search and inspectors are the
-shell's view (`app/src/shell/view.rs`); which screen is hosted where, what
+shell's view (`src/app/_layout/view.rs`); which screen is hosted where, what
 goes over every section (the sheets), Settings and the menu bar's commands
 are its declaration's (`#[shell]`, `#[over]`, the shell's further views). A route is one of the shell's places on every
 platform: an account is its section (Accounts pushes it on a phone), a
@@ -558,7 +562,7 @@ import's phases, the accounts a server names and does not follow, the
 tree, splits, receipts, charges and their adapters, the migration of
 groups into the tree (from the schema a server stands on, and one older),
 and every view against a fresh evaluation (`domain/tests/`); the demo's
-seed, and every screen's update (`app/src/*/tests.rs`). The server
+seed, and every screen's update (`src/app/**/_layout/tests.rs`). The server
 in the process on a real port (`server/tests/`): signing in through the
 routes and syncing on the socket, a phone's code sent back to
 `money://` and exchanged, a forged token turned away, nobody signed in
