@@ -92,18 +92,24 @@ let
   # "build"): cargo's resolution, a crate's features the union of what each
   # of its dependents in that graph asks of it.
   # A crate's own source: `src` without the top-level swift/ and kotlin/
-  # directories a device module (modules/ark-*) keeps beside its Rust, and
-  # without a crate of its own inside it (an app's crate is its directory,
-  # and its core, demo and server are crates beside its source: money/'s
-  # src/core, src/demo and server/), so an edit to one rebuilds that one.
+  # directories a device module (modules/ark-*) keeps beside its Rust, and,
+  # for a crate of this repository (a path, which crate2nix cleans: `src`
+  # has an `origSrc`), without a crate of its own inside it (an app's crate
+  # is its directory, and its core, demo and server are crates beside its
+  # source: money/'s src/core, src/demo and server/), so an edit to one
+  # rebuilds that one. A git dependency's source is its whole repository,
+  # whose members its build looks for: kept.
   ownSource = src:
-    let root = toString (src.origSrc or src); in
+    let
+      root = toString (src.origSrc or src);
+      local = src ? origSrc;
+    in
     lib.cleanSourceWith {
       inherit src;
       filter = path: type:
         !(type == "directory" && (
           (dirOf (toString path) == root && lib.elem (baseNameOf (toString path)) [ "swift" "kotlin" ])
-          || (toString path != root && builtins.pathExists "${toString path}/Cargo.toml")));
+          || (local && toString path != root && builtins.pathExists "${toString path}/Cargo.toml")));
     };
 
   resolve = { packageId, features, tests, split, targets }:
