@@ -241,8 +241,11 @@ page's replica and the views it holds; `Seen` to read; none at all for an
 app with no data), `WebHost<W>` driving `Hosting` over it and drawing what
 the part says (`Windowed`), and `live`, the sign-in and the socket: the
 server is whoever served the page, the first run is every app's
-(`ark_app::welcome`), and `?demo` runs the app's demo in the page with no
-server, seeded to `?today=`. Every page is that `WebHost`, whatever made
+(`ark_app::welcome`), and the page published as the demo (`<html
+data-ark-demo>`, which nix/channel.py's `web … demo` writes for the
+site's pages; no query in its address) runs the app's demo in the page
+with no server, seeded to `?today=`. The same page served by the app's
+own server signs in there. Every page is that `WebHost`, whatever made
 it: the SPA, a page the export wrote and the module takes over, a page a
 server writes (arkui-serve). The address arrives as a link
 (`HostedApp::link`): a launch when its query names a screen
@@ -555,7 +558,7 @@ browser), shown at a first launch (`FirstRun::launch`) until it is passed
 (`Asked::seen`, which the shell remembers its own way — the desktop's app
 data, the browser's local storage), never on a screenshot's, the demo's or a
 link's launch, and by its route (`/welcome/`) always. The app's pages never
-stand before the server's. The demo is a launch's (`-demo`, `?demo`), never
+stand before the server's. The demo is a launch's (`-demo`, a page published as the demo), never
 offered by the first run. A link that comes while a page shows is kept for
 the app (`open_link`, `take_link`). harken's bridge exports it; its phones still draw their own
 first run until harken is ported.
@@ -1762,7 +1765,7 @@ machine (`ark_auth::onboarding`), trades the code at `/auth/session` so
 its session is an `HttpOnly`, `SameSite=Strict` cookie no script reads,
 and holds a replica (an ark-peer in wasm, in memory) synced over the
 socket, which takes the cookie from a page of the server's own origin.
-`?demo` runs the demo household in the page instead, with no server. The docs site is the static
+The page published as the demo (the site's, `data-ark-demo`) runs the demo household in the page instead, with no server. The docs site is the static
 case (`ssg`): public, finite, read more than written. harken's public
 pages (a show, an episode, a transcript) are the next. `ssr` is a
 capability the layers keep — the same routes, controls and forms, taken by
@@ -1988,8 +1991,8 @@ ui/docs/apps/money.md for money):
    `host` runs an app's part of its host in the page ("The Browser's
    Page"): money's page, generated from its app.toml, is money's shell
    and every screen, signed in to the server that serves it and synced
-   over its socket as every device is (an ark-peer in wasm; `?demo` is the
-   demo household in the page), and nothing of it is money's own code
+   over its socket as every device is (an ark-peer in wasm; the page published as the
+   demo, `data-ark-demo`, is the demo household in the page), and nothing of it is money's own code
    but money-app's views; `nix build .#money-web` is the page
    (`checks.money-web`),
    `checks.money-web-sync` holds it to signing in and syncing with

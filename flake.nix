@@ -353,10 +353,13 @@
               let
                 a = arkApp.read n;
                 page = self.packages.${pkgs.system}."${n}-web";
+                # Published as the demo where the app has one (its `[ffi]
+                # demo`): the page is the demo by where it is.
+                demo = (a.ffi or { }) ? demo;
                 one = channel: path: package: title: {
                   inherit n channel path package title;
                   about = "${a.store.summary or a.name}: the demo in the browser, ${channel}.";
-                  drv = channels.webPage { name = package; inherit page path channel; };
+                  drv = channels.webPage { name = package; inherit page path channel demo; };
                 };
               in
               lib.optional (channels.enabled n "stable") (one "stable" n "${n}-page" a.name)
@@ -2334,10 +2337,11 @@
               key = drv: builtins.substring 0 32 (baseNameOf (builtins.unsafeDiscardStringContext drv.drvPath));
               # A page's channel is the deploy that publishes it
               # (.github/channels.sh): main's (unstable) or a tag's
-              # (stable); `path` is where under the site, and `demo` says
-              # the site links it with `?demo`.
-              page = name: package: title: about: { channel ? "unstable", path ? name, demo ? false }: {
-                inherit name package title about channel path demo;
+              # (stable); `path` is where under the site, and `spa` says
+              # it draws itself in the browser, so every address under it
+              # is its own (the site's 404.html loads it there).
+              page = name: package: title: about: { channel ? "unstable", path ? name, spa ? false }: {
+                inherit name package title about channel path spa;
                 key = key self.packages.${pkgs.system}.${package};
               };
               # An APK and its unstable twin (nix/channels.nix): build.yaml
@@ -2381,7 +2385,7 @@
             {
               pages = [
                 (page "docs" "docs" "docs" "the components every app here shares (arkui), a page each in an ArkUI app written as static HTML, with live arkui-web parts, pictures drawn by arkui itself, and catalogue.json beside it." { })
-              ] ++ map (p: page (lib.replaceStrings [ "/" ] [ "-" ] p.path) p.package p.title p.about { inherit (p) channel path; demo = true; }) webPages;
+              ] ++ map (p: page (lib.replaceStrings [ "/" ] [ "-" ] p.path) p.package p.title p.about { inherit (p) channel path; spa = true; }) webPages;
               apks = [
                 # The kernel for every ABI first, so its failure reads on its own.
                 (apk "harken" harken { first = [ "harken-android-lib" ]; })

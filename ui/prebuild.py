@@ -1870,7 +1870,7 @@ fn main() {
     return f"""//! {WEB_HEADER.format(dir=a['dir'], id=a['id'])}
 //! {a['name']} in the browser (ui/docs/app.md, "Export"): its crate's part
 //! of its host ({crate}::{w['app']}) run in the page by arkui-web's
-//! `WebHost`{', on its server or (`?demo`) its demo' if w['domain'] else ''}{'; natively, its export' if web_static(a) else ''}. Never committed.
+//! `WebHost`{', on its server or (published as the demo) its demo' if w['domain'] else ''}{'; natively, its export' if web_static(a) else ''}. Never committed.
 
 /// {a['name']} in the browser, as its app.toml says it.
 struct Web;

@@ -176,6 +176,48 @@ deploy() {
 
   index "$site" > "$site/index.html"
   cat "$site/index.html"
+  not_found "$site" > "$site/404.html"
+}
+
+# The site's 404.html, which GitHub Pages answers every address it has no
+# file for with (only the site root's: a page's own 404.html is never
+# read). A page that draws itself (`spa`) owns every address under it —
+# a deep link, a refresh after the address followed the app
+# (/apps/unstable/<app>/accounts/) — so an address under one is that
+# page, loaded where it was asked for: its index.html fetched and written
+# in place, the address left as it was, for the app's router to read.
+# Anything else is not found. Written fresh by every deploy from the plan's
+# pages of both channels that are on the site, so neither channel's
+# addresses are lost when the other deploys.
+not_found() {
+  local site=$1 base bases
+  base=$(sed -E 's|^[a-z]+://[^/]*||; s|/*$|/|' <<< "$SITE_URL")
+  bases=$(jq -r '.[] | select(.spa == true) | .path' <<< "$PAGES" |
+    while read -r path; do
+      [ -d "$site/$path" ] && echo "$base$path/"
+    done | jq -R . | jq -sc 'sort_by(-length)')
+  cat <<HTML
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Not Found</title>
+<style>body{font:16px/1.5 system-ui,sans-serif;max-width:40em;margin:4em auto;padding:0 1em;color-scheme:light dark}</style>
+<script>
+(() => {
+  const at = location.pathname, base = $bases.find(b => at.startsWith(b) || at + "/" === b);
+  if (!base) return;
+  document.documentElement.hidden = true;
+  fetch(base, { cache: "no-cache" })
+    .then(r => (r.ok ? r.text() : Promise.reject(r.status)))
+    .then(page => { document.open(); document.write(page); document.close(); })
+    .catch(() => { document.documentElement.hidden = false; });
+})();
+</script></head>
+<body>
+<h1>Not Found</h1>
+<p>Nothing is published at this address. <a href="$base">The apps</a> are.</p>
+</body>
+</html>
+HTML
 }
 
 # The site's front page: what this is, the pages by channel, and the
@@ -207,11 +249,10 @@ HTML
     esac
     echo "<h2>$heading</h2>"
     echo "<ul>"
-    jq -r --arg c "$c" '.[] | select(.channel == $c) | [.path, .title, .about, (.demo | tostring)] | @tsv' <<< "$PAGES" |
-      while IFS=$'\t' read -r path title about demo; do
+    jq -r --arg c "$c" '.[] | select(.channel == $c) | [.path, .title, .about] | @tsv' <<< "$PAGES" |
+      while IFS=$'\t' read -r path title about; do
         [ -d "$site/$path" ] || continue
-        if [ "$demo" = true ]; then href="$path/?demo"; else href="$path/"; fi
-        echo "<li><a href=\"$href\">$title</a>: $about</li>"
+        echo "<li><a href=\"$path/\">$title</a>: $about</li>"
       done
     path=$(repo_path "$c")
     if [ -d "$site/$path" ]; then

@@ -110,8 +110,9 @@ async function main() {
         const began = Date.now();
         const inPlace = mode === 'spa' && page && !shot.fresh;
         if (!inPlace) await open();
-        // `web.query`: what every shot's address says first, the app's own
-        // (money's `demo`: the household in the page, no server).
+        // `web.query`: what every shot's address says first, the app's own.
+        // (`web.demo` is no query: app-web.sh serves the page published as
+        // the demo, `data-ark-demo`, the household in the page, no server.)
         // `shots=1`: nothing on the page moves, a fade included, and the
         // caret is clear (arkui-web's `data-motion="shots"`, ui/docs/shots.md).
         const q = [web.query || '', `today=${web.today}`, `theme=${theme}`, 'shots=1', shot.query || ''].filter(Boolean).join('&');

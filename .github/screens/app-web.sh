@@ -46,6 +46,16 @@ cat > "$conf/fonts.conf" <<EOF
 </fontconfig>
 EOF
 
+# An app whose shots are of its demo (shots.json's `web.demo`) is served
+# as the site publishes it (nix/channel.py's `web … demo`): the page is the
+# demo by where it is (`data-ark-demo`), with no `?demo` in its address.
+shots_file=${ARK_WEB_SHOTS:-$PWD/$app/demo/shots.json}
+if [ "$(jq -r '.web.demo // false' "$shots_file")" = true ]; then
+  served=$conf/site
+  python3 -I "$here/../../nix/channel.py" web "$site" "$served" / "$here/../../ui/theme.toml" stable demo
+  site=$served
+fi
+
 # The page on a free port of the loopback, stopped however this ends.
 port=$(python3 -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')
 python3 -m http.server "$port" --bind 127.0.0.1 --directory "$site" > /dev/null 2>&1 &
@@ -58,4 +68,4 @@ done
 
 mkdir -p "$out"
 echo "$app web"
-FONTCONFIG_FILE=$conf/fonts.conf timeout 900 node "$here/web-shots.js" "${ARK_WEB_SHOTS:-$PWD/$app/demo/shots.json}" "http://127.0.0.1:$port" "$out"
+FONTCONFIG_FILE=$conf/fonts.conf timeout 900 node "$here/web-shots.js" "$shots_file" "http://127.0.0.1:$port" "$out"

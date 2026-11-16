@@ -1,5 +1,5 @@
 //! The demo's household (money-core's `demo`) on a peer and a disk: what
-//! the demo window, the phones' demo, the browser's `?demo` and a seeded
+//! the demo window, the phones' demo, the browser's published demo and a seeded
 //! server open on (docs/seed.md). The household itself, and the rules it
 //! is made by, are the core's and pure; writing it to a disk and opening a
 //! peer over it is this adapter's.

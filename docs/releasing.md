@@ -7,7 +7,7 @@ Every app here is published in two channels.
 | what | a `v*` tag's build: a release | every push to main |
 | Android app | the app's own id (`us.koon.<app>`), its own name | a second app beside it: `us.koon.<app>.unstable`, "&lt;Name&gt; Unstable", its launcher icon banded in the theme's caution colours |
 | F-Droid | https://k2on.github.io/apps/fdroid/repo | https://k2on.github.io/apps/fdroid/unstable/repo |
-| browser demo | https://k2on.github.io/apps/&lt;app&gt;/?demo | https://k2on.github.io/apps/unstable/&lt;app&gt;/?demo |
+| browser demo | https://k2on.github.io/apps/&lt;app&gt;/ | https://k2on.github.io/apps/unstable/&lt;app&gt;/ |
 | iPhone | TestFlight | nothing yet (a hook, below) |
 | version name | the tag without its `v` (`v1.2` is `1.2`) | `<last tag>-unstable+<commit>`, such as `1.2-unstable+3f9c2ab` |
 | GitHub release | the stable APKs attached | none |
@@ -74,6 +74,28 @@ the stable repository's, which holds the last release.
 **Once, in the repository's settings:** Settings → Environments →
 `github-pages` → Deployment branches and tags must allow the tags `v*`
 beside `main`, or a tag's deploy is refused. Not checked from here.
+
+### The browser demos' addresses
+
+A browser demo is the demo by where it is: the page the site publishes
+(nix/channels.nix's `webPage`, nix/channel.py's `web`) is written with
+`data-ark-base`, its base under the site, and, for an app with a demo
+(`[ffi] demo`), `data-ark-demo`, so it opens the demo household in the
+page with no server and no `?demo` in its address. The same page served
+by an app's own server (money-server's `MONEY_WEB`) has neither, and
+signs in there.
+
+Its address follows the app (`/apps/unstable/<app>/accounts/`,
+`/apps/<app>/album/<key>/`), so every such address must load: the
+deploy writes the site's `404.html` (`channels.sh`'s `not_found`), which
+GitHub Pages answers every address it has no file for with. For an
+address under a page that draws itself (the plan's `spa` pages, both
+channels' that are on the site) it fetches that page's `index.html` and
+writes it in place, the address left as it was, so the app's router
+reads it: a refresh, a deep link and a link with a row's id all load
+where they say. Anything else is said to be not found. It is written
+fresh on every deploy from both channels, so neither loses it when the
+other deploys.
 
 ### Carrying the other channel forward
 
@@ -156,6 +178,3 @@ it back:
   fixed authority (`CoverProvider.kt`); the unstable app's provider is
   moved under its own id so that both install, and its covers in a car
   stay missing until that code asks for its own package's authority.
-- A browser page under a path (`/apps/<app>/`) is served with
-  `data-ark-base` set; a deep link reloaded there is GitHub Pages' 404,
-  as there is no fallback page.

@@ -20,11 +20,13 @@ them, so an app that joins the flake's `publish` list has both channels
     channel.py fdroid-yml YML OUT
         an app's F-Droid metadata made the unstable app's: its Name with
         " Unstable" after it and a paragraph saying what the channel is.
-    channel.py web DIR OUT BASE THEME [unstable]
+    channel.py web DIR OUT BASE THEME CHANNEL [demo]
         a browser page (index.html beside pkg/) served under BASE (such as
         /apps/unstable/<app>/): its module, wasm and icon fetched from
-        there and its router told so (`data-ark-base`); and with
-        `unstable`, its title marked and its icon banded.
+        there and its router told so (`data-ark-base`); in the `unstable`
+        CHANNEL, its title marked and its icon banded; and with `demo`,
+        the page is its app's demo by where it is (`data-ark-demo`: the
+        household in the page, no server, no `?demo` in its address).
     channel.py check NAMES FILE...
         that none of the comma-separated NAMES (each app's directory, id
         and name) is written in any FILE: the channel code stays the same
@@ -228,7 +230,7 @@ def fdroid_yml(src, out):
         f.write("\n".join(lines))
 
 
-def web(src, out, base, theme, channel="stable"):
+def web(src, out, base, theme, channel="stable", demo=""):
     if not (base.startswith("/") and base.endswith("/")):
         fail(f"base {base} does not start and end with /")
     shutil.copytree(src, out)
@@ -250,7 +252,8 @@ def web(src, out, base, theme, channel="stable"):
     # `web_index`), which here is BASE.
     once(r'(["(])/pkg/', lambda m: m.group(1) + base + "pkg/", "module under /pkg/")
     once(r'href="/favicon\.svg"', f'href="{base}favicon.svg"', "favicon")
-    once(r"<html\b", f'<html data-ark-base="{base}"', "<html>")
+    mark = " data-ark-demo" if demo == "demo" else ""
+    once(r"<html\b", f'<html data-ark-base="{base}"{mark}', "<html>")
     if channel == "unstable":
         once(r"<title>(.*?)</title>", lambda m: f"<title>{m.group(1)}{LABEL}</title>", "title")
         fav = os.path.join(out, "favicon.svg")

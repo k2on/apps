@@ -451,8 +451,8 @@ thread_local! {
 
 /// The query keys that are the page's own, not the app's (ui/docs/app.md,
 /// "Addresses"): kept in the address whatever the app's place, so a load
-/// of it comes back the same (`?demo&today=…`, a screenshot's).
-const STICKY: [&str; 5] = ["demo", "today", "shots", "theme", "reduce-motion"];
+/// of it comes back the same (`?today=…&shots=1`, a screenshot's).
+const STICKY: [&str; 4] = ["today", "shots", "theme", "reduce-motion"];
 
 /// The browser's address made the app's (`WebHost::route`), under the
 /// site's base, with the page's own keys ([`STICKY`]) kept: a new entry in
@@ -549,6 +549,14 @@ pub fn page_base() -> String {
     root_element()
         .and_then(|r| r.get_attribute("data-ark-base"))
         .unwrap_or_else(|| "/".into())
+}
+
+/// Whether this page is its app's demo (`<html data-ark-demo>`): a page
+/// published as the demo (the site's, nix/channel.py's `web … demo`) is
+/// the demo by where it is, its household in the page with no server; the
+/// same page served by the app's own server signs in there.
+pub fn page_demo() -> bool {
+    root_element().is_some_and(|r| r.has_attribute("data-ark-demo"))
 }
 
 /// Whether this page is a screenshot's (`?shots=1`, ui/docs/shots.md):

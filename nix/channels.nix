@@ -52,9 +52,10 @@ rec {
   '';
 
   # A browser page (index.html beside pkg/) as the site serves it at
-  # `path`, in `channel`.
-  webPage = { name, page, path, channel }: pkgs.runCommand "${name}-page" { } ''
-    ${py} web ${page} $out ${siteBase}${path}/ ${theme} ${channel}
+  # `path`, in `channel`; with `demo`, the app's demo by where it is
+  # (`data-ark-demo`), its household in the page with no server.
+  webPage = { name, page, path, channel, demo ? false }: pkgs.runCommand "${name}-page" { } ''
+    ${py} web ${page} $out ${siteBase}${path}/ ${theme} ${channel} ${lib.optionalString demo "demo"}
   '';
 
   # That no app is named in the channel code: `names` each app's

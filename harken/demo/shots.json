@@ -375,8 +375,8 @@
     }
   ],
   "web": {
-    "_": "The browser's (app-web.sh, web-shots.js): harken-web over the demo library in the page (`query`'s `demo`: no server to sign in to), at each of `sizes` (named as `screens`' `on`) in light and dark; every one of `screens` is taken on the sizes it is `on`, its launch arguments as the page's address.",
-    "query": "demo",
+    "_": "The browser's (app-web.sh, web-shots.js): harken-web over the demo library in the page (`demo`: the page published as the demo, `data-ark-demo`, as the site publishes it; no server to sign in to), at each of `sizes` (named as `screens`' `on`) in light and dark; every one of `screens` is taken on the sizes it is `on`, its launch arguments as the page's address.",
+    "demo": true,
     "today": "2026-11-10",
     "sizes": {
       "mac": [

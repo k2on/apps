@@ -311,7 +311,7 @@ button.
 Every client's first run is every Ark app's (`ark_app::welcome`): a
 server's address and its sign-in, or the demo — the demo library
 (`harken-seed`) on this device alone, which `-demo` on the desktop and
-`?demo` in the browser open straight away. The phones and the browser
+the browser's published demo page (`data-ark-demo`) open straight away. The phones and the browser
 signed in to the server that served the page sync with it as money's do
 (ui/docs/app.md, "Signing In").
 

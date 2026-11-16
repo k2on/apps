@@ -12,10 +12,11 @@
 //!
 //! The household is the server's that served the page ([`crate::live`]):
 //! the page signs in through it as the phones do, holds a replica and syncs
-//! over its socket; the first run is every app's (`ark_app::welcome`). With
-//! `?demo` it is the app's demo, in the page's memory, its own authority,
-//! with no server, seeded to `?today=`: what the screenshots and a public
-//! demo run. An app with no data of its own (the docs: no domain in its
+//! over its socket; the first run is every app's (`ark_app::welcome`). A
+//! page published as the demo (`<html data-ark-demo>`, [`crate::page_demo`])
+//! is the app's demo, in the page's memory, its own authority, with no
+//! server, seeded to `?today=`: what the screenshots and the public demo
+//! run. An app with no data of its own (the docs: no domain in its
 //! app.toml) is the page alone, with no replica at all.
 //!
 //! An app names nothing of its own here: its entry point is generated from
@@ -346,8 +347,8 @@ impl<W: WebHosted> Place<Key<W>, Change<W>> for Seen<'_, W> {
 /// The app on the page the browser loaded: taking over the page its export
 /// or its server wrote (`data-ark-mode`), or drawing it alone (the SPA). An
 /// app with no data is the page alone; one with a domain is its demo's
-/// household with `?demo` (seeded to `?today=`), else its server's, the
-/// page's own origin.
+/// household on a page published as the demo (`data-ark-demo`, seeded to
+/// `?today=`), else its server's, the page's own origin.
 pub fn start<W: WebHosted>() {
     crate::set_app_mark(W::MARK);
     let now = ark_format::day_of(ark_peer::now_ms());
@@ -356,10 +357,10 @@ pub fn start<W: WebHosted>() {
         .and_then(|r| r.get_attribute("data-ark-mode"))
         .and_then(|m| crate::page::Mode::of_word(&m))
         .is_some_and(|m| m != crate::page::Mode::Spa);
-    let host = match (W::domain(), crate::query("demo")) {
+    let host = match (W::domain(), crate::page_demo()) {
         (None, _) => WebHost::<W>::over(None, Here::of_page(today), None),
-        (Some(_), Some(_)) => WebHost::<W>::demo(Here::of_page(today)),
-        (Some(_), None) => WebHost::<W>::on_server(origin(), Here::of_page(now)),
+        (Some(_), true) => WebHost::<W>::demo(Here::of_page(today)),
+        (Some(_), false) => WebHost::<W>::on_server(origin(), Here::of_page(now)),
     };
     // A page written ahead is taken over by a module built to (`hydrate`).
     #[cfg(feature = "hydrate")]
