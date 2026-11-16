@@ -227,6 +227,7 @@ pub fn play_shuffle<M>(play: M, shuffle: M) -> View<M> {
         wide_button("Shuffle", false, true, false, shuffle),
     ))
     .spacing(Space::M)
+    .max_width(Measure::Actions)
     .into()
 }
 

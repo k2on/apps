@@ -72,6 +72,8 @@ pub const ART_ROW: f32 = 48.0;
 pub const ART_SHELF: f32 = 148.0;
 /// Artwork beside a page's title: a record's cover.
 pub const ART_HEADER: f32 = 132.0;
+/// The most a page's row of wide buttons is across: an album's Play and Shuffle on a wide window.
+pub const ACTIONS_WIDTH: f32 = 360.0;
 /// The desktop's large title (the phones take the style by name, so Dynamic Type and the font scale grow it).
 pub const TYPE_LARGE_TITLE: f32 = 28.0;
 /// The desktop's title.

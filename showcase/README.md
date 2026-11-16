@@ -8,7 +8,7 @@ screen that draws one shot of them by name.
 - `android/` — a Gradle project compiling arkui (`ui/kotlin`, the
   sources harken and money compile too) and `Showcase.kt`. `gradle -p showcase/android
   :app:assembleDebug`; open a shot with
-  `adb shell am start -n dev.arkui.showcase/.ShowcaseActivity --es shot cards`.
+  `adb shell am start -n dev.arkui.showcase/.ShowcaseActivity --es shot lists`.
 - `ios/` — an XcodeGen project over ArkUI for SwiftUI (`ui/swift`).
   `xcodegen generate`, build for the simulator, and launch with
   `xcrun simctl launch booted dev.arkui.showcase -showcase art`.

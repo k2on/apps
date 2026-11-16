@@ -73,6 +73,8 @@ public enum LayoutTokens {
     public static let artShelf: Double = 148.0
     /// Artwork beside a page's title: a record's cover.
     public static let artHeader: Double = 132.0
+    /// The most a page's row of wide buttons is across: an album's Play and Shuffle on a wide window.
+    public static let actionsWidth: Double = 360.0
     /// The desktop's large title (the phones take the style by name, so Dynamic Type and the font scale grow it).
     public static let typeLargeTitle: Double = 28.0
     /// The desktop's title.

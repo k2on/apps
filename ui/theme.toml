@@ -414,6 +414,9 @@ dropdown-height = 360.0
 art-row = 48.0
 art-shelf = 148.0
 art-header = 132.0
+# The most a page's row of wide buttons (an album's Play and Shuffle) is
+# across: as wide as given on a phone, kept to this on a wide window.
+actions-width = 360.0
 # The type styles a primitive's text is set in (ui/docs/primitives.md): the
 # phones take each by name (SwiftUI's text styles, Material's type roles),
 # so Dynamic Type and the font scale grow them; these are the desktop's

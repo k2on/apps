@@ -690,6 +690,7 @@ button.ark-sidebar-heading:hover, button.ark-sidebar-heading.ark-on { color: var
 .ark-side-art-shelf { width: var(--ark-art-shelf); height: var(--ark-art-shelf); }
 .ark-side-art-header { width: var(--ark-art-header); height: var(--ark-art-header); }
 .ark-side-art-row, .ark-side-art-shelf, .ark-side-art-header { flex: none; overflow: hidden; }
+.ark-max-w-actions-width { width: 100%; max-width: var(--ark-actions-width); }
 .ark-square { width: 100%; aspect-ratio: 1; min-height: 0; overflow: hidden; }
 .ark-corner-circle { border-radius: 50%; overflow: hidden; }
 

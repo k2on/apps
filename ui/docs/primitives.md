@@ -61,7 +61,7 @@ the primitives below and ArkUI's press; nothing of it is per toolkit.
 | Artwork grid | `artwork_grid(tiles)` | `grid(Measure::ArtShelf, tiles).spacing(M).line_spacing(L).padding(Horizontal, Page)` |
 | Media row | `media_row(title, tap).art(..).under(..).trailing(..).menu(..)` | `press_row` (a row's light, its menu) round an `hstack` of the art, a plain one-line `title_stack`, `spacer_min(Xs)` and the end |
 | Media header | `media_header(art, titles, actions)` | a `vstack` of an `hstack` of the cover at `art-header` and the titles, the actions under both, at the page's margins |
-| Play/shuffle pair | `play_shuffle(play, shuffle)` | two `wide_button`s in an `hstack` |
+| Play/shuffle pair | `play_shuffle(play, shuffle)` | two `wide_button`s in an `hstack`, `.max_width(Measure::Actions)`: as wide as a phone gives it, kept to `actions-width` on a wide window |
 | Glyph button | `glyph_button(name, label, style, ink, tap)` | `pressable` round a padded `glyph` |
 | Transport controls | `transport(play_glyph, play_label, toggle, back, forward).shuffle(tint, tap).repeat(glyph, tint, tap)` | glyph buttons and `spacer`s across the width |
 | Figure with label | `figure_label(label, figure)` | a quiet caption over a one-line headline, `.combine()`d |
@@ -120,6 +120,7 @@ And on every primitive (the `Modify` trait):
 | `.background(Surface)` | `Surface::Card` (the card's container), `Surface::Raised` (a container above it) |
 | `.corner(Corner)` | `Corner::Card` (`card-corner`), `Corner::Small` (`corner`), `Corner::Circle` (round): clips |
 | `.width(Measure)` | as wide as a measure, what it holds kept to it (a tile's words under its cover) |
+| `.max_width(Measure)` | as wide as it is given up to the measure, at the leading edge (a row of wide buttons on a wide window) |
 | `.side(Measure)` | a square the measure a side; what it holds is laid into it |
 | `.square()` | as tall as it is wide, of the width it is given; what it holds is laid into that square (iced, which has no aspect-ratio layout, draws an `art-shelf` square) |
 | `.grow()` | in a row, what is left once the rest have their own width, at its leading edge, and what is cut short — so a short thing beside it (a track's length) never wraps or is squeezed: Compose's `weight(1f)` (measured after the rest), SwiftUI's filling frame at `layoutPriority(-1)`, iced's `Length::Fill`, CSS's `flex: 1 1 0` |
@@ -137,7 +138,7 @@ a `Corner`, every colour an `Ink` or a `Surface`, every face a `TextStyle`:
 |---|---|---|---|---|---|
 | `Space::Xs` … `Xxl`, `Page`, `Section` | `[layout]`'s `space-*`, `page-margin`, `section-gap` | `Space.xs` … | `Space.xs` … | `layout_tokens::SPACE_XS` … | `var(--ark-space-xs)` … |
 | `Corner::Card`, `Small`, `Circle` | `card-corner`, `corner`, round | `LayoutTokens.cardCorner` | `LayoutTokens.CARD_CORNER.dp` | `CARD_CORNER` — the desktop's card is 8 (`style::card`) | `var(--ark-card-corner)` |
-| `Measure::ArtRow`, `ArtShelf`, `ArtHeader` | `[layout]`'s `art-row`, `art-shelf`, `art-header` | `ArkMeasure.artRow` … | `ArkMeasure.artRow` … | `layout_tokens::ART_ROW` … | `var(--ark-art-row)` … |
+| `Measure::ArtRow`, `ArtShelf`, `ArtHeader`, `Actions` | `[layout]`'s `art-row`, `art-shelf`, `art-header`, `actions-width` | `ArkMeasure.artRow` … | `ArkMeasure.artRow` … | `layout_tokens::ART_ROW` … | `var(--ark-art-row)` … |
 | `TextStyle::LargeTitle`, `Title`, `Headline`, `Body`, `Subheadline`, `Footnote`, `Caption`, `Figure` | the system's named styles on the phones (they follow Dynamic Type and the font scale); the desktop's sizes, `[layout]`'s `type-*` | `.arkType(_:)`: `.largeTitle`, `.title2`, `.headline`, `.body`, `.subheadline`, `.footnote`, `.caption`, the large rounded bold figure | `ArkType.*.style`: `headlineLarge`, `titleLarge`, `titleMedium`, `bodyLarge`, `bodyMedium`, `bodySmall`, `labelSmall`, `displaySmall` bold | `layout_tokens::TYPE_*`, bold for the headline, titles and the figure | `.ark-type-*` over `var(--ark-type-*)` |
 | `Ink::Ink`, `Quiet`, `Accent`, `Tint(name)`, `Figure(name)` | the theme's roles; a tint by name (`neutral` is quiet), or as a figure (`neutral` is the ink) | `Color.ink`, `.quiet`, `.accentText`, `Tint(named:).color`, `.figure` | `ArkInk.*` over the scheme, `tintInk` | `theme::of(t)…`, `parts::Tint` | `.ark-ink-*`, `.ark-tint-*` |
 | `Surface::Card`, `Raised` | `container-low`, `container-high` | `Color.surfaceContainerLow`… via `ArkSurface` | `surfaceContainerLow`, `surfaceContainerHigh` | `style::card`'s colours | `var(--ark-container-low)` |
@@ -268,7 +269,7 @@ the primitives — moved, or still to move.
 | `artwork`, `artwork_tile`, `artwork_shelf`, `artwork_grid`, `media_row`, `media_header`, `play_shuffle`, `glyph_button`, `transport`, `figure_label` | — (the hand-written `Artwork`, `ArtworkGrid`, `ArtSize`, `artWidth`, `ArtworkCache`, `LocalGridCell`, `art::picture` callers and `.ark-art*` are gone) | one app's: **moved**, `harken-app`'s `parts` | harken |
 | `header_card` (`Part::Section` of a composed face), `goal_progress` | — | one app's: **moved**, `money-app`'s `parts` | money |
 | `summary_card` (`Part::Summary`), `hero_figure` (`Part::Hero`), `headline` (`Part::Headline`), `meter_row` (`Part::MeterRow`), `paper` (`Part::Paper`), `amount_entry` (`Part::AmountEntry`'s face) | `Summary`/`SummaryCard`, `HeroFigure`, `Headline`, `MeterRow`, `Paper` (FigureParts, PhotoParts, Parts) | one app's, hand-written per toolkit: **still to move** to money-app as compositions (they need what Hard Cases names: a figure in cents, "fits", parallel lists) | money |
-| `Cover`, `CoverLoader`, `HeroBanner`, `Components.kt`'s covers (Kotlin), `HeroParts.swift`/`.kt` | — | one app's (harken's old native screens'), hand-written: **still to move or delete** once nothing calls them | harken (old) |
+| `Cover`, `CoverLoader`, `HeroBanner`/`HeroHeading`/`HeroEntry`/`HeroMore`, `Components.kt`'s `CoverCard`, `Shelf`, `Heading`, `Empty`, `Fetching`, `SheetRow`, `MoreButton` | — | one app's (harken's old native screens'): **deleted**, nothing called them | — |
 | `MarkTile`, the account face (`Part::Account`) | `MarkTile`, `AccountFace` | native (the shell's mark and account) | every app |
 
 ## What Is Verified

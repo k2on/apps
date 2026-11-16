@@ -301,12 +301,11 @@ pub const COMPONENTS: &[Component] = &[
         glyph: glyphs::ALBUM,
         summary: "Pictures with a name and a line under each, in a grid or a shelf; a square, or a circle.",
         desktop: &["cards"],
-        android: Some(Mobile {
-            at: &["ui/Components.kt: CoverCard"],
-            how: &["CoverCard(seed, art, title, under, side, onClick, round = false, opens = false)", "A shelf is a LazyRow of them, `side` from the screen's width."],
-        }),
+        // On the phones a card is an app's own Rust composition of the
+        // primitives (harken's `artwork_tile`: ui/docs/primitives.md).
+        android: None,
         ios: None,
-        shots: &[shot("cards", "Cards, square and round.", ANDROID)],
+        shots: &[],
     },
     Component {
         id: "headers",
@@ -316,11 +315,11 @@ pub const COMPONENTS: &[Component] = &[
         summary: "How a page opens: a banner or a bar with its title and back, then headings over its sections.",
         desktop: &["hero"],
         android: Some(Mobile {
-            at: &["ui/Components.kt: PageBar, TabTitle, Heading"],
-            how: &["PageBar(title, onBack, actions = {})", "TabTitle(title, actions = {})", "Heading(title, modifier, action = null, onAction = {})"],
+            at: &["ui/Components.kt: PageBar, TabTitle"],
+            how: &["PageBar(title, onBack, actions = {})", "TabTitle(title, actions = {})"],
         }),
         ios: None,
-        shots: &[shot("headers", "A page's bar, a tab's title, a heading.", ANDROID)],
+        shots: &[shot("headers", "A page's bar and a tab's title.", ANDROID)],
     },
     Component {
         id: "empty",
@@ -329,12 +328,11 @@ pub const COMPONENTS: &[Component] = &[
         glyph: glyphs::MINUS,
         summary: "What a page says while it has nothing to show, or is still asking for it.",
         desktop: &[],
-        android: Some(Mobile {
-            at: &["ui/Components.kt: Empty, Fetching"],
-            how: &["Empty(icon, title, sentence, modifier, action = null, onAction = {})", "Fetching(host, delayMs): said only after a beat, so a quick answer never flashes it."],
-        }),
+        // Every toolkit's: ark_app's `empty_state`, a Rust composition of
+        // the primitives.
+        android: None,
         ios: None,
-        shots: &[shot("empty", "Nothing here yet, and still asking.", ANDROID)],
+        shots: &[],
     },
     Component {
         id: "account",
@@ -372,12 +370,10 @@ pub const COMPONENTS: &[Component] = &[
         glyph: glyphs::MORE,
         summary: "What can be done about one thing: a dropdown at the pointer or under a control on the desktop, a sheet from the foot of a phone.",
         desktop: &["menu", "context", "panel"],
-        android: Some(Mobile {
-            at: &["ui/Components.kt: SheetRow, MoreButton"],
-            how: &["SheetRow(icon, label, onClick, trailing = {}, emphasis = false) is one entry of a sheet.", "MoreButton(about, origin, onMore) opens it from a row."],
-        }),
+        // On the phones a row's menu is its press's (`pressable(..).menu`).
+        android: None,
         ios: None,
-        shots: &[shot("sheet", "A sheet's entries.", ANDROID)],
+        shots: &[],
     },
     Component {
         id: "command",

@@ -88,6 +88,8 @@ pub enum Measure {
     ArtShelf,
     /// `art-header`: beside a page's title.
     ArtHeader,
+    /// `actions-width`: the most a row of wide buttons is across.
+    Actions,
 }
 
 impl Measure {
@@ -97,6 +99,7 @@ impl Measure {
             Measure::ArtRow => "artRow",
             Measure::ArtShelf => "artShelf",
             Measure::ArtHeader => "artHeader",
+            Measure::Actions => "actionsWidth",
         }
     }
 
@@ -106,6 +109,7 @@ impl Measure {
             Measure::ArtRow => "art-row",
             Measure::ArtShelf => "art-shelf",
             Measure::ArtHeader => "art-header",
+            Measure::Actions => "actions-width",
         }
     }
 }
@@ -251,6 +255,9 @@ pub enum Modifier {
     /// As wide as the measure, what it holds kept to it: a tile's words
     /// under its cover.
     Width(Measure),
+    /// As wide as it is given up to the measure, at the leading edge: a
+    /// row of wide buttons on a wide window.
+    MaxWidth(Measure),
     /// A square the measure a side: what it holds is laid into that frame.
     Side(Measure),
     /// As tall as it is wide, of the width it is given: what it holds is
@@ -530,6 +537,10 @@ pub trait Modify: Sized {
     /// As wide as `m`, what it holds kept to it.
     fn width(self, m: Measure) -> Self {
         self.modify(Modifier::Width(m))
+    }
+    /// As wide as it is given, at most `m`.
+    fn max_width(self, m: Measure) -> Self {
+        self.modify(Modifier::MaxWidth(m))
     }
     /// A square `m` a side, what it holds laid into it.
     fn side(self, m: Measure) -> Self {

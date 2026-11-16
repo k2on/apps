@@ -48,6 +48,7 @@ public object ArkMeasure {
     public val artRow: Dp = LayoutTokens.ART_ROW.dp
     public val artShelf: Dp = LayoutTokens.ART_SHELF.dp
     public val artHeader: Dp = LayoutTokens.ART_HEADER.dp
+    public val actionsWidth: Dp = LayoutTokens.ACTIONS_WIDTH.dp
 
     /** The side a filling picture with no measure (a grid's, the player's) is decoded for. */
     internal val fill: Dp = 384.dp
@@ -57,13 +58,12 @@ public object ArkMeasure {
  * A picture by its URL that is exactly the box it is given ([modifier]'s; `image(..).fill()`): the
  * picture covers it and is cut to it, so it never sizes anything by its own aspect. Nothing is
  * drawn until it has come, so what is under it shows (a cover's derived square). Decoded for
- * [decode] across (the most a filling picture is drawn at when null) by the app's [CoverLoader],
- * or [UrlCovers]; a screenshot waits for it to come or fail.
+ * [decode] across (the most a filling picture is drawn at when null) by [UrlCovers]; a screenshot waits for it to come or fail.
  */
 @Composable
 public fun ArkPicture(url: String, label: String, decode: Dp?, modifier: Modifier = Modifier) {
     val context = LocalContext.current
-    val covers = LocalCoverLoader.current ?: remember(context) { UrlCovers.of(context) }
+    val covers = remember(context) { UrlCovers.of(context) }
     val side = decode ?: ArkMeasure.fill
     val said =
         if (label.isEmpty()) Modifier
@@ -73,17 +73,14 @@ public fun ArkPicture(url: String, label: String, decode: Dp?, modifier: Modifie
                 role = Role.Image
             }
     Box(modifier.clipToBounds().then(said)) {
-        val at = remember(covers, url) { covers.urlOf(url) }
+        val at = url.ifBlank { null }
         if (at != null) {
             // One already decoded is drawn at once, and nothing is launched for it: a fling
             // brings several rows in a frame.
             val cached = remember(at, side) { covers.cached(at, side) }
             var bitmap by remember(at, side) { mutableStateOf(cached) }
             if (cached == null) {
-                LaunchedEffect(at, side) {
-                    covers.launched()
-                    bitmap = covers.load(at, side)
-                }
+                LaunchedEffect(at, side) { bitmap = covers.load(at, side) }
             }
             bitmap?.let { Image(it, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize()) }
         }
@@ -120,14 +117,14 @@ public fun ArkGrid(min: Dp, across: Dp, down: Dp, modifier: Modifier = Modifier,
 }
 
 /**
- * Pictures by their URLs, for [ArkPicture] (and [Cover]) when an app gives no loader of its own: the encoded original
+ * Pictures by their URLs, for [ArkPicture]: the encoded original
  * on the disk under the app's cache (by the URL's FNV-1a; a cache the system may sweep), decoded
  * once for each size it is drawn at with the largest power-of-two shrink that keeps it that size,
  * and kept in memory by bytes. One fetch and one decode per URL and size however many rows ask at
  * once; one that cannot be had is remembered for the launch (a cover is decoration, and the square
  * under it is already right). `HttpURLConnection` and `BitmapFactory`: no dependency.
  */
-public class UrlCovers private constructor(context: Context) : CoverLoader {
+public class UrlCovers private constructor(context: Context) {
     private val dir = File(context.cacheDir, "covers")
     private val density = context.resources.displayMetrics.density
     private val missing: MutableSet<String> = Collections.synchronizedSet(HashSet())
@@ -138,13 +135,13 @@ public class UrlCovers private constructor(context: Context) : CoverLoader {
             override fun sizeOf(key: String, value: ImageBitmap): Int = value.width * value.height * 4
         }
 
-    override fun urlOf(art: String): String? = art.ifBlank { null }
-
-    override fun cached(url: String, side: Dp): ImageBitmap? = memory.get("${pixels(side)} $url")
+    /** The picture at `url` if it is already decoded for `side`, without waiting. */
+    public fun cached(url: String, side: Dp): ImageBitmap? = memory.get("${pixels(side)} $url")
 
     private fun pixels(side: Dp): Int = minOf(BOUND, (side.value * density).toInt().coerceAtLeast(64))
 
-    override suspend fun load(url: String, side: Dp): ImageBitmap? {
+    /** The picture at `url`, decoded to about `side` across, or null when there is none. */
+    public suspend fun load(url: String, side: Dp): ImageBitmap? {
         val want = pixels(side)
         val key = "$want $url"
         memory.get(key)?.let { return it }

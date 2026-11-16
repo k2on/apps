@@ -495,6 +495,40 @@ pub fn capsule(theme: &Theme, status: button::Status, on: bool) -> button::Style
     }
 }
 
+/// A wide button, as the phones draw one (`WideButton`): a capsule the
+/// width it is given, filled in the accent with the accent's ink when it
+/// is the prominent one (Play), else on a card's ground with the accent's
+/// words (Shuffle). The pointer over it, or a press, darkens it a step.
+pub fn wide(prominent: bool) -> impl Fn(&Theme, button::Status) -> button::Style {
+    move |theme, status| {
+        let p = of(theme);
+        let (ground, ink) = match prominent {
+            true => (p.primary.base.color, p.primary.base.text),
+            false => (surface_color(theme), p.primary.base.color),
+        };
+        let over = match status {
+            button::Status::Hovered => HOVER_ALPHA,
+            button::Status::Pressed => PRESS_ALPHA,
+            _ => 0.0,
+        };
+        let ground = mix(ground, p.background.base.text, over);
+        let (ground, ink) = match status {
+            button::Status::Disabled => (ground.scale_alpha(0.5), ink.scale_alpha(0.5)),
+            _ => (ground, ink),
+        };
+        button::Style {
+            background: Some(Background::Color(ground)),
+            text_color: ink,
+            border: Border {
+                // Half its height whatever that is: a capsule.
+                radius: 1.0e4.into(),
+                ..Border::default()
+            },
+            ..button::Style::default()
+        }
+    }
+}
+
 /// A sheet over a compact window: the page's ground, its top corners rounded.
 pub fn sheet(theme: &Theme) -> container::Style {
     container::Style {

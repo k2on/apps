@@ -58,6 +58,7 @@ public enum ArkMeasure {
     public static let artRow = CGFloat(LayoutTokens.artRow)
     public static let artShelf = CGFloat(LayoutTokens.artShelf)
     public static let artHeader = CGFloat(LayoutTokens.artHeader)
+    public static let actionsWidth = CGFloat(LayoutTokens.actionsWidth)
 }
 
 /// A picture by its URL that is exactly the frame it is given (`image(..)

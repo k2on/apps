@@ -168,14 +168,12 @@ slots, the rest left out. The parts decide which, never the app.
 
 ## A page about somebody
 
-`ui/rust/arkui/src/hero.rs`'s catalogue page has its twins on the phones:
-
-| Part | Inputs | Compose | SwiftUI | iced |
-|---|---|---|---|---|
-| HeroBanner | picture, kind, name | `HeroBanner(seed, art, kind, name)`, `HeroBanner.height` | `HeroBanner(image:kind:name:)`, `HeroBanner.height` | `hero::banner` |
-| HeroHeading | title | `HeroHeading` | `HeroHeading` | `hero::heading` |
-| HeroEntry | over, title, under, count, open, picture | `HeroEntry` | `HeroEntry` | `hero::entry` / `hero::listing` |
-| HeroMore | label, open | `HeroMore` | `HeroMore` | `hero::more` |
+`ui/rust/arkui/src/hero.rs`'s catalogue page (`hero::banner`,
+`hero::heading`, `hero::entry`/`hero::listing`, `hero::more`) is the
+desktop's own, drawn by the docs' examples. Its phone twins (`HeroBanner`,
+`HeroHeading`, `HeroEntry`, `HeroMore`) were harken's old native screens'
+and are gone: a page like it is an app's Rust composition of the
+primitives (ui/docs/primitives.md).
 
 ## Ids
 

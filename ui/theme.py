@@ -68,6 +68,7 @@ LAYOUT = {
     "art-row": "Artwork beside a row's words: a track's cover, a person's face.",
     "art-shelf": "Artwork on a shelf's tile; a grid's columns are at least this wide.",
     "art-header": "Artwork beside a page's title: a record's cover.",
+    "actions-width": "The most a page's row of wide buttons is across: an album's Play and Shuffle on a wide window.",
     "type-large-title": "The desktop's large title (the phones take the style by name, so Dynamic Type and the font scale grow it).",
     "type-title": "The desktop's title.",
     "type-headline": "The desktop's headline: a card's title, bold.",

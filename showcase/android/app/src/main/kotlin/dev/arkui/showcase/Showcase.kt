@@ -1,5 +1,5 @@
 // The shared components the docs show, on a real device: one activity,
-// opened at one shot by name (`--es shot cards`), drawing ark-ui on its own —
+// opened at one shot by name (`--es shot lists`), drawing ark-ui on its own —
 // placeholder content, and ark-ui's neutral theme.
 //
 // The shots are the docs' (`docs/site/src/components.rs`), and the screens
@@ -38,16 +38,15 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -56,15 +55,10 @@ import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.unit.dp
 import dev.arkui.ArkGlyphs
 import dev.arkui.ArkTheme
-import dev.arkui.Chevron
-import dev.arkui.CoverCard
-import dev.arkui.Empty
 import dev.arkui.ExpandingCard
-import dev.arkui.Fetching
 import dev.arkui.Glass
 import dev.arkui.GlassContainer
 import dev.arkui.GlassMorph
-import dev.arkui.Heading
 import dev.arkui.ListRow
 import dev.arkui.LocalArkTheme
 import dev.arkui.Accent
@@ -73,7 +67,6 @@ import dev.arkui.LocalReselect
 import dev.arkui.PageBar
 import dev.arkui.Reselect
 import dev.arkui.ScrollsToTop
-import dev.arkui.SheetRow
 import dev.arkui.SignInPhase
 import dev.arkui.SignInScreen
 import dev.arkui.Space
@@ -91,7 +84,7 @@ class ShowcaseActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        val shot = intent.getStringExtra("shot") ?: "cards"
+        val shot = intent.getStringExtra("shot") ?: "lists"
         go.intValue = intent.getIntExtra("go", 0)
         setContent { Neutral { Showcase(shot, go.intValue) } }
     }
@@ -124,16 +117,6 @@ private fun Screen(content: @Composable () -> Unit) = Box(Modifier.fillMaxSize()
 @Composable
 fun Showcase(shot: String, go: Int) {
     when (shot) {
-        "cards" -> Screen {
-            Column(Modifier.padding(Space.page), verticalArrangement = Arrangement.spacedBy(Space.l)) {
-                Heading("Cards")
-                for (pair in places.take(6).chunked(2)) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(Space.l)) {
-                        pair.forEachIndexed { i, p -> CoverCard(p, "", p, "A place", 160.dp, onClick = {}, round = i == 1) }
-                    }
-                }
-            }
-        }
         "lists" -> Screen {
             Column {
                 TabTitle("Lists")
@@ -144,25 +127,12 @@ fun Showcase(shot: String, go: Int) {
             Column {
                 PageBar("A page", onBack = {})
                 TabTitle("A tab's title")
-                Heading("A heading", action = "See all")
                 Text("What a page says under its heading.", modifier = Modifier.padding(horizontal = Space.page))
-            }
-        }
-        "sheet" -> Sheet {
-            SheetRow(ArkGlyphs.Chevron, "Open", onClick = {})
-            SheetRow(ArkGlyphs.More, "More", onClick = {}, trailing = { Chevron() })
-            SheetRow(ArkGlyphs.Volume, "Louder", onClick = {})
-            SheetRow(ArkGlyphs.Back, "Remove", onClick = {}, emphasis = true)
-        }
-        "empty" -> Screen {
-            Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.SpaceEvenly) {
-                Empty(ArkGlyphs.More, "Nothing here yet", "What a page says while it has nothing to show.", action = "Add one")
-                Fetching("example.com", delayMs = 0)
             }
         }
         "art" -> Screen {
             Column(Modifier.padding(Space.page), verticalArrangement = Arrangement.spacedBy(Space.m)) {
-                Heading("Squares")
+                Text("Squares", style = MaterialTheme.typography.titleLarge)
                 for (row in places.chunked(3)) {
                     Row(horizontalArrangement = Arrangement.spacedBy(Space.m)) { row.forEach { Square(it, Modifier.size(96.dp)) } }
                 }
@@ -270,26 +240,6 @@ fun Showcase(shot: String, go: Int) {
             GlassMerge(together)
         }
         else -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("No showcase for $shot") }
-    }
-}
-
-/** A bottom sheet as an app raises one: a scrim over the page, the sheet at its foot. */
-@Composable
-private fun Sheet(content: @Composable () -> Unit) {
-    Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.scrim.copy(alpha = 0.32f))) {
-        Spacer(Modifier.weight(1f))
-        Surface(
-            color = MaterialTheme.colorScheme.surfaceContainerLow,
-            shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Column(Modifier.padding(bottom = Space.xl)) {
-                Box(Modifier.fillMaxWidth().padding(vertical = 22.dp), contentAlignment = Alignment.Center) {
-                    Box(Modifier.width(32.dp).height(4.dp).background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f), RoundedCornerShape(2.dp)))
-                }
-                content()
-            }
-        }
     }
 }
 

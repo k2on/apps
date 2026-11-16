@@ -1,5 +1,6 @@
-// A picture: the one an app has for a thing, and `ui/rust/arkui`'s derived
-// square until it arrives or when there is none (`ui/rust/arkui/src/art.rs`).
+// The derived square, `ui/rust/arkui`'s (`ui/rust/arkui/src/art.rs`): what
+// the `swatch` primitive draws, under a picture until it arrives or when
+// there is none.
 //
 // The square is drawn the desktop's way: the name's tint from the first
 // stop of its pair, a diagonal from full strength to a third, and a note
@@ -8,11 +9,6 @@
 // so one album is one square on every screen. It is not a placeholder to
 // be replaced by a spinner: it is right on its own, and a cover that does
 // arrive simply appears over it.
-//
-// Where a picture comes from is the app's: a `CoverLoader` it provides
-// (`LocalCoverLoader`), which says where a thing's art is, hands back one
-// already decoded at once, and loads the rest. With none — a screenshot —
-// only the squares are drawn.
 package dev.arkui
 
 import android.graphics.Bitmap
@@ -20,34 +16,16 @@ import android.graphics.Canvas
 import android.graphics.LinearGradient
 import android.graphics.Paint
 import android.graphics.Shader
-import androidx.compose.foundation.Image
-import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.ProvidableCompositionLocal
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
-import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.toArgb
-import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.unit.Dp
 
 public object Art {
     /** FNV-1a over UTF-16 code units: `arkui::art::hash`, which both clients pin. */
@@ -133,83 +111,4 @@ public fun Square(seed: String, modifier: Modifier = Modifier) {
                 drawPath(flag, ink)
             }
         })
-}
-
-/**
- * A picture, `side` across: the cover the app's [CoverLoader] has at `art` (for harken, a path
- * under the media root, or a whole URL), over the square derived from `seed`. Round for a person.
- */
-@Composable
-public fun Cover(
-    seed: String,
-    art: String,
-    side: Dp,
-    modifier: Modifier = Modifier,
-    round: Boolean = false,
-    corner: Dp = Space.corner
-) {
-    val shape = if (round) CircleShape else RoundedCornerShape(corner)
-    // On the page's own colour: the derived square fades to a third, and a cover lifted on a
-    // shadow (the player's) would show the shadow through it, a dark band inside its edge.
-    Box(modifier.clip(shape).background(MaterialTheme.colorScheme.surface)) {
-        Square(seed, Modifier.fillMaxSize())
-        val covers = LocalCoverLoader.current
-        val url = remember(covers, art) { covers?.urlOf(art) }
-        if (covers != null && url != null) {
-            // A cover already decoded is drawn at once, and nothing is launched for it: a fling
-            // brings several rows in a frame, and a coroutine each to find what was already there
-            // was a cost per row.
-            val cached = remember(url, side) { covers.cached(url, side) }
-            if (cached != null) {
-                Image(
-                    cached,
-                    contentDescription = null,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize())
-            } else {
-                var bitmap by remember(url) { mutableStateOf<ImageBitmap?>(null) }
-                LaunchedEffect(url) {
-                    covers.launched()
-                    bitmap = covers.load(url, side)
-                }
-                bitmap?.let {
-                    Image(
-                        it,
-                        contentDescription = null,
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier.fillMaxSize())
-                }
-            }
-        }
-    }
-}
-
-/**
- * Where an app's pictures come from, for [Cover]: an image library's, or one of the app's own. A
- * cover already decoded is drawn in the frame its row enters, so [cached] is asked first and must
- * not wait; [load] is asked only for what it did not have.
- */
-public interface CoverLoader {
-    /** Where the picture named `art` is, or null when there is none. */
-    public fun urlOf(art: String): String?
-
-    /**
-     * The picture at `url` if it is already decoded for `side` (as [load] decodes it for that
-     * side), without waiting: not one decoded for another size, which a full player's cover would
-     * draw blurred, or a row's at more pixels than it needs, whichever came first.
-     */
-    public fun cached(url: String, side: Dp): ImageBitmap?
-
-    /** The picture at `url`, decoded to about `side` across, or null when there is none. */
-    public suspend fun load(url: String, side: Dp): ImageBitmap?
-
-    /**
-     * Told each time a cover on screen went looking for its picture rather than finding it decoded.
-     */
-    public fun launched() {}
-}
-
-/** The app's pictures, or none — in a screenshot, where only the squares are drawn. */
-public val LocalCoverLoader: ProvidableCompositionLocal<CoverLoader?> = staticCompositionLocalOf {
-    null
 }

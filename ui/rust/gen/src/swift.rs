@@ -303,6 +303,7 @@ fn modifier(m: &Modifier) -> String {
         ),
         Modifier::Combine => ".accessibilityElement(children: .combine)".into(),
         Modifier::Width(m) => format!(".frame(width: {}, alignment: .leading)", measure(*m)),
+        Modifier::MaxWidth(m) => format!(".frame(maxWidth: {}, alignment: .leading)", measure(*m)),
         // The square first, what it holds laid into it.
         Modifier::Side(m) => format!(".frame(width: {0}, height: {0})", measure(*m)),
         Modifier::Square => ".aspectRatio(1, contentMode: .fit)".into(),

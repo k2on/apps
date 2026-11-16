@@ -73,6 +73,8 @@ public object LayoutTokens {
     public const val ART_SHELF: Float = 148.0f
     /** Artwork beside a page's title: a record's cover. */
     public const val ART_HEADER: Float = 132.0f
+    /** The most a page's row of wide buttons is across: an album's Play and Shuffle on a wide window. */
+    public const val ACTIONS_WIDTH: Float = 360.0f
     /** The desktop's large title (the phones take the style by name, so Dynamic Type and the font scale grow it). */
     public const val TYPE_LARGE_TITLE: Float = 28.0f
     /** The desktop's title. */

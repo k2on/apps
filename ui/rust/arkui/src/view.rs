@@ -328,10 +328,11 @@ fn part<M: Clone + 'static>(v: View<M>) -> Option<Element<'static, M>> {
                 .push(text(title.get()))
                 .spacing(6)
                 .align_y(Alignment::Center);
+            // A capsule as the phones' (`WideButton`): filled when prominent.
             button(container(label).center_x(Length::Fill))
                 .width(Length::Fill)
-                .padding([8, 14])
-                .style(if prominent { style::action } else { style::quiet })
+                .padding([crate::layout_tokens::SPACE_M, crate::layout_tokens::SPACE_L])
+                .style(style::wide(prominent))
                 .on_press_maybe((enabled.get() && !busy).then_some(tap))
                 .into()
         }

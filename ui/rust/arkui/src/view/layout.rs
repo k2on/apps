@@ -198,6 +198,7 @@ fn modified<M: 'static>(mut el: Element<'static, M>, mods: &[Modifier]) -> Eleme
             // iced has no screen reader yet.
             Modifier::Combine => el,
             Modifier::Width(m) => container(el).width(measure(*m)).clip(true).into(),
+            Modifier::MaxWidth(m) => container(el).width(Length::Fill).max_width(measure(*m)).into(),
             Modifier::Side(m) => container(el).width(measure(*m)).height(measure(*m)).clip(true).into(),
             // iced has no aspect-ratio layout: a square of what it is given
             // is a shelf's (a grid's columns are that wide).
@@ -305,6 +306,7 @@ fn measure(m: Measure) -> f32 {
         Measure::ArtRow => tokens::ART_ROW,
         Measure::ArtShelf => tokens::ART_SHELF,
         Measure::ArtHeader => tokens::ART_HEADER,
+        Measure::Actions => tokens::ACTIONS_WIDTH,
     }
 }
 
