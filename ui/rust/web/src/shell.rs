@@ -127,7 +127,7 @@ struct Ctx<'h> {
     back_label: Option<String>,
     top_tabs: Option<AnyView>,
     /// Who is signed in (`Part::Account`), drawn as every toolbar's last
-    /// item.
+    /// item short of a sidebar, whose foot holds them where there is one.
     account: Option<Rc<dyn Fn() -> AnyView>>,
     hosts: &'h dyn Fn(&'static str) -> AnyView,
 }
@@ -632,8 +632,13 @@ fn tab_sections<M: Clone + std::fmt::Debug + 'static>(
             if let Some(p) = place {
                 content = groups.swap_remove(p).index;
             }
+            // Who is signed in has one place: the sidebar's foot where
+            // there is a sidebar (`Tabs::footer`, or the account item
+            // itself when the app gives no footer), so no toolbar beside
+            // it carries them again.
+            let account = ctx.account.take();
             let foot = match footer {
-                View::Empty => None,
+                View::Empty => account.map(|a| html::div().class("ark-sidebar-footer").child(a())),
                 f => Some(html::div().class("ark-sidebar-footer").child(draw(f, ctx))),
             };
             let side = html::nav()

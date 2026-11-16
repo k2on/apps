@@ -185,7 +185,8 @@ public fun compactTag(tag: String): String = tag.substringBefore('/')
  * The app's sections: a navigation bar when compact, a rail when medium, a
  * permanent drawer when expanded (NavigationSuiteScaffold's choice, by the
  * theme's widths). [footer] is the drawer's foot; [account] (a [ToolbarAccount])
- * the last item of every section's toolbar, at every width.
+ * the last item of every section's toolbar short of the drawer, whose foot holds who is signed
+ * in where there is one: never both.
  *
  * With an accessory ([bar] and [full]: the now-playing bar and the full player), the bar stands
  * over the navigation bar (at the screen's foot beside a rail or a drawer) while [showing], and is
@@ -228,9 +229,10 @@ public fun AdaptiveTabs(
         }
         CompositionLocalProvider(
             LocalSizeClass provides size,
-            // With an account item the toolbars carry who is signed in; the footer stays the drawer's.
+            // With an account item the toolbars carry who is signed in short of the drawer; the
+            // footer stays the drawer's, and beside the drawer no toolbar says it again.
             LocalShellFooter provides if (drawer || account != null) null else footer,
-            LocalShellAccount provides account,
+            LocalShellAccount provides if (drawer) null else account,
         ) {
             when {
                 // The bar at the foot keeps the navigation bar clear itself; the top is the

@@ -82,14 +82,19 @@ pub struct Accessory<M> {
 
 impl<M> Tabs<M> {
     /// What sits at the sidebar's foot: who is signed in, the household
-    /// (`.tabViewSidebarBottomBar`). Never on a compact tab bar.
+    /// (`.tabViewSidebarBottomBar`). Never on a compact tab bar. Where it
+    /// is shown, the toolbars carry no [`Tabs::account`]: who is signed in
+    /// has one place on the screen.
     pub fn footer(mut self, footer: impl Into<View<M>>) -> Self {
         self.footer = footer.into();
         self
     }
 
     /// Who is signed in ([`account_item`]): the last item of every
-    /// section's toolbar, on every platform and at every width.
+    /// section's toolbar short of a sidebar (a phone, a compact or a
+    /// medium width). Where there is a sidebar, who is signed in is at its
+    /// foot ([`Tabs::footer`], or this item itself when there is no
+    /// footer), never in the toolbars as well.
     pub fn account(mut self, account: impl Into<View<M>>) -> Self {
         self.account = account.into();
         self

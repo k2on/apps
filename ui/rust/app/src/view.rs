@@ -625,7 +625,8 @@ pub enum Part<M> {
         /// in, the household. Not on a compact tab bar.
         footer: Box<View<M>>,
         /// Who is signed in ([`Part::Account`]): the last item of every
-        /// section's toolbar, at every width; empty for none.
+        /// section's toolbar short of a sidebar (at the sidebar's foot
+        /// where there is one, never both); empty for none.
         account: Box<View<M>>,
         /// What stands over the sections at the foot and grows into the
         /// whole window ([`Accessory`]): the now-playing bar and the full

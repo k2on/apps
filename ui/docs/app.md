@@ -1949,7 +1949,8 @@ ui/docs/apps/money.md for money):
    `split_view`, `toolbar`
    with `bar_item`s by `Placement`, `Tabs::account` (an `account_item`:
    who is signed in, their picture or their initial, every section's
-   toolbar's last item at every width, said "Account" and their name:
+   toolbar's last item short of a sidebar — where there is one, its foot
+   (`Tabs::footer`) holds them instead, never both — said "Account" and their name:
    `ToolbarAccount` on the phones and the Mac), `searchable`, `inspector`, `hosted`,
    `confirmation_dialog`, `alert`, `settings_panes` (one shown, by title),
    and the menu bar's

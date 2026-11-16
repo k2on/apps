@@ -558,7 +558,8 @@ struct Ctx<'a, 'h, M> {
     frame: Frame,
     back: Option<M>,
     top_tabs: Option<Element<'a, M>>,
-    /// Who is signed in (`Part::Account`): every toolbar's last item.
+    /// Who is signed in (`Part::Account`): every toolbar's last item short
+    /// of a sidebar, whose foot holds them where there is one.
     account: Option<(String, M)>,
     hosts: &'h mut dyn FnMut(&'static str) -> Element<'a, M>,
 }
@@ -656,8 +657,13 @@ fn tab_sections<'a, M: Clone + 'static>(
             }
             // The sidebar's foot is the sidebar's: its rows are no
             // pane's the keys walk (the sidebar's cursor is the section).
+            // Who is signed in has one place: the sidebar's foot where
+            // there is a sidebar (`Tabs::footer`, or the account item
+            // itself when the app gives no footer), so no toolbar beside
+            // it carries them again.
+            let account = ctx.account.take();
             let foot = match footer {
-                View::Empty => None,
+                View::Empty => account.map(|(name, tap)| account_button(name, tap)),
                 f => Some(cursor::in_pane(Pane::Sidebar, || draw(f, ctx))),
             };
             let side = sidebar::view_with_footer(items, at, focused, SIDEBAR_WIDTH, SIDEBAR_PAD, "ark-shell-sidebar", foot);

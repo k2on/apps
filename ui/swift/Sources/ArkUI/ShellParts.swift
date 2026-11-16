@@ -53,7 +53,8 @@ extension EnvironmentValues {
     }
 
     /// Who is signed in (`ToolbarAccount`): every section's toolbar's last
-    /// item, at every width.
+    /// item where there is no sidebar (the iPhone, an iPad's compact
+    /// width); the sidebar's foot holds them where there is one.
     var shellAccount: AnyView? {
         get { self[ShellAccountKey.self] }
         set { self[ShellAccountKey.self] = newValue }
@@ -104,7 +105,8 @@ public struct HostedScreen: View {
 /// The app's sections: a tab bar on the iPhone, a sidebar on the iPad
 /// (the person can turn it into the tab bar) and on the Mac, with
 /// `footer` (who is signed in) at the sidebar's foot, and `account` (an
-/// `ToolbarAccount`) the last item of every section's toolbar. A tag
+/// `ToolbarAccount`) the last item of every section's toolbar where there
+/// is no sidebar: who is signed in has one place on the screen. A tag
 /// `parent/child` is a child of `parent` (an account of Accounts): a place
 /// of its own in the sidebar; on a compact width the parent's tab, which
 /// pushes it. With an accessory (`bar`, `full`: the now-playing bar and
@@ -150,9 +152,13 @@ public struct AdaptiveTabs<Tabs: TabContent<String>, Footer: View, Account: View
         self.full = full()
     }
 
-    /// Whether an account item was given: the toolbars carry it, and the
-    /// footer stays at the sidebar's foot.
+    /// Whether an account item was given: the toolbars carry it short of a
+    /// sidebar, and the footer stays at the sidebar's foot.
     private var hasAccount: Bool { Account.self != EmptyView.self }
+
+    /// Whether a footer was given: where there is a sidebar it is who is
+    /// signed in, and the toolbars carry no account item beside it.
+    private var hasFooter: Bool { Footer.self != EmptyView.self }
 
     private var compact: Bool {
         #if os(iOS)
@@ -174,7 +180,7 @@ public struct AdaptiveTabs<Tabs: TabContent<String>, Footer: View, Account: View
             .tabViewSidebarBottomBar { footer }
             .nowPlaying(accessory, bar: bar, full: full)
             .environment(\.shellFooter, compact && !hasAccount ? AnyView(footer) : nil)
-            .environment(\.shellAccount, hasAccount ? AnyView(account) : nil)
+            .environment(\.shellAccount, hasAccount && (compact || !hasFooter) ? AnyView(account) : nil)
             .environment(\.shownSection, shown)
     }
 }
