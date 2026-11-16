@@ -805,3 +805,58 @@ fn a_join_link_is_a_qr_code() {
     }
     assert!(!at(1, 1) && at(2, 2));
 }
+
+/// No browser to sign in with: said once, and a code from a device that's
+/// signed in redeemed instead — a pasted join link for this server by its
+/// code, a bare code as it is, another server's link asked about first; an
+/// older server's refusal is its own sentence; back in front, the browser
+/// is tried again. Falsified by a machine that offers no code once the
+/// browser could not be opened, or loops opening it.
+#[test]
+fn with_no_browser_a_code_signs_in() {
+    let m = Onboarding::new(harken());
+    assert_eq!(m.next(launched(Some(H), None, false)), vec![browse()]);
+    assert_eq!(m.code_entry(), None, "a browser is tried first");
+    assert!(m.next(Event::NoBrowser).is_empty());
+    assert_eq!(m.step(), sign_in(Phase::Idle, Some(words::NO_BROWSER)));
+    assert_eq!(m.code_entry().as_deref(), Some(""));
+    assert!(m.next(Event::UseCode).is_empty(), "nothing typed");
+    m.next(Event::TypedCode {
+        text: " harken://join?server=https%3A%2F%2Fh&code=K1 ".into(),
+    });
+    assert_eq!(
+        m.next(Event::UseCode),
+        vec![Effect::Redeem {
+            server: H.into(),
+            code: "K1".into()
+        }]
+    );
+    assert_eq!(m.step(), sign_in(Phase::Exchanging, None));
+    m.next(Event::SignInFailed {
+        why: crate::client::OLDER.into(),
+    });
+    assert_eq!(m.step(), sign_in(Phase::Idle, Some(crate::client::OLDER)));
+    m.next(Event::TypedCode { text: "K2".into() });
+    assert_eq!(
+        m.next(Event::UseCode),
+        vec![Effect::Redeem {
+            server: H.into(),
+            code: "K2".into()
+        }]
+    );
+    m.next(Event::SignInFailed { why: "No such code.".into() });
+    m.next(Event::TypedCode {
+        text: "harken://join?server=https%3A%2F%2Fother.example.com&code=K3".into(),
+    });
+    assert!(m.next(Event::UseCode).is_empty());
+    assert!(matches!(m.step(), Step::Confirm { server, .. } if server == "https://other.example.com"));
+    m.next(Event::Decline);
+    m.next(Event::TypedCode {
+        text: "https://example.com/x".into(),
+    });
+    m.next(Event::UseCode);
+    assert_eq!(m.step(), sign_in(Phase::Idle, Some(words::NOT_A_CODE)));
+    // A browser installed meanwhile: back in front, it is tried again.
+    let fx = m.next(Event::Foreground);
+    assert!(fx.iter().any(|e| matches!(e, Effect::Browse { .. })));
+}

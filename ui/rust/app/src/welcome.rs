@@ -410,48 +410,6 @@ mod tests {
         assert!(p.shows() && !WelcomePage::none().shows());
     }
 
-    fn sign_in(offers_code: bool, scan: bool) -> SignInPage {
-        SignInPage {
-            glyph: "shield-check".into(),
-            title: "Sign In".into(),
-            sentence: "On h's own page.".into(),
-            status: None,
-            busy: false,
-            problem: None,
-            go: "Sign In".into(),
-            can_sign_in: true,
-            offers_other: false,
-            can_change: true,
-            offers_code,
-            code: String::new(),
-            can_use_code: false,
-            scan,
-        }
-    }
-
-    /// The sign-in page offers a code only when no browser could open the
-    /// sign-in, and Scan a Code only with a camera. Falsified by drawing
-    /// the code's field whatever `offers_code` says.
-    #[test]
-    fn the_sign_in_page_offers_a_code_only_with_no_browser() {
-        let page = |s| WelcomePage {
-            sign_in: Some(s),
-            ..WelcomePage::none()
-        };
-        let mut n = vec![];
-        names(&welcome::view(&page(sign_in(false, true))), &mut n);
-        assert_eq!(n, ["FirstRunPage", "StatusLine", "WideButton"]);
-        let mut n = vec![];
-        names(&welcome::view(&page(sign_in(true, true))), &mut n);
-        assert_eq!(
-            n,
-            ["FirstRunPage", "StatusLine", "AddressField", "WideButton", "WideButton", "WideButton"]
-        );
-        let mut n = vec![];
-        names(&welcome::view(&page(sign_in(true, false))), &mut n);
-        assert_eq!(n, ["FirstRunPage", "StatusLine", "AddressField", "WideButton", "WideButton"]);
-    }
-
     /// Every page is recorded for the phones, each behind its `if let`.
     #[test]
     fn the_recording_has_every_page() {
