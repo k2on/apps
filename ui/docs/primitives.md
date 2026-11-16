@@ -72,6 +72,7 @@ What stays ArkUI's, because it is native:
 |---|---|---|
 | Pressed as one | `pressable(label, tap, content)` (a give), `press_row(label, tap, content)` (a row's light), `.menu(title, glyph, tap)` | `Part::Press`: the platform's button and context menu (SwiftUI's `Pressable`, a `Button` in `.press`/`.pressRow`; Compose's `Modifier.pressable` with `Press.Give`/`Highlight`, its menu held; iced's bare button; the browser's `<button class="ark-press">`); its walk id a row's by its label when it lights, else what it sends |
 | Scrubber, hairline | `scrubber(at_ms, since_ms, playing, length_ms, seek)`, `hairline(..)` | `Part::Timeline`: counted from its clock as it is drawn (`TimelineView`, a ticking state, iced's tick while one plays, an animation frame in the DOM), a drag with a `Selection` haptic at either end, `seek` once on release — a time-driven control and a gesture |
+| Clock words | `clock_words(text, at_ms, since_ms, playing, from_ms, until_ms)` | `Part::ClockWords`: body words in the accent while the clock (a timeline's) is in `[from_ms, until_ms)`, quiet otherwise, counted as they are drawn on the timeline's clock, so a transcript's line said now moves with no message; a colour, never motion |
 | Volume | `volume(label, level, muted, change, mute)` | `Part::Volume`: `VolumeSlider` on the phones (a level from elsewhere sprung to), iced's slider, the browser's `<input type="range">` — a slider |
 | Now-playing accessory | `adaptive_tabs(..).accessory(bar, full, open, close).showing(on).expanded(on).skips(next, previous)` | the shell's `Part::Tabs` with an `Accessory`: SwiftUI's `expandingCard` (`tabViewBottomAccessory` zooming into a `fullScreenCover`), Compose's `ExpandingCard`, iced's bar at the foot and the full window over it, the browser's — a shell container |
 
@@ -121,6 +122,7 @@ And on every primitive (the `Modify` trait):
 | `.width(Measure)` | as wide as a measure, what it holds kept to it (a tile's words under its cover) |
 | `.side(Measure)` | a square the measure a side; what it holds is laid into it |
 | `.square()` | as tall as it is wide, of the width it is given; what it holds is laid into that square (iced, which has no aspect-ratio layout, draws an `art-shelf` square) |
+| `.grow()` | in a row, what is left once the rest have their own width, at its leading edge, and what is cut short — so a short thing beside it (a track's length) never wraps or is squeezed: Compose's `weight(1f)` (measured after the rest), SwiftUI's filling frame at `layoutPriority(-1)`, iced's `Length::Fill`, CSS's `flex: 1 1 0` |
 | `.combine()` | one element to a screen reader, its words in order |
 
 A method of another primitive (`.spacing` on words) panics when the view
@@ -256,6 +258,7 @@ the primitives — moved, or still to move.
 | `tabs`, `adaptive_tabs`, `section_tab`, `tab_group`, `push`, `split`, `toolbar`, `bar_item`, `account_item`, `inspector`, `searchable`, `hosted`, `settings_panes` | ArkShell's, `ExpandingCard`, the accessory | native container (the shell) | every app |
 | `pressable`, `press_row` (`Part::Press`) | `Pressable` (Controls.swift, Controls.kt), a bare button, `<button class="ark-press">` | native control | harken; any app |
 | `scrubber`, `hairline` (`Part::Timeline`), `volume` (`Part::Volume`) | `ClockScrubber`, `ClockHairline`, `VolumePart`, `Scrubber`, `VolumeSlider` | native control | harken |
+| `clock_words` (`Part::ClockWords`) | `ClockWords` | native control (the timeline's clock) | harken |
 | `photo`, `zoom_photo` (`Part::Photo`) | `Photo`, `Zoomed` | native control (decoding, pinch to zoom) | money (a receipt) |
 | `code_image` (`Part::CodeImage`) | `QrCode` | native (drawn) | the first run's pairing |
 | `bar_chart`, `data_table`, `table_row`, `table_heading` (`Part::BarChart`, `Table`, `TableRow`, `TableHeading`) | `Charts`, `TableParts` | native (drawn; the table that becomes a list) | money |

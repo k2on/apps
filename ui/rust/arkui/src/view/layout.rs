@@ -202,6 +202,8 @@ fn modified<M: 'static>(mut el: Element<'static, M>, mods: &[Modifier]) -> Eleme
             // iced has no aspect-ratio layout: a square of what it is given
             // is a shelf's (a grid's columns are that wide).
             Modifier::Square => container(el).width(tokens::ART_SHELF).height(tokens::ART_SHELF).clip(true).into(),
+            // A row lays out what fills after what shrinks to its own.
+            Modifier::Grow => container(el).width(Length::Fill).clip(true).into(),
         };
         i += 1;
     }

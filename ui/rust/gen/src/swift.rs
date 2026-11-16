@@ -306,6 +306,8 @@ fn modifier(m: &Modifier) -> String {
         // The square first, what it holds laid into it.
         Modifier::Side(m) => format!(".frame(width: {0}, height: {0})", measure(*m)),
         Modifier::Square => ".aspectRatio(1, contentMode: .fit)".into(),
+        // What is left once the rest have theirs: laid out after them.
+        Modifier::Grow => ".frame(maxWidth: .infinity, alignment: .leading).layoutPriority(-1)".into(),
     }
 }
 

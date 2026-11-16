@@ -433,6 +433,25 @@ fn part<M: Clone + 'static>(v: View<M>) -> Option<Element<'static, M>> {
                 None => crate::parts::progress_bar(at as f32 / length as f32, crate::parts::Tint::Accent, 2.0),
             }
         }
+        // Lit as it is drawn; the window ticks while its clock runs
+        // ([`timeline_running`]), as a timeline's does.
+        Part::ClockWords {
+            text,
+            at_ms,
+            since_ms,
+            playing,
+            from_ms,
+            until_ms,
+        } => {
+            let playing = playing.get();
+            if playing {
+                TIMELINE.store(true, std::sync::atomic::Ordering::Relaxed);
+            }
+            let at = ark_app::view::clock_at(at_ms.get(), since_ms.get(), playing, now_ms());
+            let lit = at >= from_ms.get() && at < until_ms.get();
+            let words = ark_app::view::text(text.get()).ink(if lit { ark_app::view::Ink::Accent } else { ark_app::view::Ink::Quiet });
+            layout::layout(words, None).unwrap_or_else(|| Space::new().into())
+        }
         // Its mute, then the bar; iced's slider says where it is dragged as
         // it goes, so each move is a level, as a scrubber's is a seek.
         Part::Volume {

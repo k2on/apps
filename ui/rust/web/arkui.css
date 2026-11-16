@@ -509,6 +509,7 @@ button.ark-sidebar-heading:hover, button.ark-sidebar-heading.ark-on { color: var
 .ark-pad-start-section { padding-inline-start: var(--ark-section-gap); }
 .ark-pad-end-section { padding-inline-end: var(--ark-section-gap); }
 .ark-fill-w { width: 100%; box-sizing: border-box; }
+.ark-grow { flex: 1 1 0; min-width: 0; }
 .ark-fill-w.ark-fill-start { align-self: stretch; }
 .ark-fill-h { height: 100%; }
 .ark-surface-card { background: var(--ark-container-low); }

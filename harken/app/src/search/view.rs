@@ -52,7 +52,7 @@ pub fn search(p: &SearchPage) -> View<SearchMsg> {
                         media_row(t.title, SearchMsg::Play { id: t.id })
                             .art(artwork(t.art, t.seed, t.title))
                             .under(t.under)
-                            .trailing(text(t.length).style(TextStyle::Caption).ink(Ink::Quiet))
+                            .trailing(text(t.length).style(TextStyle::Caption).ink(Ink::Quiet).lines(1))
                     })
                     .header("Songs")
                 },

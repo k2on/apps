@@ -584,6 +584,22 @@ pub enum Part<M> {
         length_ms: Val<i64>,
         seek: Option<Input<i64, M>>,
     },
+    /// Words lit in the accent while a clock (`at_ms` read at `since_ms`,
+    /// the device's epoch milliseconds, counting on while `playing`, as a
+    /// [`Part::Timeline`]'s) is at or past `from_ms` and before
+    /// `until_ms`, quiet otherwise: a transcript's line said now. Counted
+    /// as it is drawn on the clock the timeline parts read (SwiftUI's
+    /// `TimelineView`, Compose's ticking clock, iced's frame subscription
+    /// while playing, the browser's animation frame), so it moves with no
+    /// message. A colour, never motion.
+    ClockWords {
+        text: Val<String>,
+        at_ms: Val<i64>,
+        since_ms: Val<i64>,
+        playing: Val<bool>,
+        from_ms: Val<i64>,
+        until_ms: Val<i64>,
+    },
     /// How loud, 0 to 100, which a finger drags (`VolumeSlider`): its
     /// mute at its start (the loudspeaker struck through while `muted`,
     /// `mute` sent when it is pressed), the track the control; the level
@@ -2349,6 +2365,36 @@ pub fn hairline<M>(
     .into()
 }
 
+/// `text` lit while the clock is between `from_ms` and `until_ms`
+/// ([`Part::ClockWords`]): a transcript's line said now.
+pub fn clock_words<M>(
+    text: impl Into<Val<String>>,
+    at_ms: impl Into<Val<i64>>,
+    since_ms: impl Into<Val<i64>>,
+    playing: impl Into<Val<bool>>,
+    from_ms: impl Into<Val<i64>>,
+    until_ms: impl Into<Val<i64>>,
+) -> View<M> {
+    Part::ClockWords {
+        text: text.into(),
+        at_ms: at_ms.into(),
+        since_ms: since_ms.into(),
+        playing: playing.into(),
+        from_ms: from_ms.into(),
+        until_ms: until_ms.into(),
+    }
+    .into()
+}
+
+/// Where a clock is at `now`: `at_ms` read at `since_ms`, counting on
+/// while `playing` — what every toolkit's timeline parts count.
+pub fn clock_at(at_ms: i64, since_ms: i64, playing: bool, now: i64) -> i64 {
+    match playing {
+        true => at_ms + (now - since_ms).max(0),
+        false => at_ms,
+    }
+}
+
 /// How loud something is, 0 to 100, which a finger drags ([`Part::Volume`]):
 /// `change` sent once with the level it was let go at, `mute` when its
 /// loudspeaker is pressed; `label` says what is loud ("Volume", a
@@ -2888,6 +2934,25 @@ impl<M> Part<M> {
                     None => c("ClockHairline", Some(G::Val(lit(at_ms))), args, vec![]),
                 }
             }
+            Part::ClockWords {
+                text,
+                at_ms,
+                since_ms,
+                playing,
+                from_ms,
+                until_ms,
+            } => c(
+                "ClockWords",
+                Some(G::Val(lit(text))),
+                vec![
+                    ("at", G::Val(lit(at_ms))),
+                    ("since", G::Val(lit(since_ms))),
+                    ("playing", G::Val(lit(playing))),
+                    ("from", G::Val(lit(from_ms))),
+                    ("until", G::Val(lit(until_ms))),
+                ],
+                vec![],
+            ),
             Part::Volume {
                 label,
                 level,
@@ -3528,6 +3593,21 @@ impl<M: 'static> Part<M> {
                 playing,
                 length_ms,
                 seek: seek.map(|s| input(s, f)),
+            },
+            Part::ClockWords {
+                text,
+                at_ms,
+                since_ms,
+                playing,
+                from_ms,
+                until_ms,
+            } => Part::ClockWords {
+                text,
+                at_ms,
+                since_ms,
+                playing,
+                from_ms,
+                until_ms,
             },
             Part::Volume {
                 label,

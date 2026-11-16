@@ -98,6 +98,39 @@ pub fn timeline<M: Clone + std::fmt::Debug + 'static>(
     }
 }
 
+/// `Part::ClockWords` drawn: words lit in the accent while the clock is
+/// between `from_ms` and `until_ms`, moved by the same frame loop as a
+/// timeline while it plays.
+pub fn words(text: String, at_ms: i64, since_ms: i64, playing: bool, from_ms: i64, until_ms: i64) -> AnyView {
+    let lit = |at: i64| at >= from_ms && at < until_ms;
+    let now = at_ms_now(at_ms, since_ms, playing, now_ms());
+    if playing {
+        run();
+    }
+    html::span()
+        .class(words_class(lit(now)))
+        .attr("data-at", at_ms.to_string())
+        .attr("data-since", since_ms.to_string())
+        .attr("data-playing", if playing { "1" } else { "0" })
+        .attr("data-from", from_ms.to_string())
+        .attr("data-until", until_ms.to_string())
+        .child(text)
+        .into_any()
+}
+
+/// Clock words' classes, lit or not: body text in the accent or quiet.
+fn words_class(lit: bool) -> &'static str {
+    match lit {
+        true => "ark-clock-words ark-text ark-type-body ark-ink-accent",
+        false => "ark-clock-words ark-text ark-type-body ark-ink-quiet",
+    }
+}
+
+/// A clock's place at `now`, unbounded (`ark_app::view::clock_at`).
+fn at_ms_now(at_ms: i64, since_ms: i64, playing: bool, now: i64) -> i64 {
+    ark_app::view::clock_at(at_ms, since_ms, playing, now)
+}
+
 fn fill(at: i64, length: i64) -> String {
     format!("{:.3}", at as f64 * 100.0 / length as f64)
 }
@@ -144,6 +177,17 @@ fn tick() {
         return;
     };
     let now = now_ms();
+    let words = doc.query_selector_all(".ark-clock-words[data-playing=\"1\"]").ok();
+    for i in 0..words.as_ref().map_or(0, |w| w.length()) {
+        let Some(el) = words.as_ref().and_then(|w| w.item(i)).and_then(|n| n.dyn_into::<web_sys::Element>().ok()) else {
+            continue;
+        };
+        let read = |k: &str| el.get_attribute(k).and_then(|v| v.parse::<i64>().ok()).unwrap_or(0);
+        let here = at_ms_now(read("data-at"), read("data-since"), true, now);
+        let lit = here >= read("data-from") && here < read("data-until");
+        let _ = el.set_attribute("class", words_class(lit));
+    }
+    let playing_words = words.as_ref().map_or(0, |w| w.length());
     for i in 0..found.length() {
         let Some(el) = found.item(i).and_then(|n| n.dyn_into::<web_sys::Element>().ok()) else {
             continue;
@@ -163,7 +207,7 @@ fn tick() {
             }
         }
     }
-    match found.length() {
+    match found.length() + playing_words {
         0 => RUNNING.with(|r| r.set(false)),
         _ => crate::request_frame(tick),
     }

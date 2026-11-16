@@ -105,6 +105,18 @@ public fun ClockScrubber(at: Long, since: Long, playing: Boolean, length: Long, 
     }
 }
 
+/**
+ * Words lit in the accent while the clock is at or past [from] and before [until], quiet
+ * otherwise: a transcript's line said now, moving on as it plays on the same clock as
+ * [ClockHairline]. A colour, never motion.
+ */
+@Composable
+public fun ClockWords(text: String, at: Long, since: Long, playing: Boolean, from: Long, until: Long) {
+    val now = if (playing) at + maxOf(ticking(playing) - since, 0L) else at
+    val lit = now >= from && now < until
+    androidx.compose.material3.Text(text, style = ArkType.Body.style, color = if (lit) ArkInk.accent else ArkInk.quiet)
+}
+
 /** How far along a sound is, a hairline in the accent, moving as it plays. */
 @Composable
 public fun ClockHairline(at: Long, since: Long, playing: Boolean, length: Long) {

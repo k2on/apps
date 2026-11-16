@@ -175,13 +175,17 @@ fn an_episode_offers_its_transcript_with_the_line_said_now_lit() {
     let p = d.page(&mut rt);
     assert!(p.has_transcript && p.transcript_open, "no transcript");
     assert!(!p.lines.is_empty());
-    assert_eq!(p.lines.iter().filter(|l| l.tint == "accent").count(), 1, "one line said now");
-    assert_eq!(
-        p.lines.iter().position(|l| l.tint == "accent"),
-        Some(1),
-        "the second line is said at its start"
-    );
-    assert!(!p.lines[0].speaker.is_empty() || p.lines.iter().all(|l| l.speaker.is_empty()));
+    // Each line is said from its start to the next's, on the player's
+    // clock: the second's span holds where the clock is.
+    let lit: Vec<usize> = (0..p.lines.len())
+        .filter(|&i| {
+            let l = &p.lines[i];
+            let at = ark_app::view::clock_at(l.at_ms, l.since_ms, l.playing, 0);
+            at >= l.from_ms && at < l.until_ms
+        })
+        .collect();
+    assert_eq!(lit, [1], "the second line is said at its start, and only it");
+    assert!(p.lines.windows(2).all(|w| w[0].until_ms == w[1].from_ms), "lines follow one another");
     // A song has none.
     let song = d.first_song();
     d.run(

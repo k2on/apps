@@ -360,6 +360,14 @@ fn drawn<M: Clone + std::fmt::Debug + 'static>(v: View<M>) -> Option<AnyView> {
             length_ms,
             seek,
         } => crate::timeline::timeline(at_ms.get(), since_ms.get(), playing.get(), length_ms.get(), seek),
+        Part::ClockWords {
+            text,
+            at_ms,
+            since_ms,
+            playing,
+            from_ms,
+            until_ms,
+        } => crate::timeline::words(text.get(), at_ms.get(), since_ms.get(), playing.get(), from_ms.get(), until_ms.get()),
         Part::Volume {
             label,
             level,

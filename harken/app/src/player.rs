@@ -167,9 +167,15 @@ pub struct QueueRow {
 pub struct Line {
     pub speaker: String,
     pub text: String,
-    /// The one said now: drawn in the accent (`accent`), the rest quiet
-    /// (`neutral`).
-    pub tint: String,
+    /// When it is said: from its start to the next line's (its own end,
+    /// the last), lit while the player's clock is there.
+    pub from_ms: i64,
+    pub until_ms: i64,
+    /// The player's clock, as its timeline counts it (`Playing`'s), so a
+    /// line is lit as it is drawn with no message.
+    pub at_ms: i64,
+    pub since_ms: i64,
+    pub playing: bool,
 }
 
 /// Another device of the session, as the group's picker lists it: in the
@@ -254,15 +260,6 @@ pub fn queue_rows(covers: &words::Covers, queue: &[harken_domain::Track], at: i6
             }
         })
         .collect()
-}
-
-/// Where the transcript's clock is: the position counted on from the
-/// clock to `now`.
-fn position(p: &Playing, now: i64) -> i64 {
-    match p.playing {
-        true => p.at_ms + (now - p.since_ms).max(0),
-        false => p.at_ms,
-    }
 }
 
 /// The account's listening session as the views hold it.
@@ -484,12 +481,11 @@ impl App for Player {
                 .collect(),
             _ => vec![],
         };
-        let at = now.as_ref().map_or(0, |n| position(n, data.now_ms));
         let cues: Vec<harken_domain::TranscriptEntry> = match crate::key_of(&s.now) {
             Some(media) if now.as_ref().is_some_and(|n| n.key == s.now) => words::rows(data, &HarkenView::Transcript { media }),
             _ => vec![],
         };
-        let said = cues.iter().rposition(|c| c.start_ms <= at);
+        let clock = now.clone().unwrap_or_default();
         let lines: Vec<Line> = cues
             .iter()
             .enumerate()
@@ -499,7 +495,11 @@ impl App for Player {
                     _ => c.speaker.clone(),
                 },
                 text: c.text.clone(),
-                tint: if Some(i) == said { "accent" } else { "neutral" }.into(),
+                from_ms: c.start_ms,
+                until_ms: cues.get(i + 1).map_or(c.end_ms.max(c.start_ms + 1), |n| n.start_ms),
+                at_ms: clock.at_ms,
+                since_ms: clock.since_ms,
+                playing: clock.playing,
             })
             .collect();
         let playing = now.as_ref().is_some_and(|n| n.playing);

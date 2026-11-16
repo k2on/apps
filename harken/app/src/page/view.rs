@@ -22,7 +22,7 @@ pub fn record(p: &RecordPage) -> View<PageMsg> {
             media_row(t.title, PageMsg::Play { id: t.id })
                 .art(artwork(t.art, t.seed, t.title))
                 .under(t.under)
-                .trailing(text(t.length).style(TextStyle::Caption).ink(Ink::Quiet))
+                .trailing(text(t.length).style(TextStyle::Caption).ink(Ink::Quiet).lines(1))
                 .menu("Play Next", "list-start", PageMsg::Queue { id: t.id, next: true })
                 .menu("Play Last", "list-end", PageMsg::Queue { id: t.id, next: false })
                 .menu("Add to Playlist", "list-plus", PageMsg::AddTo { id: t.id })

@@ -55,7 +55,7 @@ pub fn library(p: &LibraryPage) -> View<LibraryMsg> {
                     media_row(t.title, LibraryMsg::Play { id: t.id })
                         .art(artwork(t.art, t.seed, t.title))
                         .under(t.under)
-                        .trailing(text(t.length).style(TextStyle::Caption).ink(Ink::Quiet))
+                        .trailing(text(t.length).style(TextStyle::Caption).ink(Ink::Quiet).lines(1))
                         .menu("Play Next", "list-start", LibraryMsg::Queue { id: t.id, next: true })
                         .menu("Play Last", "list-end", LibraryMsg::Queue { id: t.id, next: false })
                         .menu("Add to Playlist", "list-plus", LibraryMsg::AddTo { id: t.id })

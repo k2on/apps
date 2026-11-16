@@ -459,6 +459,7 @@ impl<M: Clone + Debug + 'static> Walk<M> {
             }
             P::SettingsPane { content, .. } => self.view(content, shown, modal),
             P::Hero { label, .. } | P::Summary { label, .. } => self.text(shown, modal, label.to_string()),
+            P::ClockWords { text, .. } => self.text(shown, modal, text.get()),
             P::Tile { .. }
             | P::Timeline { .. }
             | P::Volume { .. }

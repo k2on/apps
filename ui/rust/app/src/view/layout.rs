@@ -258,6 +258,13 @@ pub enum Modifier {
     /// `aspectRatio(1f)`, CSS's `aspect-ratio: 1`; iced, which has no
     /// aspect-ratio layout, an `art-shelf` square).
     Square,
+    /// In a row: what is left of its width once the rest of the row has
+    /// its own, at its leading edge — so a short thing beside it (a
+    /// length, a glyph) is never squeezed for it, and it is what is cut
+    /// short. Compose's `weight(1f)` (measured after the rest), SwiftUI's
+    /// filling frame at a lower `layoutPriority`, iced's `Length::Fill`,
+    /// CSS's `flex: 1 1 0` with no least width.
+    Grow,
 }
 
 // * The primitives
@@ -531,6 +538,10 @@ pub trait Modify: Sized {
     /// As tall as it is wide, what it holds laid into that square.
     fn square(self) -> Self {
         self.modify(Modifier::Square)
+    }
+    /// In a row, what is left of it once the rest have their own.
+    fn grow(self) -> Self {
+        self.modify(Modifier::Grow)
     }
 }
 

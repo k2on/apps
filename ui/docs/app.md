@@ -1246,9 +1246,10 @@ device), beside harken-peer's walk; both pass against 77da9807.
    down or takes it out: `Press::Jump`, `Move`, `Remove`; the session's
    queue while joined, the sound's own alone, which the host tells the
    player) and Transcript (an episode's lines, who speaks over the first
-   of theirs, the line said at the position the player was last drawn at
-   in the accent; it moves on with the next message, not with the
-   clock). Covers: every screen joins a cover's path to the session's
+   of theirs, the line said now in the accent, counted on the player's
+   clock as it is drawn: `clock_words`, `Part::ClockWords`, the
+   timeline's clock on every toolkit; a rate other than 1 is not
+   counted, as no press of harken's sets one). Covers: every screen joins a cover's path to the session's
    `url` (the server's base URL; the server as shown has no scheme, so
    the phones and the desktop drew derived squares), and a song is drawn
    with its album's cover (`words::Covers`, from the songs' details and
@@ -1289,13 +1290,17 @@ device), beside harken-peer's walk; both pass against 77da9807.
    queue's sheet; the desktop (43906883066) has the covers and the
    player, and its queue shot held the sheet in its tree but drew none
    (a sheet in a hosted view that is not a page was laid out in its
-   column: fixed in arkui's `element`, not yet seen in a shot). Open: the
-   browser's walk (the desktop job's) fails every shot at ce624386 and
-   after, "not ready" with the app idle and still — an image never
-   complete — which it did not at a15b2b96; that window holds this
-   port's covers for songs and arkui-web's picture becoming the image
-   primitive's (b749f136), and is not yet told apart. The iPhone's, the
-   iPad's and the Mac's runs were cancelled by later pushes. The open issue it waited on is
+   column: fixed in arkui's `element`, and seen drawn at 5eca66ca,
+   app-screens 43915815762). The browser's walk failed every shot from
+   ce624386 "not ready" with the app idle and still: covers in a shelf
+   that scrolls across, out of sight to its right, are `loading="lazy"`
+   (arkui-web's picture since b749f136) and never asked for, so never
+   `complete`, and the songs' new covers put more there. The walk
+   (web-shots.js) now waits only for a picture that could show: one lazy
+   and out of sight is not waited for, and one not come or failed in 5 s
+   is let go (reproduced and passed with Playwright's Chromium over the
+   nix-built page). The iPhone's, the iPad's and the Mac's runs were
+   cancelled by later pushes. The open issue it waited on is
    found and
    fixed: a hub opened on `harken_seed::seeded_disk` (a log standing at
    its start on a snapshot of rows) took a device at cursor 0 for one

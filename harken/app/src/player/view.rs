@@ -98,7 +98,7 @@ pub fn player(p: &PlayerPage) -> View<PlayerMsg> {
                 card_section(for l in p.lines {
                     vstack((
                         text(l.speaker).style(TextStyle::Caption).ink(Ink::Quiet).if_any(),
-                        text(l.text).ink(Ink::Tint(l.tint)),
+                        clock_words(l.text, l.at_ms, l.since_ms, l.playing, l.from_ms, l.until_ms),
                     ))
                     .spacing(Space::Xs)
                     .padding(Edges::Horizontal, Space::L)

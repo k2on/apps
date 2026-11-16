@@ -186,11 +186,17 @@ impl<M> From<MediaRow<M>> for View<M> {
         if let Some(u) = r.under {
             words = words.under(u);
         }
-        let face = hstack((r.art.unwrap_or(View::Empty), View::from(words), spacer_min(Space::Xs), r.trailing))
-            .spacing(Space::M)
-            .padding(Edges::Horizontal, Space::L)
-            .padding(Edges::Vertical, Space::S)
-            .fill_width_at(Align::Start);
+        // The words take what the cover and the end leave them, and are cut
+        // short there: what is at the end (a length) keeps its own width.
+        let face = hstack((
+            r.art.unwrap_or(View::Empty),
+            vstack(View::from(words)).align(Align::Start).grow(),
+            r.trailing,
+        ))
+        .spacing(Space::M)
+        .padding(Edges::Horizontal, Space::L)
+        .padding(Edges::Vertical, Space::S)
+        .fill_width_at(Align::Start);
         let mut row = press_row(r.title, r.tap, face);
         for (title, glyph, tap) in r.menu {
             row = row.menu(title, glyph, tap);

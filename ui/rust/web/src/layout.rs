@@ -34,6 +34,7 @@ pub(crate) fn layout<M: Clone + std::fmt::Debug + 'static>(l: Layout<M>) -> Opti
             Modifier::Width(m) => class.push(format!("ark-w-{}", m.token())),
             Modifier::Side(m) => class.push(format!("ark-side-{}", m.token())),
             Modifier::Square => class.push("ark-square".into()),
+            Modifier::Grow => class.push("ark-grow".into()),
         }
     }
     let role = group.then_some("group");

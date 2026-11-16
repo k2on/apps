@@ -352,6 +352,8 @@ fn chain(mods: &[Modifier]) -> Option<String> {
             Modifier::Width(m) => format!("width({})", measure(*m)),
             Modifier::Side(m) => format!("size({})", measure(*m)),
             Modifier::Square => "aspectRatio(1f)".into(),
+            // A row's: Compose measures a weight after the rest.
+            Modifier::Grow => "weight(1f)".into(),
         })
         .collect();
     Some(format!("Modifier.{}", links.join(".")))

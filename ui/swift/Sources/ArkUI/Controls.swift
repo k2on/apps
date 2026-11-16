@@ -101,6 +101,38 @@ public struct ClockScrubber: View {
     }
 }
 
+/// Words lit in the accent while the clock is at or past `from` and
+/// before `until`, quiet otherwise: a transcript's line said now, redrawn
+/// as it plays on the same clock as `ClockHairline`. A colour, never
+/// motion.
+public struct ClockWords: View {
+    let text: String
+    let at: Int64
+    let since: Int64
+    let playing: Bool
+    let from: Int64
+    let until: Int64
+
+    public init(_ text: String, at: Int64, since: Int64, playing: Bool, from: Int64, until: Int64) {
+        self.text = text
+        self.at = at
+        self.since = since
+        self.playing = playing
+        self.from = from
+        self.until = until
+    }
+
+    public var body: some View {
+        TimelineView(.periodic(from: .now, by: playing && !Shots.on ? 0.25 : 3600)) { tick in
+            let n = Int64(tick.date.timeIntervalSince1970 * 1000)
+            let now = playing ? at + max(n - since, 0) : at
+            Text(text)
+                .arkType(.body)
+                .foregroundStyle(now >= from && now < until ? Color.accentText : Color.quiet)
+        }
+    }
+}
+
 /// How far along a sound is, a hairline in the accent, counting on as it
 /// plays.
 public struct ClockHairline: View {
