@@ -72,7 +72,8 @@ pub(super) fn layout<M: Clone + 'static>(l: Layout<M>, axis: Option<Axis>) -> Op
         }
         Prim::Scroll { axis: along, content } => match along {
             Axis::Horizontal => scrollable(row(held(*content, Axis::Horizontal)))
-                .direction(scrollable::Direction::Horizontal(scrollable::Scrollbar::new()))
+                // Its bar under what it holds, never over a tile's caption.
+                .direction(scrollable::Direction::Horizontal(scrollable::Scrollbar::new().spacing(tokens::SPACE_XS)))
                 .width(Length::Fill)
                 .into(),
             _ => scrollable(column(held(*content, Axis::Vertical))).height(Length::Fill).into(),
