@@ -440,22 +440,27 @@ fn an_address_selects_what_it_names() {
     assert_eq!(rt.screen(&demo).section, format!("accounts/{id}"));
 }
 
-/// Every screenshot's `route` (money/demo/shots.json) opens what its
-/// launch arguments open: the same page, the same requests of the
-/// platform. Falsified by an address the shell reads otherwise than its
-/// `-screen` (a bank's, a sheet's, To Review's).
+/// Every address a place is linked by opens what its launch arguments
+/// open: the same page, the same requests of the platform. Falsified by an
+/// address the shell reads otherwise than its `-screen` (a bank's, a
+/// sheet's, To Review's).
 #[test]
-fn every_shot_route_is_its_launch() {
-    // Read where the run finds it (money/demo beside this crate), not
-    // compiled in: the crate's build holds only its own directory.
-    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../demo/shots.json");
-    let shots: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(path).expect(path)).unwrap();
-    let mut n = 0;
-    for screen in shots["screens"].as_array().expect("screens") {
-        let (Some(route), Some(args)) = (screen["route"].as_str(), screen["args"].as_array()) else {
-            continue;
-        };
-        let args: Vec<String> = args.iter().filter_map(|a| a.as_str().map(String::from)).collect();
+fn every_address_is_its_launch() {
+    let places: [(&str, &[&str]); 11] = [
+        ("/budget", &["-screen", "budget"]),
+        ("/category/dining", &["-screen", "category:dining"]),
+        ("/category/dining?inspector=1", &["-screen", "category:dining", "-inspector", "1"]),
+        ("/accounts", &["-screen", "accounts"]),
+        ("/account/checking", &["-screen", "account:checking"]),
+        ("/inbox", &["-screen", "review"]),
+        ("/transaction/receipt", &["-screen", "transaction:receipt"]),
+        ("/transaction/receipt?inspector=1", &["-screen", "transaction:receipt", "-inspector", "1"]),
+        ("/transactions?sheet=new-transaction", &["-screen", "add-transaction"]),
+        ("/insights", &["-screen", "insights"]),
+        ("/settings", &["-screen", "settings"]),
+    ];
+    for (route, args) in places {
+        let args: Vec<String> = args.iter().map(|a| a.to_string()).collect();
         let open = |msg: ShellMsg| {
             let mut demo = Demo::new();
             let mut rt = Runtime::<MoneyShell>::new();
@@ -469,9 +474,7 @@ fn every_shot_route_is_its_launch() {
             open(ShellMsg::Launch { args: args.clone() }),
             "{route} against {args:?}"
         );
-        n += 1;
     }
-    assert!(n >= 12, "the shots' routes: {n}");
 }
 
 /// The appearance follows the device's by default, everywhere the shell

@@ -350,3 +350,15 @@ fn a_hosted_screen_grown_into_is_reached() {
     assert_eq!(take(&tap("player.row:full-song"), &t, &mut focus), Took::Done, "{}", tree(&t));
     assert_eq!(take(&tap("shell.cancel"), &t, &mut focus), Took::Done);
 }
+
+/// An id is the screen's message's, not the window's around it (`Own`,
+/// what the desktop's window and the browser's page walk by). Falsified
+/// by unwrapping a message that is no one-value variant.
+#[test]
+fn the_windows_wrapping_is_left_out() {
+    assert_eq!(unwrapped("Shell(Inspector { on: false })"), "Inspector { on: false }");
+    assert_eq!(unwrapped("Transactions(Show { all: true })"), "Show { all: true }");
+    assert_eq!(unwrapped("Inspector { on: false }"), "Inspector { on: false }");
+    assert_eq!(unwrapped("Done"), "Done");
+    assert_eq!(format!("{:?}", Own(Some(1))), "1");
+}

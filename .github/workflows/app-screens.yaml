@@ -245,8 +245,8 @@ jobs:
           }
           # revelation comes back to the screenshots once ported to an Ark app.
           shots() { [ -f "$1/demo/shots.json" ] && ! grep -qxE 'revelation' <<< "$1"; }
-          # An app whose shots.json has the desktop's shots.
-          desktop() { shots "$1" && jq -e '.desktop.shots | length > 0' "$1/demo/shots.json" > /dev/null; }
+          # An app whose shots.json has the wide windows' walk (the desktop's and the browser's).
+          desktop() { shots "$1" && jq -e '.wide.shots | length > 0' "$1/demo/shots.json" > /dev/null; }
           iphones() { for a in $(jq -r '.ios[]' "$RUNNER_TEMP/apps.json"); do if shots "$a"; then echo "$a"; fi; done; }
           # The hash kept beside an app's iPhone shots on a branch
           # (<dir>/ios/inputs), or nothing: none kept, or no such branch.
@@ -1079,7 +1079,7 @@ jobs:
       # this Mac, signed in to the same server.
       - if: ${{ !cancelled() && steps.open.outputs.open == 'true' }}
         name: Capture (Mac)
-        timeout-minutes: 15
+        timeout-minutes: 30
         env:
           BUILT: ${{ runner.temp }}/apps
         run: bash .github/screens/apps-mac.sh "$RUNNER_TEMP/out" src $APPS
@@ -1214,9 +1214,17 @@ jobs:
       - name: The server
         run: bash .github/screens/meanwhile.sh wait servers
 
-      # With no window and no GPU: wgpu on Mesa's lavapipe (app-desktop.sh).
+      # The browser the page is walked in (app-web.sh, web-shots.js):
+      # Playwright's Chromium, at a pinned version.
+      - name: Playwright
+        run: |
+          npm install --no-save --no-audit --no-fund playwright@1.48.2
+          npx playwright install --with-deps chromium
+
+      # With no window and no GPU: wgpu on Mesa's lavapipe (app-desktop.sh);
+      # then the page, the same walk (app-web.sh).
       - name: Capture
-        timeout-minutes: 20
+        timeout-minutes: 30
         run: bash .github/screens/apps-desktop.sh "$RUNNER_TEMP/out" "$RUNNER_TEMP/windows" $APPS
 
       - name: The servers' logs

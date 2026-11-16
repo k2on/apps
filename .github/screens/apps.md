@@ -26,7 +26,7 @@ scripts here, names an app.
 The apps are the flake's one list (`flake.nix`, `publish`: its `apks`, its
 `ios` and its `desktop`); an app on it with `<app>/demo/shots.json` is
 photographed on each phone it is listed for, and on the desktop when its
-shots.json has `desktop`. Every app's id, its Android applicationId
+shots.json has `wide`. Every app's id, its Android applicationId
 and its iPhone bundle id, is `bundlePrefix` (`us.koon`) and its name, so
 neither driver is told it: Android reads it from the APK, iOS from the app.
 
@@ -100,42 +100,39 @@ All of it is in `<app>/demo/`:
   `ARK_DEV_NAME`: what Settings, the account button and "Entered by"
   show), and their picture.
 
-- **`shots.json`'s `screens`** (optional): the Mac's and the browser's
-  screens, opened by their launch arguments alone, no steps, on the sizes
-  each is `on` (`mac`, and the browser's `ios`, `ipad-portrait`,
-  `ipad-landscape`):
+- **`shots.json`'s `wide`**: the wide windows' one walk, which the
+  desktop's iced window, the browser's page and the Mac's own window all
+  take ([below](#the-wide-windows)), by the same ids in the same order, at
+  one size, light then dark:
 
   ```json
-  "launch": { "mac": ["-demo", "2026-11-18", "-window", "1440x900"] },
-  "screens": [
-    { "id": "category", "args": ["-screen", "category:dining"], "on": ["ios", "android"] },
-    { "id": "category", "args": ["-screen", "category:dining", "-inspector", "1"], "on": ["ipad-portrait", "ipad-landscape", "android-tablet", "fold-unfolded", "fold-folded", "mac"] }
-  ]
+  "wide": {
+    "window": [1440, 900], "scale": 2, "today": "2026-11-18",
+    "mac": ["-window", "1440x900", "-ApplePersistenceIgnoreState", "YES"],
+    "web": { "demo": true },
+    "shots": [
+      { "id": "budget", "steps": [{ "await": "tab:budget" }] },
+      { "id": "category", "steps": [{ "tap": "budget.row:dining-out" }] },
+      { "id": "keys", "on": ["desktop"], "steps": [{ "key": "j" }, { "key": "z" }] },
+      { "id": "auto-assign-menu", "steps": [{ "key": "Escape", "on": ["desktop"] }, { "tap": "budget.auto-assign" }] },
+      { "id": "context-menu", "on": ["web"], "query": "screen=budget&context=Groceries" }
+    ]
+  }
   ```
 
-  **One list, one id for a screen on every device.** The phones take the
-  same screens in the same order, and so do the larger screens (the iPad
-  either way up, Android's tablet, the Fold open and folded); a screen
-  that each shows its own way (money's category: Category Details on a
-  phone, the inspector on a larger screen) is two entries under one id,
-  so the same screen is the same file on every device and `compare.py`
-  and the docs hold it against itself. money's: `budget`, `category`,
-  `accounts`, `account` (Checking's register), `review`, `transaction`
-  (the newest with a receipt), `add-transaction`, `insights`, `settings`,
-  `auto-assign-menu`, then `welcome`; the Mac's are the same but the last
-  two.
-
-  Every Ark app's shell reads them (`ark_app::shell::Launch`: `-screen
-  <place>[:item]`, `-inspector 1`, `-appearance`, `-pane`), the iPhone's
-  and the Mac's from the process's arguments (XCUITest's
-  `launchArguments`, a Mac app's command line), Android's from the launch
-  intent's string array `ark.args` (`am start --esa ark.args
-  -screen,budget`), the desktop's from its command line. Every phone and
-  tablet is signed in to the app's server as `server.user`, so every shot
-  of a run is of one household, on one day (`DEMO_DAY`, `server.sh`
-  below). `launch.mac` goes before each screen's on the Mac, which no
-  browser signs in for: money's opens its demo household, the one its
-  server is seeded with, and `app-mac.sh` gives its `-demo` the run's day.
+  Each step names an element by its id, as the larger screens' walk
+  does, and is taken inside the app (`ark_app::shots`): the desktop's
+  window's walk, the page's `window.arkShots`, the Mac's `ArkHost`, the
+  same as the iPhone's. A key, a wait and a click by a text are a hand's
+  (the desktop's and the browser's). What only one of them can do is a
+  narrow addition said by `on` (`desktop`, `web`, `mac`), on a shot or on
+  one step: money's vim keys are the desktop's, the browser's transient
+  parts (a row's context menu, a picker's popover, the command box) are
+  each opened in a page of its own at its `query`, arkui-web's address.
+  The Mac and the browser show the demo's household (`-demo`; the page published as the demo) on
+  the run's day (`DEMO_DAY`, else `today`), the one the desktop's server
+  is seeded with; the Mac takes its first run's page (`welcome`) too,
+  opened with no demo before the walk.
 
 - **`server.sh`** (only for an app with a server):
   `server.sh <dir> <listen address>`, run from the repository's root,
@@ -154,38 +151,19 @@ All of it is in `<app>/demo/`:
   tagged FLAC files and covers, `<dir>/data/media`, for the server's own
   scanner to read (`harken-seed`, no ffmpeg).
 
-- **`shots.json`'s `desktop`**: the window's size, its scale, and its
-  shots, each an `id` (the phones' where the screen is the same) and steps:
-
-  ```json
-  "desktop": {
-    "window": [1440, 900], "scale": 2,
-    "shots": [
-      { "id": "library", "steps": [{ "click": "Albums" }] },
-      { "id": "search", "steps": [{ "key": "ctrl+k" }, { "type": "Elise" }, { "await": "Für Elise" }] }
-    ]
-  }
-  ```
-
-  A window has no accessibility tree to read, so a step names its target by
-  the text the window lays out (iced's own selector, as iced_test finds
-  text): `{"click": "<text>"}` clicks the middle of the text that says
-  exactly that (`a|b`, `"where": "bottom"`, `"optional"` and `"unless"` as
-  the phones' taps have them; `"button": "right"` for its context menu);
-  `{"hover": "<text>"}` moves the pointer over
-  it and leaves it there, so the shot is drawn pointed at it (a shot is
-  otherwise drawn with no pointer); `{"scroll": "<text>", "by": <pixels>}`
-  turns the wheel over it, `by` down (negative: up), for a page no key
-  scrolls; `{"type": "<text>"}` types into what has the
-  keys, and a key no widget takes goes on to the app's own, the vim keys;
-  `{"key": "ctrl+k"}` presses one (`Enter`, `Escape`, `Tab`, `Backspace`,
-  `Space`, the arrows, or a character, after `ctrl+`, `shift+`, `alt+`,
-  `super+`); `{"await": …}`, `{"wait": …}` and `{"relaunch": true}` as the
-  phones'. Each shot's `<id>.tree.txt` is every text on that screen and
-  where it is, which is what a step can name. harken has no `player` on the
-  desktop: nothing there can play ("the desktop build has no audio
-  device"). money's `accounts` is Checking's register, its `transactions`
-  all accounts'.
+  A desktop step that names no id names its target by the text the
+  window lays out (iced's own selector, as iced_test finds text):
+  `{"click": "<text>"}` clicks the middle of the text that says exactly
+  that (`a|b`, `"where": "bottom"`, `"optional"` and `"unless"` as the
+  phones' taps have them; `"button": "right"` for its context menu);
+  `{"hover": "<text>"}` moves the pointer over it and leaves it there;
+  `{"scroll": "<text>", "by": <pixels>}` turns the wheel over it;
+  `{"type": "<text>", "into": "keys"}` types at the keyboard, and a key no
+  widget takes goes on to the app's own, the vim keys; `{"key": "ctrl+k"}`
+  presses one (`Enter`, `Escape`, `Tab`, `Backspace`, `Space`, the arrows,
+  or a character, after `ctrl+`, `shift+`, `alt+`, `super+`);
+  `{"wait": …}` and `{"relaunch": true}`. Each shot's `<id>.tree.txt`
+  lists what a step can name.
 
 And the builds: on Android the artifact `apk-<app>` of `build.yaml`
 (already the case for every APK in the flake's `publish`); on the iPhone
@@ -447,18 +425,8 @@ build, the same driver, the same shots.json, light and dark.
   no hash (`<app>/ios/inputs`), so it is taken whole again.
 - **The Mac**: in the same job, after the iPad (beside the iPhone's
   shots, in 43052816932, its windows took 1162 s instead of 218 s and
-  came out at the wrong sizes). The commit's Mac packages
-  are listed by name (nothing evaluated); an app with `<app>-macos` is
-  built by `nix-xcode.sh` as the iPhone's are, opened with `--server
-  <URL> --user <name>` (what the desktop window is given; an app that takes
-  them opens signed in to the same sample-data server), and its window
-  taken with `screencapture -l` in light and dark (System Events' dark
-  mode) as one shot, `window`; then each of shots.json's `screens` that is
-  `on` "mac", the app opened afresh with `launch.mac` and its arguments. No app has a Mac build yet, so every app is
-  passed over in the seconds the listing takes; this is plumbing, not yet
-  seen running an app. Steps are not driven yet: a Mac window needs a
-  macOS UI-test driver of its own, which is
-  the next thing to add when there is a Mac build to drive.
+  came out at the wrong sizes): each app with `<app>-macos` walks `wide`
+  inside itself ([the wide windows](#the-wide-windows)).
 - **What a run costs.** Linux: a tablet's and a Fold's job per app and
   theme, beside the phone's, each its own nix, server and emulator, at
   once with the phone's. Together, one job after the other, they were 5
@@ -520,33 +488,45 @@ window (`nix build .#harken-desktop`), and run `app-desktop.sh <out> result
 harken http://127.0.0.1:8787` from the repository's root; `ARK_SHOTS_ONLY=<id>`
 takes one shot.
 
-## The browser
+## The wide windows
 
-`app-web.sh <out> <site> <app>` photographs an app's web client (`nix
-build .#money-web`: its index.html beside pkg/) in Playwright's Chromium
-(`web-shots.js`): the page served on the loopback, DejaVu the only font
-fontconfig knows (the desktop's), every one of shots.json's `screens` on
-the sizes it is `on` (its launch arguments as the page's address:
-`-screen budget -inspector 1` is `?screen=budget&inspector=1`), then the
-browser's own `web.shots`, each opened by its address — the launch arguments every shell reads (`screen`,
-`inspector`, `pane`) and arkui-web's own (`context`, `menu`, `popover`,
-`command`, `keys`) — then its steps in the desktop's vocabulary (`click`,
-`key`, `type`, `await`, `wait`), at each of `web.sizes` (`mac`,
-`ipad-landscape`, `ipad-portrait`, `ios`) in light and dark, reduced motion so nothing is
-caught moving. It writes `<out>/<size>/<theme>/<id>.png` and each its
-`<id>.tree.txt`. Every shot's address starts with the app's `web.query`
-(money's `demo`: the household in the page, no server to sign in to).
+The desktop's iced window, the browser's page and the Mac's own window are
+one walk, shots.json's `wide`: the same ids in the same order, at
+`wide.window` (1440×900, at twice the pixels), light then dark, so that
+each shot is the same screen on all three and their pictures can be laid
+side by side. None has a hand-written list of its own; what one alone can
+do is `on` it.
 
-`ARK_WEB_MODE=ssg` takes a static site instead (an app whose app.toml's
-`[web] modes` has `ssg`; money's and harken's are the SPA alone), each
-screen by its route's address (ui/docs/app.md, "The Browser's Modes"),
-the browser's own `web.shots` left out; `ARK_WEB_JS=0` takes it with
-script off.
+- **The desktop** (app-desktop.sh, [above](#the-desktop)): the window
+  signed in straight back from the run's dev server, its steps taken by
+  its walk; told it is focused as it opens, as a window in use is.
+- **The browser** (app-web.sh, web-shots.js): the page nix builds at the
+  commit (`nix build .#<app>-web`, desktop-build.sh), served on the
+  loopback, in Playwright's Chromium with DejaVu the only font fontconfig
+  knows (the desktop's): the page as the site publishes its demo
+  (`wide.web.demo`), on the run's day, one page a theme, each step inside it by its id
+  (`window.arkShots`, arkui-web's walk, there only on a screenshot's page,
+  `?shots=1`) or a hand's. A shot with a `query` is opened in a page of
+  its own. It writes `<out>/<theme>/<id>.png` beside each `<id>.tree.txt`
+  (the walk's ids, then the page's text). In app-screens' desktop job,
+  after the window's.
+- **The Mac** (app-mac.sh): the app nix built for the Mac launched with
+  `-shots YES -shotsPlan <plan> -demo <day>` and `wide.mac`, walking the
+  plan (the Mac's of `wide`) inside itself as the iPhone does (ArkApp's
+  ShotsWalk): light, then the app reset (`ArkHost.shotsReset`, the windows
+  but its own put away) and dark, the app's own appearance
+  (`NSApp.appearance`). Before each picture it makes itself the active app
+  and its window key (and the script brings its process to the front
+  through System Events), waits for the screen to be ready drawn so, and
+  asks for the picture (`<plan>/out/want`: the window's number, the
+  theme, the id); the script takes it with `screencapture -l` and takes
+  the ask away. A launch from a script had come up behind it, its window
+  drawn as one in the background (app-screens 43796348626). First, its
+  first run's page (`welcome`), opened with no demo, light and dark.
 
-Not yet a job of app-screens.yaml: a job would build `.#money-web`
-(cached), `npx playwright install --with-deps chromium`, and run
-`app-web.sh screens/web money` from the repository's root, then publish
-or compare `screens/web` as the desktop's are.
+To take the browser's by hand: `nix build .#money-web`, then
+`app-web.sh out result money` from the repository's root, where `node` can
+`require('playwright')` with its Chromium installed.
 
 ## The iPhone builds, in nix
 

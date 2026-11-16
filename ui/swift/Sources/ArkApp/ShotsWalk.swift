@@ -26,6 +26,14 @@
 // `shots/out/done` (or `failed`, why) once it is over. Before the first
 // screen is timed, what a cold simulator does once is done out of sight
 // (`ShotsWarm`), and its time logged.
+//
+// On the Mac (the wide walk, .github/screens/app-mac.sh) the plan is named
+// by the launch (`-shotsPlan <path>`, with `-shots YES`), and has no ways
+// up: each shot is walked light, then dark, the app reset between, as the
+// iPhone's are. The app is the active one and its window key before each
+// picture (`ShotsMac`); the picture is the window server's: the walk asks
+// for it by writing `out/want` (the window's number, the theme, the id)
+// and goes on once the script has taken it and taken the ask away.
 import ArkUI
 import Foundation
 #if canImport(ArkBindings)
@@ -33,6 +41,8 @@ import ArkBindings
 #endif
 #if canImport(UIKit)
 import UIKit
+#elseif canImport(AppKit)
+import AppKit
 #endif
 
 @MainActor
@@ -52,6 +62,11 @@ final class ShotsWalk {
         #if targetEnvironment(simulator)
         guard Shots.on else { return nil }
         let plan = URL(fileURLWithPath: root).appendingPathComponent("shots/plan.json")
+        return FileManager.default.fileExists(atPath: plan.path) ? plan : nil
+        #elseif os(macOS)
+        // A screenshot's launch alone, whose script names its plan.
+        guard Shots.on, let path = UserDefaults.standard.string(forKey: "shotsPlan") else { return nil }
+        let plan = URL(fileURLWithPath: path)
         return FileManager.default.fileExists(atPath: plan.path) ? plan : nil
         #else
         return nil
@@ -79,6 +94,11 @@ final class ShotsWalk {
         Ready.shared.probe { [weak self] in
             guard let self, self.modal, !ShotsWindow.presenting else { return nil }
             return "a sheet or a dialog the app shows, not presented yet"
+        }
+        #elseif os(macOS)
+        Ready.shared.probe { [weak self] in
+            guard let self, self.modal, NSApp.windows.allSatisfy({ $0.attachedSheet == nil && $0.sheetParent == nil }) else { return nil }
+            return "a sheet the app shows, not presented yet"
         }
         #endif
         try? FileManager.default.removeItem(at: out)
@@ -255,10 +275,88 @@ final class ShotsWalk {
                 throw Stop(why: "\(id): \(x) and \(y) drew the same picture")
             } }
         }
+        #elseif os(macOS)
+        try await walkMac()
         #else
-        throw Stop(why: "a walk is the iPhone's and the iPad's")
+        throw Stop(why: "a walk is the iPhone's, the iPad's and the Mac's")
         #endif
     }
+
+    #if os(macOS)
+    /// How long the script is given to take a picture the walk asked for,
+    /// and the app to become the active one: guards.
+    private static let taken = 30.0
+    private static let focus = 10.0
+
+    /// The Mac's walk: every shot light, then the app reset and every shot
+    /// dark, each picture asked of the script.
+    private func walkMac() async throws {
+        let data = try Data(contentsOf: plan)
+        guard let p = try JSONSerialization.jsonObject(with: data) as? [String: Any], let shots = p["shots"] as? [[String: Any]] else {
+            throw Stop(why: "\(plan.path) is no plan")
+        }
+        ShotsMac.theme(dark: false)
+        try await focused("the first screen")
+        for (k, dark) in [false, true].enumerated() {
+            let theme = dark ? "dark" : "light"
+            let walkBegan = Date()
+            if k > 0 {
+                let r = Date()
+                switch host.shotsReset() {
+                case .done: break
+                case let .failed(why), let .notYet(why): throw Stop(why: "reset: \(why)")
+                }
+                ShotsMac.backToMain()
+                modal = host.shotsTree().contains(" (modal)")
+                ShotsMac.theme(dark: dark)
+                try await focused("reset, \(theme)")
+                say("reset and \(theme): \(ms(r))")
+            }
+            for shot in shots {
+                guard let id = shot["id"] as? String else { throw Stop(why: "a shot with no id") }
+                let steps = shot["steps"] as? [[String: Any]] ?? []
+                let t = Date()
+                var each: [String] = []
+                for step in steps { each.append(try await take(step, id)) }
+                let stepped = ms(t)
+                let tree = host.shotsTree()
+                let took = try await picture(id, theme, tree)
+                say("\(id) \(theme): \(steps.count) steps \(stepped) [\(each.joined(separator: "; "))], picture \(took)")
+            }
+            say("the walk \(theme): \(ms(walkBegan))")
+        }
+    }
+
+    /// Until the app is the active one, its window key and the screen
+    /// ready: a picture of a window in the background is not the app's.
+    private func focused(_ what: String) async throws {
+        let t = Date()
+        while !ShotsMac.focused && Date().timeIntervalSince(t) < Self.focus {
+            ShotsMac.activate()
+            try await Task.sleep(nanoseconds: 100_000_000)
+        }
+        if !ShotsMac.focused { say("  \(what): not the active window after \(ms(t))") }
+        try await settled(what)
+    }
+
+    /// The screen as it is now asked of the script, and waited for: its
+    /// tree beside it.
+    private func picture(_ id: String, _ theme: String, _ tree: String) async throws -> String {
+        let t = Date()
+        try await focused("\(id) \(theme)")
+        guard let w = ShotsMac.window else { throw Stop(why: "\(id): no window to take") }
+        let dir = out.appendingPathComponent(theme)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try tree.write(to: dir.appendingPathComponent("\(id).tree.txt"), atomically: true, encoding: .utf8)
+        let want = out.appendingPathComponent("want")
+        try "\(w.windowNumber) \(theme) \(id)\n".write(to: want, atomically: true, encoding: .utf8)
+        while FileManager.default.fileExists(atPath: want.path) {
+            if Date().timeIntervalSince(t) > Self.taken { throw Stop(why: "\(id) \(theme): the picture was not taken in \(Int(Self.taken)) s") }
+            try await Task.sleep(nanoseconds: 50_000_000)
+        }
+        return ms(t)
+    }
+    #endif
 
     /// One step, then the screen waited for: its times, Rust's and the
     /// ready signal's. What it names not there at a ready screen fails at

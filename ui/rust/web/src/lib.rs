@@ -58,6 +58,7 @@ pub mod shell;
 pub mod specimens;
 pub mod table;
 mod timeline;
+mod walk;
 pub mod writing;
 
 pub use host::{HostMsg, WebHost, WebHosted};
@@ -640,6 +641,8 @@ pub fn run<W: WebHosted>(app: WebHost<W>) {
 fn listen<W: WebHosted>(app: &Rc<RefCell<WebHost<W>>>) {
     keys::listen::<W>(app.clone());
     listen_for_gestures();
+    // A screenshot's page takes the wide walk's steps inside it (`walk`).
+    walk::install::<W>(app);
     if !cfg!(target_arch = "wasm32") {
         return;
     }

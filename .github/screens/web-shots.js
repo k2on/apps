@@ -1,25 +1,25 @@
 // An app's browser screenshots (app-web.sh): its <app>/demo/shots.json
-// `screens` (each by its launch arguments, the address's parameters here)
-// and `web`, each shot opened by its address (`query`: the launch arguments
-// every shell reads, `?screen=…`, and arkui-web's `?context=`, `?menu=`,
-// `?popover=`, `?command=`, `?keys=`) and then its steps — the desktop's
-// vocabulary: `tap` an element by its walk id (`data-ark-id`), `click` a text on the page, `key` a key, `type` text,
-// `await` a text, `wait` seconds — at each size in light and in dark, in
-// Playwright's Chromium: one page for each size and theme, every shot's
-// address taken in it in turn (a `fresh` shot, a page of its own).
+// `wide`, the wide windows' one walk (apps.md, "The wide windows"), taken
+// in Playwright's Chromium as the desktop's window and the Mac take it: the
+// page as the site publishes its demo (`wide.web.demo`, app-web.sh), on
+// DEMO_DAY or `wide.today`, at
+// `wide.window` and `wide.scale`, one page a theme, light then dark, each
+// shot's steps from where the last left it. A step that names an element
+// by its id (`tap`, `text`, `press`, `await`, and `type` into the field
+// tapped last) is taken inside the page (`window.arkShots`, arkui-web's
+// walk: the views' own, as the desktop's window and the phones' walks);
+// the rest are a hand's: `click` a text, `context` a text (its menu),
+// `hover`, `key`, `type` with `"into": "keys"` (typed at the keyboard),
+// `wait` seconds. A shot or a step `on` other platforms alone is passed
+// over; a shot with a `query` (the browser's own: arkui-web's `?context=`,
+// `?menu=`, `?popover=`, `?command=`, `?keys=`, and the launch arguments
+// every shell reads) is opened in a page of its own at that address, then
+// its steps.
 //
 //   node web-shots.js <shots.json> <base URL> <out>
 //
-// Writes <out>/<size>/<theme>/<id>.png and <out>/device.json.
-//
-// The page's mode (ui/docs/app.md, "The Browser's Modes") is ARK_WEB_MODE:
-// `spa` (the default) as above; `ssg`, a static site, where each of
-// `screens` is opened by its route's address (`/budget/?inspector=1`) and the
-// browser's own `web.shots` (which open the page's transient parts by its
-// query) are left out. ARK_WEB_JS=0 takes them with script off. With
-// script on, a page written as HTML fails its shot on any error or any
-// word of hydration in the console: the browser's first draw must be the
-// one the page was written with.
+// Writes <out>/<theme>/<id>.png, each with its <id>.tree.txt (what a step
+// can name), and <out>/device.json.
 const fs = require('fs');
 const path = require('path');
 const { chromium } = require('playwright');
@@ -52,126 +52,120 @@ async function ready(page) {
   if (said) throw new Error(said);
 }
 
+// Whether a shot or a step is the browser's: one with no `on` is every wide
+// window's.
+const ours = s => !s.on || s.on.includes('web');
+
+// A step the page's walk takes, as `arkShots.step` is handed it: its kind,
+// the id it names (or the text it types) and a menu's item; none for a
+// hand's.
+function walked(step) {
+  if (step.tap) return ['tap', step.tap, ''];
+  if (step.text) return ['text', step.text, ''];
+  if (step.press && step.item) return ['press', step.press, step.item];
+  if (step.await) return ['await', step.await, ''];
+  if (step.type !== undefined && step.into !== 'keys') return ['type', step.type, ''];
+  return null;
+}
+
+// One step: inside the page while what it names is not there yet (asked
+// again each time the page is ready anew, for 20 s), else a hand's.
+async function take(page, step) {
+  const w = walked(step);
+  if (w) {
+    const until = Date.now() + 20000;
+    for (;;) {
+      const said = await page.evaluate(([k, id, item]) => window.arkShots.step(k, id, item), w);
+      const [what, ...rest] = said.split('\n');
+      if (what === 'done') return ready(page);
+      if (what === 'failed') throw new Error(`${JSON.stringify(step)}: ${rest.join('\n')}`);
+      if (Date.now() > until) throw new Error(`${JSON.stringify(step)} never came; on the page:\n${rest.join('\n')}`);
+      await page.waitForTimeout(100);
+      await ready(page);
+    }
+  }
+  // `"prefix": true`: a text that begins so (a count after it: "Approve All (5)").
+  if (step.click) await page.getByText(step.prefix ? new RegExp('^' + step.click.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')) : step.click, { exact: !step.prefix }).first().click({ button: step.button || 'left' });
+  if (step.context) await page.getByText(step.context, { exact: true }).first().click({ button: 'right' });
+  if (step.hover) await page.getByText(step.hover, { exact: true }).last().hover();
+  if (step.key) await page.keyboard.press(step.key);
+  if (step.type !== undefined && step.into === 'keys') await page.keyboard.type(step.type);
+  if (step.wait) await page.waitForTimeout(step.wait * 1000);
+  await ready(page);
+}
+
 async function main() {
   const [shotsFile, base, out] = process.argv.slice(2);
   const all = JSON.parse(fs.readFileSync(shotsFile, 'utf8'));
-  const web = all.web;
-  if (!web) throw new Error(`${shotsFile} has no "web"`);
-  const sizes = web.sizes;
-  // Every app's screens by their launch arguments (`-screen budget
-  // -inspector 1`), the address's parameters here, on the sizes each is on;
-  // then the browser's own.
-  const query = args => {
-    const q = [];
-    for (let i = 0; i + 1 < args.length; i += 2) q.push(`${args[i].replace(/^-+/, '')}=${encodeURIComponent(args[i + 1])}`);
-    return q.join('&');
-  };
-  const mode = process.env.ARK_WEB_MODE || 'spa';
-  const js = process.env.ARK_WEB_JS !== '0';
-  // A route's address, as arkui-web's `page::Route::url` writes it: the
-  // screen the path, the rest the query (the UI's state, which a static
-  // page takes once its script runs).
-  const routePath = args => {
-    const q = [];
-    let path = '/';
-    for (let i = 0; i + 1 < args.length; i += 2) {
-      const k = args[i].replace(/^-+/, ''), v = encodeURIComponent(args[i + 1]).replace(/%3A/g, ':');
-      if (k === 'screen') path = `/${v}/`; else q.push(`${k}=${v}`);
-    }
-    return q.length ? `${path}?${q.join('&')}` : path;
-  };
-  // A screen the phones open by a route alone (money's `welcome`) is not the browser's: its screens are their launch arguments.
-  const screens = (all.screens || []).filter(s => s.args).map(s => ({ id: s.id, query: query(s.args), path: routePath(s.args), sizes: s.on }));
-  const shots = mode === 'spa' ? screens.concat(web.shots || []) : screens;
+  const wide = all.wide;
+  if (!wide) throw new Error(`${shotsFile} has no "wide"`);
+  const [width, height] = wide.window || [1440, 900];
+  const scale = wide.scale || 1;
+  const today = process.env.DEMO_DAY || wide.today;
+  const shots = (wide.shots || []).filter(ours);
   const browser = await chromium.launch({ args: ['--font-render-hinting=none', '--disable-lcd-text', '--force-color-profile=srgb'] });
   let failed = 0;
-  for (const [size, [width, height]] of Object.entries(sizes)) {
-    for (const theme of ['light', 'dark']) {
-      const context = await browser.newContext({ viewport: { width, height }, deviceScaleFactor: web.scale || 1, colorScheme: theme, reducedMotion: 'reduce', javaScriptEnabled: js });
-      // One page for every shot at this size and theme (the SPA's): each
-      // shot's address taken in place (`history.pushState` and its
-      // `popstate`, which arkui-web answers by putting the app back where it
-      // opens, its menus and popovers closed, and bringing it where the
-      // address says); a page of its own only for a shot that says it needs
-      // a clean start (`fresh`), and for every page of a static site.
-      let page = null;
-      let errors = [];
-      const open = async () => {
-        if (page) await page.close();
-        page = await context.newPage();
-        page.on('pageerror', e => errors.push(e.message));
-        page.on('console', m => {
-          if (mode !== 'spa' && (m.type() === 'error' || /hydrat/i.test(m.text()))) errors.push(`console ${m.type()}: ${m.text()}`);
-        });
-      };
-      for (const shot of shots) {
-        if (shot.sizes && !shot.sizes.includes(size)) continue;
-        errors = [];
-        const began = Date.now();
-        const inPlace = mode === 'spa' && page && !shot.fresh;
-        if (!inPlace) await open();
-        // `web.query`: what every shot's address says first, the app's own.
-        // (`web.demo` is no query: app-web.sh serves the page published as
-        // the demo, `data-ark-demo`, the household in the page, no server.)
-        // `shots=1`: nothing on the page moves, a fade included, and the
-        // caret is clear (arkui-web's `data-motion="shots"`, ui/docs/shots.md).
-        const q = [web.query || '', `today=${web.today}`, `theme=${theme}`, 'shots=1', shot.query || ''].filter(Boolean).join('&');
-        // How a shot's `route` is put in the address: the one place that says
-        // it (a router's URL is its fragment, as the address bar shows it).
-        const at = route => (route ? `#${route.replace(/^[a-z]+:\/\//, '')}` : '');
-        try {
-          const url = mode === 'spa' ? `${base}/?${q}${at(shot.route)}` : `${base}${shot.path}`;
-          if (inPlace) {
-            await page.evaluate(u => {
-              history.pushState(null, '', u);
-              window.dispatchEvent(new PopStateEvent('popstate'));
-            }, url);
-            // An app that cannot put itself back loads the address afresh.
-            await page.waitForLoadState('load');
-          } else {
-            await page.goto(url);
-          }
-          // The written page is the browser's once its module has run.
-          if (mode !== 'spa' && js) await page.waitForSelector('html[data-ark-js]', { timeout: 20000 });
-          await page.waitForSelector('.ark-window', { timeout: 20000 });
-          await ready(page);
-          for (const step of shot.steps || []) {
-            // `"prefix": true`: a text that begins so (a count after it: "Approve All (5)").
-            // An element by its walk id (ui/docs/shots.md: `budget.auto-assign`), as the
-            // phones' walks name it; its first drawn element is what a pointer presses.
-            if (step.tap) await page.locator(`[data-ark-id="${step.tap}"] > *`).first().click();
-            if (step.click) await page.getByText(step.prefix ? new RegExp('^' + step.click.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')) : step.click, { exact: !step.prefix }).first().click({ button: step.button || 'left' });
-            if (step.context) await page.getByText(step.context, { exact: true }).first().click({ button: 'right' });
-            if (step.hover) await page.getByText(step.hover, { exact: true }).last().hover();
-            if (step.key) await page.keyboard.press(step.key);
-            if (step.type) await page.keyboard.type(step.type);
-            if (step.await) await page.getByText(step.await).first().waitFor({ timeout: 10000 });
-            if (step.wait) await page.waitForTimeout(step.wait * 1000);
-            await ready(page);
-          }
-          const dir = path.join(out, size, theme);
-          fs.mkdirSync(dir, { recursive: true });
-          await page.screenshot({ path: path.join(dir, `${shot.id}.png`) });
-          // The texts on the page, as the desktop's tree.txt has them: what a step can name.
-          fs.writeFileSync(path.join(dir, `${shot.id}.tree.txt`), await page.evaluate(() => document.body.innerText));
-          console.log(`${size} ${theme} ${shot.id}: ${inPlace ? 'in place' : 'loaded'}, ${((Date.now() - began) / 1000).toFixed(1)}s${errors.length ? ' (errors: ' + errors.join('; ') + ')' : ''}`);
-          if (mode !== 'spa' && errors.length) {
-            failed++;
-            console.log(`::error::${size} ${theme} ${shot.id}: ${errors.join('; ')}`);
-          }
-        } catch (e) {
-          failed++;
-          console.log(`::error::${size} ${theme} ${shot.id}: ${e.message}`);
-          // Wherever it stuck is no place for the next: a page of its own.
-          await page.close();
-          page = null;
+  for (const theme of ['light', 'dark']) {
+    const context = await browser.newContext({ viewport: { width, height }, deviceScaleFactor: scale, colorScheme: theme, reducedMotion: 'reduce' });
+    const address = query => {
+      // `wide.web.query`: what every address says first, the app's own (the
+      // demo is no query: app-web.sh serves the page published as the demo).
+      // `shots=1`: nothing on the page moves, a fade included, the caret is
+      // clear, and the walk is the page's (`window.arkShots`).
+      const q = [(wide.web || {}).query || '', today ? `today=${today}` : '', `theme=${theme}`, 'shots=1', query || ''].filter(Boolean).join('&');
+      return `${base}/?${q}`;
+    };
+    const open = async query => {
+      const page = await context.newPage();
+      const errors = [];
+      page.on('pageerror', e => errors.push(e.message));
+      await page.goto(address(query));
+      await page.waitForSelector('.ark-window', { timeout: 20000 });
+      await page.waitForFunction(() => !!window.arkShots, null, { timeout: 20000 });
+      await ready(page);
+      return { page, errors };
+    };
+    // The walk's page, opened once a theme; a shot's own page for one with an address.
+    let walk = null;
+    const dir = path.join(out, theme);
+    fs.mkdirSync(dir, { recursive: true });
+    for (const shot of shots) {
+      const began = Date.now();
+      let at = null;
+      try {
+        if (shot.query) {
+          at = await open(shot.query);
+        } else {
+          walk = walk || (await open(''));
+          at = walk;
+        }
+        for (const step of (shot.steps || []).filter(ours)) await take(at.page, step);
+        await at.page.screenshot({ path: path.join(dir, `${shot.id}.png`) });
+        // What a step can name: the walk's ids, as the desktop's tree.txt
+        // has them, and the page's text under them.
+        const tree = await at.page.evaluate(() => `${window.arkShots.tree()}\n\n${document.body.innerText}`);
+        fs.writeFileSync(path.join(dir, `${shot.id}.tree.txt`), tree);
+        console.log(`${theme} ${shot.id}: ${((Date.now() - began) / 1000).toFixed(1)}s${at.errors.length ? ' (errors: ' + at.errors.join('; ') + ')' : ''}`);
+      } catch (e) {
+        failed++;
+        console.log(`::error::${theme} ${shot.id}: ${e.message}`);
+        if (at) {
+          await at.page.screenshot({ path: path.join(dir, 'stuck.png') }).catch(() => {});
+          // Wherever the walk stuck is no place for the next: a page of its own.
+          if (at === walk) walk = null;
+          await at.page.close();
+          at = null;
         }
       }
-      if (page) await page.close();
-      await context.close();
+      if (at && at !== walk) await at.page.close();
     }
+    if (walk) await walk.page.close();
+    await context.close();
   }
-  fs.writeFileSync(path.join(out, 'device.json'), JSON.stringify({ browser: 'chromium', version: browser.version(), sizes, mode, js }, null, 2) + '\n');
+  fs.writeFileSync(path.join(out, 'device.json'), JSON.stringify({
+    name: `Browser, ${width}×${height}`, width: width * scale, height: height * scale, corner: 0, cutout: 'none',
+    browser: 'chromium', version: browser.version(),
+  }, null, 2) + '\n');
   await browser.close();
   if (failed) process.exit(1);
 }

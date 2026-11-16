@@ -1,21 +1,18 @@
 #!/usr/bin/env bash
-# An app's browser screenshots (apps.md), the same for every app: what is
-# the app's is its <app>/demo/shots.json, its `web`. The page nix built
-# at the commit (`nix build .#<app>-web`: index.html beside pkg/), served
-# here on the loopback, photographed by Playwright's Chromium
-# (web-shots.js): each shot opened by its address — the launch arguments
-# every shell reads, `?screen=budget`, and arkui-web's `?context=`,
-# `?menu=`, `?popover=` — then its steps, at each size in light and dark.
+# An app's browser screenshots (apps.md, "The wide windows"), the same for
+# every app: what is the app's is its <app>/demo/shots.json, its `wide`, the
+# one walk the desktop's window and the Mac take too. The page nix built at
+# the commit (`nix build .#<app>-web`: index.html beside pkg/), served here
+# on the loopback, walked in Playwright's Chromium (web-shots.js): the demo
+# in the page on DEMO_DAY (else `wide.today`), each step inside the page
+# (`window.arkShots`) or a hand's, light then dark.
 #
 #   app-web.sh <out> <site> <app>     (ARK_WEB_SHOTS: another shots.json, to take a few)
 #
-# ARK_WEB_MODE=ssg takes a static site (an app's whose `[web] modes` has it)
-# by its routes' paths, and ARK_WEB_JS=0 with script off (web-shots.js).
-#
-# Writes <out>/device.json and <out>/<size>/<theme>/<id>.png, each with
-# its <id>.tree.txt (the page's text, what a step can name). Run from the
-# repository's root, where `node` can `require('playwright')` with its
-# Chromium installed (`npx playwright install chromium` on a runner).
+# Writes <out>/device.json and <out>/<theme>/<id>.png, each with its
+# <id>.tree.txt (what a step can name). Run from the repository's root,
+# where `node` can `require('playwright')` with its Chromium installed
+# (`npx playwright install chromium` on a runner).
 set -euo pipefail
 out=$1
 site=$2
@@ -46,11 +43,11 @@ cat > "$conf/fonts.conf" <<EOF
 </fontconfig>
 EOF
 
-# An app whose shots are of its demo (shots.json's `web.demo`) is served
+# An app whose shots are of its demo (shots.json's `wide.web.demo`) is served
 # as the site publishes it (nix/channel.py's `web … demo`): the page is the
 # demo by where it is (`data-ark-demo`), with no `?demo` in its address.
 shots_file=${ARK_WEB_SHOTS:-$PWD/$app/demo/shots.json}
-if [ "$(jq -r '.web.demo // false' "$shots_file")" = true ]; then
+if [ "$(jq -r '.wide.web.demo // false' "$shots_file")" = true ]; then
   served=$conf/site
   python3 -I "$here/../../nix/channel.py" web "$site" "$served" / "$here/../../ui/theme.toml" stable demo
   site=$served

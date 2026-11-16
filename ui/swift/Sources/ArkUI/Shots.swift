@@ -17,6 +17,8 @@
 import SwiftUI
 #if canImport(UIKit)
 import UIKit
+#elseif canImport(AppKit)
+import AppKit
 #endif
 
 extension View {
@@ -40,6 +42,10 @@ private final class Signal: ObservableObject {
     @Published private(set) var ready = false
     #if canImport(UIKit)
     private var link: CADisplayLink?
+    #elseif canImport(AppKit)
+    /// The Mac's frame, ticked by a timer at the display's usual rate: a
+    /// screenshot's alone (a view's own display link needs its window).
+    private var timer: Timer?
     #endif
 
     private init() {
@@ -87,6 +93,13 @@ private final class Signal: ObservableObject {
         let l = CADisplayLink(target: Frame(), selector: #selector(Frame.frame))
         l.add(to: .main, forMode: .common)
         link = l
+        #elseif canImport(AppKit)
+        timer?.invalidate()
+        timer = nil
+        guard on else { return }
+        let t = Timer(timeInterval: 1.0 / 60, repeats: true) { _ in MainActor.assumeIsolated { Ready.shared.frame() } }
+        RunLoop.main.add(t, forMode: .common)
+        timer = t
         #endif
     }
 
@@ -234,10 +247,83 @@ private struct ShotsRoot: ViewModifier {
                 window.layer.speed = 100
             }
         }
+        #elseif canImport(AppKit)
+        ShotsMac.watch()
+        ShotsMac.activate()
         #endif
         Ready.shared.changed()
     }
 }
+
+#if canImport(AppKit) && !canImport(UIKit)
+/// The Mac's window, as a screenshot walk inside the app takes it
+/// (ui/docs/shots.md, "In the App"; .github/screens/app-mac.sh): the app
+/// the active one and its window key, so it is drawn as a person's in use
+/// is (a launch from a script came up behind the script's own: grey
+/// traffic lights, a faded toolbar and sidebar, the accent's buttons grey,
+/// app-screens 43796348626); the theme the whole app's; and which window a
+/// picture is of. The picture itself is the window server's
+/// (`screencapture -l`), taken by the script once the walk asks.
+@MainActor
+public enum ShotsMac {
+    private static var watching: [NSObjectProtocol] = []
+    /// The app's own window, the first that was key: what each walk starts
+    /// in, and what a reset puts the rest away for.
+    private static var main: NSWindow?
+
+    /// The app and its window told of each change of either's state: it
+    /// changes how everything is drawn.
+    static func watch() {
+        guard watching.isEmpty else { return }
+        let names: [Notification.Name] = [NSApplication.didBecomeActiveNotification, NSApplication.didResignActiveNotification,
+                                          NSWindow.didBecomeKeyNotification, NSWindow.didResignKeyNotification]
+        watching = names.map {
+            NotificationCenter.default.addObserver(forName: $0, object: nil, queue: .main) { _ in
+                MainActor.assumeIsolated { Ready.shared.changed() }
+            }
+        }
+    }
+
+    /// The window on the screen that pictures are of: the key one (a sheet's
+    /// the window it is on, which draws it), else the main one.
+    public static var window: NSWindow? {
+        let w = NSApp.keyWindow ?? NSApp.mainWindow ?? main ?? NSApp.windows.first { $0.isVisible && $0.canBecomeKey }
+        return w?.sheetParent ?? w
+    }
+
+    /// The app brought to the front, and its window made key.
+    public static func activate() {
+        if main == nil { main = NSApp.keyWindow ?? NSApp.windows.first { $0.isVisible && $0.canBecomeMain } }
+        NSApp.unhide(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        (window ?? main)?.makeKeyAndOrderFront(nil)
+    }
+
+    /// Whether the app is the active one and its window key: drawn as in use.
+    public static var focused: Bool {
+        guard NSApp.isActive, let w = window else { return false }
+        return w.isKeyWindow || w.attachedSheet?.isKeyWindow == true || NSApp.keyWindow?.sheetParent === w
+    }
+
+    /// Every window drawn dark, or light, whatever the system's appearance.
+    public static func theme(dark: Bool) {
+        NSApp.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
+        Ready.shared.changed()
+    }
+
+    /// Every window but the app's own put away (Settings', a panel's): a
+    /// walk starts again in the one it began in.
+    public static func backToMain() {
+        guard let main else { return }
+        for w in NSApp.windows where w !== main && w.sheetParent == nil && w.isVisible && w.styleMask.contains(.titled) {
+            w.close()
+        }
+        activate()
+        main.makeKeyAndOrderFront(nil)
+        Ready.shared.changed()
+    }
+}
+#endif
 
 /// The ready signal as a point of text no one sees, there only to be
 /// found: `ark.ready` while ready, `ark.busy` (and why) while not.

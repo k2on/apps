@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Each desktop window as nix builds it at a commit, for its screenshots
 # (apps.md): `<app>-desktop` or `<app>-iced` (flake.nix, `icedApp`), the cache's when its
-# inputs have not moved, linked as <out>/desktop-<app>.
+# inputs have not moved, linked as <out>/desktop-<app>; and its page,
+# `<app>-web`, where the commit has one, linked as <out>/web-<app>: the
+# wide windows' walk is the browser's too (apps.md, "The wide windows").
 #
 #   desktop-build.sh <checkout> <out> <app>...
 #
@@ -29,6 +31,15 @@ for a in "$@"; do
     echo "$a: $(readlink "$out/desktop-$a")"
   else
     echo "::error::$a's desktop window did not build"
+    failed=1
+  fi
+  has=$(nix eval --json "$src#packages.x86_64-linux" --apply "p: p ? \"$a-web\"" 2>/dev/null)
+  if [ "$has" != true ]; then
+    echo "$a: this commit has no $a-web; no page to take"
+  elif nix build --print-build-logs -o "$out/web-$a" "$src#$a-web"; then
+    echo "$a: $(readlink "$out/web-$a")"
+  else
+    echo "::error::$a's page did not build"
     failed=1
   fi
 done

@@ -1,5 +1,6 @@
 //! A desktop window photographed, for the apps' screenshots
-//! (`.github/screens/apps.md`): the `desktop` beside the phones.
+//! (`.github/screens/apps.md`): the `desktop` beside the phones, one of the
+//! wide windows that walk shots.json's `wide`.
 //!
 //! **The app's own application, run as iced runs it.** An app hands over the
 //! `iced::application(...)` its `main` would run, and this runs it with no
@@ -43,7 +44,7 @@
 //! and the screen drawn in light and in dark. A shot that needs a clean
 //! start (`"fresh": true`: what the one before left open would be in its
 //! way) has the window closed and opened again first. The steps
-//! (`desktop.shots[].steps` in shots.json) name what to press by what it
+//! (`wide.shots[].steps` in shots.json, the wide windows' one walk) name what to press by what it
 //! says, as the phones' do, from the text the window lays out:
 //!
 //! - `{"click": "<text>"}` clicks the middle of the text that says exactly
@@ -199,12 +200,19 @@ impl Asked {
     {
         let read = std::fs::read_to_string(&self.shots).map_err(|e| format!("{}: {e}", self.shots.display()))?;
         let all: Value = serde_json::from_str(&read).map_err(|e| format!("{}: {e}", self.shots.display()))?;
-        let desktop = &all["desktop"];
+        // The wide windows' one walk (shots.json's `wide`), the desktop's of
+        // it: a shot or a step `on` other platforms alone is theirs.
+        let desktop = &all["wide"];
         let window = desktop["window"].as_array();
         let side = |i: usize, or: f64| window.and_then(|w| w.get(i)).and_then(Value::as_f64).unwrap_or(or) as f32;
         let size = Size::new(side(0, 1280.0), side(1, 800.0));
         let scale = desktop["scale"].as_f64().unwrap_or(2.0) as f32;
-        let shots = desktop["shots"].as_array().ok_or("shots.json has no desktop.shots")?;
+        let shots: Vec<&Value> = desktop["shots"]
+            .as_array()
+            .ok_or("shots.json has no wide.shots")?
+            .iter()
+            .filter(|s| ours(s))
+            .collect();
 
         if let Some(fonts) = std::env::var_os("ARK_SHOTS_FONTS") {
             only_fonts(Path::new(&fonts))?;
@@ -250,7 +258,7 @@ impl Asked {
             };
             eprintln!("shots: {id}{}", if fresh { " (fresh)" } else { "" });
             let mut done = Ok(());
-            for step in shot["steps"].as_array().map(Vec::as_slice).unwrap_or_default() {
+            for step in shot["steps"].as_array().map(Vec::as_slice).unwrap_or_default().iter().filter(|s| ours(s)) {
                 if step["relaunch"].as_bool() == Some(true) {
                     // The one open goes first, as a window closed does: its
                     // replica's files and socket let go before the next opens.
@@ -296,6 +304,16 @@ impl Asked {
             true => Ok(()),
             false => Err(format!("not taken: {}", failed.join(", "))),
         }
+    }
+}
+
+/// Whether a shot or a step of the wide walk is the desktop's: one with no
+/// `on` is every wide window's, one `on` a list the desktop's when it says
+/// `desktop`.
+fn ours(v: &Value) -> bool {
+    match v["on"].as_array() {
+        None => true,
+        Some(on) => on.iter().any(|p| p.as_str() == Some("desktop")),
     }
 }
 
@@ -454,10 +472,14 @@ where
         };
         window.resubscribe();
         window.spawn(task);
-        // As a window is opened: it says so, with its size.
+        // As a window is opened: it says so, with its size, and that it has
+        // the keys (a person's window in use is focused; a widget or an app
+        // that draws a window in the background otherwise is drawn as one
+        // in use).
         window.events(vec![
             Event::Window(window::Event::Opened { position: None, size }),
             Event::Window(window::Event::Resized(size)),
+            Event::Window(window::Event::Focused),
         ]);
         window
     }

@@ -1887,10 +1887,9 @@ than caught up each request.
 **Checked**: arkui-serve's tests (tests/static_site.rs) write a fixture
 site from its declared paths — a band each, a link to each declared path, the rest
 disabled, nothing dangling, the bound refused — and round-trip routes.
-`.github/screens/app-web.sh` with `ARK_WEB_MODE=ssg` photographs a static
-site by its routes' addresses, with script and with `ARK_WEB_JS=0`
-without; with script, a written page fails its shot on any error or any
-word of hydration in the console.
+The browser's screenshots (`.github/screens/app-web.sh`) are the SPA's,
+walking the wide windows' one walk (.github/screens/apps.md, "The wide
+windows"); a static site is not photographed there.
 
 ## The iced Fork: COSMIC's
 

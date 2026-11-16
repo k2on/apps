@@ -1,72 +1,61 @@
 #!/usr/bin/env bash
-# An app's Mac window (apps.md, "The Mac"), on the runner's own screen: the
-# app nix built for the Mac opened as it is, given the server CI started
-# and the name to sign in as (`--server <URL> --user <name>`, what the
-# desktop window is given: an app that takes them opens signed in, its
-# sample data synced), left to settle, and its window taken
-# (`screencapture -l`, the window alone, no shadow), in light and in dark.
+# An app's Mac window (apps.md, "The wide windows"), on the runner's own
+# screen: the app nix built for the Mac, walking shots.json's `wide` inside
+# itself (ArkApp's ShotsWalk, the iPhone's walk: each step taken in Rust by
+# the id it names), the same ids in the same order as the desktop's window
+# and the browser. The demo's household (`-demo`, on DEMO_DAY, else
+# `wide.today`), at `wide.mac`'s size; light, then reset and dark, the app
+# drawing itself in each (`NSApp.appearance`). Before each picture the walk
+# makes the app the active one and its window key (a launch from here came
+# up behind: grey traffic lights, a faded toolbar, app-screens
+# 43796348626), then asks for it (`<plan>/out/want`: the window's number,
+# the theme, the id); this takes it with `screencapture -l` (the window
+# alone, no shadow) and takes the ask away. And first, `welcome`: the
+# first run's page, the app opened with no demo, light and dark
+# (`-AppleInterfaceStyle Dark`), a Mac addition the others have no page of.
 #
-#   app-mac.sh <out> <Foo.app> <app> [server URL]
+#   app-mac.sh <out> <Foo.app> <app>
 #
-# Writes <out>/device.json and <out>/<theme>/window.png, and each of the
-# shots.json's `screens` that is `on` "mac", <out>/<theme>/<id>.png: the
-# app opened with that screen's launch arguments (`args`, after
-# shots.json's `launch.mac`, the Mac's own: a demo, a window size), so a
-# screen is opened with no steps. No steps beyond that: a Mac window has
-# no step driver here: the phones walk themselves (ui/docs/shots.md).
+# Writes <out>/device.json and <out>/<theme>/<id>.png, each walked shot's
+# <id>.tree.txt beside it, and <out>/walk.log.
 set -euo pipefail
 out=$1
 bundle_app=$2
 app=$3
-server=${4:-}
 here=$(cd "$(dirname "$0")" && pwd)
-user=$(jq -r '.server.user // empty' "$app/demo/shots.json")
+shots="$app/demo/shots.json"
 # A Mac app's Info.plist is under Contents/ (an iPhone app's at its root).
 exe="$bundle_app/Contents/MacOS/$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$bundle_app/Contents/Info.plist")"
 tmp=$(mktemp -d)
-mkdir -p "$out"
+mkdir -p "$out/light" "$out/dark"
 # The window of a process, by its pid (window.swift).
 began=$(date +%s)
 xcrun swiftc -O "$here/window.swift" -o "$tmp/window"
 echo "  window.swift compiled in $(( $(date +%s) - began ))s"
 
-# The system's appearance, dark or not (System Events): given twenty
-# seconds, as a prompt for leave to drive System Events would never end.
-dark_mode() {
-  osascript -e "tell application \"System Events\" to tell appearance preferences to set dark mode to $1" &
+# Asked of System Events, given twenty seconds: a prompt for leave to drive
+# it would never end.
+events() {
+  osascript -e "tell application \"System Events\" to $1" > /dev/null &
   local asked=$!
   for _ in $(seq 1 20); do
     kill -0 "$asked" 2> /dev/null || { wait "$asked"; return; }
     sleep 1
   done
   kill "$asked" 2> /dev/null || true
-  echo "::error::the Mac's appearance could not be set (System Events did not answer)"
+  echo "::warning::System Events did not answer: $1"
   return 1
 }
+# The process of `pid` the frontmost: the app the active one.
+front() { events "set frontmost of (first process whose unix id is $1) to true" || true; }
+# The system light: what the app's own appearance is drawn over.
+events "tell appearance preferences to set dark mode to false" || true
 
-args=()
-if [ -n "$server" ]; then args=(--server "$server" --user "$user"); fi
-# The Mac's own launch arguments, then each screen's id and arguments.
-base=()
-while IFS= read -r a; do base+=("$a"); done < <(jq -r '.launch.mac // [] | .[]' "$app/demo/shots.json")
-# Its demo (`-demo <day>`) on the run's day when one is given (DEMO_DAY,
-# what the phones' servers are seeded up to, app-screens.yaml): the same
-# household as theirs, on the same day.
-if [ -n "${DEMO_DAY:-}" ]; then
-  for i in "${!base[@]}"; do
-    if [ "${base[$i]}" = -demo ] && [ $((i + 1)) -lt ${#base[@]} ]; then base[$((i + 1))]=$DEMO_DAY; fi
-  done
-fi
-screens=$(jq -c '[.screens // [] | .[] | select((.on // []) | index("mac"))]' "$app/demo/shots.json")
-
-# The app opened with `$@`, its window taken as <out>/<theme>/<name>.png.
-shoot() {
-  local theme=$1 name=$2
-  shift 2
-  # In shots mode (ArkUI's `Shots`, ui/docs/shots.md): every move at its end at once.
-  local began
-  began=$(date +%s)
-  "$exe" -shots YES "$@" > "$tmp/$theme-$name.log" 2>&1 &
+# The first run's page, its window taken once the app is in front and still.
+welcome() {
+  local theme=$1
+  shift
+  "$exe" -shots YES "$@" > "$tmp/welcome-$theme.log" 2>&1 &
   local pid=$! wid=""
   for _ in $(seq 1 60); do
     wid=$("$tmp/window" "$pid" 2> /dev/null) && break
@@ -74,43 +63,67 @@ shoot() {
     sleep 1
   done
   if [ -z "$wid" ]; then
-    echo "::error::$app's Mac window never opened ($name)"
-    tail -n 40 "$tmp/$theme-$name.log" || true
+    echo "::error::$app's Mac window never opened (welcome $theme)"
+    tail -n 40 "$tmp/welcome-$theme.log" || true
     kill "$pid" 2> /dev/null || true
     return 1
   fi
-  local opened=$(( $(date +%s) - began ))
-  # Signed in and synced (or the demo opened), then still.
-  sleep 8
-  # Its front window now, not the first it opened: Settings is a window
-  # of its own, opened after the main one (08-settings-banks was the
-  # Budget's window in 42977527249 and 43083062235).
-  wid=$("$tmp/window" "$pid" 2> /dev/null || echo "$wid")
-  mkdir -p "$out/$theme"
-  screencapture -x -o -l "$wid" "$out/$theme/$name.png"
+  front "$pid"
+  sleep 4
+  screencapture -x -o -l "$wid" "$out/$theme/welcome.png"
   kill "$pid" 2> /dev/null || true
   wait "$pid" 2> /dev/null || true
-  echo "  $theme $name: its window in ${opened}s, taken and closed in $(( $(date +%s) - began ))s"
+  echo "  $theme welcome: taken"
 }
-
 failed=0
-for theme in light dark; do
-  echo "$app mac $theme"
-  dark=false
-  [ "$theme" = light ] || dark=true
-  dark_mode "$dark"
-  shoot "$theme" window ${args[@]+"${args[@]}"} || exit 1
-  n=$(jq length <<< "$screens")
-  for i in $(seq 0 $((n - 1))); do
-    id=$(jq -r ".[$i].id" <<< "$screens")
-    each=()
-    while IFS= read -r a; do each+=("$a"); done < <(jq -r ".[$i].args // [] | .[]" <<< "$screens")
-    echo "$app mac $theme $id"
-    shoot "$theme" "$id" ${base[@]+"${base[@]}"} ${each[@]+"${each[@]}"} || failed=1
-  done
-done
-dark_mode false || true
+welcome light || failed=1
+welcome dark -AppleInterfaceStyle Dark || failed=1
 
-read -r w h < <(sips -g pixelWidth -g pixelHeight "$out/light/window.png" | awk '/pixelWidth/ {w=$2} /pixelHeight/ {h=$2} END {print w, h}')
+# The walk's plan: the Mac's of `wide` (a shot or a step `on` others alone
+# left out), in the app's reach.
+plan="$tmp/walk"
+mkdir -p "$plan"
+jq '{shots: [.wide.shots[] | select((.on // ["mac"]) | index("mac"))
+             | .steps = [(.steps // [])[] | select((.on // ["mac"]) | index("mac")) | del(.on)] | del(.on)]}' \
+  "$shots" > "$plan/plan.json"
+day=${DEMO_DAY:-$(jq -r '.wide.today' "$shots")}
+mac=()
+while IFS= read -r a; do mac+=("$a"); done < <(jq -r '.wide.mac // [] | .[]' "$shots")
+echo "$app mac walk: $(jq '.shots | length' "$plan/plan.json") shots, the demo on $day"
+began=$(date +%s)
+"$exe" -shots YES -shotsPlan "$plan/plan.json" -demo "$day" ${mac[@]+"${mac[@]}"} > "$tmp/walk.log" 2>&1 &
+pid=$!
+fronted=""
+# Each picture the walk asks for, until it ends (or 15 minutes: a guard).
+while kill -0 "$pid" 2> /dev/null; do
+  if [ -z "$fronted" ] && "$tmp/window" "$pid" > /dev/null 2>&1; then front "$pid"; fronted=1; fi
+  if [ -f "$plan/out/want" ]; then
+    read -r wid theme id < "$plan/out/want"
+    front "$pid"
+    mkdir -p "$plan/out/$theme"
+    screencapture -x -o -l "$wid" "$plan/out/$theme/$id.png" || echo "::error::$id $theme: no picture of window $wid"
+    rm -f "$plan/out/want"
+  fi
+  if [ $(( $(date +%s) - began )) -gt 900 ]; then
+    echo "::error::$app's Mac walk still going after 900s"
+    kill "$pid" 2> /dev/null || true
+    break
+  fi
+  sleep 0.1
+done
+wait "$pid" 2> /dev/null || true
+cat "$plan/out/walk.log" 2> /dev/null || tail -n 60 "$tmp/walk.log"
+cp "$plan/out/walk.log" "$out/walk.log" 2> /dev/null || true
+for theme in light dark; do
+  cp "$plan/out/$theme"/* "$out/$theme/" 2> /dev/null || true
+done
+if ! [ -f "$plan/out/done" ]; then
+  echo "::error::$app's Mac walk failed: $(cat "$plan/out/failed" 2> /dev/null || echo 'it ended with no word')"
+  tail -n 40 "$tmp/walk.log" || true
+  failed=1
+fi
+echo "  the walk: $(( $(date +%s) - began ))s"
+
+read -r w h < <(sips -g pixelWidth -g pixelHeight "$out/light/welcome.png" | awk '/pixelWidth/ {w=$2} /pixelHeight/ {h=$2} END {print w, h}')
 printf '{"name":"Mac","width":%s,"height":%s,"corner":20,"cutout":"none"}\n' "$w" "$h" > "$out/device.json"
 exit $failed

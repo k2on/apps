@@ -740,6 +740,87 @@ fn expand(
     }
 }
 
+/// One screen's message, as its own view sends it: a window's message
+/// (`Windowed::Msg`, an enum of its screens' messages) with that one level
+/// of wrapping left out of its `Debug`, so an element's id is worked out
+/// from the screen's message (`shell.inspector:category-details`,
+/// `transactions.show:all`), as the phones' walks have it, never from the
+/// window's (`shell.shell:…`).
+#[derive(Clone)]
+pub struct Own<M>(pub M);
+
+impl<M: Debug> Debug for Own<M> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = format!("{:?}", self.0);
+        f.write_str(unwrapped(&s))
+    }
+}
+
+/// `Shell(Inspector { .. })` as `Inspector { .. }`; anything not one
+/// variant around one value as it is.
+pub fn unwrapped(s: &str) -> &str {
+    match s.find('(') {
+        Some(i) if s.ends_with(')') && i > 0 && s[..i].chars().all(|c| c.is_alphanumeric() || c == '_') => &s[i + 1..s.len() - 1],
+        _ => s,
+    }
+}
+
+/// The names `nodes` host, shown.
+fn hosted_shown(nodes: &[Node]) -> Vec<String> {
+    nodes
+        .iter()
+        .filter_map(|n| match n {
+            Node::Hosted { name, shown: true, .. } => Some(name.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+/// What a step can reach in a window an app's part says whole
+/// (`Windowed`: the desktop's window and the browser's page, which walk
+/// the same shots, .github/screens/apps.md): its shell's view (or
+/// Settings' panes while they show), each name it hosts as that screen,
+/// what that hosts in turn, and what is over it — each element's message
+/// sent with `send`.
+pub fn windowed<A: crate::window::Windowed>(
+    app: &A,
+    place: &dyn crate::host::Place<A::Key, A::Change>,
+    now_ms: i64,
+    send: Rc<dyn Fn(A::Msg)>,
+) -> Vec<Target> {
+    let send: Rc<dyn Fn(Own<A::Msg>)> = Rc::new(move |m: Own<A::Msg>| send(m.0));
+    let window: View<Own<A::Msg>> = match app.settings(place, now_ms) {
+        Some((panes, _)) => panes,
+        None => app.window(place, now_ms),
+    }
+    .map(Own);
+    let mut screens = vec![Screen {
+        name: A::WINDOW.into(),
+        nodes: nodes(&window, send.clone()),
+    }];
+    // Each name hosted, as its screen (a hosted name's last part,
+    // `register` of `accounts.register`), and what it hosts in turn.
+    let mut names = hosted_shown(&screens[0].nodes);
+    let mut done: Vec<String> = vec![];
+    while let Some(name) = names.pop() {
+        if done.contains(&name) {
+            continue;
+        }
+        let n = nodes(&app.hosted(&name, place, now_ms).map(Own), send.clone());
+        names.extend(hosted_shown(&n));
+        screens.push(Screen {
+            name: name.rsplit('.').next().unwrap_or(&name).to_string(),
+            nodes: n,
+        });
+        done.push(name);
+    }
+    screens.push(Screen {
+        name: A::OVER.into(),
+        nodes: nodes(&app.over(place, now_ms).map(Own), send),
+    });
+    compose(screens)
+}
+
 /// A shot's step, as shots.json writes it (.github/screens/apps.md): each
 /// names an element by its id ([`id_of`]), as a shot's `<id>.tree.txt`
 /// lists them.

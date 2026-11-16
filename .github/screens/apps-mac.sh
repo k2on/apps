@@ -32,8 +32,7 @@ for a in "$@"; do
   if [ -n "${BUILT:-}" ]; then
     app=$(find "$BUILT/macos-$a" -maxdepth 1 -name '*.app' 2> /dev/null | head -1)
     [ -n "$app" ] || { echo "$a: no Mac build ($BUILT/macos-$a); no Mac window"; continue; }
-    server=$(jq -r '.server.port // empty | "http://127.0.0.1:\(.)"' "$a/demo/shots.json")
-    bash "$here/app-mac.sh" "$out/$a/mac" "$app" "$a" "$server" ||
+    bash "$here/app-mac.sh" "$out/$a/mac" "$app" "$a" ||
       { echo "::error::$a's Mac screenshots failed"; echo "$a" >> "$partial"; failed=1; }
     ph "$a: its Mac window taken"
     continue
@@ -51,9 +50,8 @@ for a in "$@"; do
     echo "::error::$a-macos has no .app in it"; echo "$a" >> "$partial"; failed=1
     continue
   fi
-  server=$(jq -r '.server.port // empty | "http://127.0.0.1:\(.)"' "$a/demo/shots.json")
   ph "$a: built"
-  bash "$here/app-mac.sh" "$out/$a/mac" "$app" "$a" "$server" ||
+  bash "$here/app-mac.sh" "$out/$a/mac" "$app" "$a" ||
     { echo "::error::$a's Mac screenshots failed"; echo "$a" >> "$partial"; failed=1; }
   ph "$a: its Mac window taken"
 done
