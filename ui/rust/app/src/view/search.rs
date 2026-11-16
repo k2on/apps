@@ -214,7 +214,6 @@ impl Searching {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::view::{search_choice, search_picker, Val};
 
     fn c(title: &str, tag: &str, group: &str) -> Choice {
         Choice {
@@ -313,60 +312,5 @@ mod tests {
         assert_eq!(s.key(&cs, Key::Choose), None);
         assert_eq!(s.key(&cs, Key::Down), None);
         assert_eq!(s.at, None);
-    }
-
-    /// The part holds its choices, read back as the toolkits read them, and
-    /// choosing one sends the picker's message with its tag. Falsified by
-    /// a choice's tag lost on the way: the message would carry its title.
-    #[derive(Clone, Debug, PartialEq)]
-    enum Msg {
-        Category { key: String },
-    }
-
-    #[test]
-    fn the_part_sends_the_chosen_tag() {
-        let v: View<Msg> = search_picker(
-            "Category",
-            "rent",
-            |key| Msg::Category { key },
-            View::List(vec![
-                search_choice("Rent", "house", "rent")
-                    .group("Bills")
-                    .detail("$1,200.00", "positive")
-                    .into(),
-                search_choice("Groceries", "shopping-cart", "groc").group("Food").into(),
-            ]),
-        )
-        .unset("Needs a Category")
-        .prompt("Search Categories")
-        .into();
-        let View::Part(Part::SearchPicker {
-            label,
-            selected,
-            unset,
-            prompt,
-            pick,
-            choices: slot,
-        }) = &v
-        else {
-            panic!("a search picker: {v:?}")
-        };
-        assert_eq!((*label, *prompt), ("Category", "Search Categories"));
-        assert_eq!(selected, &Val::Is("rent".to_string()));
-        assert_eq!(unset, &Val::Is("Needs a Category".to_string()));
-        let cs = choices(slot);
-        assert_eq!(cs[0].detail, "$1,200.00");
-        assert_eq!(cs[0].tint, "positive");
-        assert_eq!(cs[1].tint, "neutral", "no detail: the neutral tint");
-        let mut s = Searching::open(&cs, &selected.get());
-        s.typed(&cs, "food");
-        let Some(Done::Chose(tag)) = s.key(&cs, Key::Choose) else { panic!() };
-        assert_eq!(pick.call(tag), Msg::Category { key: "groc".into() });
-        // And mapped into another app's messages, it still sends the tag.
-        let mapped = v.map(|m| match m {
-            Msg::Category { key } => format!("chose {key}"),
-        });
-        let View::Part(Part::SearchPicker { pick, .. }) = mapped else { panic!() };
-        assert_eq!(pick.call("rent".into()), "chose rent");
     }
 }

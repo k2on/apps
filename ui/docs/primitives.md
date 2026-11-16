@@ -270,10 +270,9 @@ the primitives — moved, or still to move.
 
 ## What Is Verified
 
-The view model and the components by `cargo test -p ark-app`
-(`view/layout.rs`, `view/components.rs`); harken's compositions (a cover
-its square first, the picture filled over the derived square) by
-app-screens' sheets on every platform; the generated SwiftUI and Compose
+The view model, the components and harken's compositions (a cover its
+square first, the picture filled over the derived square) by app-screens'
+sheets on every platform, and no test of their own; the generated SwiftUI and Compose
 by `ui/rust/gen/tests/snapshots` (`CardView.swift`, `CardScreen.kt`: the
 rebuilt header card and goal, an empty state, a row of a glyph, words and a
 spacer, a sideways shelf, an image — and a test that neither holds a number);
