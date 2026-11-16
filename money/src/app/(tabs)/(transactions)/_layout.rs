@@ -183,8 +183,6 @@ pub struct TransactionsPage {
     /// "Approve All (2)", offered while some to review have a category.
     pub approve_all: String,
     pub can_approve_all: bool,
-    /// Under To Review: how a row is reviewed.
-    pub review_note: Option<String>,
     pub days: Vec<TxnDay>,
     pub categorizing: Option<CategorizeForm>,
     pub deleting: Option<DeleteQuestion>,
@@ -384,7 +382,6 @@ impl App for Transactions {
             review: review.iter().map(|t| item(t, style)).collect(),
             approve_all: format!("Approve All ({ready})"),
             can_approve_all: ready > 0,
-            review_note: Some("Tap one that needs a category to choose it; hold one for what else can be done.".into()),
             days,
             categorizing: s.choosing.as_ref().map(|c| {
                 let mut ls: Vec<&BudgetLine> = lines.iter().filter(|l| !l.hidden && !l.is_payment()).collect();

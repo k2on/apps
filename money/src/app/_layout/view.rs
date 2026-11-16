@@ -491,19 +491,16 @@ pub fn bank_page(b: &BankPage) -> View<ShellMsg> {
 /// Appearance: the system's, or always light or dark.
 #[view]
 pub fn settings_appearance(p: &ShellPage) -> View<ShellMsg> {
-    detail_page(
-        card_section(option_picker(
-            "Appearance",
-            p.settings.appearance,
-            |key| ShellMsg::AppearanceKey { key },
-            (
-                picker_choice("System", "smartphone", "system"),
-                picker_choice("Light", "eye", "light"),
-                picker_choice("Dark", "eye-off", "dark"),
-            ),
-        ))
-        .footer(p.settings.appearance_note),
-    )
+    detail_page(card_section(option_picker(
+        "Appearance",
+        p.settings.appearance,
+        |key| ShellMsg::AppearanceKey { key },
+        (
+            picker_choice("System", "smartphone", "system"),
+            picker_choice("Light", "eye", "light"),
+            picker_choice("Dark", "eye-off", "dark"),
+        ),
+    )))
 }
 
 /// A section shown, by its tag.

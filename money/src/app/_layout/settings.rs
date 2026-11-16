@@ -224,7 +224,6 @@ pub struct SettingsPage {
     pub plaid: Option<String>,
     /// `system`, `light` or `dark`.
     pub appearance: String,
-    pub appearance_note: Option<String>,
 }
 
 /// The holds Settings needs: the banks, their accounts, this person's asks.
@@ -499,7 +498,6 @@ pub fn screen(s: &ShellState, data: &Data<'_, MoneyView>) -> SettingsPage {
             Some(Appearance::Dark) => "dark",
         }
         .into(),
-        appearance_note: Some("System follows this device's light and dark.".into()),
     }
 }
 

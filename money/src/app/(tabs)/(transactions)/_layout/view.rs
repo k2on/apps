@@ -34,7 +34,6 @@ pub fn transactions(p: &TransactionsPage) -> View<TransactionsMsg> {
                             },
                         ))
                         .header(p.review_count)
-                        .footer(p.review_note)
                     },
                 )
             },
