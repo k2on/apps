@@ -544,7 +544,6 @@ button.ark-sidebar-heading:hover, button.ark-sidebar-heading.ark-on { color: var
 .ark-link { color: var(--ark-accent-text); text-align: start; padding: 2px 0; }
 .ark-link:hover { text-decoration: underline; }
 .ark-form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-.ark-swatch { width: 18px; height: 18px; border-radius: 5px; display: inline-flex; align-items: center; justify-content: center; color: #FFFFFF; flex: none; }
 .ark-unread-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--ark-accent); margin-right: 6px; flex: none; }
 .ark-check-button { display: inline-flex; color: var(--ark-quiet); }
 .ark-check-button.ark-on { color: var(--ark-positive); }

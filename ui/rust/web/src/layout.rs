@@ -84,14 +84,7 @@ pub(crate) fn layout<M: Clone + std::fmt::Debug + 'static>(l: Layout<M>) -> Opti
             let c = with(&mut class, "ark-picture".into());
             match url.is_empty() {
                 true => html::div().class(c).attr("aria-label", label.get()).into_any(),
-                false => html::img()
-                    .class(c)
-                    .attr("src", url)
-                    .attr("alt", label.get())
-                    .attr("loading", "lazy")
-                    .attr("decoding", "async")
-                    .attr("onerror", "this.style.visibility='hidden'")
-                    .into_any(),
+                false => picture(url, label.get(), &c),
             }
         }
         // The theme's square for `seed`, picked as every toolkit's
@@ -121,7 +114,8 @@ pub(crate) fn layout<M: Clone + std::fmt::Debug + 'static>(l: Layout<M>) -> Opti
 /// The image primitive's picture (`image(url, label)`, and a photo's):
 /// one `<img>` that a redraw keeps — its `src` set again only when it
 /// changes, so the browser neither fetches nor decodes it again — decoded
-/// off the main thread, and shown when it has loaded (`data-ark-shown`,
+/// off the main thread when it comes near the window, and shown when it
+/// has loaded (`data-ark-shown`,
 /// faded in on the theme's fade, which reduced motion keeps and a
 /// screenshot's page puts at its end: ui/docs/motion.md). One that will
 /// not load is hidden in place (`data-ark-failed`) rather than taken out
@@ -134,6 +128,7 @@ pub(crate) fn picture(url: String, label: String, class: &str) -> AnyView {
         .class(format!("ark-image {class}"))
         .attr("onload", "delete this.dataset.arkFailed; this.dataset.arkShown = ''")
         .attr("onerror", "delete this.dataset.arkShown; this.dataset.arkFailed = ''")
+        .attr("loading", "lazy")
         .attr("decoding", "async")
         .attr("alt", label)
         .attr("src", url)
