@@ -1448,7 +1448,7 @@ fn section<M: Clone + 'static>(s: Section<M>) -> Element<'static, M> {
         let chevron = s
             .open
             .is_some()
-            .then(|| icon::plain(if open { glyphs::DOWN } else { glyphs::CHEVRON }, true));
+            .then(|| icon::plain(if open { glyphs::DOWN } else { glyphs::CHEVRON }, true).into());
         let mut head = parts::section_header(&title, chevron, trailing);
         if let Some((_, toggle)) = s.open.clone() {
             head = button(head).padding(0).width(Length::Fill).style(style::bare).on_press(toggle).into();
