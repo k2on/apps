@@ -195,7 +195,9 @@ fn press<W: WebHosted>(app: &Rc<RefCell<WebHost<W>>>, e: web_sys::KeyboardEvent)
 /// by what the browser itself moves (seven eighths of the page's height).
 /// With anything focused they are its own, as ever.
 fn page_key(e: &web_sys::KeyboardEvent) -> bool {
-    let Some(doc) = web_sys::window().and_then(|w| w.document()) else { return false };
+    let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
+        return false;
+    };
     let unfocused = doc.active_element().is_none_or(|el| matches!(el.tag_name().as_str(), "BODY" | "HTML"));
     if !unfocused || e.alt_key() {
         return false;
@@ -226,7 +228,9 @@ fn shown_scroller(doc: &web_sys::Document) -> Option<web_sys::Element> {
         .or_else(|| doc.query_selector(".ark-accessory-full").ok().flatten())
         .or_else(|| doc.query_selector(".ark-shell-main").ok().flatten())
         .or_else(|| doc.query_selector(".ark-window").ok().flatten())?;
-    let list = within.query_selector_all(".ark-page, .ark-scroll.ark-v, .ark-table, .ark-sheet-body, .ark-accessory-body, .ark-split-detail").ok()?;
+    let list = within
+        .query_selector_all(".ark-page, .ark-scroll.ark-v, .ark-table, .ark-sheet-body, .ark-accessory-body, .ark-split-detail")
+        .ok()?;
     (0..list.length())
         .filter_map(|i| list.item(i).and_then(|n| n.dyn_into::<web_sys::Element>().ok()))
         .filter(|el| el.scroll_height() > el.client_height())

@@ -81,7 +81,10 @@ fn page<M: Clone + 'static>(title: Val<String>, content: View<M>) -> Element<'st
     }
     // Its title is the toolbar's (`shell`), inline or large: not said twice.
     let _ = title;
-    let list = column(body).spacing(10).padding(PAD).max_width(if wide { f32::INFINITY } else { PAGE_WIDTH });
+    let list = column(body)
+        .spacing(10)
+        .padding(PAD)
+        .max_width(if wide { f32::INFINITY } else { PAGE_WIDTH });
     let mut layers = stack![scrollable(container(list).center_x(Length::Fill)).height(Length::Fill)];
     for v in over {
         let asked = match v {
