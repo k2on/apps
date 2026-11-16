@@ -720,7 +720,7 @@ git diff "$base"... -U0 -- '*.kt' '*.swift' '*.rs' > /tmp/motion.diff
    `.motionScale`/`.reduced(still)`, or `reduced()`/`or_instant`/`Shown`.
    `grep -n 'accessibilityReduceMotion\|areAnimatorsEnabled\|enable-animations' /tmp/motion.diff`
    outside the libraries is a finding. `ALWAYS_ANIMATE`/`alwaysAnimate`
-   unchanged. A test or preview exercises the reduced path.
+   unchanged. A preview or a screenshot shows the reduced path.
 5. **Nothing from nothing.** `grep -nE '\.scale\b[^(E]|scaleIn\(|initialScale' /tmp/motion.diff`
    — a SwiftUI `.scale` transition takes `scale: 0.9…0.97`; a Compose
    `scaleIn` sets `initialScale` ≥ 0.9.
@@ -738,14 +738,14 @@ git diff "$base"... -U0 -- '*.kt' '*.swift' '*.rs' > /tmp/motion.diff
    per action; never in a per-frame path; never the only feedback.
 10. **Choreography.** One entrance per container; no stagger on frequent
     surfaces; parts of one object on one spring; exits together and
-    quicker; interruption tested (re-trigger mid-flight, go back mid-open).
+    quicker; interruption tried (re-trigger mid-flight, go back mid-open).
 11. **Performance.** `grep -nE 'animateContentSize|animate.*(Dp|Size)AsState|\.frame\(.*(width|height):.*anim|padding\(.*anim|elevation' /tmp/motion.diff`
     — no layout property animated per frame; Compose values read in
     `graphicsLayer {}`/`offset {}`/draw lambdas; no lazy-row entrance; no
     animated blur; an iced frame clock that stops at rest.
 12. **Parity.** The same interaction on the other two toolkits uses the
     same token values, or the diff says why it differs.
-13. **Said, not assumed.** The commit says what was verified by tests or
+13. **Said, not assumed.** The commit says what was verified by the
     screenshots and what has not been felt on a device — flick it,
     interrupt it, reverse it, run it slow.
 

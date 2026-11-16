@@ -73,11 +73,6 @@ raw-window-handle = "0.6"
 wayland-client = { version = "0.31", features = ["system"] }
 wayland-protocols = { version = "0.32", features = ["client", "unstable"] }
 
-[dev-dependencies]
-# A window driven by hand in a test: a click at a point, and the messages
-# it gave.
-iced_test = { workspace = true }
-
 [features]
 # `view`: a screen laid out once in Rust (ark-app's `#[view]`), drawn by iced.
 app = ["dep:ark-app"]

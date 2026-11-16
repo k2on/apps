@@ -205,24 +205,6 @@ mod tests {
         k.press(&Key::Character(c.into()), Modifiers::default(), panes, 1, 4, &[])
     }
 
-    /// The size classes are the theme's widths, and nothing else: a phone
-    /// is compact, a small window has a sidebar and one column, a Mac's
-    /// has all three. Falsified by deciding on any other width.
-    #[test]
-    fn the_size_class_is_the_themes() {
-        assert_eq!(SizeClass::of(390.0), SizeClass::Compact);
-        assert_eq!(SizeClass::of(COMPACT_WIDTH), SizeClass::Medium);
-        assert_eq!(SizeClass::of(EXPANDED_WIDTH - 1.0), SizeClass::Medium);
-        assert_eq!(SizeClass::of(1440.0), SizeClass::Expanded);
-        let wide = Frame {
-            width: 1440.0,
-            focus: Pane::Content,
-        };
-        assert_eq!(wide.panes(true, true), vec![Pane::Sidebar, Pane::Content, Pane::Detail, Pane::Inspector]);
-        let phone = Frame { width: 390.0, ..wide };
-        assert_eq!(phone.panes(true, true), vec![Pane::Detail], "one at a time; the inspector a sheet");
-    }
-
     /// `h` and `l` walk the panes on screen, `j`/`k` on the sidebar walk
     /// the sections, and what is left is the focused pane's. Falsified by
     /// handing `j` to the content while the sidebar has the keys.

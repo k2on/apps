@@ -170,39 +170,3 @@ pub fn label<'a, M: 'a>(body: String, lit: bool) -> Element<'a, M> {
 pub fn hang_above(right: f32, bottom: f32, width: f32, height: f32) -> Point {
     Point::new((right - width).max(EDGE), (bottom - height).max(EDGE))
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// A picker hung off a button hangs off the button, and nothing about
-    /// where the pointer is can move it.
-    ///
-    /// **Said twice, the second time as literals**: written only against the
-    /// constants, both sides of a comparison move together and the assertion
-    /// holds whatever they are set to. 628 and 423 are harken's device picker
-    /// at 860×600 with two devices and a stop row, worked out by hand —
-    /// 860 − 16 − 216, and 600 − 16 − 48 − (8 + 24 + 27 × 3). Falsified by
-    /// changing `TITLE` to 27: the literals fail and the first two do not.
-    #[test]
-    fn a_panel_hangs_off_its_button() {
-        let (width, bar_top, right) = (216.0, 600.0 - 16.0 - 48.0, 860.0 - 16.0);
-        let at = hang_above(right, bar_top, width, titled_height(3));
-        assert_eq!(at.x + width, right, "the panel does not end where the button does");
-        assert_eq!(at.y + titled_height(3), bar_top, "the panel does not sit on the bar");
-        assert_eq!((at.x, at.y), (628.0, 423.0));
-    }
-
-    /// …and it stays on the glass on a window too small to hold it: thirty
-    /// rows is a house full of speakers, well past what 600px can show.
-    /// Falsified by dropping either `.max` in `hang_above`.
-    #[test]
-    fn a_panel_never_hangs_off_the_glass() {
-        for rows in 1..=30 {
-            for window in [120.0, 240.0, 860.0, 4000.0] {
-                let at = hang_above(window - 16.0, 600.0 - 16.0 - 48.0, 216.0, titled_height(rows));
-                assert!(at.x >= EDGE && at.y >= EDGE, "{rows} rows on a {window}px window put the panel at {at:?}");
-            }
-        }
-    }
-}

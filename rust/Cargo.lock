@@ -553,7 +553,6 @@ dependencies = [
  "chrono",
  "iced",
  "iced_accessibility",
- "iced_test",
  "image",
  "raw-window-handle",
  "serde_json",

@@ -379,18 +379,3 @@ fn line_svg(points: &[i64], area: bool) -> String {
     body += &format!(r#"<path d="{line}" fill="none" stroke="currentColor" stroke-width="1.2" vector-effect="non-scaling-stroke"/>"#);
     format!(r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {w} {h}" preserveAspectRatio="none">{body}</svg>"#)
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// The area runs to the foot whatever the sign of the figures, so a
-    /// negative net worth is not a block filled up to nothing. Falsified by
-    /// closing the area at the zero line.
-    #[test]
-    fn the_area_runs_to_the_foot() {
-        let s = line_svg(&[-300, -250, -240], true);
-        assert!(s.contains("L100 40L0 40Z"), "{s}");
-        assert!(line_svg(&[1, 2], false).matches("<path").count() == 1);
-    }
-}

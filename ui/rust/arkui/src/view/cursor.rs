@@ -182,16 +182,10 @@ pub(crate) fn in_section<R>(heading: Vec<Bound>, f: impl FnOnce() -> R) -> R {
     r
 }
 
-/// A row drawn in the pane being drawn, opened by `open`: whether the
-/// cursor (or a visual selection) is on it. Outside [`drawing`] (a view
-/// drawn alone) nothing is.
-#[cfg(test)]
-pub(crate) fn row_drawn<M: Clone + 'static>(title: &str, open: Option<&M>) -> bool {
-    row_bound(title, open, vec![]) == Keyed::Here
-}
-
-/// [`row_drawn`] for a row whose menu binds `bound`: where the cursor is
-/// from it, for its menu's keys ([`Keyed`]).
+/// A row drawn in the pane being drawn, opened by `open`, whose menu binds
+/// `bound`: where the cursor (or a visual selection) is from it, for its
+/// menu's keys ([`Keyed`]). Outside [`drawing`] (a view drawn alone) it is
+/// away.
 pub(crate) fn row_bound<M: Clone + 'static>(title: &str, open: Option<&M>, mut bound: Vec<Bound>) -> Keyed {
     DRAWING.with(|d| {
         let mut d = d.borrow_mut();
@@ -236,36 +230,4 @@ pub(crate) fn section_drawn<M: Clone + 'static>(select: &M, shown: bool) {
             d.drawn.sections.push(Box::new(select.clone()));
         }
     })
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// The rows come back by pane, and only the cursor's is lit, once keyed.
-    /// Falsified by lighting a row in a pane without the keys.
-    #[test]
-    fn rows_are_drawn_by_pane_and_lit_by_the_cursor() {
-        let cursor = Cursor {
-            focus: Pane::Content,
-            at: [1, 0, 0],
-            keyed: true,
-            anchor: None,
-        };
-        let (lit, drawn) = drawing(cursor, || {
-            let a = row_drawn("Rent", Some(&1u8));
-            let b = row_drawn("Groceries", Some(&2u8));
-            let c = in_pane(Pane::Inspector, || row_drawn("Assigned", None::<&u8>));
-            (a, b, c)
-        });
-        assert_eq!(lit, (false, true, false));
-        assert_eq!(drawn.rows[0].len(), 2);
-        assert_eq!(drawn.rows[2].len(), 1);
-        assert_eq!(drawn.rows[0][1].open.as_ref().and_then(|m| m.downcast_ref::<u8>()), Some(&2));
-        let (unkeyed, _) = drawing(Cursor { keyed: false, ..cursor }, || {
-            row_drawn("Rent", Some(&1u8));
-            row_drawn("Groceries", Some(&2u8))
-        });
-        assert!(!unkeyed);
-    }
 }

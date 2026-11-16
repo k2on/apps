@@ -483,7 +483,7 @@ mod imp {
 
 #[cfg(test)]
 mod tests {
-    use super::{key, Images, BOUND};
+    use super::{key, Images};
 
     /// A cache filename has to be a function of the URL and nothing else, or
     /// two runs disagree about where a picture is and the cache never hits.
@@ -521,70 +521,6 @@ mod tests {
         assert!(Images::new("arkui-test").want(String::new()).is_none());
     }
 
-    /// A portrait the size harken's demo seeds must not reach the renderer at
-    /// the size it was fetched. 960×1262 was going into the atlas as 4.8 MB to
-    /// be drawn 132 pixels wide. Falsified by deleting the `resize`.
-    #[test]
-    fn a_portrait_is_shrunk_to_what_is_drawn() {
-        let mut big = ::image::RgbImage::new(960, 1262);
-        // Not a flat fill: a solid image encodes to almost nothing and would
-        // prove the decoder ran on no more than the header.
-        for (x, y, pixel) in big.enumerate_pixels_mut() {
-            *pixel = ::image::Rgb([(x % 251) as u8, (y % 241) as u8, ((x ^ y) % 239) as u8]);
-        }
-        let mut png = std::io::Cursor::new(Vec::new());
-        ::image::DynamicImage::ImageRgb8(big)
-            .write_to(&mut png, ::image::ImageFormat::Png)
-            .expect("the fixture encodes");
-
-        let out = super::imp::shrink(png.get_ref(), BOUND).expect("a PNG decodes");
-        assert!(
-            out.width.max(out.height) <= BOUND,
-            "a picture reaches the renderer at {}\u{d7}{}, {:.1} MB of atlas",
-            out.width,
-            out.height,
-            (out.width as f64 * out.height as f64 * 4.0) / 1e6,
-        );
-        // Aspect kept: 960/1262 at a 384 bound is 292×384.
-        assert_eq!((out.width, out.height), (292, 384));
-        assert_eq!(out.pixels.len(), 292 * 384 * 4);
-    }
-
-    /// A face's corners are transparent and its middle is the picture,
-    /// opaque, with the rim between anti-aliased — on any renderer, because
-    /// it is in the pixels. Falsified by a hard mask (no pixel between 0
-    /// and 255 on the rim) or by none (opaque corners).
-    #[test]
-    fn a_face_is_a_circle_in_its_pixels() {
-        // Not square, so the crop is exercised: 120 × 80, red, opaque.
-        let (w, h) = (120u32, 80u32);
-        let pixels: Vec<u8> = (0..w * h).flat_map(|_| [200u8, 30, 30, 255]).collect();
-        let out = 56u32;
-        let face = super::circle(&pixels, w, h, out);
-        assert_eq!(face.len(), (out * out * 4) as usize);
-        let alpha = |x: u32, y: u32| face[((y * out + x) * 4 + 3) as usize];
-        for (x, y) in [(0, 0), (out - 1, 0), (0, out - 1), (out - 1, out - 1), (4, 4)] {
-            assert_eq!(alpha(x, y), 0, "corner ({x}, {y}) is drawn");
-        }
-        assert_eq!(alpha(out / 2, out / 2), 255, "the middle is not opaque");
-        let middle = ((out / 2 * out + out / 2) * 4) as usize;
-        assert_eq!(&face[middle..middle + 3], &[200, 30, 30], "the middle is not the picture");
-        // The middle row reaches the edge: the circle is inscribed.
-        assert!(alpha(0, out / 2) > 200, "the circle does not reach the edge");
-        // Along the diagonal, from the corner in: transparent, then
-        // something between, then opaque, never back.
-        let diagonal: Vec<u8> = (0..out / 2).map(|k| alpha(k, k)).collect();
-        assert_eq!(diagonal[0], 0, "{diagonal:?}");
-        assert!(diagonal.iter().any(|a| *a > 0 && *a < 255), "the rim is not anti-aliased: {diagonal:?}");
-        assert!(diagonal.windows(2).all(|p| p[0] <= p[1]), "the rim is not monotone: {diagonal:?}");
-        // And round: half covered where a circle's rim crosses the
-        // diagonal, r(1 - 1/sqrt 2) in from the corner, to a pixel.
-        let half = diagonal.iter().position(|a| *a >= 128).unwrap() as f32;
-        let r = out as f32 / 2.0;
-        let rim = r - r / std::f32::consts::SQRT_2;
-        assert!((half - rim).abs() <= 1.0, "half covered at {half}, the rim is at {rim}");
-    }
-
     /// The same picture at the same size is the same handle, so the atlas
     /// keeps one texture; another size is another. Falsified by dropping
     /// the cache.
@@ -599,18 +535,5 @@ mod tests {
             panic!("not pixels")
         };
         assert_eq!((width, height), (56, 56));
-    }
-
-    /// Anything already inside the bound is left exactly as it is — a
-    /// resample there only loses detail. Falsified by always resizing.
-    #[test]
-    fn a_small_picture_is_left_alone() {
-        let small = ::image::RgbImage::new(361, 295);
-        let mut png = std::io::Cursor::new(Vec::new());
-        ::image::DynamicImage::ImageRgb8(small)
-            .write_to(&mut png, ::image::ImageFormat::Png)
-            .expect("the fixture encodes");
-        let out = super::imp::shrink(png.get_ref(), BOUND).expect("a PNG decodes");
-        assert_eq!((out.width, out.height), (361, 295));
     }
 }

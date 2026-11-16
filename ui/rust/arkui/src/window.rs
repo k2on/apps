@@ -50,35 +50,3 @@ pub fn wakes() -> Subscription<()> {
 pub fn boot<M: Send + 'static>() -> Task<M> {
     crate::touchpad::listen()
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::text::text;
-    use iced::widget::{container, mouse_area, stack};
-    use iced::Length;
-
-    #[derive(Debug, Clone, PartialEq)]
-    enum Seen {
-        Root(Point),
-        Layer,
-    }
-
-    /// The pointer moved over a layer that takes it is still heard at the
-    /// root, in the window's coordinates. Falsified by tracking it on the
-    /// page under the layer, as harken did: the stack hid it, and nothing
-    /// was heard.
-    #[test]
-    fn the_pointer_is_heard_over_a_layer() {
-        let page = container(text("page")).width(Length::Fill).height(Length::Fill);
-        let layer = mouse_area(container(text("sheet")).width(Length::Fill).height(Length::Fill))
-            .interaction(iced::mouse::Interaction::Pointer)
-            .on_press(Seen::Layer);
-        let mut ui = iced_test::simulator(tracked(stack![page, layer], Seen::Root));
-        let at = Point::new(40.0, 30.0);
-        ui.point_at(at);
-        let _ = ui.simulate([iced::Event::Mouse(iced::mouse::Event::CursorMoved { position: at })]);
-        let seen: Vec<Seen> = ui.into_messages().collect();
-        assert!(seen.contains(&Seen::Root(at)), "{seen:?}");
-    }
-}

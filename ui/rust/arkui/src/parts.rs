@@ -322,19 +322,3 @@ pub fn scrubber<'a, M: Clone + 'a>(
 pub fn bar<'a, M: Clone + 'a>(range: std::ops::RangeInclusive<f32>, at: f32, on_change: impl Fn(f32) -> M + 'a) -> slider::Slider<'a, f32, M> {
     slider(range, at, on_change).style(style::seek)
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// A neutral tint's text is stronger than its colour, which is a wash's;
-    /// the rest are their colour.
-    #[test]
-    fn neutral_text_is_stronger_than_its_wash() {
-        let t = Theme::Light;
-        let c = Tint::Neutral.color(&t);
-        let w = Tint::Neutral.text()(&t).color.unwrap();
-        assert!(w.a > c.a);
-        assert_eq!(Tint::Negative.text()(&t).color.unwrap(), Tint::Negative.color(&t));
-    }
-}

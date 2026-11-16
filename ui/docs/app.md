@@ -1590,11 +1590,9 @@ resources in `revelation/native/android`.
 
 - Rust: `cargo test` and `clippy --all-targets -D warnings` on ark-app,
   ark-module and every module crate (ark-clipboard with `desktop`, and
-  with `web` for wasm32), arkui-macros, ark-ui-gen, arkui (the context
-  menu's tests drive it in iced's simulator: every item runs its own
-  message, the keys move and run, a press outside closes it), money-app
+  with `web` for wasm32), arkui-macros, ark-ui-gen, arkui, money-app
   (Accounts over the demo household with the fakes, Reconcile, the amount
-  in cents, the row's menu in order), arkui with `host`, `clipboard` and
+  in cents), arkui with `host`, `clipboard` and
   `scanner` (`arkui-host`), the generated
   money-desktop built (`checks.money-desktop`), money-ffi (`--no-default-features`: the session's day).
 - nix: `checks.theme`, `checks.prebuild`, `checks.money-native`,

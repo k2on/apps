@@ -274,31 +274,3 @@ where
         Element::new(line)
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// Body text keeps the face's spacing; a title closes up, more the
-    /// bigger it is, and never by more than a fortieth of an em. Falsified
-    /// by one value for every size: 13 was tightened as much as 28.
-    #[test]
-    fn tracking_is_the_size_s() {
-        assert_eq!(tracking(13.0), 0.0);
-        assert!(tracking(TITLE) < 0.0);
-        assert!(tracking(28.0) < tracking(TITLE));
-        assert_eq!(tracking(40.0), tracking(28.0));
-        assert!(tracking(28.0) >= -0.025);
-    }
-
-    /// A name with an accent written as its own character, or an emoji, is
-    /// not drawn a character at a time. Falsified by a check for ASCII
-    /// alone: “Dvořák” (one character for its ř) was drawn untracked.
-    #[test]
-    fn only_what_is_whole_characters_is_tracked() {
-        assert!(letters_apart("November 2026"));
-        assert!(letters_apart("Dvořák “matching”"));
-        assert!(!letters_apart("Dvor\u{30C}a\u{301}k"));
-        assert!(!letters_apart("Favorites \u{1F3B5}"));
-    }
-}

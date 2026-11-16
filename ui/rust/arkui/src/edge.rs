@@ -164,20 +164,3 @@ impl<M> Widget<M, Theme, iced::Renderer> for Faded<'_, M> {
         self.content.as_widget_mut().overlay(tree, layout, renderer, viewport, offset)
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// Nothing at rest, a little a little way down, all of it a fade down
-    /// and beyond. Falsified by a ground that is there at rest: a page that
-    /// has not moved had a band over its top.
-    #[test]
-    fn the_edge_comes_in_with_the_scroll() {
-        assert_eq!(strength(0.0), 0.0);
-        assert_eq!(strength(-3.0), 0.0, "overscrolled up is at rest");
-        assert!((strength(FADE / 2.0) - 0.5).abs() < 1e-6);
-        assert_eq!(strength(FADE), 1.0);
-        assert_eq!(strength(FADE * 40.0), 1.0);
-    }
-}

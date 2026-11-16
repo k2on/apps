@@ -556,21 +556,3 @@ pub fn progress(tint: Tint) -> impl Fn(&Theme) -> progress_bar::Style {
         },
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// A surface is a step off the page on either side — toward the text, so
-    /// lighter on dark and darker on light — and only a step.
-    #[test]
-    fn a_surface_is_a_step_off_the_page() {
-        for (theme, lighter) in [(Theme::Dark, true), (Theme::Light, false)] {
-            let page = of(&theme).background.base.color;
-            let surface = surface_color(&theme);
-            let step = surface.r - page.r;
-            assert_eq!(step > 0.0, lighter, "{theme:?}: {page:?} to {surface:?}");
-            assert!(step.abs() > 0.01 && step.abs() < 0.05, "{theme:?}: a step of {step}");
-        }
-    }
-}

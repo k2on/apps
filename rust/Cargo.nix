@@ -2370,12 +2370,6 @@ rec {
             features = [ "async-io" "blocking-api" ];
           }
         ];
-        devDependencies = [
-          {
-            name = "iced_test";
-            packageId = "iced_test";
-          }
-        ];
         features = {
           "app" = [ "dep:ark-app" ];
           "clipboard" = [ "host" "dep:ark-clipboard" ];

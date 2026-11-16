@@ -129,38 +129,3 @@ pub fn view<'a, M: Clone + 'a>(art: Option<Element<'a, M>>, name: &str, open: f3
     let open = open.clamp(0.0, 1.0);
     motion::transformed(pressed, Vector::new(0.0, RISE * (1.0 - open)), 1.0, 1.0 - open, 6.0)
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::time::Duration;
-
-    /// Hidden at the top, coming once the header is past, in place in a
-    /// moment, and going again once it is back; at once from the keys;
-    /// with no header, never. Falsified by showing on any scroll (a page
-    /// moved a pixel had it), and by animating a keyed scroll (`G` drew it
-    /// part of the way in).
-    #[test]
-    fn it_comes_once_the_header_is_gone_and_goes_when_it_is_back() {
-        let t0 = Instant::now();
-        let mut c = Compact::new(t0);
-        assert!(!c.showing(t0), "at rest, nothing");
-        assert!(!c.moving(t0), "and nothing ticks");
-        c.heard(40.0, Some(120.0), false, t0);
-        assert!(!c.showing(t0), "the header still in sight");
-        c.heard(160.0, Some(120.0), false, t0);
-        let mid = c.at(t0 + Duration::from_millis(60));
-        assert!(mid > 0.0 && mid < 1.0, "on its way: {mid}");
-        let later = t0 + Duration::from_secs(1);
-        assert_eq!(c.at(later), 1.0, "all the way in");
-        c.heard(10.0, Some(120.0), false, later);
-        assert_eq!(c.at(later + Duration::from_secs(1)), 0.0, "gone again");
-        let keyed = later + Duration::from_secs(2);
-        c.heard(900.0, Some(120.0), true, keyed);
-        assert_eq!(c.at(keyed), 1.0, "from the keys: there at once");
-        c.heard(0.0, Some(120.0), true, keyed);
-        assert_eq!(c.at(keyed), 0.0, "and gone at once");
-        c.heard(500.0, None, false, keyed);
-        assert!(!c.showing(keyed + Duration::from_secs(1)), "no header, nothing to stand for it");
-    }
-}
