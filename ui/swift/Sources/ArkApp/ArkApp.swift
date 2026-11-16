@@ -25,6 +25,9 @@ import ArkUI
 import AuthenticationServices
 #endif
 import SwiftUI
+#if canImport(UIKit)
+import UIKit
+#endif
 
 /// An app's library, as the app holds it: the host every app has, and its
 /// first run's pages. Every app's bridge exports one (`MoneyHost`).
@@ -38,13 +41,41 @@ extension Launch {
     /// its version, `-demo YES` (or a day, `-demo 2026-11-18`: the demo's
     /// household for this launch, whatever sign-in is remembered — the
     /// screenshots'), `-shots YES`, and its arguments.
+    @MainActor
     public static func current(scan: Bool) -> Launch {
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         let demo = UserDefaults.standard.string(forKey: "demo")
         let i = Bundle.main.infoDictionary
         let version = "\(i?["CFBundleShortVersionString"] as? String ?? "?") (\(i?["CFBundleVersion"] as? String ?? "?"))"
         return Launch(root: support.path, version: version, demo: demo != nil, demoDay: demo.flatMap { $0.count == 10 ? $0 : nil },
-                      shots: Shots.on, walk: ShotsWalk.planned(root: support.path) != nil, scan: scan, args: ProcessInfo.processInfo.arguments)
+                      shots: Shots.on, walk: ShotsWalk.planned(root: support.path) != nil, scan: scan, args: ProcessInfo.processInfo.arguments,
+                      form: form, device: deviceName)
+    }
+
+    /// What kind of device this is, as an app's live space is told it.
+    @MainActor
+    static var form: DeviceForm {
+        #if canImport(UIKit) && !os(macOS)
+        switch UIDevice.current.userInterfaceIdiom {
+        case .pad: return .tablet
+        case .mac: return .computer
+        default: return .phone
+        }
+        #else
+        return .computer
+        #endif
+    }
+
+    /// This device's name as its person reads it: the phone's (without the
+    /// entitlement for the user's own name, iOS says its model: "iPhone"),
+    /// or the Mac's.
+    @MainActor
+    static var deviceName: String {
+        #if canImport(UIKit) && !os(macOS)
+        return UIDevice.current.name
+        #else
+        return Host.current().localizedName ?? ProcessInfo.processInfo.hostName
+        #endif
     }
 }
 

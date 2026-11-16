@@ -248,6 +248,24 @@ impl Config {
             ..Config::new(Module::of(&domain))
         }
     }
+
+    /// This device's peer standing in a live space over the same domain as
+    /// its log: `device` what its volatile `Hello` says it is, `ephemeral`
+    /// the functions relayed rather than ordered, at most one every
+    /// `every_ms` (what an app's `ark_app::host::LiveSpace` says, which
+    /// every host opens its peer with).
+    pub fn standing(self, device: Vec<u8>, ephemeral: impl IntoIterator<Item = String>, every_ms: i64) -> Config {
+        let module = self.log.clone();
+        Config {
+            live: Some(Live {
+                device: Some(device),
+                ephemeral: ephemeral.into_iter().collect(),
+                every_ms,
+                ..Live::new(module)
+            }),
+            ..self
+        }
+    }
 }
 
 /// A patch of a view's rows, each its bytes.

@@ -128,10 +128,68 @@ fn at_root() -> bool {
     true
 }
 
+/// The app's peer on its server: its log, and its live space as this
+/// browser stands in it where the app has one (`HostedApp::live`).
+pub fn standing<W: WebHosted>(domain: std::sync::Arc<ark::domain::Domain>) -> Config {
+    let c = Config::of(domain);
+    match <W::App as HostedApp>::live(&this_device()) {
+        Some(l) => c.standing(l.hello, l.ephemeral, l.every_ms),
+        None => c,
+    }
+}
+
+/// This browser, as an app's live space is told it: the browser and the
+/// system it runs on, as its user agent says them ("Firefox on Linux").
+pub fn this_device() -> ark_app::host::ThisDevice {
+    #[cfg(target_arch = "wasm32")]
+    let agent = web_sys::window().and_then(|w| w.navigator().user_agent().ok()).unwrap_or_default();
+    #[cfg(not(target_arch = "wasm32"))]
+    let agent = String::new();
+    ark_app::host::ThisDevice {
+        form: ark_app::host::Form::Browser,
+        name: browser_name(&agent),
+    }
+}
+
+/// A user agent's browser and system, as a person names them.
+pub fn browser_name(agent: &str) -> String {
+    let has = |w: &str| agent.contains(w);
+    let browser = if has("Firefox/") {
+        "Firefox"
+    } else if has("Edg/") {
+        "Edge"
+    } else if has("Chrome/") || has("CriOS/") {
+        "Chrome"
+    } else if has("Safari/") {
+        "Safari"
+    } else {
+        "A Browser"
+    };
+    let system = if has("iPhone") {
+        Some("iPhone")
+    } else if has("iPad") {
+        Some("iPad")
+    } else if has("Android") {
+        Some("Android")
+    } else if has("Mac OS X") || has("Macintosh") {
+        Some("Mac")
+    } else if has("Windows") {
+        Some("Windows")
+    } else if has("Linux") || has("X11") {
+        Some("Linux")
+    } else {
+        None
+    };
+    match system {
+        Some(s) => format!("{browser} on {s}"),
+        None => browser.to_string(),
+    }
+}
+
 /// A replica of the app's domain in memory, dialling `server`'s socket
 /// once it has a login.
 pub fn replica<W: WebHosted>(server: &str, domain: std::sync::Arc<ark::domain::Domain>) -> Peer {
-    let mut peer = Peer::open_as(Config::of(domain), Box::new(Memory::default()), None);
+    let mut peer = Peer::open_as(standing::<W>(domain), Box::new(Memory::default()), None);
     // A page draws on the thread it takes frames in on: a fill is taken
     // between frames, a few milliseconds a pump.
     peer.link.budget = Some(8);

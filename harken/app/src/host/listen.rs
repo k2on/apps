@@ -81,7 +81,7 @@ impl Listen {
             own: None,
             clock: cx.place.clock(),
         };
-        l.attach(&session.server, cx);
+        l.attach(&session.url, cx);
         l
     }
 
@@ -127,7 +127,7 @@ impl Listen {
     /// controls asked pressed, and what plays alone worked out for the
     /// player.
     pub fn step(&mut self, cx: &mut Cx<'_, Harken>) {
-        let server = cx.place.session().server;
+        let server = cx.place.session().url;
         self.attach(&server, cx);
         let Some(sound) = self.sound.as_mut() else { return };
         let remote = sound.take_remote();
@@ -151,7 +151,7 @@ impl Listen {
         self.core.reconcile(&v, sound, &mut Says { cx });
         self.own = match v.joined {
             true => None,
-            false => own(&s.server, sound, (self.clock)()),
+            false => own(&s.url, sound, (self.clock)()),
         };
     }
 
@@ -159,7 +159,7 @@ impl Listen {
     /// to its own sound while it is alone. Why not, where it was neither.
     pub fn press(&mut self, p: Press, cx: &mut Cx<'_, Harken>) -> Option<String> {
         let s = cx.place.session();
-        self.attach(&s.server, cx);
+        self.attach(&s.url, cx);
         let l = Listen::listening(cx);
         if Listen::joined(&s, &l) {
             let local = self.sound.as_ref().map(|o| (o.tracks(), o.heard().at.unwrap_or(0), o.heard().from));

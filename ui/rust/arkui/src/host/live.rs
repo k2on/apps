@@ -27,7 +27,7 @@ use ark_auth::Login;
 use ark_peer::{Config, Disk, Logins, Memory, Peer};
 use iced::Task;
 
-use ark_app::host::{HostedApp, Session};
+use ark_app::host::{Form, HostedApp, Session, ThisDevice};
 use ark_app::window::Windowed;
 
 use super::{Desktop, DesktopHost, Msg};
@@ -106,9 +106,31 @@ pub fn open<W: Desktop>(server: &str, login: Option<&Login>) -> Result<Peer, Str
     let disk = ark_peer::Files::new(&dir)
         .map(|f| Box::new(f) as Box<dyn Disk>)
         .map_err(|e| format!("{}: {e}", dir.display()))?;
-    let mut p = Peer::open_as(Config::of(W::domain()), disk, login);
+    let mut p = Peer::open_as(standing::<W>(), disk, login);
     p.connect(&ark_auth::socket_url(server));
     Ok(p)
+}
+
+/// The app's peer on a server: its log, and its live space as this
+/// machine stands in it where the app has one (`HostedApp::live`).
+pub fn standing<W: Desktop>() -> Config {
+    let c = Config::of(W::domain());
+    match <W::App as HostedApp>::live(&this_device()) {
+        Some(l) => c.standing(l.hello, l.ephemeral, l.every_ms),
+        None => c,
+    }
+}
+
+/// This machine, as an app's live space is told it: a computer, by its
+/// host name.
+pub fn this_device() -> ThisDevice {
+    let name = std::fs::read_to_string("/proc/sys/kernel/hostname")
+        .ok()
+        .or_else(|| std::env::var("HOSTNAME").ok())
+        .map(|n| n.trim().to_string())
+        .filter(|n| !n.is_empty())
+        .unwrap_or_else(|| "Computer".into());
+    ThisDevice { form: Form::Computer, name }
 }
 
 /// `$XDG_DATA_HOME/<scheme>/<server>`, or `~/.local/share/…`, or the
@@ -187,6 +209,7 @@ pub fn session_of<W: Desktop>(peer: &Peer, live: Option<&Live>, today: &str) -> 
         email: user.email.clone(),
         picture: ark_auth::picture_url(&live.server, &user.id, &user.picture).unwrap_or_default(),
         server: ark_auth::onboarding::display(&live.server),
+        url: live.server.clone(),
         linked: Some(status.linked),
         pending: status.pending as i64,
         device: peer.me().session.clone(),

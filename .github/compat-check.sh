@@ -11,7 +11,11 @@
 #   harken  the phone host (harken/app/tests/deployed.rs), as money's: the
 #           first run, the address typed, the dev sign-in, the server's
 #           Favorites synced, a playlist made and confirmed there, and seen
-#           on a second phone; then the headless client this build's
+#           on a second device; then the listening session on that old
+#           server: the phone and the second device (a computer) each
+#           stand in it as their host says they are and see the other
+#           there, the second plays and the phone's player shows it, the
+#           phone pauses and the second sees it paused; then the headless client this build's
 #           harken-server package carries (harken-peer, which drives
 #           ark-ffi's Peer as a phone does) the same way.
 #

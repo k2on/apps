@@ -69,6 +69,7 @@ fn launch(root: &std::path::Path, demo: bool) -> Launch {
         walk: false,
         scan: false,
         args: vec![],
+        ..Launch::default()
     }
 }
 
@@ -231,7 +232,7 @@ fn change(c: MoneyChange) -> (&'static str, Vec<u8>) {
 #[test]
 fn money_opens_and_is_called_by_name() {
     let dir = tempfile::tempdir().unwrap();
-    let p = ark_ffi::hosted::open::<MoneyPhone>(dir.path().to_str().unwrap(), None).unwrap();
+    let p = ark_ffi::hosted::open::<MoneyPhone>(dir.path().to_str().unwrap(), None, &Default::default()).unwrap();
     p.alone();
     p.mutate("setup".into(), "null".into()).unwrap();
     let accounts = p.view_typed::<AccountLine>("accounts", "null").unwrap();

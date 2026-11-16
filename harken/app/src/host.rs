@@ -8,7 +8,8 @@
 //! made to agree with the session whenever the store or the sound moved
 //! (ui/docs/app.md, "harken's Port").
 
-use ark_app::host::{Cx, Has, HostedApp, Link, Running, Screen, Session, ShellAsk};
+use ark_app::host::{Cx, Form, Has, HostedApp, Link, LiveSpace, Running, Screen, Session, ShellAsk, ThisDevice};
+use harken_domain::host::Kind;
 use harken_domain::player::{Change, Press};
 use harken_domain::{HarkenChange, HarkenView};
 
@@ -112,7 +113,7 @@ impl HostedApp for Harken {
             refused: None,
             settings: false,
         };
-        let server = session.server.clone();
+        let server = session.url.clone();
         h.home.send(HomeMsg::Server { server: server.clone() }, cx);
         h.library.send(LibraryMsg::Server { server: server.clone() }, cx);
         h.search.send(SearchMsg::Server { server: server.clone() }, cx);
@@ -229,7 +230,7 @@ impl HostedApp for Harken {
     /// what a car asked answered.
     fn moved(&mut self, cx: &mut Cx<'_, Harken>) {
         self.listen.step(cx);
-        let server = cx.place.session().server;
+        let server = cx.place.session().url;
         for (parent, items) in self.car.step(self.listen.asks(), &server, cx) {
             self.listen.children(parent, items);
         }
@@ -271,6 +272,22 @@ impl HostedApp for Harken {
     fn launched(&mut self, args: Vec<String>, cx: &mut Cx<'_, Harken>) {
         self.shell.send(ShellMsg::Launch { args }, cx)
     }
+
+    /// The listening session, as this device stands in it: a phone (a
+    /// tablet too) or a computer (a browser too), by its name, able to play
+    /// (every host has the media player); the scrubber relayed as it is
+    /// dragged.
+    fn live(device: &ThisDevice) -> Option<LiveSpace> {
+        let kind = match device.form {
+            Form::Phone | Form::Tablet => Kind::Phone,
+            Form::Computer | Form::Browser => Kind::Computer,
+        };
+        Some(LiveSpace {
+            hello: harken_domain::host::hello(true, kind, &device.name),
+            ephemeral: harken_domain::host::EPHEMERAL.iter().map(|e| e.to_string()).collect(),
+            every_ms: harken_domain::host::RELAY_MS,
+        })
+    }
 }
 
 impl Harken {
@@ -282,9 +299,9 @@ impl Harken {
         let s = cx.place.session();
         let linked = s.linked == Some(true);
         let st = self.player.state();
-        if (st.server.as_str(), st.device.as_str(), st.linked) != (s.server.as_str(), s.device.as_str(), linked) {
+        if (st.server.as_str(), st.device.as_str(), st.linked) != (s.url.as_str(), s.device.as_str(), linked) {
             let msg = PlayerMsg::Session {
-                server: s.server.clone(),
+                server: s.url.clone(),
                 device: s.device.clone(),
                 linked,
             };

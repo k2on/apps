@@ -26,6 +26,7 @@ import android.os.Handler
 import android.os.Looper
 import dev.arkdb.auth.Step
 import dev.arkdb.ffi.ArkHost
+import dev.arkdb.ffi.DeviceForm
 import dev.arkdb.ffi.HostShell
 import dev.arkdb.ffi.Launch
 import dev.arkdb.ffi.Refusal
@@ -104,8 +105,19 @@ public abstract class ArkApplication : Application() {
             // No code is scanned here yet: ark-camera has no QR decoder on Android.
             scan = false,
             args = args,
+            form = if (resources.configuration.smallestScreenWidthDp >= 600) DeviceForm.TABLET else DeviceForm.PHONE,
+            device = deviceName(),
         )
     }
+
+    /** This device's name as its person reads it: the one they gave it, else its maker's model. */
+    private fun deviceName(): String =
+        runCatching { android.provider.Settings.Global.getString(contentResolver, android.provider.Settings.Global.DEVICE_NAME) }
+            .getOrNull()
+            ?.takeIf { it.isNotBlank() }
+            ?: listOf(android.os.Build.MANUFACTURER.replaceFirstChar { it.uppercase() }, android.os.Build.MODEL)
+                .filter { it.isNotBlank() }
+                .joinToString(" ")
 }
 
 /**

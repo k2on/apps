@@ -21,6 +21,28 @@ pub const UNSAID_VOLUME: i64 = 100;
 /// coarsest output (a speaker read through Home Assistant).
 pub const SYNC_MS: i64 = 600;
 
+/// The milliseconds between two ephemeral calls a device's relay sends — a
+/// scrubber dragged — twenty a second; the last always goes.
+pub const RELAY_MS: i64 = 50;
+
+/// The transitions a device relays as ephemeral rather than ordered: where
+/// its scrubber is being dragged to.
+pub const EPHEMERAL: &[&str] = &["listening.scrub"];
+
+/// What a device says it is in its volatile `Hello` (`kind` a [`Kind`]'s
+/// name): the server makes it `on_join`'s input with the login's user and
+/// session ([`arrive`]).
+pub fn hello(can_play: bool, kind: Kind, name: &str) -> Vec<u8> {
+    Device {
+        can_play,
+        id: String::new(),
+        kind: kind.name().into(),
+        name: name.into(),
+        user: String::new(),
+    }
+    .encode()
+}
+
 /// What a server authors `on_join` and `on_leave` with: what the device
 /// said it is, its user and its id the verified login's — a device is a
 /// session. What a device says that does not read as a device is no device.

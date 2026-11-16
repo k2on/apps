@@ -94,7 +94,8 @@ app's, the same on every platform, and written once in its app crate
   function: `Peer::change`), its device modules and what wakes it when
   one answers later, a file fetched or kept, a sentence said, the server
   dialled, who is signed in where (`Session`: the demo, the day, the
-  login, the server as shown, the link, what is pending, this device as
+  login, the server as shown and its base URL (what a file it serves is
+  fetched from), the link, what is pending, this device as
   the live space names it and how many connections have opened, the
   version, and whether this host can sign out or add a device), and two
   facts of its toolkit: whether it
@@ -115,6 +116,21 @@ app's, the same on every platform, and written once in its app crate
   shell's places on every host, a phone's too (its section, its inspector,
   a Settings pane: money's account is its section, which a phone's
   Accounts pushes where it is compact), so no route is asked of a shell.
+
+**Its live space** is the app's too (`HostedApp::live`): given what this
+device is (`ThisDevice`: its `Form` — a phone, a tablet, a computer, a
+browser — and its name as its person reads it), the app says what its
+`Hello` tells the space this device is, the transitions relayed as
+ephemeral and how often (`LiveSpace`), or none (the default: no live
+space, the log alone). Every host opens its peer on a server with it,
+through ark-peer's `Config::standing`: the phones' (`ark_ffi::hosted::config`,
+the device from the `Launch` the shell reads — UIDevice's or the Mac's
+name, Android's device name, the idiom or the smallest width for the
+form), the browser's (`arkui_web::live::standing`, "Firefox on Linux"
+from the user agent) and the desktop's (`arkui::host::live::standing`,
+the machine's host name). The demo opens with none. harken's is its
+listening session (a phone or a computer that can play, the scrubber
+relayed at `RELAY_MS`), so every generated client stands in it.
 
 `Hosting<H>` is the loop between them, the same everywhere: a message in
 for one screen (`send::<Accounts>(msg, place)`, `Has<Accounts>` saying

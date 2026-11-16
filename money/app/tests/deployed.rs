@@ -71,6 +71,7 @@ fn signed_in(root: &std::path::Path, server: &str) -> (Arc<ArkHost>, Arc<Hosted<
         walk: true,
         scan: false,
         args: vec![],
+        ..Launch::default()
     };
     let app = Hosted::<MoneyPhone>::new();
     let host = ArkHost::new(app.clone(), launch, None);
@@ -163,7 +164,7 @@ fn the_phones_sync_with_the_deployed_server() {
     // (The phone host's runtime is the process's one, so a second phone is
     // its peer rather than a second host here.)
     let login = ark_ffi::ark_auth::client::login(&server, None, |_| {}).expect("the second device's sign-in");
-    let other = ark_ffi::hosted::open::<MoneyPhone>(b_dir.path().to_str().unwrap(), Some(login.into())).unwrap();
+    let other = ark_ffi::hosted::open::<MoneyPhone>(b_dir.path().to_str().unwrap(), Some(login.into()), &Default::default()).unwrap();
     other.connect(ark_ffi::ark_auth::socket_url(&server));
     other.set_online(true);
     let register = |p: &ark_ffi::Peer| p.view_typed::<TxnLine>("register", r#"{"account_id":null}"#).unwrap().rows();

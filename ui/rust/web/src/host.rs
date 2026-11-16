@@ -217,6 +217,7 @@ fn session_of<W: WebHosted>(peer: Option<&Peer>, live: Option<&Live>, visitor: O
         email: user.email.clone(),
         picture: ark_auth::picture_url(&live.server, &user.id, &user.picture).unwrap_or_default(),
         server: ark_auth::onboarding::display(&live.server),
+        url: live.server.clone(),
         linked: Some(status.linked),
         pending: status.pending as i64,
         device: peer.me().session.clone(),

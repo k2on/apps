@@ -15,11 +15,9 @@ use ark_peer::{Config, Live, Module};
 use harken_domain::Device;
 
 /// The milliseconds between two ephemeral calls the relay sends — a
-/// scrubber dragged — twenty a second; the last always goes.
-pub const THROTTLE_MS: i64 = 50;
-
-/// The one ephemeral transition.
-const SCRUB: &str = "listening.scrub";
+/// scrubber dragged — twenty a second; the last always goes (the
+/// domain's, which every client's host relays at too).
+pub const THROTTLE_MS: i64 = harken_domain::host::RELAY_MS;
 
 /// What a device says it is in its volatile `Hello`: the server makes it
 /// `on_join`'s input with the login's user and session.
@@ -39,7 +37,7 @@ pub fn device(can_play: bool, kind: &str, name: &str) -> Vec<u8> {
 pub fn peer(domain: &Arc<Domain>, device: Vec<u8>, every_ms: i64) -> Config {
     let live = Live {
         device: Some(device),
-        ephemeral: [SCRUB.to_string()].into(),
+        ephemeral: harken_domain::host::EPHEMERAL.iter().map(|e| e.to_string()).collect(),
         every_ms,
         ..Live::new(Module::of(domain))
     };

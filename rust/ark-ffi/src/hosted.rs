@@ -55,18 +55,28 @@ pub fn domain_line<P: PhoneApp>() -> String {
     format!("{} {}", d.schema_hash(), d.version)
 }
 
+/// The app's peer, as `device` stands in its live space where it has one
+/// (`HostedApp::live`): the log alone otherwise.
+pub fn config<P: PhoneApp>(device: &ark_app::host::ThisDevice) -> ark_peer::Config {
+    let c = ark_peer::Config::of(P::domain());
+    match <P::App as HostedApp>::live(device) {
+        Some(l) => c.standing(l.hello, l.ephemeral, l.every_ms),
+        None => c,
+    }
+}
+
 /// The app's replica on the disk at `dir`, as whoever last signed in there
-/// or as `login`.
-pub fn open<P: PhoneApp>(dir: &str, login: Option<Login>) -> Result<Arc<Peer>, Refusal> {
-    Peer::open(ark_peer::Config::of(P::domain()), dir, login)
+/// or as `login`, standing in its live space as `device`.
+pub fn open<P: PhoneApp>(dir: &str, login: Option<Login>, device: &ark_app::host::ThisDevice) -> Result<Arc<Peer>, Refusal> {
+    Peer::open(config::<P>(device), dir, login)
 }
 
 /// The app's replica on the disk at `dir`, as the process's one runtime
 /// ([`ArkProcess::shared`]): opened the first time, the same peer for every
 /// Activity, Scene or window after, and running while none shows; another
 /// `dir` (another server) lets the old one go.
-pub fn process_open<P: PhoneApp>(dir: &str, login: Option<Login>) -> Result<Arc<Peer>, Refusal> {
-    ArkProcess::shared().open(dir, || open::<P>(dir, login))
+pub fn process_open<P: PhoneApp>(dir: &str, login: Option<Login>, device: &ark_app::host::ThisDevice) -> Result<Arc<Peer>, Refusal> {
+    ArkProcess::shared().open(dir, || open::<P>(dir, login, device))
 }
 
 /// The app's demo's household, seeded up to `today` (`2026-10-26`) — today
@@ -177,7 +187,8 @@ impl<P: PhoneApp> Place<Key<P>, Change<P>> for PhonePlace<P> {
                 Some(s) if !demo => ark_auth::picture_url(s, &l.user, &l.picture).unwrap_or_default(),
                 _ => String::new(),
             },
-            server: server.map(|s| ark_auth::probe::display(&s).to_string()).unwrap_or_default(),
+            server: server.as_deref().map(|s| ark_auth::probe::display(s).to_string()).unwrap_or_default(),
+            url: server.unwrap_or_default(),
             name: l.name,
             user: l.user,
             email: l.email,
@@ -409,8 +420,8 @@ where
     fn domain(&self) -> String {
         domain_line::<P>()
     }
-    fn open(&self, dir: &str, login: Login) -> Result<Arc<Peer>, Refusal> {
-        process_open::<P>(dir, Some(login))
+    fn open(&self, dir: &str, login: Login, device: &ark_app::host::ThisDevice) -> Result<Arc<Peer>, Refusal> {
+        process_open::<P>(dir, Some(login), device)
     }
     fn demo(&self, today: Option<String>) -> Result<Arc<Peer>, Refusal> {
         demo::<P>(today)

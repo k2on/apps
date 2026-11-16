@@ -71,6 +71,41 @@ pub struct Launch {
     pub scan: bool,
     /// The launch's own arguments (`-screen budget`), for the app's shell.
     pub args: Vec<String>,
+    /// What this device is, and its name as its person reads it: what the
+    /// app's live space is told of it (`ark_app::host::HostedApp::live`).
+    pub form: DeviceForm,
+    pub device: String,
+}
+
+impl Launch {
+    /// This device, as the app's part reads it.
+    pub fn this_device(&self) -> ark_app::host::ThisDevice {
+        ark_app::host::ThisDevice {
+            form: self.form.into(),
+            name: self.device.clone(),
+        }
+    }
+}
+
+/// What kind of device the phone is (`ark_app::host::Form`): a phone, a
+/// tablet (an iPad, an Android tablet or a Fold opened), or a computer
+/// (the Mac).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, uniffi::Enum)]
+pub enum DeviceForm {
+    #[default]
+    Phone,
+    Tablet,
+    Computer,
+}
+
+impl From<DeviceForm> for ark_app::host::Form {
+    fn from(f: DeviceForm) -> ark_app::host::Form {
+        match f {
+            DeviceForm::Phone => ark_app::host::Form::Phone,
+            DeviceForm::Tablet => ark_app::host::Form::Tablet,
+            DeviceForm::Computer => ark_app::host::Form::Computer,
+        }
+    }
 }
 
 /// How a session was opened.
@@ -90,8 +125,9 @@ pub trait HostApp: Send + Sync + 'static {
     fn copy(&self, scan: bool, demo: bool) -> ark_app::welcome::WelcomeCopy;
     /// The domain it carries, as a server's `/healthz` names it.
     fn domain(&self) -> String;
-    /// Its replica on the disk at `dir`, as `login`.
-    fn open(&self, dir: &str, login: Login) -> Result<Arc<Peer>, Refusal>;
+    /// Its replica on the disk at `dir`, as `login`, standing in its live
+    /// space as `device` where it has one.
+    fn open(&self, dir: &str, login: Login, device: &ark_app::host::ThisDevice) -> Result<Arc<Peer>, Refusal>;
     /// Its demo's household, on `today` (today when none).
     fn demo(&self, today: Option<String>) -> Result<Arc<Peer>, Refusal>;
     /// A session open over `peer`: the app's runtimes made over it. What it
@@ -406,11 +442,12 @@ impl ArkHost {
             Effect::OpenSession { server, login } => {
                 self.close();
                 let dir = ArkHost::replica_dir(&self.launch.root, &self.app.info().scheme, &server);
+                let device = self.launch.this_device();
                 self.off(move |h| {
                     let opened = std::fs::create_dir_all(&dir)
                         .map_err(|e| Refusal::from(format!("{}: {e}", dir.display())))
                         .and_then(|_| {
-                            let peer = h.app.open(&dir.to_string_lossy(), login.clone())?;
+                            let peer = h.app.open(&dir.to_string_lossy(), login.clone(), &device)?;
                             peer.connect(ark_auth::socket_url(&server));
                             Ok(peer)
                         });

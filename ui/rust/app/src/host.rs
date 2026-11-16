@@ -42,6 +42,9 @@ pub struct Session {
     pub picture: String,
     /// The server, as it is shown (`money.example.com`); empty for the demo.
     pub server: String,
+    /// The server's base URL (`https://money.example.com`): what a file it
+    /// serves (a cover, a track) is fetched from; empty for the demo.
+    pub url: String,
     /// The link to it: up, down, or not known yet.
     pub linked: Option<bool>,
     /// Changes made here not yet synced.
@@ -88,6 +91,40 @@ pub type Waker = Arc<dyn Fn() + Send + Sync>;
 /// The device's clock, for what reads it on a thread of its own (a module's
 /// listener): milliseconds since the epoch.
 pub type Clock = Arc<dyn Fn() -> i64 + Send + Sync>;
+
+/// What this device is, as its host says it: what an app's live space is
+/// told of it when the device stands in it ([`HostedApp::live`]).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ThisDevice {
+    pub form: Form,
+    /// Its name as its person reads it: the phone's own ("Alex's
+    /// iPhone"), the machine's, the browser's ("Firefox on Linux").
+    pub name: String,
+}
+
+/// What kind of device a host runs on.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Form {
+    #[default]
+    Phone,
+    Tablet,
+    Computer,
+    Browser,
+}
+
+/// An app's live space as a device stands in it (ui/docs/app.md, "The
+/// App's Part of Its Host"), platform-neutral: what its `Hello` says this
+/// device is (`hello`, the domain's own bytes), the transitions relayed as
+/// ephemeral rather than ordered (`ephemeral`, by their full names), and
+/// the least time between two of them (`every_ms`; the last always goes).
+/// Every host opens its peer with it: the phones', the browser's and the
+/// desktop's.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct LiveSpace {
+    pub hello: Vec<u8>,
+    pub ephemeral: Vec<String>,
+    pub every_ms: i64,
+}
 
 /// The platform's half of a host: what every app's part is run over.
 pub trait Place<K: ViewKey, C> {
@@ -458,6 +495,12 @@ pub trait HostedApp: Sized + 'static {
     fn link(&mut self, link: Link, cx: &mut Cx<'_, Self>);
     /// The launch's own arguments, once its runtimes run.
     fn launched(&mut self, args: Vec<String>, cx: &mut Cx<'_, Self>);
+    /// Its live space, as `device` stands in it: what every host opens its
+    /// peer with on a server (never the demo). None, the default: the app
+    /// has no live space, and its peer the log alone.
+    fn live(_device: &ThisDevice) -> Option<LiveSpace> {
+        None
+    }
 }
 
 /// An app's part that runs `A` as one of its screens.

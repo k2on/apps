@@ -12,15 +12,23 @@
 //! the browser straight back, which the shell here does for it), the
 //! library synced (the server's own Favorites, made at the first sign-in);
 //! then a playlist made on the phone, confirmed by the server, and seen on a
-//! second device signed in after it.
+//! second device signed in after it. Then the listening session, on that
+//! old server: both devices stand in it, each as its host says it is (the
+//! phone and a computer), and each sees the other there; the second plays,
+//! and the phone's player shows what plays and where; the phone pauses,
+//! and the second sees it paused.
 
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use ark::format::Encode;
+use ark_app::host::{Form, ThisDevice};
 use ark_ffi::hosted::{Hosted, PhoneApp};
-use ark_ffi::{ArkHost, HostShell, Launch, ShotsTook, Standing};
+use ark_ffi::{ArkHost, DeviceForm, HostShell, Launch, ShotsTook, Standing};
 use harken_app::host::Harken;
-use harken_domain::Playlist;
+use harken_app::player::{Player, PlayerMsg};
+use harken_domain::host::Listening;
+use harken_domain::{Clock, Playlist, Start, Track};
 
 struct HarkenPhone;
 
@@ -60,7 +68,7 @@ fn until(what: &str, f: impl Fn() -> bool) {
 
 /// A new install of harken, walked through its first run to `server` and
 /// signed in there: its host.
-fn signed_in(root: &std::path::Path, server: &str) -> Arc<ArkHost> {
+fn signed_in(root: &std::path::Path, server: &str) -> (Arc<ArkHost>, Arc<Hosted<HarkenPhone>>) {
     let launch = Launch {
         root: root.to_string_lossy().into(),
         version: "0.1 (1)".into(),
@@ -70,9 +78,11 @@ fn signed_in(root: &std::path::Path, server: &str) -> Arc<ArkHost> {
         walk: true,
         scan: false,
         args: vec![],
+        form: DeviceForm::Phone,
+        device: "Compat Phone".into(),
     };
     let app = Hosted::<HarkenPhone>::new();
-    let host = ArkHost::new(app, launch, None);
+    let host = ArkHost::new(app.clone(), launch, None);
     let shell = Arc::new(Shell::default());
     host.start(shell.clone());
     for step in [
@@ -98,7 +108,15 @@ fn signed_in(root: &std::path::Path, server: &str) -> Arc<ArkHost> {
         true
     });
     until("the app shown, signed in", || host.shows_app());
-    host
+    (host, app)
+}
+
+/// The account's listening session as `peer` holds it.
+fn listening(peer: &ark_ffi::Peer) -> Listening {
+    peer.with(|p| match &p.live {
+        Some(live) => Listening::of(&live.store, &p.me().actor),
+        None => Listening::default(),
+    })
 }
 
 #[test]
@@ -126,7 +144,7 @@ fn the_phones_sync_with_the_deployed_server() {
     // is up (a UI attached to the process's runtime), so it dials.
     let (a_dir, b_dir) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
     let _ui = ark_ffi::ArkProcess::shared().attach();
-    let phone = signed_in(a_dir.path(), &server);
+    let (phone, app) = signed_in(a_dir.path(), &server);
     let peer = phone.peer().expect("a session open");
     let st = peer.status();
     assert!(!st.alone && !st.user.is_empty(), "{st:?}");
@@ -148,9 +166,63 @@ fn the_phones_sync_with_the_deployed_server() {
     // server answers the loopback with a code), its own replica, has it
     // from the server.
     let login = ark_ffi::ark_auth::client::login(&server, None, |_| {}).expect("the second device's sign-in");
-    let other = ark_ffi::hosted::open::<HarkenPhone>(b_dir.path().to_str().unwrap(), Some(login.into())).unwrap();
+    let desk = ThisDevice {
+        form: Form::Computer,
+        name: "Compat Desk".into(),
+    };
+    let other = ark_ffi::hosted::open::<HarkenPhone>(b_dir.path().to_str().unwrap(), Some(login.into()), &desk).unwrap();
     other.connect(ark_ffi::ark_auth::socket_url(&server));
     other.set_online(true);
     until("the second device has the playlist", || playlists(&other).iter().any(|p| p.name == name));
     assert_eq!(peer.status().pending, 0, "nothing of the first phone's held");
+
+    // The listening session: each stands in it as its host said it is, and
+    // sees the other there.
+    let named = |l: &Listening, n: &str, kind: &str| l.devices.iter().any(|d| d.name == n && d.kind == kind && d.can_play);
+    until("the phone sees both devices in the session", || {
+        let l = listening(&peer);
+        named(&l, "Compat Phone", "phone") && named(&l, "Compat Desk", "computer")
+    });
+    until("the second device sees the phone in the session", || {
+        named(&listening(&other), "Compat Phone", "phone")
+    });
+    until("the phone's player stands in the session", || {
+        let p = app.page::<Player>();
+        p.joined && p.devices.iter().any(|d| d.name == "Compat Desk") && p.devices.iter().any(|d| d.mine)
+    });
+
+    // The second device plays; the phone's player shows it, and where.
+    let track = Track {
+        album: "Compat".into(),
+        creator: "Nobody".into(),
+        duration_ms: 180_000,
+        file: "music/compat.flac".into(),
+        id: harken_domain::Id::new([7; 16]),
+        title: format!("Compat Track {}", ark_peer::now_ms()),
+    };
+    let start = Start {
+        at: 0,
+        from: String::new(),
+        position: 0,
+        queue: vec![track.clone()],
+    };
+    other
+        .change_encoded("listening.start", start.to_bytes())
+        .expect("the second device plays");
+    until("the phone's player shows what the second device plays", || {
+        let p = app.page::<Player>();
+        p.has && p.now.title == track.title && p.now.playing && p.output == "Compat Desk"
+    });
+
+    // The phone pauses it; the second device sees it paused.
+    app.send::<Player>(PlayerMsg::Toggle);
+    until("the second device sees it paused", || {
+        listening(&other)
+            .session
+            .is_some_and(|a| a.queue.first() == Some(&track) && matches!(a.clock, Clock::Paused { .. }))
+    });
+    until("the phone's player shows it paused", || {
+        let p = app.page::<Player>();
+        p.has && !p.now.playing
+    });
 }
