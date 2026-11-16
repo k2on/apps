@@ -11,6 +11,20 @@
 // when it changes: each bar's appearance handed back to it, each
 // material's effect set afresh, and the window laid out.
 //
+// And not only what is on the screen: every view controller of the window
+// (each tab's navigation stack, each page under the top of a stack, the
+// sidebar's and the detail's columns) is brought into the style at once,
+// its bar drawn again, so that nothing switches later, when it comes on
+// the screen. A tab or a page that was off the screen at the switch took
+// the new style only as it appeared, and its navigation bar laid its large
+// title out in the middle of that: drawn over the page's first rows
+// (harken's Library on the iPhone and the iPad, app-screens 43796348626)
+// or in the old theme's colour, white on the light page under a toolbar
+// drawn dark (money's account, budget and review on the iPad on its side).
+// The traits are applied (`updateTraitsIfNeeded`) before the bars are
+// drawn again, so a bar's colours are resolved in the new style, not the
+// old.
+//
 // On the Mac, SwiftUI's own `preferredColorScheme`.
 import SwiftUI
 #if canImport(UIKit)
@@ -91,9 +105,43 @@ public enum ArkAppearance {
         let want = style
         guard w.overrideUserInterfaceStyle != want else { return }
         w.overrideUserInterfaceStyle = want
+        w.updateTraitsIfNeeded()
+        // Every controller's, off the screen too (above): its traits taken
+        // now, and its navigation bar drawn again in them.
+        for vc in controllers(under: w.rootViewController) {
+            vc.updateTraitsIfNeeded()
+            if vc.isViewLoaded, vc.view.window == nil {
+                vc.view.updateTraitsIfNeeded()
+                redraw(vc.view)
+            }
+            if let n = vc as? UINavigationController {
+                n.navigationBar.updateTraitsIfNeeded()
+                redraw(n.navigationBar)
+                n.navigationBar.layoutIfNeeded()
+            }
+        }
         redraw(w)
         w.setNeedsLayout()
         w.layoutIfNeeded()
+    }
+
+    /// `root` and every controller under it, each once: its children, each
+    /// tab's (shown or not), each column's, each page of a stack, and what
+    /// is presented over it.
+    private static func controllers(under root: UIViewController?) -> [UIViewController] {
+        var out: [UIViewController] = []
+        var seen = Set<ObjectIdentifier>()
+        func walk(_ vc: UIViewController?) {
+            guard let vc, seen.insert(ObjectIdentifier(vc)).inserted else { return }
+            out.append(vc)
+            for c in vc.children { walk(c) }
+            for c in (vc as? UITabBarController)?.viewControllers ?? [] { walk(c) }
+            for c in (vc as? UISplitViewController)?.viewControllers ?? [] { walk(c) }
+            for c in (vc as? UINavigationController)?.viewControllers ?? [] { walk(c) }
+            walk(vc.presentedViewController)
+        }
+        walk(root)
+        return out
     }
 
     /// What draws a material or a bar under `v`, told to draw again.
