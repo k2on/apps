@@ -1,6 +1,9 @@
-# TEMPORARY (removed before the branch is done): the app prototype's Swift
-# compiled on a Mac, fast. The kernels by nix (the cache's when unmoved),
-# then each destination's xcodebuild here, its errors alone said.
+# Each app's Mac builds compiled on a Mac, fast, and pushed to the cache:
+# the kernels by nix (the cache's when unmoved), then each destination's
+# xcodebuild here, one at a time and with no simulator booted, its errors
+# alone said. Run by hand ahead of app-screens, its ios job then fetches
+# every app's simulator and Mac build rather than build them beside its
+# booting simulator (where two at once hung, app-screens 43787509355).
 name: mac-compile
 
 on:
@@ -44,7 +47,7 @@ jobs:
       # each <app>/demo/server.sh's packages, as `compile` builds them.
       - run: |
           servers=$(cat */demo/server.sh | grep -o '\.#[A-Za-z0-9_-]*' | cut -c3- | sort -u)
-          bash .github/apple-ahead.sh . "$RUNNER_TEMP/kernels.txt" money-ios-simulator money-macos money-ios-archive harken-ios-simulator ark-app-fixture-ios $servers
+          bash .github/apple-ahead.sh . "$RUNNER_TEMP/kernels.txt" money-ios-simulator money-macos money-ios-archive harken-ios-simulator harken-macos ark-app-fixture-ios $servers
 
   compile:
     needs: kernels
@@ -90,14 +93,18 @@ jobs:
       - name: Compile
         run: |
           # The very derivations app-screens builds (nix-xcode.sh), each one's
-          # log kept and its errors said.
+          # log kept and its errors said, each its own build: never two
+          # apps' xcodebuilds at once (ios-build.sh says why), each ended
+          # after 20 minutes with what the Mac was doing said (limit.sh).
           set +e
           status=0
-          for a in money-ios-simulator money-macos money-ios-archive harken-ios-simulator ark-app-fixture-ios; do
-            bash .github/nix-xcode.sh . "$XCODE" "$a" > "$RUNNER_TEMP/$a.out" 2> "$RUNNER_TEMP/$a.log"
+          # The screenshots' builds first (what app-screens fetches), then
+          # the rest.
+          for a in money-ios-simulator harken-ios-simulator money-macos harken-macos money-ios-archive ark-app-fixture-ios; do
+            bash .github/screens/limit.sh 1200 bash .github/nix-xcode.sh . "$XCODE" "$a" > "$RUNNER_TEMP/$a.out" 2> "$RUNNER_TEMP/$a.log"
             r=$?
             echo "== $a: exit $r"
-            grep -E ' error: |\*\* BUILD' "$RUNNER_TEMP/$a.log" | sed 's|/nix/var/nix/builds/[^/]*/source/||' | sort -u | head -80
+            grep -E ' error: |\*\* BUILD|still going after' "$RUNNER_TEMP/$a.log" | sed 's|/nix/var/nix/builds/[^/]*/source/||' | sort -u | head -80
             [ $r = 0 ] || status=1
           done
           exit $status

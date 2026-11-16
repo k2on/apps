@@ -915,22 +915,29 @@ jobs:
           done
           echo "NIX_XCODE_DRVS=$RUNNER_TEMP/drvs" >> "$GITHUB_ENV"
           echo "evaluated the apps in $(( $(date +%s) - start ))s"
+          # Whether an app must be built here (its derivation among those
+          # the plan builds, not only fetches): then the simulator boots
+          # once it is built, not under it (CoreSimulator, booting beside
+          # the apps' xcodebuilds on this 7 GB Mac, is what an asset
+          # catalog's compile waits on: app-screens 43771365729 and
+          # 43787509355 hung there). Fetched, it boots meanwhile.
+          boot=early
+          if [ -s "$RUNNER_TEMP/drvs" ]; then
+            plan=$(nix build --dry-run $(awk '{print $2 "^out"}' "$RUNNER_TEMP/drvs") 2>&1 || true)
+            while read -r p drv; do
+              if grep -qF "$drv" <<< "$plan"; then echo "$p is built here, not fetched"; boot=late; fi
+            done < "$RUNNER_TEMP/drvs"
+          fi
+          echo "BOOT=$boot" >> "$GITHUB_ENV"
+          echo "the simulator boots $([ "$boot" = early ] && echo 'under the fetch' || echo 'once the apps are built')"
 
       # As screens.yaml: the newest iPhone Pro of the pinned Xcode's iOS
-      # (ios-runtime.sh), booting under the rest. One for every app: each is
-      # installed on it in turn.
-      - if: steps.open.outputs.open == 'true'
+      # (boot-iphone.sh), booting under the rest when every app is fetched
+      # (BOOT, above), else once they are built (below). One for every app:
+      # each is installed on it in turn.
+      - if: steps.open.outputs.open == 'true' && env.BOOT == 'early'
         name: Start booting a simulator
-        run: |
-          bash .github/screens/meanwhile.sh start boot bash -c '
-            rt=$(bash .github/screens/ios-runtime.sh)
-            device=$(xcrun simctl list devices available -j | jq -r --arg rt "$rt" "
-              .devices[\$rt]
-              | map(select(.name | test(\"^iPhone [0-9]+ Pro$\"))) | sort_by(.name) | last | .udid + \" \" + .name")
-            udid=${device%% *} device=${device#* }
-            echo "Booting $device"
-            echo "$device" > "$RUNNER_TEMP/device"
-            xcrun simctl boot "$udid" && xcrun simctl bootstatus "$udid" -b'
+        run: bash .github/screens/meanwhile.sh start boot bash .github/screens/boot-iphone.sh
 
       # Each app's server, as nix builds it (its server.sh), all at once, each
       # on its own port: the cache's once main's run has pushed it, or else
@@ -965,7 +972,16 @@ jobs:
         # One that fails is said; the others are still taken, and the job
         # fails at its end.
         continue-on-error: true
+        # Each app's build is ended after BUILD_LIMIT seconds with what the
+        # Mac was doing said (limit.sh); this is only the backstop.
+        timeout-minutes: 60
+        env:
+          BUILD_LIMIT: 1200
         run: bash .github/screens/ios-build.sh src "$XCODE" "$RUNNER_TEMP/apps" $APPS
+
+      - if: ${{ !cancelled() && steps.open.outputs.open == 'true' && env.BOOT != 'early' }}
+        name: Start booting a simulator, the apps built
+        run: bash .github/screens/meanwhile.sh start boot bash .github/screens/boot-iphone.sh
 
       # Each app installed on the iPhone in the background as soon as it has
       # booted, its plan written (apps-ios.sh's PHASE=install), while the

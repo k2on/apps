@@ -261,8 +261,13 @@ which nix builds at the commit (see below).
   **`await-apk.sh`**: an APK from a `build` run still going, as soon as it
   is uploaded.
 - **`ios-build.sh`**: each iPhone app as nix builds it at the commit:
-  the cache's when its inputs have not moved, or built with the runner's
-  own Xcode where it is installed. **`desktop-build.sh`**:
+  the cache's when its inputs have not moved (mac-compile.yaml builds and
+  pushes them ahead, by hand), or built with the runner's own Xcode where
+  it is installed: one app's build at a time, each ended after
+  `BUILD_LIMIT` seconds by **`limit.sh`**, which says first what the Mac
+  was doing (its memory, its processes, a sample of a stuck `actool`).
+  Two apps' simulator builds at once, beside a booting simulator, hung an
+  asset catalog's compile for hours on the 7 GB Mac. **`desktop-build.sh`**:
   each desktop window as nix builds it at the commit, the cache's when its
   inputs have not moved.
 - **`apps-lay.sh`**: lays a run's captures over a tree. A phone taken only
@@ -290,13 +295,17 @@ which nix builds at the commit (see below).
 On Android and the desktop each app is a job of its own, so the apps are
 taken at once. The iPhone's are one job, on one Mac, the scarce runner:
 one Xcode selected, one nix installed, one simulator booted, every app
-built and every server started under the boot, then each app taken on it
+built (or fetched) and every server started, then each app taken on it
 in turn, the driver built once (`apps-ios.sh`). One that fails is said,
 the others still taken and kept, and the job fails at its end. Each job
 starts its apps' servers first, in the background (each `server.sh`,
 nix's build of the server: the cache's, or built while the rest goes on),
 under whatever is slow anyway: the apps' build on the iPhone and the
-desktop, the system image and the emulator's boot on Android.
+desktop, the system image and the emulator's boot on Android. The
+iPhone's simulator boots under the apps' fetch, but after their build
+when one must be built on that Mac (`boot-iphone.sh`): CoreSimulator
+booting beside Xcode's builds is what a simulator asset catalog's
+compile waited on when it hung.
 
 **An iPhone app whose shots would be the same is not taken.** What they
 are taken from is hashed on Linux, before any Mac is asked for

@@ -28,10 +28,27 @@ for a in "$@"; do
   if jq -e --arg p "$a-macos" 'index($p) != null' <<< "$names" > /dev/null; then attrs+=("$a-macos"); fi
 done
 [ ${#attrs[@]} -gt 0 ] || exit 0
-# All at once (../nix-xcode.sh): the apps' builds side by side, over the
-# ArkUI each platform's share. Each line `<attr> <path>`, of each built.
+# One app's build at a time (../nix-xcode.sh), the iPhone's first: what
+# each is built from (its bindings, its modules, ArkUI's Swift) still
+# side by side, but never two apps' xcodebuilds at once. Two simulator
+# apps' asset catalogs compiled at once hung one `actool` for over an hour
+# on this 3-core, 7 GB Mac (harken's in app-screens 43771365729, money's in
+# 43787509355), where money's alone, before harken was generated, never
+# did. Each build is limited (BUILD_LIMIT seconds, limit.sh): one that
+# hangs is ended with what the Mac was doing said, and the others still
+# built. Each line `<attr> <path>`, of each built.
+limit=${BUILD_LIMIT:-1200}
+ordered=()
+for attr in "${attrs[@]}"; do case $attr in *-ios-simulator) ordered+=("$attr") ;; esac; done
+for attr in "${attrs[@]}"; do case $attr in *-ios-simulator) ;; *) ordered+=("$attr") ;; esac; done
 start=$(date +%s)
-built=$(bash "$(dirname "$0")/../nix-xcode.sh" "$src" "$xcode" "${attrs[@]}") || failed=1
+built=
+for attr in "${ordered[@]}"; do
+  t=$(date +%s)
+  line=$(bash "$(dirname "$0")/limit.sh" "$limit" bash "$(dirname "$0")/../nix-xcode.sh" "$src" "$xcode" "$attr") || failed=1
+  built+="$line"$'\n'
+  echo "$attr: built or fetched in $(( $(date +%s) - t ))s"
+done
 echo "every app built or fetched in $(( $(date +%s) - start ))s"
 for attr in "${attrs[@]}"; do
   path=$(awk -v p="$attr" '$1 == p {print $2}' <<< "$built")
