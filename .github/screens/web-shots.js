@@ -27,20 +27,39 @@ const { chromium } = require('playwright');
 // The page ready to be taken (ui/docs/shots.md): the app's own signal where
 // it has one (`data-ark-idle` = 1: every runtime's `Runtime::is_idle`), at a
 // version (`data-ark-version`: the runtimes' `version`) that held for two
-// frames; and the page's own: its fonts loaded, every image decoded, no
-// animation with an end still running. No time is waited for: the limit
-// only fails a page that never says so.
+// frames; and the page's own: its fonts loaded, every image in sight
+// decoded or failed (one out of sight and lazy is not waited for, and one
+// that has not come in PICTURE_MS is let go), no animation with an end
+// still running. No time is waited for: the limit only fails a page that
+// never says so.
 async function ready(page) {
   const said = await page.evaluate(() => new Promise(done => {
     const until = performance.now() + 20000;
     let last = null, frames = 0;
+    // A picture is waited for only while it could show: one the browser
+    // has not asked for (loading="lazy", out of sight) is not, and one
+    // asked for that has neither come nor failed within PICTURE_MS is let
+    // go — a slow or dead address never holds the page from being ready.
+    const PICTURE_MS = 5000;
+    const asked = new Map();
+    const inSight = i => {
+      const r = i.getBoundingClientRect();
+      return r.width > 0 && r.height > 0 && r.bottom > 0 && r.right > 0 && r.top < innerHeight && r.left < innerWidth;
+    };
+    const settled = i => {
+      if (i.complete) return true;
+      if (i.loading === 'lazy' && !inSight(i)) return true;
+      const key = i.currentSrc || i.src;
+      if (!asked.has(key)) asked.set(key, performance.now());
+      return performance.now() - asked.get(key) > PICTURE_MS;
+    };
     const check = async () => {
       await document.fonts.ready;
       const root = document.documentElement;
       const idle = !root.hasAttribute('data-ark-idle') || root.getAttribute('data-ark-idle') === '1';
       const version = root.getAttribute('data-ark-version');
       const moving = document.getAnimations().some(a => a.playState === 'running' && a.effect && a.effect.getComputedTiming().iterations !== Infinity);
-      const quiet = idle && !moving && [...document.images].every(i => i.complete);
+      const quiet = idle && !moving && [...document.images].every(settled);
       frames = quiet && version === last ? frames + 1 : 0;
       last = version;
       if (frames >= 2) return done(null);
