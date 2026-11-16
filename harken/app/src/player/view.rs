@@ -37,76 +37,76 @@ pub fn now_playing(p: &PlayerPage) -> View<PlayerMsg> {
 /// the queue and, for what has one, the transcript, each a sheet.
 #[view]
 pub fn player(p: &PlayerPage) -> View<PlayerMsg> {
-    vstack((
-        artwork(p.now.art, p.now.seed, p.now.title).size(ArtSize::Fill),
-        title_stack(p.now.title).under(p.now.under),
-        scrubber(p.now.at_ms, p.now.since_ms, p.now.playing, p.now.length_ms, |at_ms| PlayerMsg::Seek {
-            at_ms,
-        }),
-        transport(p.play_glyph, p.play_label, PlayerMsg::Toggle, PlayerMsg::Previous, PlayerMsg::Next),
-        if p.has_volume {
-            volume("Volume", p.now.volume, p.now.muted, |level| PlayerMsg::Volume { level }, PlayerMsg::Mute)
-        },
-        card_section((
-            if p.joined {
-                list_row(p.output).glyph("speaker").pushes().on_tap(PlayerMsg::Devices)
+    (
+        vstack((
+            artwork(p.now.art, p.now.seed, p.now.title).size(ArtSize::Fill),
+            title_stack(p.now.title).under(p.now.under),
+            scrubber(p.now.at_ms, p.now.since_ms, p.now.playing, p.now.length_ms, |at_ms| PlayerMsg::Seek {
+                at_ms,
+            }),
+            transport(p.play_glyph, p.play_label, PlayerMsg::Toggle, PlayerMsg::Previous, PlayerMsg::Next),
+            if p.has_volume {
+                volume("Volume", p.now.volume, p.now.muted, |level| PlayerMsg::Volume { level }, PlayerMsg::Mute)
             },
-            list_row("Queue").glyph("list-music").value(p.next).pushes().on_tap(PlayerMsg::Queue),
-            if p.has_transcript {
-                list_row("Transcript").glyph("captions").pushes().on_tap(PlayerMsg::Transcript)
-            },
-        )),
-        (
-            if p.devices_open {
-                form_sheet(
-                    "Devices",
-                    PlayerMsg::CloseDevices,
-                    (
-                        card_section(for d in p.devices {
-                            list_row(d.name).glyph("speaker").value(d.status).on_tap(PlayerMsg::Transfer { to: d.id })
-                        }),
-                        if p.has_group {
-                            card_section(for g in p.group {
-                                list_row(g.name).glyph("speaker").value(g.mark).on_tap(PlayerMsg::Group { device: g.id })
-                            })
-                            .header("Group")
-                        },
-                    ),
-                )
-            },
-            if p.queue_open {
-                form_sheet(
-                    "Queue",
-                    PlayerMsg::CloseQueue,
-                    card_section(for q in p.queue {
-                        media_row(q.title, PlayerMsg::Jump { at: q.at })
-                            .art(artwork(q.art, q.seed, q.title).size(ArtSize::Row))
-                            .under(q.under)
-                            .menu("Move Up", "arrow-up", PlayerMsg::MoveUp { at: q.at })
-                            .menu("Move Down", "arrow-down", PlayerMsg::MoveDown { at: q.at })
-                            .menu("Remove", "trash", PlayerMsg::Remove { at: q.at })
-                    })
-                    .header(p.next),
-                )
-            },
-            if p.transcript_open {
-                form_sheet(
-                    "Transcript",
-                    PlayerMsg::CloseTranscript,
-                    card_section(for l in p.lines {
-                        vstack((
-                            text(l.speaker).style(TextStyle::Caption).ink(Ink::Quiet).if_any(),
-                            text(l.text).ink(Ink::Tint(l.tint)),
-                        ))
-                        .spacing(Space::Xs)
-                        .padding(Edges::Horizontal, Space::L)
-                        .padding(Edges::Vertical, Space::S)
-                        .fill_width_at(Align::Start)
+            card_section((
+                if p.joined {
+                    list_row(p.output).glyph("speaker").pushes().on_tap(PlayerMsg::Devices)
+                },
+                list_row("Queue").glyph("list-music").value(p.next).pushes().on_tap(PlayerMsg::Queue),
+                if p.has_transcript {
+                    list_row("Transcript").glyph("captions").pushes().on_tap(PlayerMsg::Transcript)
+                },
+            )),
+        ))
+        .spacing(Space::L),
+        if p.devices_open {
+            form_sheet(
+                "Devices",
+                PlayerMsg::CloseDevices,
+                (
+                    card_section(for d in p.devices {
+                        list_row(d.name).glyph("speaker").value(d.status).on_tap(PlayerMsg::Transfer { to: d.id })
                     }),
-                )
-            },
-        ),
-    ))
-    .spacing(Space::L)
-    .into()
+                    if p.has_group {
+                        card_section(for g in p.group {
+                            list_row(g.name).glyph("speaker").value(g.mark).on_tap(PlayerMsg::Group { device: g.id })
+                        })
+                        .header("Group")
+                    },
+                ),
+            )
+        },
+        if p.queue_open {
+            form_sheet(
+                "Queue",
+                PlayerMsg::CloseQueue,
+                card_section(for q in p.queue {
+                    media_row(q.title, PlayerMsg::Jump { at: q.at })
+                        .art(artwork(q.art, q.seed, q.title).size(ArtSize::Row))
+                        .under(q.under)
+                        .menu("Move Up", "arrow-up", PlayerMsg::MoveUp { at: q.at })
+                        .menu("Move Down", "arrow-down", PlayerMsg::MoveDown { at: q.at })
+                        .menu("Remove", "trash", PlayerMsg::Remove { at: q.at })
+                })
+                .header(p.next),
+            )
+        },
+        if p.transcript_open {
+            form_sheet(
+                "Transcript",
+                PlayerMsg::CloseTranscript,
+                card_section(for l in p.lines {
+                    vstack((
+                        text(l.speaker).style(TextStyle::Caption).ink(Ink::Quiet).if_any(),
+                        text(l.text).ink(Ink::Tint(l.tint)),
+                    ))
+                    .spacing(Space::Xs)
+                    .padding(Edges::Horizontal, Space::L)
+                    .padding(Edges::Vertical, Space::S)
+                    .fill_width_at(Align::Start)
+                }),
+            )
+        },
+    )
+        .into()
 }

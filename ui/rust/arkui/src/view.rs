@@ -64,8 +64,38 @@ const LARGE_TITLE: f32 = 28.0;
 pub fn element<M: Clone + 'static>(view: View<M>) -> Element<'static, M> {
     match view {
         View::Part(Part::Page { title, top, content, .. }) => page(title, View::List(vec![*top, *content])),
-        v => column(nodes(v)).spacing(8).into(),
+        v => {
+            // What goes over (a sheet, a question) over the rest, as a
+            // page's is: in a column it would be drawn nowhere.
+            let (over, body): (Vec<View<M>>, Vec<View<M>>) = flatten(v).into_iter().partition(|v| {
+                matches!(
+                    v,
+                    View::Part(Part::Sheet { .. } | Part::Prompt { .. } | Part::Confirm { .. } | Part::Alert { .. })
+                )
+            });
+            let base: Element<'static, M> = column(body.into_iter().flat_map(nodes)).spacing(8).into();
+            overlaid(base, over)
+        }
     }
+}
+
+/// `base` with each of `over` (a sheet, a question) dimmed over it.
+fn overlaid<M: Clone + 'static>(base: Element<'static, M>, over: Vec<View<M>>) -> Element<'static, M> {
+    if over.is_empty() {
+        return base;
+    }
+    let mut layers = stack![base];
+    for v in over {
+        let asked = match v {
+            View::Part(p) => notice(p),
+            v => dialog(v),
+        };
+        if let Some((dismiss, dialog)) = asked {
+            cursor::modal_drawn(&dismiss);
+            layers = layers.push(layer::dimmed(dismiss.clone(), dismiss)).push(layer::centred(dialog));
+        }
+    }
+    layers.into()
 }
 
 fn page<M: Clone + 'static>(title: Val<String>, content: View<M>) -> Element<'static, M> {
@@ -85,18 +115,7 @@ fn page<M: Clone + 'static>(title: Val<String>, content: View<M>) -> Element<'st
         .spacing(10)
         .padding(PAD)
         .max_width(if wide { f32::INFINITY } else { PAGE_WIDTH });
-    let mut layers = stack![scrollable(container(list).center_x(Length::Fill)).height(Length::Fill)];
-    for v in over {
-        let asked = match v {
-            View::Part(p) => notice(p),
-            v => dialog(v),
-        };
-        if let Some((dismiss, dialog)) = asked {
-            cursor::modal_drawn(&dismiss);
-            layers = layers.push(layer::dimmed(dismiss.clone(), dismiss)).push(layer::centred(dialog));
-        }
-    }
-    layers.into()
+    overlaid(scrollable(container(list).center_x(Length::Fill)).height(Length::Fill).into(), over)
 }
 
 /// `v` with its lists opened out: what lies one after another.
