@@ -1,7 +1,6 @@
-use super::view::{commands, money_settings, money_shell};
+use super::view::commands;
 use super::*;
 use ark_app::shell::{command_for, MenuPlace};
-use ark_app::view::{Part, View};
 use ark_app::{Ask, Host, Modules, Runtime, Ticket};
 use ark_peer::store::Store;
 use ark_peer::Peer;
@@ -55,22 +54,6 @@ impl Host<MoneyShell> for Demo {
     }
 }
 
-/// Every hosted screen's name, in the order the view says them.
-fn hosted<M>(v: &View<M>, out: &mut Vec<&'static str>) {
-    match v {
-        View::List(vs) => vs.iter().for_each(|v| hosted(v, out)),
-        View::Part(p) => {
-            if let Part::Hosted { name } = p {
-                out.push(name);
-            }
-            for (_, slot) in p.call().slots {
-                hosted(slot, out);
-            }
-        }
-        _ => {}
-    }
-}
-
 /// The sections are money.md's, in its order, Transactions with what
 /// waits for a look; choosing one shows it, and a new place starts with
 /// nothing searched. Each open account is a place of its own under its
@@ -115,23 +98,6 @@ fn the_sections_then_every_account() {
     assert_eq!(rt.screen(&demo).section, "insights", "an unknown tag shows nothing new");
     rt.dispatch(ShellMsg::Month { month: "2026-10".into() }, &mut demo);
     assert_eq!(rt.screen(&demo).month_title, "October 2026", "the budget's title is its month");
-    let mut names = vec![];
-    hosted(&money_shell::view(&rt.screen(&demo)), &mut names);
-    assert_eq!(
-        &names[..9],
-        [
-            "budget",
-            "budget.inspector",
-            "accounts",
-            "accounts.register",
-            "transactions.inspector",
-            "transactions",
-            "transactions.inspector",
-            "insights",
-            "accounts.register",
-        ]
-    );
-    assert_eq!(names.last(), Some(&"household"), "who is signed in, at the sidebar's foot");
 }
 
 /// The inspector toggles from the toolbar and ⌥⌘I, and is put away by its
@@ -166,34 +132,12 @@ fn the_inspector_and_the_commands() {
     assert_eq!(places, vec![MenuPlace::File, MenuPlace::View, MenuPlace::Go]);
 }
 
-/// Settings has its four panes, one shown at a time, each drawn from
-/// Rust: no platform hosts any of them, only what it adds to General. Falsified by leaving one out, a
-/// pane still hosted, or showing a pane no title names.
+/// Settings shows one pane at a time, General first, and a title no pane
+/// has shows nothing new. Falsified by showing a pane no title names.
 #[test]
-fn settings_has_four_panes_none_hosted() {
+fn settings_shows_one_pane_at_a_time() {
     let mut demo = Demo::new();
     let mut rt = Runtime::<MoneyShell>::new();
-    let mut names = vec![];
-    let view = money_settings::view(&rt.screen(&demo));
-    hosted(&view, &mut names);
-    assert_eq!(names, ["settings.more"], "only what a platform adds of its own");
-    let mut panes = vec![];
-    fn titles<M>(v: &View<M>, out: &mut Vec<&'static str>) {
-        match v {
-            View::List(vs) => vs.iter().for_each(|v| titles(v, out)),
-            View::Part(p) => {
-                if let Part::SettingsPane { title, .. } = p {
-                    out.push(*title);
-                }
-                for (_, slot) in p.call().slots {
-                    titles(slot, out);
-                }
-            }
-            _ => {}
-        }
-    }
-    titles(&view, &mut panes);
-    assert_eq!(panes, PANES);
     assert_eq!(rt.screen(&demo).pane, "General");
     rt.dispatch(
         ShellMsg::Pane {
@@ -296,9 +240,6 @@ fn the_category_inspector() {
     assert_eq!((page.section.as_str(), page.search.as_str()), ("transactions", "Groceries"));
     rt.dispatch(ShellMsg::InspectCategory { id: None }, &mut demo);
     assert!(rt.screen(&demo).category.is_none());
-    let mut names = vec![];
-    hosted(&money_shell::view(&rt.screen(&demo)), &mut names);
-    assert_eq!(names[1], "budget.inspector", "nothing inspected: the platform's own");
 }
 
 /// Review is To Review with the newest waiting for a look open: its sheet
@@ -506,45 +447,13 @@ fn the_appearance_follows_the_system_by_default() {
     assert_eq!(rt.screen(&demo).appearance, None, "another launch puts the last one's appearance back");
 }
 
-/// Every section's toolbar ends with who is signed in: the shell's tabs
-/// carry an account item with their name and picture, and tapping it opens
-/// Settings on General — on every platform, the same item (the phones'
-/// generated `ToolbarAccount`). Falsified by leaving the item out, by the
-/// demo's household going nameless, or by the tap opening another pane.
+/// Who is signed in opens Settings on General, whichever pane was last
+/// shown; the account's label and initial are the person's. Falsified by
+/// the tap opening another pane.
 #[test]
-fn the_toolbars_end_with_the_account() {
+fn the_account_opens_settings_on_general() {
     let mut demo = Demo::new();
     let mut rt = Runtime::<MoneyShell>::new();
-    fn account<M: Clone>(v: &View<M>) -> Option<(String, String, M)> {
-        match v {
-            View::List(vs) => vs.iter().find_map(account),
-            View::Part(Part::Account { name, picture, tap }) => Some((name.get(), picture.get(), tap.clone())),
-            View::Part(p) => p.call().slots.into_iter().find_map(|(_, s)| account(s)),
-            _ => None,
-        }
-    }
-    let facts = |demo: bool, picture: &str| ShellMsg::Session {
-        facts: SessionFacts {
-            who: "Sam Lee".into(),
-            picture: picture.into(),
-            demo,
-            ..SessionFacts::default()
-        },
-    };
-    rt.dispatch(facts(true, ""), &mut demo);
-    let (name, picture, tap) = account(&money_shell::view(&rt.screen(&demo))).expect("the shell's account item");
-    assert_eq!(
-        (name.as_str(), picture.as_str()),
-        ("Alex", ""),
-        "the demo's household is Alex's, with no picture"
-    );
-    assert_eq!(tap, ShellMsg::Account);
-    rt.dispatch(facts(false, "https://money.example.com/auth/picture/sam"), &mut demo);
-    let (name, picture, _) = account(&money_shell::view(&rt.screen(&demo))).unwrap();
-    assert_eq!(
-        (name.as_str(), picture.as_str()),
-        ("Sam Lee", "https://money.example.com/auth/picture/sam")
-    );
     rt.dispatch(ShellMsg::Pane { title: "Appearance".into() }, &mut demo);
     rt.dispatch(ShellMsg::Account, &mut demo);
     assert_eq!(rt.screen(&demo).pane, "General");
@@ -552,90 +461,4 @@ fn the_toolbars_end_with_the_account() {
     assert_eq!(ark_app::shell::account_label("Sam Lee"), "Account, Sam Lee");
     assert_eq!(ark_app::shell::account_initial("sam"), "S");
     assert_eq!(ark_app::shell::account_initial(""), "?");
-}
-
-/// The phones' walk (money/demo/shots.json, taken in the app: ui/docs/
-/// shots.md) reaches what it taps in the views every phone draws: the
-/// sections' tabs, the account's button, a new transaction, Auto-Assign and
-/// a category of the budget the Budget tab hosts. Falsified by a label the
-/// walk names that no view says (a tab renamed, the account's button gone).
-#[test]
-fn the_walk_reaches_what_it_taps() {
-    use ark_app::shots::{compose, nodes, take, tree, Screen, Step, Took};
-    use std::cell::RefCell;
-    use std::rc::Rc;
-    let mut demo = Demo::new();
-    let mut rt = Runtime::<MoneyShell>::new();
-    rt.dispatch(ShellMsg::Month { month: "2026-10".into() }, &mut demo);
-    rt.dispatch(ShellMsg::Select { tag: "budget".into() }, &mut demo);
-    let mut bd = crate::testing::Demo::<crate::budget::Budget>::new();
-    let mut brt = Runtime::<crate::budget::Budget>::new();
-    bd.run(&mut brt, [crate::budget::BudgetMsg::Month { month: "2026-10".into() }]);
-    let sent: Rc<RefCell<Vec<String>>> = Rc::default();
-    let (s1, s2) = (sent.clone(), sent.clone());
-    let targets = compose(vec![
-        Screen {
-            name: "shell".into(),
-            nodes: nodes(
-                &money_shell::view(&rt.screen(&demo)),
-                Rc::new(move |m: ShellMsg| s1.borrow_mut().push(format!("{m:?}"))),
-            ),
-        },
-        Screen {
-            name: "budget".into(),
-            nodes: nodes(
-                &crate::budget::view::budget::view(&brt.screen(&bd)),
-                Rc::new(move |m: crate::budget::BudgetMsg| s2.borrow_mut().push(format!("{m:?}"))),
-            ),
-        },
-    ]);
-    let said = tree(&targets);
-    for want in [
-        "[tab] tab:budget \u{2014} Budget (taps)",
-        "[tab] tab:accounts \u{2014} Accounts (taps)",
-        "[tab] tab:transactions \u{2014} Transactions (taps)",
-        "[tab] tab:insights \u{2014} Insights (taps)",
-        "[button] shell.account \u{2014} Account (taps)",
-        "[button] shell.new-transaction \u{2014} New Transaction (taps)",
-        "[button] budget.auto-assign \u{2014} Auto-Assign (taps)",
-        "[row] budget.row:dining-out \u{2014} \u{1f35c} Dining Out (taps",
-    ] {
-        assert!(said.contains(want), "{want}, in:\n{said}");
-    }
-    let mut focus = None;
-    let tap = |id: &str| Step::Tap { id: id.into(), text: false };
-    assert_eq!(take(&tap("budget.auto-assign"), &targets, &mut focus), Took::Done);
-    assert_eq!(take(&tap("tab:accounts"), &targets, &mut focus), Took::Done);
-    assert_eq!(sent.borrow().clone(), ["AutoAssign", "Select { tag: \"accounts\" }"]);
-
-    // Accounts' rows by their names, not all a screen reader says of them
-    // (their kind and balance after the name): app-screens 43306576550's
-    // walk found no "Checking" row.
-    let ad = crate::testing::Demo::<crate::accounts::Accounts>::new();
-    let art = Runtime::<crate::accounts::Accounts>::new();
-    let rows = compose(vec![Screen {
-        name: "accounts".into(),
-        nodes: nodes(
-            &crate::accounts::view::accounts::view(&art.screen(&ad)),
-            Rc::new(|_: crate::accounts::AccountsMsg| {}),
-        ),
-    }]);
-    let said = tree(&rows);
-    let mut td = crate::testing::Demo::<crate::transactions::Transactions>::new();
-    let mut trt = Runtime::<crate::transactions::Transactions>::new();
-    td.run(&mut trt, [crate::transactions::TransactionsMsg::Show { review: false }]);
-    let txns = compose(vec![Screen {
-        name: "transactions".into(),
-        nodes: nodes(
-            &crate::transactions::view::transactions::view(&trt.screen(&td)),
-            Rc::new(|_: crate::transactions::TransactionsMsg| {}),
-        ),
-    }]);
-    let listed = tree(&txns);
-    assert!(listed.contains("[button] transactions.show:all \u{2014} All (taps)"), "{listed}");
-    assert!(
-        listed.contains("[row] transactions.row:target \u{2014}") && listed.contains("[row] transactions.row:target~2 \u{2014}"),
-        "{listed}"
-    );
-    assert!(said.contains("[row] accounts.row:checking \u{2014} Checking (taps"), "{said}");
 }

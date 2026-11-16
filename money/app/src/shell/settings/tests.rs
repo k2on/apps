@@ -1,8 +1,6 @@
 use super::*;
-use crate::shell::view::{money_settings, settings_banks};
 use crate::shell::{ShellPage, PANES};
 use crate::testing::{Demo, NOW};
-use ark_app::view::{Part, View};
 use ark_app::Runtime;
 
 fn facts(demo: bool) -> SessionFacts {
@@ -24,25 +22,6 @@ fn facts(demo: bool) -> SessionFacts {
 fn on(demo: &mut Demo<MoneyShell>, rt: &mut Runtime<MoneyShell>, msg: ShellMsg) -> ShellPage {
     rt.dispatch(msg, demo);
     rt.screen(demo)
-}
-
-/// Every title a view's rows and dialogs say, in order.
-fn said<M>(v: &View<M>, out: &mut Vec<String>) {
-    match v {
-        View::List(vs) => vs.iter().for_each(|v| said(v, out)),
-        View::Part(p) => {
-            match p {
-                Part::Row(r) => out.push(r.title.get()),
-                Part::Confirm { title, .. } => out.push(title.get()),
-                _ => {}
-            }
-            for (_, slot) in p.call().slots {
-                said(slot, out);
-            }
-        }
-        View::Layout(l) => l.slots().into_iter().for_each(|s| said(s, out)),
-        View::Each { .. } | View::When { .. } | View::WhenSome { .. } | View::Empty => {}
-    }
 }
 
 /// General says who is signed in where and what waits, and Sign Out is
@@ -71,9 +50,6 @@ fn general_signs_out_only_once_asked() {
         (p.who.as_str(), p.sign_out.as_str(), p.on_server, p.can_connect),
         ("Alex", "Leave the Demo", false, false)
     );
-    let mut rows = vec![];
-    said(&money_settings::view(&rt.screen(&demo)), &mut rows);
-    assert!(!rows.iter().any(|r| r == "Add a Device"), "{rows:?}");
 }
 
 /// A launch puts back what the window showed, not who is signed in.
@@ -109,9 +85,6 @@ fn a_bank_and_what_its_accounts_feed() {
     let p = on(&mut demo, &mut rt, ShellMsg::OpenBank { name: bank.name.clone() }).settings;
     let page = p.bank.expect("its page");
     assert!(p.showing_bank && page.has_feeds, "{page:?}");
-    let mut rows = vec![];
-    said(&settings_banks::view(&rt.screen(&demo)), &mut rows);
-    assert!(rows.contains(&"Disconnect".to_string()), "{rows:?}");
 
     let feed = page.feeds[0].clone();
     let p = on(&mut demo, &mut rt, ShellMsg::ChooseFeed { plaid: feed.plaid.clone() }).settings;

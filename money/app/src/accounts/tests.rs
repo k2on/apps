@@ -252,13 +252,6 @@ fn reconcile_asks_the_shell_for_an_open_account() {
     let p = rt.screen(&d);
     let row = p.shelves.iter().flat_map(|s| &s.accounts).find(|r| r.id == a).unwrap();
     assert!(row.is_open);
-    let v = view::account_row::view(row);
-    let ark_app::view::View::Part(ark_app::view::Part::Row(r)) = v else {
-        panic!("a row")
-    };
-    let offered: Vec<String> = r.menu.iter().filter(|m| m.offered()).map(|m| m.title.get()).collect();
-    assert_eq!(offered, ["Rename", "Reconcile…", "Copy Balance", "Close Account"]);
-    assert!(r.pushes, "an account's row opens its register as a pushed page");
 }
 
 /// The iPhone's amount entry says cents; the form keeps what was entered

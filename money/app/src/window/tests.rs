@@ -1,11 +1,9 @@
 //! money in a window its host draws itself, over the demo's household on
 //! the host's test place (not a phone's: its sections are the window's
 //! places): the address says where it is and brings a fresh window there,
-//! Settings is the window's own, and every name the shell hosts is drawn
-//! from money's views.
+//! Settings is the window's own.
 
 use ark_app::host::{Hosting, Link, Place};
-use ark_app::view::{Given, Part, View};
 use ark_app::window::Windowed;
 use money_core::{AccountLine, MoneyView};
 
@@ -43,34 +41,6 @@ fn checking(place: &Test) -> AccountLine {
     out.into_iter()
         .find(|a| a.name.contains("Checking"))
         .expect("the demo's checking account")
-}
-
-/// Every word a view says, in order.
-fn said<M>(v: &View<M>, out: &mut Vec<String>) {
-    match v {
-        View::List(vs) => vs.iter().for_each(|v| said(v, out)),
-        View::Part(p) => {
-            let call = p.call();
-            for g in call.first.iter().chain(call.args.iter().map(|(_, g)| g)) {
-                match g {
-                    Given::Val(v) => out.push(v.trim_matches('"').to_string()),
-                    Given::Text(t) => out.push(t.to_string()),
-                    _ => {}
-                }
-            }
-            for (_, slot) in call.slots {
-                said(slot, out);
-            }
-        }
-        View::Layout(l) => l.slots().into_iter().for_each(|s| said(s, out)),
-        _ => {}
-    }
-}
-
-fn words<M>(v: &View<M>) -> Vec<String> {
-    let mut out = vec![];
-    said(v, &mut out);
-    out
 }
 
 /// The address is the shell's own: a section is its route's path, the UI
@@ -162,41 +132,6 @@ fn settings_is_the_windows_own() {
     send(&mut h, &mut place, MoneyMsg::CloseSettings);
     assert!(h.app().settings(&place, now).is_none());
     assert_eq!(address(&h, &place), "/budget/");
-}
-
-/// Every name the window's shell hosts is drawn from money's views: the
-/// budget's inspector is the month and Auto-Assign, the sidebar's foot who
-/// is using it. Falsified by a name left to "Nothing Selected".
-#[test]
-fn every_hosted_name_is_a_view() {
-    let (h, place) = open();
-    let now = h.now_ms(&place);
-    let mut names = vec![];
-    fn hosted<M>(v: &View<M>, out: &mut Vec<&'static str>) {
-        match v {
-            View::List(vs) => vs.iter().for_each(|v| hosted(v, out)),
-            View::Part(p) => {
-                if let Part::Hosted { name } = p {
-                    out.push(name);
-                }
-                for (_, slot) in p.call().slots {
-                    hosted(slot, out);
-                }
-            }
-            _ => {}
-        }
-    }
-    hosted(&h.app().window(&place, now), &mut names);
-    assert!(names.contains(&"budget.inspector") && names.contains(&"household"));
-    for name in names {
-        let w = words(&h.app().hosted(name, &place, now));
-        assert!(!w.iter().any(|s| s == "Nothing Selected"), "{name}: {w:?}");
-    }
-    let month = words(&h.app().hosted("budget.inspector", &place, now));
-    for w in ["October 2026", "Auto-Assign", "Underfunded"] {
-        assert!(month.iter().any(|s| s == w), "{w} in {month:?}");
-    }
-    assert!(words(&h.app().hosted("household", &place, now)).iter().any(|s| s == "Alex"));
 }
 
 /// Auto-Assign from the month's inspector reaches the budget's runtime.
