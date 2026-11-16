@@ -3,7 +3,7 @@ name = "harken-server"
 version = "0.1.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
-description = "harken's server, an ark-peer that listens: the log and the listening session (harken/core, linked) on the hub, sign-in (ark-auth), a media directory authored as a peer, the house's speakers as devices, and the browser client"
+description = "harken's server, an ark-peer that listens: the log and the listening session (harken/src/core, linked) on the hub, sign-in (ark-auth), a media directory authored as a peer, the house's speakers as devices, and the browser client"
 workspace = "../../rust"
 
 [[bin]]
@@ -21,7 +21,7 @@ path = "src/bin/harken-peer.rs"
 [dependencies]
 ark = { path = "../../rust/ark" }
 serde = { workspace = true }
-harken-domain = { path = "../core" }
+harken-domain = { path = "../src/core" }
 # The server is a peer that listens; the scanner and the house's speakers
 # are peers in this process that reach it through its handle, never a socket.
 ark-peer = { path = "../../rust/ark-peer", features = ["server"] }

@@ -217,7 +217,7 @@ pub struct Script {
 }
 
 /// ArkOS's mock Plaid (`sync/actual-import/src/test/mock-plaid.ts`), whose
-/// answers `money/core/tests/import.rs` walks the domain through: one
+/// answers `money/src/core/tests/import.rs` walks the domain through: one
 /// bank of two accounts, its initial pull over two pages with a pending
 /// transaction and a payroll; that transaction posting with another amount
 /// while the coffee is modified; and nothing new. Beside it, Plaid's

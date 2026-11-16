@@ -84,6 +84,14 @@ pub trait App: 'static {
     fn woken(_reason: Woken) -> Option<Self::Msg> {
         None
     }
+
+    /// The message that shows `route`, for a screen that shows routes
+    /// (`ark_router::routes!`: the routes in its layout's folder, or that
+    /// name it): harken's page told which record. None (the default) for a
+    /// screen a route only brings forward.
+    fn shown(_route: &Self::Route) -> Option<Self::Msg> {
+        None
+    }
 }
 
 /// Why the OS woke the process with no screen (ui/docs/app.md, Background

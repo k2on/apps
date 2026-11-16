@@ -4,7 +4,7 @@ workspace = "../../../rust"
 version = "0.1.0"
 edition.workspace = true
 license.workspace = true
-description = "The router's derive: an app's Route enum as paths (#[derive(Routes)]), used through ark_router::Routes."
+description = "The router's macros: an app's Route enum as paths (#[derive(Routes)]) and its routes, screens and layouts read from a folder (routes!), used through ark_router."
 
 [lib]
 proc-macro = true

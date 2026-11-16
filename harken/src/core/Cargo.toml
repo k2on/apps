@@ -1,0 +1,27 @@
+[package]
+name = "harken-domain"
+version = "0.1.0"
+workspace = "../../../rust"
+edition = "2021"
+description = "harken's domain in plain Rust (docs/plan-v5.md §1.16): its schema, types and functions, and its tests."
+
+[lib]
+name = "harken_domain"
+path = "src/lib.rs"
+
+[dependencies]
+ark = { path = "../../../rust/ark" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+arkdb = { path = "../../../rust/arkdb" }
+ark-peer = { path = "../../../rust/ark-peer", default-features = false }
+
+[features]
+# The kernel's push table (`ark::auth::Push`) in the schema, and
+# `session.push` registered. Off by default: the servers deployed before
+# it serve the schema without it (ui/docs/app.md, Servers Already
+# Deployed), and the new clients must be that schema. On again with
+# ark-peer's, ark-ffi's and ark-app's `push` (docs/releasing.md).
+push = []

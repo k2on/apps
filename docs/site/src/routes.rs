@@ -1,23 +1,7 @@
-//! Where the docs can be: every page, one URL each (`ark-router`, ui/docs/
-//! app.md "Addresses"), declared once — the overview at the site's root,
-//! every other page by its tag (`/menu/`, `/overlays/`, `/all/`). The search
-//! (`?q=`) is the reader's, a query key no route names.
-use ark_router::Routes;
-
+//! A page's route by its tag, and back: the routes themselves are files, in
+//! `src/app` (`crate::Route`, `ark_router::routes!`).
 use crate::pages::OVERVIEW;
-
-/// A page of the docs.
-#[derive(Debug, Clone, Routes)]
-pub enum Route {
-    /// The overview, at the site's root.
-    #[home]
-    #[route("/")]
-    Overview,
-    /// Any other page, by its tag: a component's, a section's, the index of
-    /// every page.
-    #[route("/:tag")]
-    Page { tag: String },
-}
+use crate::Route;
 
 impl Route {
     /// The page tagged `tag`.
@@ -54,5 +38,7 @@ mod tests {
         for p in &pages {
             assert_eq!(crate::pages::href("/", &p.tag), Route::of(&p.tag).url());
         }
+        // A static export writes every page, in reading order, and no other.
+        assert_eq!(Route::statics(), routes);
     }
 }

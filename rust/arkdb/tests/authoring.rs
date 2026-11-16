@@ -1,5 +1,5 @@
 //! `spec/AUTHORING.md` is held to the sources: every Rust block in it is
-//! cut from `rust/arkdb/src/demo.rs` or a file of `harken/core/src/` (or
+//! cut from `rust/arkdb/src/demo.rs` or a file of `harken/src/core/src/` (or
 //! of a directory in it), its lines that file's lines in order,
 //! indentation aside, a line `// …`
 //! standing for any run of them. Falsified by changing one word of the
@@ -56,7 +56,7 @@ fn holds(src: &str, block: &[&str]) -> bool {
 fn every_example_is_cut_from_a_source() {
     let md = std::fs::read_to_string(root().join("spec/AUTHORING.md")).unwrap();
     let mut sources = vec![root().join("rust/arkdb/src/demo.rs")];
-    let domain = root().join("harken/core/src");
+    let domain = root().join("harken/src/core/src");
     // Its files, and those of its modules' directories (`player/`).
     for p in std::fs::read_dir(&domain).unwrap().map(|e| e.unwrap().path()) {
         match p.is_dir() {

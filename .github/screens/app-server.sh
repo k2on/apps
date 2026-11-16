@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # An app's own server on this runner, for its screenshots (apps.md): the
-# app's <app>/demo/server.sh, which starts it with dev auth and
+# app's <app>/src/demo/server.sh, which starts it with dev auth and
 # something in it, on the port its shots.json names. Then waits until it
 # answers /healthz with nothing it is busy with (no `busy` line: harken's
 # while its scanner first looks). Nothing here is any one app's.
@@ -16,22 +16,22 @@
 set -euo pipefail
 app=$1
 dir=$2
-port=${3:-$(jq -r '.server.port' "$app/demo/shots.json")}
+port=${3:-$(jq -r '.server.port' "$app/src/demo/shots.json")}
 mkdir -p "$dir"
 # Who its dev sign-in signs in when a login names nobody (ark-auth): the
 # phone's sign-in sheet then opens and comes straight back, with no page
 # to fill in.
-ARK_DEV_USER=$(jq -r '.server.user // empty' "$app/demo/shots.json")
+ARK_DEV_USER=$(jq -r '.server.user // empty' "$app/src/demo/shots.json")
 export ARK_DEV_USER
 # …the name they go by, where shots.json gives one (`Alex` for `alex`): what
 # Settings, the account button and "Entered by" show, the id kept for the login.
-ARK_DEV_NAME=$(jq -r '.server.name // empty' "$app/demo/shots.json")
+ARK_DEV_NAME=$(jq -r '.server.name // empty' "$app/src/demo/shots.json")
 export ARK_DEV_NAME
 # …and the picture they wear (a file, from the repository's root): the
 # screens show a face, not only initials (nix/demo/README.md).
-picture=$(jq -r '.server.picture // empty' "$app/demo/shots.json")
+picture=$(jq -r '.server.picture // empty' "$app/src/demo/shots.json")
 if [ -n "$picture" ]; then ARK_DEV_PICTURE=$(realpath "$picture"); export ARK_DEV_PICTURE; fi
-bash "$app/demo/server.sh" "$dir" "127.0.0.1:$port"
+bash "$app/src/demo/server.sh" "$dir" "127.0.0.1:$port"
 
 health() { curl -sf "http://127.0.0.1:$port/healthz" || true; }
 # Up as soon as it answers and says it is busy with nothing (a server whose

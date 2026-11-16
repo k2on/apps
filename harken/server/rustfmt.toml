@@ -1,0 +1,3 @@
+# The server's own width, rustfmt's: harken's crate (../rustfmt.toml) is
+# wider, and the server is not of it.
+max_width = 100

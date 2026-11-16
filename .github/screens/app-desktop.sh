@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # An app's desktop screenshots (apps.md, "The wide windows"), the same for
-# every app: what is the app's is its <app>/demo/shots.json, its `wide`, the
+# every app: what is the app's is its <app>/src/demo/shots.json, its `wide`, the
 # one walk the browser and the Mac take too (a shot or a step `on` others
 # alone passed over). The window nix
 # built at the commit, run with no window by arkui-shots (ui/rust/shots,
@@ -20,7 +20,7 @@ out=$1
 window=$2
 app=$3
 server=${4:-}
-user=$(jq -r '.server.user // empty' "$app/demo/shots.json")
+user=$(jq -r '.server.user // empty' "$app/src/demo/shots.json")
 bin=$(find -L "$window/bin" -maxdepth 1 \( -name "$app-desktop" -o -name "$app-iced" \) | head -1)
 [ -n "$bin" ] || { echo "::error::no $app-desktop or $app-iced in $window"; exit 1; }
 
@@ -50,7 +50,7 @@ args=()
 mkdir -p "$out"
 echo "$app desktop"
 HOME=$home XDG_CONFIG_HOME=$home/.config XDG_DATA_HOME=$home/.local/share XDG_CACHE_HOME=$home/.cache \
-  ARK_SHOTS="$PWD/$app/demo/shots.json" ARK_SHOTS_OUT="$out" \
+  ARK_SHOTS="$PWD/$app/src/demo/shots.json" ARK_SHOTS_OUT="$out" \
   ARK_SHOTS_FONTS="$pinned" VK_ICD_FILENAMES="$icd" \
   timeout 900 "$bin" "${args[@]}"
 rm -rf "$home" "$pinned"

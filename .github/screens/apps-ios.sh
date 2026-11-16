@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Every app's iOS screenshots on the simulator that is booted (apps.md),
 # one command per device: the iPhone, or (FAMILY=ipad) the iPad, booted
-# already. What is each app's is its <app>/demo/shots.json's `walk`, which
+# already. What is each app's is its <app>/src/demo/shots.json's `walk`, which
 # the app walks inside itself (ui/docs/shots.md, "In the App"): installed
 # afresh, its list (`phone` on the iPhone, `large` on the iPad) written as
 # a plan into its own container, and opened with `-shots YES`; it goes
@@ -78,7 +78,7 @@ install() {
   local p server data shots
   p=$(date +%s)
   ph() { echo "  $a: $1 $(( $(date +%s) - p ))s"; p=$(date +%s); }
-  server=$(jq -r --argjson off "${PORT_OFFSET:-0}" '.server.port // empty | "http://127.0.0.1:\(. + $off)"' "$a/demo/shots.json")
+  server=$(jq -r --argjson off "${PORT_OFFSET:-0}" '.server.port // empty | "http://127.0.0.1:\(. + $off)"' "$a/src/demo/shots.json")
   if [ "$family" = ipad ]; then
     # The simulator's build alone, made one that takes the whole screen
     # (above), and signed again as the simulator's builds are, its
@@ -106,7 +106,7 @@ install() {
   mkdir -p "$shots"
   jq --arg s "$server" --arg l "$list" \
     '{orientations: (if $l == "large" then ["portrait", "landscape"] else null end), theme: .walk.theme, shots: .walk[$l]} | with_entries(select(.value != null))
-     | walk(if type == "string" then gsub("\\{server\\}"; $s) else . end)' "$a/demo/shots.json" > "$shots/plan.json"
+     | walk(if type == "string" then gsub("\\{server\\}"; $s) else . end)' "$a/src/demo/shots.json" > "$shots/plan.json"
   ph "permissions, plan written"
   touch "$installed/$udid-$a"
 }
@@ -209,7 +209,7 @@ failed=0
 for t in "${taken[@]}"; do
   a=${t%%:*} rest=${t#*:} kind=${rest%%:*} orientation=${rest#*:}
   dir=$out/$a/$kind
-  want=$(jq --arg l "$([ "$family" = ipad ] && echo large || echo phone)" '.walk[$l] | length' "$a/demo/shots.json")
+  want=$(jq --arg l "$([ "$family" = ipad ] && echo large || echo phone)" '.walk[$l] | length' "$a/src/demo/shots.json")
   for theme in light dark; do
     have=$(find "$dir/$theme" -maxdepth 1 -name '*.png' ! -name 'stuck.png' 2> /dev/null | wc -l | tr -d ' ')
     if [ "$have" -lt "$want" ]; then

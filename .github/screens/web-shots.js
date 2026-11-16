@@ -1,4 +1,4 @@
-// An app's browser screenshots (app-web.sh): its <app>/demo/shots.json
+// An app's browser screenshots (app-web.sh): its <app>/src/demo/shots.json
 // `wide`, the wide windows' one walk (apps.md, "The wide windows"), taken
 // in Playwright's Chromium as the desktop's window and the Mac take it: the
 // page as the site publishes its demo (`wide.web.demo`, app-web.sh), on

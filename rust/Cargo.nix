@@ -9836,7 +9836,7 @@ rec {
         crateName = "harken-app";
         version = "0.1.0";
         edition = "2021";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../harken/app; };
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../harken; };
         libName = "harken_app";
         dependencies = [
           {
@@ -9895,7 +9895,7 @@ rec {
         crateName = "harken-domain";
         version = "0.1.0";
         edition = "2021";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../harken/core; };
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../harken/src/core; };
         libName = "harken_domain";
         dependencies = [
           {
@@ -9939,7 +9939,7 @@ rec {
             requiredFeatures = [ "cli" ];
           }
         ];
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../harken/demo; };
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../harken/src/demo; };
         libName = "harken_seed";
         dependencies = [
           {
@@ -14984,7 +14984,7 @@ rec {
         crateName = "money-app";
         version = "0.1.0";
         edition = "2021";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../money/app; };
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../money; };
         libName = "money_app";
         dependencies = [
           {
@@ -15068,7 +15068,7 @@ rec {
         crateName = "money-core";
         version = "0.1.0";
         edition = "2021";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../money/core; };
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../money/src/core; };
         libName = "money_core";
         dependencies = [
           {
@@ -15101,7 +15101,7 @@ rec {
             requiredFeatures = [ "cli" ];
           }
         ];
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../money/demo; };
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../money/src/demo; };
         libName = "money_seed";
         dependencies = [
           {

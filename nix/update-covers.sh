@@ -1,11 +1,11 @@
-# harken/demo/covers from the catalogue (harken/demo/catalogue.json): each
+# harken/src/demo/covers from the catalogue (harken/src/demo/catalogue.json): each
 # album's cover fetched, made at most 600 pixels and a JPEG, and kept under
 # the name harken-seed's `media::key` gives its address (the first sixteen
 # hex digits of its SHA-256), for the flake's `harken-covers`. Run from the
 # repository's root after the catalogue moves (`update-catalogue`).
 set -euo pipefail
-catalogue=harken/demo/catalogue.json
-out=harken/demo/covers
+catalogue=harken/src/demo/catalogue.json
+out=harken/src/demo/covers
 tmp=$(mktemp)
 trap 'rm -f "$tmp"' EXIT
 mkdir -p "$out"

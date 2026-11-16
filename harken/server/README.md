@@ -275,7 +275,7 @@ position, then a position, an early seek dropped — never drawn at the
 beginning on any device and within the bound of the speaker from the
 moment it starts, a drift followed without a command, and the trace
 (`tests/bridge.rs`); the session's own rules are the
-domain's transition tests (`harken/core/tests/listening.rs`); the scanner
+domain's transition tests (`harken/src/core/tests/listening.rs`); the scanner
 over real WAV files, tags written and read by lofty, covers beside a
 record and inside its tracks fetched where the log says, a retagged file
 the same song, a rescan of nothing new reading nothing, and `/media` range

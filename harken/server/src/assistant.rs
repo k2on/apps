@@ -1,6 +1,6 @@
 //! Home Assistant's media players, as devices in the listening session.
 //!
-//! A Sonos is a *device*, not a client. The session (`harken/core`'s
+//! A Sonos is a *device*, not a client. The session (`harken/src/core`'s
 //! `listening.*`, live state over volatile tables) already describes one — it
 //! stands in an account's session, is handed the sound, and says what
 //! happens to it — and nothing in that says the far end has to be
@@ -2929,7 +2929,7 @@ mod tests {
 /// machine current and wake the thread, which reads the sessions whole
 /// from the hub, which is in this process.
 ///
-/// A device is a session (`harken/core/devices.ark`), so a speaker's id
+/// A device is a session (`harken/src/core/devices.ark`), so a speaker's id
 /// in the session is its connection's session, `user@entity`, which two
 /// accounts' kitchens do not share; the bridge reads and says it as the
 /// entity ([`as_entities`]). A speaker's machine is kept for the life of

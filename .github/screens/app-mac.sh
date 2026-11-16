@@ -23,7 +23,7 @@ out=$1
 bundle_app=$2
 app=$3
 here=$(cd "$(dirname "$0")" && pwd)
-shots="$app/demo/shots.json"
+shots="$app/src/demo/shots.json"
 # A Mac app's Info.plist is under Contents/ (an iPhone app's at its root).
 exe="$bundle_app/Contents/MacOS/$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$bundle_app/Contents/Info.plist")"
 tmp=$(mktemp -d)

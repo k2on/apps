@@ -1,0 +1,34 @@
+[package]
+name = "harken-app"
+version = "0.1.0"
+workspace = "../rust"
+edition.workspace = true
+license.workspace = true
+description = "harken as an Ark app (ui/docs/app.md, harken's Port): its screens' state, messages, update and views in Rust, run by ark-app on every platform, and where it can be (its routes)."
+
+[lib]
+name = "harken_app"
+path = "src/lib.rs"
+
+[dependencies]
+ark = { path = "../rust/ark" }
+ark-app = { path = "../ui/rust/app" }
+ark-format = { path = "../rust/ark-format" }
+harken-domain = { path = "src/core" }
+# Its routes, spelled as paths (`src/routes.rs`).
+ark-router = { path = "../ui/rust/router" }
+# This device's own player (`src/sound.rs`): the media player module, taken
+# on by depending on it (its port's fake by default; a platform's behind
+# its feature, chosen by whoever builds the app).
+ark-media-player = { path = "../modules/ark-media-player" }
+
+[dev-dependencies]
+# The tests' store, a peer's, over the demo's library.
+ark-peer = { path = "../rust/ark-peer", default-features = false }
+harken-seed = { path = "src/demo", default-features = false }
+# harken as its phones run it against a deployed server (tests/deployed.rs):
+# its part of its host under ark-ffi's `Hosted`, as its generated library
+# puts them together.
+ark-ffi = { path = "../rust/ark-ffi" }
+serde_json = { workspace = true }
+tempfile = "3"

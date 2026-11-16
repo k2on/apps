@@ -50,7 +50,7 @@ out, and what that asked of ArkUI:
 | **Avatar** (`Avatar`, `PeopleLine`, `AccountButton`) | the account sheet; the face's picture loading (`Covers`) | a `ZStack` of a circle in the name's colour, the initials, the picture over them, clipped round | **avatar** — ArkUI already has it (`AccountFace` / `Part::Account`, money's toolbar); harken's `Avatar` is the same face at another size |
 
 What falls out is harken's own, so it is harken's: Rust compositions in
-`harken/app/src/parts.rs`, used by its `#[view]`s like any part. Each is
+`harken/src/components`, used by its `#[view]`s like any part. Each is
 the primitives below and ArkUI's press; nothing of it is per toolkit.
 
 | Component (`harken_app::parts`) | API | Composed of |

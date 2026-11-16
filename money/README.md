@@ -393,7 +393,7 @@ was authored while the server was away to push when it is back (until
 the page is closed: no durable replica yet). The page published as the
 demo (`<html data-ark-demo>`, the site's) is the demo household in the
 page instead, with no server — the screenshots', and the public demo's
-(`money/demo/shots.json`'s `web.demo`).
+(`money/src/demo/shots.json`'s `web.demo`).
 
 `money-peer SERVER USER wait PAYEE | add PAYEE AMOUNT`
 (`server/src/peer.rs`, beside the server's binary) is another device with

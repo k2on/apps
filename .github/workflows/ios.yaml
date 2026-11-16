@@ -90,18 +90,14 @@ on:
     paths: &paths
       - "harken/app.toml"
       - "harken/icon.svg"
-      - "harken/core/**"
-      - "harken/app/**"
-      # The demo's library, which harken's library links for its demo.
-      - "harken/demo/src/**"
-      - "harken/demo/catalogue.json"
-      - "harken/demo/shows.json"
+      # Its crate, its routes and screens, its domain, and the demo's
+      # library, which harken's library links for its demo; not its server.
+      - "harken/Cargo.toml"
+      - "harken/src/**"
       - "money/app.toml"
       - "money/icon.svg"
       - "ui/prebuild.py"
       - "nix/ark-app.nix"
-      - "money/core/**"
-      # The demo's household, which money's library links for its demo.
       # The crates the phones link, not the whole workspace: arkui, arkdb
       # and the desktop apps are none of an iPhone's.
       - "rust/ark/**"
@@ -112,8 +108,11 @@ on:
       - "rust/ark-format/**"
       - "ui/rust/router/**"
       - "ui/rust/router-macros/**"
-      # money's screens run in Rust, and the device modules it lists.
-      - "money/app/**"
+      # money's crate, its routes and screens, its domain and the demo's
+      # household, which its library links for its demo; and the device
+      # modules it lists.
+      - "money/Cargo.toml"
+      - "money/src/**"
       - "ui/rust/app/**"
       - "ui/rust/arkui-macros/**"
       - "ui/rust/module/**"

@@ -1,9 +1,11 @@
 //! An app's manifest (ui/docs/app.md, "The App's Declaration"): what its
 //! generated targets are written from that is said in its Rust, never in
 //! its app.toml. An app declares itself once, at its crate's root, with
-//! [`app!`](crate::app): its part of its host, each screen's runtime and
-//! `#[view]`, and each screen's further views (Settings, the menu bar's
-//! commands, a now-playing bar). Everything else follows by convention:
+//! [`app!`](crate::app) — which `ark_router::routes!` writes from its
+//! `src/app` folder, each screen a layout there: its part of its host, each
+//! screen's runtime and `#[view]`, and each screen's further views
+//! (Settings, the menu bar's commands, a now-playing bar). Everything else
+//! follows by convention:
 //!
 //! - **the names its generated code is written under**: a screen's runtime
 //!   object `<Screen>App` (its name in the declaration, `accounts` →
@@ -79,6 +81,10 @@ pub struct Decl {
     /// A screen the phone runs for as long as it shows it, beside its
     /// host's (`#[beside]`).
     pub beside: bool,
+    /// Where its screen's module is, from the app's crate's directory, a
+    /// layout's (`src/app/(tabs)/(budget)/_layout`: its own modules in the
+    /// folder of that name); empty where its path says (`src/accounts`).
+    pub dir: &'static str,
 }
 
 /// What takes an app's declared views ([`Declared::declare`]).
@@ -223,6 +229,13 @@ impl Manifest {
             let base = pascal(last(&d.path));
             let holder = own(d.screen).unwrap_or_else(|| base.clone());
             let module = d.path.rsplit_once("::").map_or("lib", |(m, _)| m);
+            // A layout's view is in its folder: `budget::view` is
+            // `<dir>/view.rs`, `budget` the layout's file itself.
+            let source = match (d.dir.is_empty(), module.split_once("::")) {
+                (true, _) => format!("src/{}.rs", module.replace("::", "/")),
+                (false, Some((_, rest))) => format!("{}/{}.rs", d.dir, rest.replace("::", "/")),
+                (false, None) => format!("{}.rs", d.dir),
+            };
             let (swift, kotlin) = match () {
                 _ if *commands => (format!("{part}Commands"), format!("{}{}Commands", part[..1].to_lowercase(), &part[1..])),
                 _ if !d.name.is_empty() || d.screen == H::SHELL => (format!("{base}View"), base.clone()),
@@ -236,7 +249,7 @@ impl Manifest {
                     kotlin,
                     kotlin_holder: format!("{holder}Holder"),
                     runtime: format!("{}App", pascal(d.screen)),
-                    source: format!("src/{}.rs", module.replace("::", "/")),
+                    source,
                     commands: *commands,
                 },
             ));
@@ -402,7 +415,9 @@ fn quoted(s: &str) -> String {
     out
 }
 
-/// An app's declaration, at its crate's root: its part of its host, named
+/// An app's declaration, at its crate's root — written by
+/// `ark_router::routes!` from its `src/app` folder, each screen `in` its
+/// layout's folder: its part of its host, named
 /// `App` there (what every generated target runs: `money_app::App`), and
 /// each screen it runs over a session — the field of the part that holds
 /// its runtime, the runtime's type and its `#[view]` — with its further
@@ -436,7 +451,7 @@ macro_rules! app {
         $vis:vis type $alias:ident = $host:path {
             $(
                 $(#[$mark:ident])?
-                $name:ident : $ty:path = $($view:ident)::+
+                $name:ident : $ty:path = $($view:ident)::+ $(in $dir:literal)?
                 $({ $($fname:ident : $($fview:ident)::+),* $(,)? })?
             ),* $(,)?
         }
@@ -452,11 +467,7 @@ macro_rules! app {
 
             fn declare<D: $crate::manifest::Declare>(d: &mut D) {
                 $(
-                    d.view(
-                        $crate::app!(@decl [$($mark)?], $name, $ty, "", $($view)::+),
-                        $($view)::+::record,
-                    );
-                    $($( $crate::app!(@further d, $name, $ty, $fname, $($fview)::+); )*)?
+                    $crate::app!(@screen d, [$($mark)?], $name, $ty, [$($dir)?], $($view)::+, [$($($fname : $($fview)::+),*)?]);
                 )*
             }
 
@@ -470,6 +481,10 @@ macro_rules! app {
             }
         }
     };
+    (@screen $d:ident, [$($mark:ident)?], $name:ident, $ty:path, $dir:tt, $($view:ident)::+, [$($fname:ident : $($fview:ident)::+),*]) => {
+        $d.view($crate::app!(@decl [$($mark)?], $name, $ty, "", $dir, $($view)::+), $($view)::+::record);
+        $( $crate::app!(@further $d, $name, $ty, $dir, $fname, $($fview)::+); )*
+    };
     (@has $host:path, [beside], $name:ident, $ty:path) => {};
     (@has $host:path, [$($mark:ident)?], $name:ident, $ty:path) => {
         impl $crate::host::Has<$ty> for $host {
@@ -481,7 +496,7 @@ macro_rules! app {
             }
         }
     };
-    (@decl [$($mark:ident)?], $name:ident, $ty:path, $further:expr, $($view:ident)::+) => {
+    (@decl [$($mark:ident)?], $name:ident, $ty:path, $further:expr, [$($dir:literal)?], $($view:ident)::+) => {
         $crate::manifest::Decl {
             screen: stringify!($name),
             name: $further,
@@ -490,12 +505,13 @@ macro_rules! app {
             msg: ::std::any::type_name::<<$ty as $crate::App>::Msg>(),
             path: stringify!($($view)::+).replace(' ', ""),
             beside: $crate::manifest::marked(&[(stringify!($($mark)?), "beside")], "beside", "") == "beside",
+            dir: $crate::manifest::marked(&[$(("dir", $dir))?], "dir", ""),
         }
     };
-    (@further $d:ident, $name:ident, $ty:path, commands, $($fview:ident)::+) => {
-        $d.commands($crate::app!(@decl [], $name, $ty, "commands", $($fview)::+), $($fview)::+);
+    (@further $d:ident, $name:ident, $ty:path, $dir:tt, commands, $($fview:ident)::+) => {
+        $d.commands($crate::app!(@decl [], $name, $ty, "commands", $dir, $($fview)::+), $($fview)::+);
     };
-    (@further $d:ident, $name:ident, $ty:path, $fname:ident, $($fview:ident)::+) => {
-        $d.view($crate::app!(@decl [], $name, $ty, stringify!($fname), $($fview)::+), $($fview)::+::record);
+    (@further $d:ident, $name:ident, $ty:path, $dir:tt, $fname:ident, $($fview:ident)::+) => {
+        $d.view($crate::app!(@decl [], $name, $ty, stringify!($fname), $dir, $($fview)::+), $($fview)::+::record);
     };
 }

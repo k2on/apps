@@ -4,11 +4,11 @@
 # older revision of this flake — the one k2on/os pins, by default — and
 # this build's clients dialling them, each walked the way a person goes:
 #
-#   money   the phone host (money/app/tests/deployed.rs): the first run,
+#   money   the phone host (money/tests/deployed.rs): the first run,
 #           the address typed, the dev sign-in, the demo's household synced
 #           from the old server, a transaction entered and confirmed there,
 #           and seen on a second phone signed in after it.
-#   harken  the phone host (harken/app/tests/deployed.rs), as money's: the
+#   harken  the phone host (harken/tests/deployed.rs), as money's: the
 #           first run, the address typed, the dev sign-in, the server's
 #           Favorites synced, a playlist made and confirmed there, and seen
 #           on a second device; then the listening session on that old

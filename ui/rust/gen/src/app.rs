@@ -145,7 +145,7 @@ pub fn main(app: App) {
 /// first run's among them, and `manifest`, the manifest itself as JSON
 /// (what ui/prebuild.py reads). `namespace` is its library's UniFFI
 /// namespace (`money_ffi`), `dir` its crate's directory from the
-/// repository's root (`money/app`), which each file's header names.
+/// repository's root (`money`), which each file's header names.
 ///
 ///   <generator> manifest                the manifest, as JSON
 ///   <generator> write DIR --package P   every view's Swift and Kotlin

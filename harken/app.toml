@@ -13,9 +13,9 @@ version = "0.1"
 accent = "gold"
 platforms = ["iphone", "ipad", "mac", "android", "desktop", "web"]
 # Everything else is said in its Rust and its Cargo (ui/docs/app.md, "The
-# App's Declaration"): its crate (harken/app), its screens, views and shell
-# (harken/app/src/lib.rs's `ark_app::app!`), what crosses to its phones,
-# its domain (harken/core), its demo (harken/demo), its device modules (its
+# App's Declaration"): its crate (harken), its screens, views and shell
+# (harken/src/lib.rs's `ark_app::app!`), what crosses to its phones,
+# its domain (harken/src/core), its demo (harken/src/demo), its device modules (its
 # crate's dependencies: the media player) and its scheme (harken://auth,
 # harken://album/…).
 

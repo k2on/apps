@@ -1,7 +1,8 @@
 # An Ark app, from its directory (ui/docs/app.md, "Generated, Not
 # Committed"): Expo's Continuous Native Generation, in nix. An app commits
-# its app.toml, its icon.svg, its Rust (core/, app/, server/) and what is
-# not written in Rust yet (native/); this generates everything native:
+# its app.toml, its icon.svg and its Rust (its crate at its root, its
+# routes in src/app, its core and demo crates in src/core and src/demo,
+# server/); this generates everything native:
 #
 #   crates      the app's generated crates, in crate2nix's form, for
 #               nix/rust.nix to resolve and build beside the workspace's:
@@ -33,17 +34,17 @@ let
   # The package at `d` (from the repository's root), or null.
   packageAt = d: if builtins.pathExists (self + "/${d}/Cargo.toml") then (toml "${d}/Cargo.toml").package.name else null;
   # An app: its app.toml, and what its Cargo says beside it, as
-  # ui/prebuild.py's `app_of` derives it — its crate (`<dir>/app`, else
-  # `<dir>`), and for an app with data its domain (`<dir>/core`'s
-  # `shared`), its demo (`<dir>/demo`), its scheme (its id) and the object
-  # its phones hold (`<Name>Host`). What its crate declares (its screens,
-  # what crosses) is its manifest's, read by ui/prebuild.py, never here.
+  # ui/prebuild.py's `app_of` derives it — its crate (`<dir>`), and for an
+  # app with data its domain (`<dir>/src/core`'s `shared`), its demo
+  # (`<dir>/src/demo`), its scheme (its id) and the object its phones hold
+  # (`<Name>Host`). What its crate declares (its screens, what crosses) is
+  # its manifest's, read by ui/prebuild.py, never here.
   read = dir:
     let
       a = toml "${dir}/app.toml" // { inherit dir; };
-      crate = if packageAt "${dir}/app" != null then packageAt "${dir}/app" else packageAt dir;
-      core = packageAt "${dir}/core";
-      demo = packageAt "${dir}/demo";
+      crate = packageAt dir;
+      core = packageAt "${dir}/src/core";
+      demo = packageAt "${dir}/src/demo";
     in
     a // lib.optionalAttrs (crate != null) { inherit crate; }
     // lib.optionalAttrs (crate != null && core != null) {
@@ -57,10 +58,10 @@ rec {
   # The Cargo manifests ui/prebuild.py reads of an app beside its app.toml:
   # its crate's, its domain's and its demo's.
   cargoFiles = a: lib.filter (f: builtins.pathExists (self + "/${f}"))
-    [ "${crateDir a}/Cargo.toml" "${a.dir}/core/Cargo.toml" "${a.dir}/demo/Cargo.toml" ];
+    [ "${a.dir}/Cargo.toml" "${a.dir}/src/core/Cargo.toml" "${a.dir}/src/demo/Cargo.toml" ];
 
   # The app's manifest (ui/docs/app.md, "The App's Declaration"): what its
-  # crate declares (`ark_app::app!`) — its screens and their views, its
+  # crate declares (`ark_router::routes!` over its src/app) — its screens and their views, its
   # shell, what crosses to its phones — as JSON, printed by its generator
   # (`<id>-gen manifest`, built by `build`), which ui/prebuild.py reads
   # (`ARK_MANIFEST`) for its phones' library and entry points.
@@ -215,15 +216,12 @@ rec {
   # The modules whose browser device the page registers (module.toml's `[web]`).
   webModules = a: map (m: m.name) (lib.filter (m: m.toml ? web) (modulesOf a));
 
-  # The app's crate's directory: `<dir>/app`, or the app's directory itself
-  # where its crate is (an app with no core, server or demo: the docs).
-  crateDir = a: if builtins.pathExists (self + "/${a.dir}/app/Cargo.toml") then "${a.dir}/app" else a.dir;
-  # `money/app/../../modules/ark-camera` as `modules/ark-camera`.
+  # `money/../modules/ark-camera` as `modules/ark-camera`.
   normal = p: lib.concatStringsSep "/" (lib.foldl'
     (acc: seg: if seg == ".." then lib.init acc else if seg == "." || seg == "" then acc else acc ++ [ seg ])
     [ ] (lib.splitString "/" p));
   # The device modules an app takes on: the crates its app crate
-  # (`<dir>/app`) depends on, directly or through its other path
+  # (`<dir>`) depends on, directly or through its other path
   # dependencies (normal and build, never dev, never one a feature turns
   # on: arkui's desktop devices are the desktop's, not every app's), whose Cargo.toml says
   # `[package.metadata.ark] module` — what ui/prebuild.py reads of `cargo
@@ -237,7 +235,7 @@ rec {
         lib.concatMap (d: lib.optional (builtins.isAttrs d && d ? path && !(d.optional or false)) (normal "${dir}/${d.path}"))
           (builtins.attrValues ((m.dependencies or { }) // (m.build-dependencies or { })));
       reached = builtins.genericClosure {
-        startSet = [{ key = crateDir a; }];
+        startSet = [{ key = a.dir; }];
         operator = item: map (key: { inherit key; }) (paths item.key);
       };
       isModule = dir: ((manifest dir).package.metadata.ark.module or null) != null;

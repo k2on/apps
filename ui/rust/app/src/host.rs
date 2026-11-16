@@ -503,6 +503,16 @@ pub trait HostedApp: Sized + 'static {
     }
 }
 
+/// What a route does to an app's screens, written by `ark_router::routes!`
+/// from its folder: the tab it is in selected, the screen that shows it
+/// told, a page pushed. The app's [`HostedApp::route`] asks it first and
+/// does the rest itself with what it hands back: a route the shell shows
+/// outside a tab (a sheet, Settings, an inspector) is the app's own.
+pub trait Routed: HostedApp {
+    /// `route` carried out, or handed back when it is the app's own.
+    fn routed(&mut self, route: Self::Route, cx: &mut Cx<'_, Self>) -> Option<Self::Route>;
+}
+
 /// An app's part that runs `A` as one of its screens.
 pub trait Has<A: App> {
     fn screen(&self) -> &Screen<A>;

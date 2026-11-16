@@ -49,7 +49,7 @@ fn catalogue_json_is_what_the_catalogue_prints() {
 struct Site;
 
 impl arkui_web::WebHosted for Site {
-    type App = crate::app::Docs;
+    type App = crate::host::Docs;
     const ID: &'static str = "docs";
     const NAME: &'static str = "ArkUI";
     const SCHEME: &'static str = "docs";
@@ -77,7 +77,7 @@ fn site() -> arkui_web::WebHost<Site> {
 }
 
 /// `m` taken by the site's window.
-fn tell(app: &mut arkui_web::WebHost<Site>, m: crate::app::Msg) {
+fn tell(app: &mut arkui_web::WebHost<Site>, m: crate::host::Msg) {
     app.update(arkui_web::HostMsg::App(m));
 }
 
@@ -156,19 +156,19 @@ fn every_page_leads_to_the_next() {
     assert_eq!(order[1], "foundations");
     let at = |t: &str| order.iter().position(|o| o == t).unwrap();
     assert_eq!(at("overlays") + 1, at("menu"));
-    tell(&mut app, crate::app::Msg::Go { tag: "menu".into() });
-    tell(&mut app, crate::app::Msg::Step(-1));
+    tell(&mut app, crate::host::Msg::Go { tag: "menu".into() });
+    tell(&mut app, crate::host::Msg::Step(-1));
     assert_eq!(app.route().path_url(), "/overlays/");
-    tell(&mut app, crate::app::Msg::Step(1));
-    tell(&mut app, crate::app::Msg::Step(1));
+    tell(&mut app, crate::host::Msg::Step(1));
+    tell(&mut app, crate::host::Msg::Step(1));
     assert_eq!(app.route().path_url(), "/command/");
     tell(
         &mut app,
-        crate::app::Msg::Go {
+        crate::host::Msg::Go {
             tag: order.last().unwrap().clone(),
         },
     );
-    tell(&mut app, crate::app::Msg::Step(1));
+    tell(&mut app, crate::host::Msg::Step(1));
     assert_eq!(app.route().path_url(), format!("/{}/", order.last().unwrap()), "past the last, it stays");
 }
 
@@ -178,9 +178,9 @@ fn every_page_leads_to_the_next() {
 #[test]
 fn every_page_is_a_path_and_the_search_is_not() {
     let mut app = site();
-    tell(&mut app, crate::app::Msg::Go { tag: "menu".into() });
+    tell(&mut app, crate::host::Msg::Go { tag: "menu".into() });
     assert_eq!(app.route().path_url(), "/menu/");
-    tell(&mut app, crate::app::Msg::Search { text: "spring".into() });
+    tell(&mut app, crate::host::Msg::Search { text: "spring".into() });
     assert_eq!(app.route().path_url(), "/menu/");
     assert_eq!(app.route().get("q"), Some("spring"));
     assert_eq!(app.paths().len(), COMPONENTS.len() + 2 + Section::ALL.len());
@@ -188,8 +188,8 @@ fn every_page_is_a_path_and_the_search_is_not() {
     let found = app.app().found();
     assert!(found.iter().any(|h| h.tag == "springs"), "{found:?}");
     assert!(found.iter().all(|h| h.tag != "overview" || h.title == "ArkUI"));
-    tell(&mut app, crate::app::Msg::Phone { phone: "ios".into() });
+    tell(&mut app, crate::host::Msg::Phone { phone: "ios".into() });
     assert_eq!(app.route().get("phone"), Some("ios"), "the phone is the reader's, in the query");
-    tell(&mut app, crate::app::Msg::Go { tag: "nowhere".into() });
+    tell(&mut app, crate::host::Msg::Go { tag: "nowhere".into() });
     assert_eq!(app.route().path_url(), "/");
 }

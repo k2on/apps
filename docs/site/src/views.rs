@@ -6,7 +6,7 @@ use ark_app::view;
 use ark_app::view::*;
 use ark_app::writing::writing;
 
-use crate::app::Msg;
+use crate::host::Msg;
 
 /// What the shell reads.
 #[derive(Clone, Debug)]

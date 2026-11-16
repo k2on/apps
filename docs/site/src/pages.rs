@@ -114,7 +114,7 @@ fn bare(s: &str) -> String {
 
 /// Where a page is, under `base`: its route's URL there.
 pub fn href(base: &str, tag: &str) -> String {
-    crate::routes::Route::of(tag).address().url_under(base)
+    crate::Route::of(tag).address().url_under(base)
 }
 
 /// Every page, in the sidebar's order: the overview, the index, then each

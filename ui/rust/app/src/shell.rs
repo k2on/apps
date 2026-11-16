@@ -28,6 +28,21 @@
 //! ```
 
 use crate::view::{DialogAction, Input, Part, Placement, Val, View};
+use crate::App;
+
+/// A shell that routes move (`ark_router::routes!`): a tab selected for a
+/// route in `(tabs)`, and a page pushed onto the shown tab's stack for a
+/// route its folder's screen shows outside them.
+pub trait Navigates: App {
+    /// The message that shows the tab tagged `tag` (a group's name under
+    /// `(tabs)`, or a route's `#[tab = "…"]`).
+    fn select(tag: String) -> Self::Msg;
+    /// The message that pushes `route`'s page onto the shown tab's stack;
+    /// none (the default) for a shell with no stack of its own.
+    fn push(_route: &Self::Route) -> Option<Self::Msg> {
+        None
+    }
+}
 
 /// The app's sections: a sidebar on a regular width and the Mac, a tab bar
 /// when compact. `tabs` are [`section_tab`]s and [`tab_group`]s; `selected`

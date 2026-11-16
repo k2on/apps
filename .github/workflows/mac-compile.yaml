@@ -44,9 +44,9 @@ jobs:
           authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
           pushFilter: "macOS-SDK"
       # And what of the Mac's servers is Linux's (money's browser client):
-      # each <app>/demo/server.sh's packages, as `compile` builds them.
+      # each <app>/src/demo/server.sh's packages, as `compile` builds them.
       - run: |
-          servers=$(cat */demo/server.sh | grep -o '\.#[A-Za-z0-9_-]*' | cut -c3- | sort -u)
+          servers=$(cat */src/demo/server.sh | grep -o '\.#[A-Za-z0-9_-]*' | cut -c3- | sort -u)
           bash .github/apple-ahead.sh . "$RUNNER_TEMP/kernels.txt" money-ios-simulator money-macos money-ios-archive harken-ios-simulator harken-macos ark-app-fixture-ios $servers
 
   compile:
@@ -68,7 +68,7 @@ jobs:
           name: ${{ vars.CACHIX_NAME }}
           authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
           pushFilter: "[Xx]code([^Gg]|$)|macOS-SDK"
-      # The Mac's servers (each <app>/demo/server.sh's packages: the very
+      # The Mac's servers (each <app>/src/demo/server.sh's packages: the very
       # `nix build` app-screens' ios job runs for its servers), built under
       # the kernels and the Xcode builds and pushed, so that app-screens
       # fetches them rather than compile them (13.6 minutes in app-screens
@@ -76,7 +76,7 @@ jobs:
       # background: a background process outlives its step.
       - name: Start building the servers
         run: |
-          refs=$(cat */demo/server.sh | grep -o '\.#[A-Za-z0-9_-]*' | sort -u | tr '\n' ' ')
+          refs=$(cat */src/demo/server.sh | grep -o '\.#[A-Za-z0-9_-]*' | sort -u | tr '\n' ' ')
           echo "$refs"
           nohup bash -c 'start=$(date +%s); nix build --no-link --keep-going -L $0 > "$RUNNER_TEMP/servers.log" 2>&1; r=$?; echo "the servers built or fetched in $(( $(date +%s) - start ))s" >> "$RUNNER_TEMP/servers.log"; echo $r > "$RUNNER_TEMP/servers.status"' "$refs" < /dev/null > /dev/null 2>&1 &
       - name: Kernels

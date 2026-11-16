@@ -24,9 +24,12 @@
 //! type's default. A pattern's last `:name` in the path takes the rest of it,
 //! so a slash an old link left unescaped in it survives.
 //!
-//! A query field is a `String`, which an address must carry, or an
-//! `Option<String>`, which is left out when it is `None` and read as `None`
-//! when it is missing or empty. A query is read in any order, and a key a
+//! A field is typed: its type is an `ark_router::Param` (a `String`, a
+//! number, a flag), which says how it is written and read back, and a
+//! segment that does not read as one is no match. A query field is a
+//! `Param`, which an address must carry, or an `Option` of one, which is
+//! left out when it is `None` and read as `None` when it is missing, empty
+//! or not one. A query is read in any order, and a key a
 //! pattern does not name is the UI's (`?inspector=1`), not the route's: it
 //! is passed over.
 use proc_macro2::TokenStream;
@@ -122,9 +125,20 @@ fn parse_pattern(lit: &LitStr) -> syn::Result<Pattern> {
     Ok(Pattern { segs, query })
 }
 
-/// Whether a field's type is `Option<…>`.
-fn optional(t: &Type) -> bool {
-    matches!(t, Type::Path(p) if p.path.segments.last().is_some_and(|s| s.ident == "Option"))
+/// The `T` of a field typed `Option<T>`.
+fn optional(t: &Type) -> Option<Type> {
+    let Type::Path(p) = t else { return None };
+    let last = p.path.segments.last()?;
+    if last.ident != "Option" {
+        return None;
+    }
+    match &last.arguments {
+        syn::PathArguments::AngleBracketed(a) => a.args.iter().find_map(|a| match a {
+            syn::GenericArgument::Type(t) => Some(t.clone()),
+            _ => None,
+        }),
+        _ => None,
+    }
 }
 
 pub fn routes(input: DeriveInput) -> syn::Result<TokenStream> {
@@ -151,15 +165,26 @@ pub fn routes(input: DeriveInput) -> syn::Result<TokenStream> {
         if patterns.is_empty() {
             return Err(Error::new(vi.span(), "every route needs a #[route(\"/…\")]"));
         }
-        let fields: Vec<(syn::Ident, bool)> = match &v.fields {
-            Fields::Named(f) => f.named.iter().map(|f| (f.ident.clone().unwrap(), optional(&f.ty))).collect(),
+        // Each field, its type, and the `T` of an `Option<T>`.
+        let fields: Vec<(syn::Ident, Type, Option<Type>)> = match &v.fields {
+            Fields::Named(f) => f
+                .named
+                .iter()
+                .map(|f| (f.ident.clone().unwrap(), f.ty.clone(), optional(&f.ty)))
+                .collect(),
             Fields::Unit => vec![],
             Fields::Unnamed(_) => return Err(Error::new(vi.span(), "a route's fields are named, as its path's are")),
         };
-        let is_optional = |i: &syn::Ident| fields.iter().any(|(f, o)| f == i && *o);
+        let is_optional = |i: &syn::Ident| fields.iter().any(|(f, _, o)| f == i && o.is_some());
+        let ty = |i: &syn::Ident| {
+            fields
+                .iter()
+                .find(|(f, ..)| f == i)
+                .map(|(_, t, o)| o.clone().unwrap_or_else(|| t.clone()))
+        };
         for p in &patterns {
             for i in p.fields().chain(p.slug()) {
-                if !fields.iter().any(|(f, _)| f == i) {
+                if !fields.iter().any(|(f, ..)| f == i) {
                     return Err(Error::new(i.span(), format!("`{vi}` has no field `{i}`")));
                 }
             }
@@ -189,7 +214,7 @@ pub fn routes(input: DeriveInput) -> syn::Result<TokenStream> {
             }
             let pushes = p.segs.iter().map(|s| match s {
                 Seg::Lit(l) => quote! { out.push(::std::string::String::from(#l)); },
-                Seg::Param(i, _) => quote! { out.push(::std::clone::Clone::clone(#i)); },
+                Seg::Param(i, _) => quote! { out.push(::ark_router::Param::param(#i)); },
                 Seg::Slug(i) => quote! {
                     if slugs {
                         let slug = ::ark_router::url::slug(#i);
@@ -200,11 +225,12 @@ pub fn routes(input: DeriveInput) -> syn::Result<TokenStream> {
                 },
             });
             let queries = p.query.iter().map(|(k, f)| match is_optional(f) {
-                false => quote! { query.push((::std::string::String::from(#k), ::std::clone::Clone::clone(#f))); },
+                false => quote! { query.push((::std::string::String::from(#k), ::ark_router::Param::param(#f))); },
                 true => quote! {
                     if let ::core::option::Option::Some(value) = #f {
+                        let value = ::ark_router::Param::param(value);
                         if !value.is_empty() {
-                            query.push((::std::string::String::from(#k), ::std::clone::Clone::clone(value)));
+                            query.push((::std::string::String::from(#k), value));
                         }
                     }
                 },
@@ -221,7 +247,7 @@ pub fn routes(input: DeriveInput) -> syn::Result<TokenStream> {
             _ => {
                 let fallback = choices[0].2.clone();
                 let arms = choices.iter().map(|(_, needs, body)| {
-                    let conds = needs.iter().map(|i| quote!(!#i.is_empty()));
+                    let conds = needs.iter().map(|i| quote!(!::ark_router::Param::param(#i).is_empty()));
                     quote! { if true #(&& #conds)* { #body } else }
                 });
                 quote! { #(#arms)* { #fallback } }
@@ -245,22 +271,33 @@ pub fn routes(input: DeriveInput) -> syn::Result<TokenStream> {
                 _ => None,
             });
             let lets = p.segs.iter().enumerate().filter_map(|(i, s)| match s {
-                Seg::Param(f, true) => Some(quote! {
-                    let #f = ::ark_router::url::id(parts[#i])?;
-                }),
-                Seg::Param(f, false) if last_param && i + 1 == n => Some(quote! {
-                    let #f = parts[#i..].join("/");
-                    if #f.is_empty() { return ::core::option::Option::None; }
-                }),
-                Seg::Param(f, false) => Some(quote! {
-                    let #f = ::std::string::String::from(parts[#i]);
-                    if #f.is_empty() { return ::core::option::Option::None; }
-                }),
+                Seg::Param(f, true) => {
+                    let t = ty(f);
+                    Some(quote! {
+                        let #f = <#t as ::ark_router::Param>::of_param(&::ark_router::url::id(parts[#i])?)?;
+                    })
+                }
+                Seg::Param(f, false) if last_param && i + 1 == n => {
+                    let t = ty(f);
+                    Some(quote! {
+                        let #f = parts[#i..].join("/");
+                        if #f.is_empty() { return ::core::option::Option::None; }
+                        let #f = <#t as ::ark_router::Param>::of_param(&#f)?;
+                    })
+                }
+                Seg::Param(f, false) => {
+                    let t = ty(f);
+                    Some(quote! {
+                        if parts[#i].is_empty() { return ::core::option::Option::None; }
+                        let #f = <#t as ::ark_router::Param>::of_param(parts[#i])?;
+                    })
+                }
                 Seg::Lit(_) | Seg::Slug(_) => None,
             });
             let query_lets = p.query.iter().map(|(k, f)| {
+                let t = ty(f);
                 let found = quote! {
-                    address.get(#k).filter(|v| !v.is_empty()).map(::std::string::String::from)
+                    address.get(#k).filter(|v| !v.is_empty()).and_then(<#t as ::ark_router::Param>::of_param)
                 };
                 match is_optional(f) {
                     true => quote! { let #f = #found; },
@@ -270,7 +307,7 @@ pub fn routes(input: DeriveInput) -> syn::Result<TokenStream> {
             let build = match &v.fields {
                 Fields::Unit => quote!(#name::#vi),
                 _ => {
-                    let inits = fields.iter().map(|(f, _)| match p.fields().any(|i| i == f) {
+                    let inits = fields.iter().map(|(f, ..)| match p.fields().any(|i| i == f) {
                         true => quote!(#f),
                         false => quote!(#f: ::core::default::Default::default()),
                     });

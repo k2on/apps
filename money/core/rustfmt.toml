@@ -1,3 +1,0 @@
-# The engine workspace's width, so `cargo fmt --check` from ../../rust reads
-# this crate by the same rule as the rest of it.
-max_width = 150

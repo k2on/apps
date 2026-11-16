@@ -10,7 +10,7 @@
     rust-overlay.inputs.nixpkgs.follows = "nixpkgs";
 
     # The classical catalogue (github.com/k2on/classical): what the demo's
-    # library is made of (harken/demo/catalogue.json, the copy
+    # library is made of (harken/src/demo/catalogue.json, the copy
     # `nix run .#update-catalogue` writes and checks.catalogue holds to
     # this). Over git for the reason above; plain files, built by its
     # catalogue.nix.
@@ -80,7 +80,7 @@
       channelsOf = pkgs: import ./nix/channels.nix { inherit lib pkgs self; };
       arkApps = [ "harken" "money" "revelation" ];
 
-      rustDirs = [ "rust" "ui/rust" "modules" "harken/core" "harken/app" "harken/server" "money/core" "money/demo" "money/app" "money/server" "harken/demo" ];
+      rustDirs = [ "rust" "ui/rust" "modules" ] ++ lib.concatMap (app: map (p: "${app}/${p}") [ "Cargo.toml" "rustfmt.toml" "src" "tests" "server" ]) [ "harken" "money" ];
       # The wasm-bindgen CLI must be the exact version of the `wasm-bindgen`
       # crate the workspace locked, or the glue it writes does not match the
       # module's imports and the page fails at load with a name nobody
@@ -342,7 +342,7 @@
             makeWrapper ${money-server-bin}/bin/money-server $out/bin/money-server --set-default MONEY_WEB ${if pkgs.stdenv.hostPlatform.isDarwin then outputs.x86_64-linux.packages.money-web else money-web}
           '';
           # Each app's demo data (docs/seed.md): `<app>-seed DATA` writes what
-          # that app's server boots seeded from; money's is money/demo.
+          # that app's server boots seeded from; money's is money/src/demo.
           money-seed = serverCrate "money-seed";
           # Each Ark app's generated pieces (nix/ark-app.nix): its
           # generator, the SwiftUI and Compose of its #[view]s (`<app>-ui`),
@@ -378,14 +378,14 @@
             cargo metadata --no-deps --offline --format-version 1 > $out
           '';
           harken-seed = serverCrate "harken-seed";
-          # The catalogue's covers, kept in the repository (harken/demo/covers,
+          # The catalogue's covers, kept in the repository (harken/src/demo/covers,
           # each 600 pixels at most, named as harken-seed's `media::key` names
           # them: the first sixteen hex digits of the address's SHA-256), so
           # seeding fetches nothing (`harken-seed --covers`) and every run has
           # the same bytes: a host's thumbnails are not the same bytes from
           # one fetch to the next, which a hash pinned against them failed on.
-          harken-covers = builtins.path { path = ./harken/demo/covers; name = "harken-covers"; };
-          # `nix run .#update-covers`: harken/demo/covers from the catalogue,
+          harken-covers = builtins.path { path = ./harken/src/demo/covers; name = "harken-covers"; };
+          # `nix run .#update-covers`: harken/src/demo/covers from the catalogue,
           # each fetched and made small, after the catalogue moves.
           update-covers = pkgs.writeShellApplication {
             name = "update-covers";
@@ -1799,11 +1799,11 @@
             installPhase = "touch $out";
           };
 
-          # harken's domain (harken/core: plain Rust, §1.16) built, and
+          # harken's domain (harken/src/core: plain Rust, §1.16) built, and
           # its schema's hash held to the one its tests pin.
           harken-domain = crateTests {
             name = "harken-domain";
-            crates = [ { packageId = "harken-domain"; member = "harken/core"; } ];
+            crates = [ { packageId = "harken-domain"; member = "harken/src/core"; } ];
             targets = [ "port" ];
             args = "the_schema_hash_is_pinned";
           };
@@ -1982,9 +1982,9 @@
           # embeds made from it.
           classical = pkgs.writeText "catalogue.json" (import "${inputs.classical}/catalogue.nix");
           update-catalogue = pkgs.writeShellScriptBin "update-catalogue" ''
-            cp ${classical} harken/demo/catalogue.json
-            chmod 644 harken/demo/catalogue.json
-            echo "harken/demo/catalogue.json is the catalogue at ${inputs.classical.shortRev or "?"}"
+            cp ${classical} harken/src/demo/catalogue.json
+            chmod 644 harken/src/demo/catalogue.json
+            echo "harken/src/demo/catalogue.json is the catalogue at ${inputs.classical.shortRev or "?"}"
           '';
         in
         {
@@ -2030,7 +2030,7 @@
             inherit money-seed harken-seed harken-covers money-demo harken-demo;
           } // {
             # money's library for its phones (the generated shim over
-            # money/app), as harken's.
+            # money), as harken's.
             inherit money-android-lib money-ios-xcframework;
             default = ark;
             inherit harken-apk;
@@ -2124,8 +2124,8 @@
             # The demo's copy of the catalogue is the `classical` input's:
             # `nix flake update classical` then `nix run .#update-catalogue`.
             catalogue = pkgs.runCommand "catalogue-current" { } ''
-              cmp ${classical} ${./harken/demo/catalogue.json} || {
-                echo "harken/demo/catalogue.json is not the classical input's: nix run .#update-catalogue" >&2
+              cmp ${classical} ${./harken/src/demo/catalogue.json} || {
+                echo "harken/src/demo/catalogue.json is not the classical input's: nix run .#update-catalogue" >&2
                 exit 1
               }
               touch $out
@@ -2260,7 +2260,7 @@
             # The workspace formatted as each crate's rustfmt.toml says.
             fmt = rustfmtCheck "arkdb" (only (rustDirs ++ [ "ui/rustfmt.toml" ]));
             # harken's domain crate builds, and its schema's hash is the one
-            # pinned (harken/core/tests/port.rs).
+            # pinned (harken/src/core/tests/port.rs).
             inherit harken-domain;
             # The bridge (§1.16, N3): ark-ffi builds natively, its tests drive
             # the whole surface in the process (a server in it, a mutate and
@@ -2330,7 +2330,7 @@
           # nix/channels.nix): a page goes up at k2on.github.io/apps/<path>/,
           # an APK into the channel's F-Droid repository (and a tag's onto
           # its release), an iPhone app to TestFlight from a tag (ios.yaml); and each app with
-          # <name>/demo/shots.json is photographed on the phones and the
+          # <name>/src/demo/shots.json is photographed on the phones and the
           # desktop it is listed for (app-screens.yaml). Adding one is adding it here; the
           # workflow builds each in a job of its own.
           #

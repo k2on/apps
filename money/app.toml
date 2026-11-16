@@ -12,9 +12,9 @@ version = "0.1"
 accent = "green"
 platforms = ["iphone", "ipad", "mac", "android", "desktop", "web"]
 # Everything else is said in its Rust and its Cargo (ui/docs/app.md, "The
-# App's Declaration"): its crate (money/app), its screens, views and shell
-# (money/app/src/lib.rs's `ark_app::app!`), what crosses to its phones, its
-# domain (money/core), its demo (money/demo), its device modules (its
+# App's Declaration"): its crate (money), its screens, views and shell
+# (money/src/lib.rs's `ark_app::app!`), what crosses to its phones, its
+# domain (money/src/core), its demo (money/src/demo), its device modules (its
 # crate's dependencies) and its scheme (money://auth, money://account/…).
 
 [icon]

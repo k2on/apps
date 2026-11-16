@@ -136,7 +136,7 @@ for a in "$@"; do
   apk=$(find "$apks/apk-$a" -name '*.apk' 2>/dev/null | head -1)
   # Nothing published for it yet: said where it was fetched, and its shots kept.
   [ -n "$apk" ] || { echo "$a: no APK to take; skipped"; continue; }
-  server=$(jq -r '.server.port // empty | "http://10.0.2.2:\(.)"' "$a/demo/shots.json")
+  server=$(jq -r '.server.port // empty | "http://10.0.2.2:\(.)"' "$a/src/demo/shots.json")
   case $device in
     phone)
       bash "$here/app-android.sh" "$out/$a/android" "$apk" "$a" "$server" ||
@@ -152,7 +152,7 @@ for a in "$@"; do
       # `walk`) is a new install in each, walked from its first run; the
       # others are signed in once, open, and keep the login folded.
       kept=1
-      jq -e '.walk' "$a/demo/shots.json" > /dev/null && kept=
+      jq -e '.walk' "$a/src/demo/shots.json" > /dev/null && kept=
       if opened; then
         echo "$a: the Fold is open already ($(adb shell cmd device_state state 2>/dev/null | tr -d '\r' | grep -i committed))"
       else

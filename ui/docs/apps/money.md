@@ -4,7 +4,7 @@ A household's budget, YNAB's way, designed as a standard macOS SwiftUI app
 first (ui/docs/design.md) and adapting from there. Its shape is Food
 Truck's: a sidebar of sections, each a content list, a detail, a toolbar,
 an inspector and a Settings scene. Only the Accounts slice is written in
-ark-app today (money/app); the rest is the plan for the port.
+ark-app today (money); the rest is the plan for the port.
 
 ## Scenes
 
@@ -57,7 +57,7 @@ toolbar.
 
 ## The Shell (Written)
 
-`money/app/src/shell` is the design above in ark-app's shell vocabulary:
+`money/src/app/_layout.rs` (the shell) is the design above in ark-app's shell vocabulary:
 `MoneyShell` (its state: the section, the inspector, the search, a pushed
 detail), `money_shell` (the four sections, each `toolbar` over
 `searchable`/`split_view`/`inspector` and a hosted screen), `money_settings`
@@ -67,7 +67,7 @@ detail), `money_shell` (the four sections, each `toolbar` over
 through money-ffi's `ShellApp`; drawn on the desktop by
 `arkui::view::shell`, hosted by arkui's `host` over money-app's window.
 
-The inspectors are Rust's (`money/app/src/shell/inspect.rs`, the views
+The inspectors are Rust's (`money/src/app/_layout/inspect.rs`, the views
 `category_inspector` and `transaction_inspector`): the shell holds the
 month's lines and every account's register, the platforms tell it what
 is selected (`InspectCategory`, `InspectTransaction`; a launch's

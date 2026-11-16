@@ -24,6 +24,6 @@ tower = { version = "0.5", features = ["util"] }
 # The fixtures are apps' parts of their hosts, as every app's is; one is
 # over money's domain, its roles and its views as they are.
 ark-app = { path = "../app" }
-money-core = { path = "../../../money/core" }
+money-core = { path = "../../../money/src/core" }
 ureq = { version = "2", default-features = false }
 tempfile = "3"

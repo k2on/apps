@@ -186,7 +186,7 @@ fn a_fanout_encodes_once() {
     assert!(many <= ten + 150 + 8, "one push allocated {ten} times to 10 connections, {many} to 160");
 }
 
-/// harken's `media` table, as `harken/core/src/schema.rs` declares it.
+/// harken's `media` table, as `harken/src/core/src/schema.rs` declares it.
 fn media_schema() -> Schema {
     let t = Table::new("media")
         .col("id", Type::Id("media".into()))

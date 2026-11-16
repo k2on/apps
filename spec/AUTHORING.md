@@ -5,7 +5,7 @@ its inputs and its functions, registered by name in a `Domain` the kernel
 runs. There is one runtime; a peer finds a function by the name an entry
 carries, and code never crosses the wire. Everything below comes from
 `ark::prelude::*`. Every example is cut from `rust/arkdb/src/demo.rs`
-or `harken/core/src/` (a line `// …` skips some), and
+or `harken/src/core/src/` (a line `// …` skips some), and
 `rust/arkdb/tests/authoring.rs` holds each to its source.
 
 ## Rows and the schema

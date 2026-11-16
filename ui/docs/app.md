@@ -22,9 +22,10 @@ demo with them until its Leptos client exists. What has no UI stays wasm-capable
 `web`, ark-format, ark-router, ark-app and the modules' `web` impls.
 
 ```
- money/core           the domain: its rows, rules and views' keys; no UniFFI, no peer
- money/app            the app: State, Msg, update, screen records, #[view] layouts
- money/demo           the demo's household on a peer and a disk, and `money-seed`
+ money                the app (money-app): its host's part, State, Msg, update, screen records, #[view] layouts
+ money/src/app        its routes and screens, a folder (`ark_router::routes!`)
+ money/src/core       the domain: its rows, rules and views' keys; no UniFFI, no peer
+ money/src/demo       the demo's household on a peer and a disk, and `money-seed`
    └ ark-app          the runtime (App, Runtime, Host, Command) and the view vocabulary (ui/rust/app)
    └ ark-module       the device's plumbing (ui/rust/module)
    └ ark-<name>       a device module each: modules/ark-haptics, clipboard, share, camera, …
@@ -71,7 +72,7 @@ behind the phones' bridge, in the iced window and in wasm.
 A runtime's `Host` is what carries its commands out for one message. No
 shell writes one any more: `ark_app::host::Screen` is a runtime with its
 host written once over the platform's place (below), and the tests'
-(`money/app/src/testing.rs`, over the demo household and the modules'
+(`money/src/testing.rs`, over the demo household and the modules'
 fakes) is the one other.
 
 ### The App's Part of Its Host: `ark_app::host`
@@ -147,7 +148,7 @@ Each platform has one place and drives the one loop:
 | iPhone, iPad, Mac, Android | ark-ffi's `PhonePlace` (the session's views over the process's peer, the process's modules, the login, the link) | ark-ffi's `Hosted<P>`, the `HostApp` under `ArkHost`; one UniFFI object per screen (`ark_ffi::hosted_screen!`; one the phone runs for as long as it shows it, `beside`) |
 | Browser | arkui-web's `WebPlace` (the page's replica and store; `Seen` to read) | `arkui_web::host::WebHost<W>`, over the app's `Windowed` |
 | Desktop | arkui's `DeskPlace` (the replica on this machine's disk and the views it holds, the desktop's devices, the login in the Secret Service) | `arkui::host::DesktopHost<W>`, over the app's `Windowed` |
-| Tests | `money/app/src/host/tests.rs`'s place over the demo household | `Hosting` |
+| Tests | `money/src/host/tests.rs`'s place over the demo household | `Hosting` |
 
 On the phones an app names no code of its own: its library is generated
 ("The Phones' Library", below), and what `Hosted` asks of it beside its
@@ -196,7 +197,7 @@ adds at `<app>/.ffi`. It is, in order:
   never listed (`ark::twin::Reach`, which a twin's derive writes);
 - the first run's object (`ark_ffi::welcome_app!`);
 - `Phone`, its `PhoneApp`: the part (its crate's declared `App`), the
-  domain (its `<app>/core` crate's `shared`), the demo (its `<app>/demo`
+  domain (its `<app>/src/core` crate's `shared`), the demo (its `<app>/src/demo`
   crate, whose `seeded_disk(today, now_ms)` its `open(disk)` opens), the
   name and the scheme (its id);
 - one object per declared screen (`ark_ffi::hosted_screen!`, or
@@ -213,7 +214,7 @@ adds at `<app>/.ffi`. It is, in order:
   nothing of the app's.
 
 Its Rust is tested without UniFFI by the app's own tests over the same
-pieces (money/app/tests/phone.rs: a demo launch running every screen, the
+pieces (money/tests/phone.rs: a demo launch running every screen, the
 demo remembered and left, a server that is not there, a launch's
 arguments, the replica opened, the demo seeded, a household of two
 devices synced through `ark_ffi::hall::Hall`); `checks.ffi` has UniFFI
@@ -226,7 +227,7 @@ web <app>` writes `<id>-web` — `main.rs` and `Cargo.toml` — and, for an
 app drawn in the browser alone, the page that loads it, `index.html`, with
 the app's icon beside it (`favicon.svg`), from app.toml: its name, scheme,
 accent and version, its part of its host (its crate's declared `App`),
-its domain and demo where it has data (its `core/` and `demo/` crates), its look (`[web] css`,
+its domain and demo where it has data (its `src/core` and `src/demo` crates), its look (`[web] css`,
 `head`, `files`), how its pages are made (`[web] modes`) and what its
 export works out first (`[web] prepare`). nix/ark-app.nix builds it
 (`webSrc`, `webCrate`), flake.nix's `<app>-web` binds it (`wasmPage`), and
@@ -875,7 +876,7 @@ nothing a client sends or expects is only a newer server's:
 and harken's servers from that revision (Cachix has them), starts them
 with dev auth (money's on its own seed's household), and runs this
 build's clients against them — money's phone host
-(money/app/tests/deployed.rs: the first run, the address typed, the dev
+(money/tests/deployed.rs: the first run, the address typed, the dev
 sign-in, the household synced, a transaction confirmed by the server and
 seen on a second phone) and harken's headless client (`harken-peer`: a
 playlist made, confirmed, and seen by a second peer). It is not in CI: it
@@ -958,7 +959,7 @@ the plan and where it stands.
 ## harken's Port
 
 harken is ported the way money was: its committed shape becomes
-`app.toml`, `icon.svg`, `core/`, `app/`, `server/`, `demo/`, its README
+`app.toml`, `icon.svg`, `Cargo.toml`, `src/` (`app/`, `components/`, `core/`, `demo/`), `server/`, its README
 and `.gitignore` (and the debug key app.toml names), every screen a
 `#[view]` in harken-app, its host logic a `HostedApp`, the phones on the
 shared shell, the browser and the desktop generated, and harken/ios,
@@ -971,13 +972,13 @@ in the same commit that replaces them.
 
 | Today | Becomes |
 |---|---|
-| `harken/core` (harken-domain) | `harken/core`, the same crate and name: the domain, pure (layers.toml's core) |
+| `harken/core` (harken-domain) | `harken/src/core`, the same crate and name: the domain, pure (layers.toml's core) |
 | `harken/player` (harken-player) | split: the reconciler's decisions, its typed memory and the presses (`press.rs`, `reconcile.rs`'s rules, `memory.rs`'s values, `Listening`) into `harken_domain::player`, pure over the session and what a sound said; what drives a peer (`Player`, `config.rs`, the rows it keeps) into the adapters that need it — the server's Home Assistant speakers (`harken/server`) and the app's host through its place (below) |
-| `harken/app` (routes, first-run words) | harken-app: every screen's state, messages, update, page record and `#[view]`; `host::Harken` (its `HostedApp` and `Windowed`); `words` (lengths, counts, "played from") |
+| `harken/app` (routes, first-run words) | harken-app (`harken/`, its routes and screens `harken/src/app`): every screen's state, messages, update, page record and `#[view]`; `host::Harken` (its `HostedApp` and `Windowed`); `words` (lengths, counts, "played from") |
 | `harken/ffi` (hand-written bridge, `HarkenSession`, `Player`, the `Hall`) | generated (`[ffi]`): `harken-ffi` from app.toml like `money-ffi`; the Hall moves to the server's tests (`harken-server`'s `hall`), which already hold the same hub |
 | `harken/ios`, `harken/android` | gone: the app library's `ArkShell` from `[shell]`, the generated views, the modules' Swift and Kotlin |
 | `harken/iced` | gone: the generated window (`arkui::host::run`), its keys and its walk |
-| `harken/demo` | stays: harken-seed, the catalogue, the covers, `shots.json` (rewritten as an in-app walk by ids), `server.sh` |
+| `harken/demo` | `harken/src/demo`: harken-seed, the catalogue, the covers, `shots.json` (rewritten as an in-app walk by ids), `server.sh` |
 | `harken/server` | stays, unchanged on the wire (Servers Already Deployed) |
 | `harken/iced/icon.svg` | `harken/icon.svg` |
 
@@ -1056,7 +1057,7 @@ before harken uses it (ui/docs/primitives.md lists the components).
 - *Recent searches*, kept on the device only: a durable local row of the
   domain (ark's local instance, as the plays the reconciler counts are).
 - *Covers*: `/media/<key>/cover?size=` as today; harken's `artwork`
-  (harken-app's `parts`) a filled `image` primitive — fetched, decoded
+  (harken-app's `components`) a filled `image` primitive — fetched, decoded
   for its size and kept by each toolkit (`ArkPicture`, `UrlCovers`,
   `images::remote`, the browser's `<img>`), a screenshot waiting on it
   (`Ready`) — over the `swatch` of its seed, laid into its square.
@@ -1067,7 +1068,7 @@ before harken uses it (ui/docs/primitives.md lists the components).
 
 (The plan as it was. Since then the covers, tiles, shelf, grid, media row
 and header, play/shuffle, transport and figure with label are
-`harken-app`'s `parts`, Rust compositions of ArkUI's primitives — a
+`harken-app`'s `components`, Rust compositions of ArkUI's primitives — a
 filled `image` over a `swatch` laid into a `side`/`square` frame and
 clipped, a `grid` — since only harken uses them; ArkUI keeps the press,
 the scrubber, the hairline, the volume and the accessory, which are
@@ -1260,7 +1261,7 @@ device), beside harken-peer's walk; both pass against 77da9807.
    toolkit: its title (and its buttons) stay and what is between scrolls
    (arkui-web's `.ark-dialog-body`, iced's sheet, Compose's `FormSheet`;
    SwiftUI's is a `Form` already).
-5. Screenshots: harken/demo/shots.json is an in-app walk by ids (the
+5. Screenshots: harken/src/demo/shots.json is an in-app walk by ids (the
    first run — harken's now opens on Welcome to Harken, as money's on
    its page — Home, Search, Library, Albums, an album, the player grown
    from the now-playing bar by `shell.open-player` and paused, Settings
@@ -1343,7 +1344,7 @@ what such a crate needs of the world it is handed (the time is `Data::now_ms`'s,
 a file's bytes are its caller's). Their integration tests read fixtures
 and are allowed to (an `#![allow]` at each test's top); no library code
 is. `money-seed`'s command line, which writes the demo's household to
-disk, is a crate of its own (money/demo), an adapter.
+disk, is a crate of its own (money/src/demo), an adapter.
 
 **Who is signed in is the kernel's.** A domain's schema embeds two
 tables, `sign_in` and `role`, and registers the functions over them
@@ -1376,10 +1377,10 @@ each `"<crate> -> <dependency>"` with what removes it; a change that
 fixes one deletes its line, or the check fails. In order:
 
 Done: who is signed in (`ark::auth`), the view keys and what an app
-reads of them (`ark::views`), harken's routes (harken/app), the phones'
+reads of them (`ark::views`), harken's routes (harken/src/app), the phones'
 records (generated in the phones' library), the phones' bridge (gone:
 generated) and
-the demo's peer (money/demo) are out of the core and the app; display
+the demo's peer (money/src/demo) are out of the core and the app; display
 text with a figure in it is the app's (`money_app::words`), and
 ark-format's UniFFI exports are an adapter's (ark-format-ffi, namespace
 `ark_format`); ark-module is the runtime's, and the modules money asks
@@ -1394,21 +1395,26 @@ Nothing native of an app is committed. An app is
 
 ```
 <app>/
-├── app.toml      its configuration: name, id, accent, platforms, what it asks of each platform, its store listing
-├── icon.svg      its icon, every platform's
-├── core/         its domain, and (`demo`) its demo's household
-├── app/          ark-app: its state, messages, update, #[view]s, `commands()`, and its declaration (lib.rs's `ark_app::app!`)
-├── server/       when it has one
-├── demo/         the demo's household (its seed crate), shots.json, server.sh
+├── app.toml        its configuration: name, id, accent, platforms, what it asks of each platform, its store listing
+├── icon.svg        its icon, every platform's
+├── Cargo.toml      its crate (`<app>-app`), at its root
+├── src/
+│   ├── lib.rs      its host's part and what is shared, `ark_router::routes!` over src/app
+│   ├── app/        its routes and screens: route files, `_layout.rs`s, `(tabs)`, `(modals)`, `+not-found.rs`
+│   ├── components/ its own components, Rust compositions of arkui's primitives
+│   ├── core/       its domain, a crate of its own (and, `demo`, its demo's household)
+│   └── demo/       the demo's household (its seed crate), shots.json, server.sh
+├── tests/          its crate's tests (the phone host, the deployed server)
+├── server/         when it has one
 └── debug.keystore  the one public Android debug key app.toml's `keystore` names
 ```
 
-**`iced/` is being removed** (`bridge/`, `web/` and money's `native/` are
-gone; revelation's `native/` is its own Kotlin, not yet an Ark app's).
-The end state is `app.toml`, `icon.svg`, `core/`, `app/`, `server/`,
-`demo/` and the debug key, nothing else committed: the layout is this
-convention, held by review, and each of the other directories only
-shrinks until it is gone.
+revelation, Kotlin alone with no crate, is `app.toml`, `icon.svg`, its own
+`native/` (not yet an Ark app's) and `src/demo/shots.json`, its walk.
+Nothing else is committed beside them (`checks.prebuild` refuses an
+`app/`, `core/`, `demo/` or `domain/` beside app.toml, and every generated
+directory): the layout is this convention, and the server folds into the
+app next.
 The phones' library is generated from app.toml ("The Phones' Library");
 money's part of its host is money-app's; every money screen is Rust, and
 the phones' `Model.swift`, `Bridge.swift`, `Book.kt` and `Start.kt` and
@@ -1422,14 +1428,16 @@ declaration.)
 
 If you are an agent, or anyone, about to add to one of these:
 
-- **A screen, or what a screen shows:** write it in `app/` (state,
-  message, `update`, a `#[view]` from ArkUI's primitives, native
-  containers and controls), never as SwiftUI or Compose of the app's, and
-  not as an export of the phones' library for a native screen to read.
+- **A screen, or what a screen shows:** write it in `src/app` (a
+  `_layout.rs` for a screen of its own: state, message, `update`, a
+  `#[view]` from ArkUI's primitives, native containers and controls; a
+  route file for an address), never as SwiftUI or Compose of the app's,
+  and not as an export of the phones' library for a native screen to
+  read.
 - **A component** (a card, a row, a header, a tile — anything drawn of
   primitives): a Rust composition, never hand-written per toolkit. One
-  app's own lives in that app's `app/` crate (harken's covers, rows,
-  headers and controls are `harken-app`'s `parts`); one several apps
+  app's own lives in that app's `src/components/` (harken's covers, rows,
+  headers and controls are `harken-app`'s `components`); one several apps
   really share is a composition in ark-app (`ark_app::view`'s
   components: `title_stack`, `empty_state`). ArkUI itself holds only
   primitives, native containers and native controls
@@ -1437,21 +1445,21 @@ If you are an agent, or anyone, about to add to one of these:
   they cannot do is added there as a primitive, on every toolkit.
 - **Something of the shell** (a section, a tab's glyph, a toolbar, an
   inspector, what is hosted where, Settings): the shell's `#[view]` in
-  `app/` and its declaration (`#[shell]`, its further views); what every app's shell does goes in
+  `src/app/_layout.rs` (its further views in its `#[ark_router::screen]`); what every app's shell does goes in
   ArkApp and ark-app-android (`ArkShell`), a value in `ui/theme.toml`, a
   glyph in ArkUI's glyph sets, a mark in the record (its glyph and chart
   slot, drawn by `MarkTile`).
 - **A device feature** (camera, keychain, player, sharing…): a port in
   `ark-module`, implemented in a module under `modules/ark-*`, asked for
   with a `Command`; never a native call of the app's.
-- **Domain rules or data:** `core/`, pure.
+- **Domain rules or data:** `src/core/`, pure.
 - **Something the phones must call that has no other home** (rare): a
   generic export of ark-ffi's (`phone_host!`) every app's library writes,
   or something the manifest says (`ark_app::manifest`); never an app's
   own Rust for its library, which has none, and never a key of app.toml.
 - **Never** commit a `native/`, or
   copy a screen into `iced/`; and never commit a `web/`: the page is
-  generated, and what it draws of the app's own is a view in `app/`.
+  generated, and what it draws of the app's own is a view in `src/app`.
 
 and nix generates the rest, from app.toml, the app's manifest (what its
 crate declares, "The App's Declaration"), its Cargo, each module's
@@ -1461,7 +1469,7 @@ crate declares, "The App's Declaration"), its Cargo, each module's
 |---|---|---|
 | XcodeGen's `project.yml` (one multiplatform target for the iPhone, the iPad and the Mac), its Info.plist keys, entitlements, the asset catalog (AccentColor from the theme, AppIcon rendered from icon.svg) | app.toml's `[apple]`, the modules' `[ios]` | `<app>-ios-simulator`, `<app>-ios-archive`, `<app>-macos` |
 | Gradle's project (settings, the app's `build.gradle.kts` with ArkUI's dependencies and the modules'), the AndroidManifest (permissions, the scheme's links, services, meta-data), the launcher's adaptive and themed icon and the mark (vectors from icon.svg), the splash | app.toml's `[android]`, the modules' `[android]` | `<app>-apk` |
-| The app's manifest (`<id>-gen manifest`: its screens, their names in each toolkit, its shell, what crosses) | its crate's declaration (`ark_app::app!`) | `<app>-native`'s input (`arkOf.<app>.manifest`) |
+| The app's manifest (`<id>-gen manifest`: its screens, their names in each toolkit, its shell, what crosses) | its crate's `src/app`, read by `ark_router::routes!` into its declaration | `<app>-native`'s input (`arkOf.<app>.manifest`) |
 | The SwiftUI and Compose of every `#[view]` | the declaration, the app's #[view]s | inside both |
 | The phones' library: `<id>-ffi` (lib and UniFFI namespace `<id>_ffi`): the twins, the first run, each screen's runtime and the object the phone holds over the app's crate (ui/prebuild.py's `ffi`), as a static library (the iPhone, the Mac) and a shared one (Android) | the manifest; its domain and demo crates; the modules' `[phone]` features | `<app>-android-lib`, `<app>-ios-kernel*` |
 | The entry points over the app library: the `@main`, the Application and the activity, the screens' holders, the shell's holders and scenes, and — only with `[background]` — the background's hookup ("The App Library") | the manifest, app.toml's `[apple] scene`, `[android] root`, `[background]` | inside both |
@@ -1538,40 +1546,80 @@ What an app's generated targets are written from beyond its app.toml is
 said once, in its Rust and its Cargo, and derived by convention (Expo's
 config plugins, read from the code instead of a config file):
 
-- **Its crates**, from where they are: the app's crate is `<app>/app`
-  (else `<app>` itself, the docs'), its domain `<app>/core` (whose
-  `shared()` gives the domain its replica's log is of), its demo
-  `<app>/demo` (`seeded_disk`, `open`). An app with a domain has a
-  server, so a scheme (its id) and a phones' library (`<Name>Host`).
+- **Its crates**, from where they are: the app's crate is `<app>` itself
+  (its `Cargo.toml` at the app's root), its domain `<app>/src/core`
+  (whose `shared()` gives the domain its replica's log is of), its demo
+  `<app>/src/demo` (`seeded_disk`, `open`), each a crate of its own. An
+  app with a domain has a server, so a scheme (its id) and a phones'
+  library (`<Name>Host`).
 - **Its modules**, from its crate's dependencies ("How an App Opts In"),
   and ark-ffi's features its phones link, from its modules' module.toml
   (`[phone] android-features`: the scanner's corner model).
-- **Its screens**, from its declaration at its crate's root:
+- **Its routes and screens**, from its `src/app` folder, as Expo Router
+  reads `app/` (`ark_router::routes!` at its crate's root; ark_router's
+  crate docs hold every convention):
 
 ```rust
-// money/app/src/lib.rs
-ark_app::app! {
+// money/src/lib.rs
+ark_router::routes! {
+    /// Somewhere money can be.
+    #[derive(Debug, Clone, ark::twin::Twin)]
+    #[ark(ffi_eq)]
+    pub enum Route in "src/app";
     /// money as every generated target runs it: its part of its host.
-    pub type App = host::Money {
-        accounts: accounts::Accounts = accounts::view::accounts,
-        budget: budget::Budget = budget::view::budget,
-        // …
-        #[over]
-        sheets: sheets::Sheets = sheets::view::sheets,
-        #[shell]
-        shell: shell::MoneyShell = shell::view::money_shell {
-            settings: shell::view::money_settings,
-            commands: shell::view::commands,
-        },
-    }
+    pub type App = host::Money;
 }
 ```
 
-  Each screen is the field of the part that holds its runtime (`Has` is
-  written for it), the runtime's type and its `#[view]`; braces hold its
-  further views, by name. `App` is what every generated target runs
-  (`money_app::App`); the macro writes `ark_app::manifest::Declared`, the
-  window's `SHELL` and `OVER` among it.
+```
+money/src/app/
+  _layout.rs                            the shell (MoneyShell), its own modules in _layout/
+  +not-found.rs                         `pub use crate::Route::Budget as Home;`
+  (modals)/_layout.rs                   the sheets, over every section
+  (tabs)/(budget)/_layout.rs            the Budget tab's screen
+  (tabs)/(budget)/budget.rs             /budget/
+  (tabs)/(accounts)/_layout.rs          the Accounts tab's screen (no address of its own)
+  (tabs)/(accounts)/account/_layout.rs  the register (`name = "register"`)
+  (tabs)/(accounts)/account/[id].rs     /account/<id>/<slug>/, `#[tab = "accounts/{id}"]`
+  (tabs)/(transactions)/_layout.rs      the Transactions tab's screen
+  (tabs)/(transactions)/accounts.rs     /accounts/ (All Accounts), inbox.rs, filtered.rs, filter/[id].rs
+  (tabs)/(insights)/…                   its screen, /insights/
+  category/[id].rs, bank/[name].rs      the app's own: Category Details, a bank in Settings
+  banks.rs, settings.rs, welcome.rs, join.rs
+```
+
+  A route file is its path (its folders but a `(group)`, `index.rs` its
+  folder's own, `[id]` a field) and its struct, `#[derive(ark_router::Route)]`:
+  the struct's name is the variant's, its docs the variant's and its
+  fields what the route carries, typed (`ark_router::Param`: a `String`,
+  a number, a flag; `#[hex]` a row's id, `#[slug]` its readable name after
+  it, `#[query]` a query key; any other field no part of the address). A
+  `_layout.rs` is a screen: its runtime marked
+  `#[ark_router::screen(view = view::budget)]` (its further views beside,
+  `settings = …`, `commands = …`; `name = "…"` where its folder's name is
+  not its name), the field of the part that holds it of that name (`Has`
+  is written for it), and at the crate's root by that name
+  (`crate::budget`), so the rest of the crate knows it as before. The
+  root's is the shell (`#[shell]`), `(modals)`' goes over every section
+  (`#[over]`), each group in `(tabs)` is a tab. From the folder the macro
+  writes the `Route` enum through `#[derive(Routes)]` (a path's own words
+  read before a field in the same place), `From` each route file's
+  struct, `Route::statics()` (every route that carries nothing, and each
+  a file lists with `fn params()`: the docs' `[tag].rs`, which their
+  export writes), the app's declaration (`ark_app::app!`, each screen
+  `in` its layout's folder, which the generated files' headers name) —
+  `App` is what every generated target runs (`money_app::App`), and the
+  declaration writes `ark_app::manifest::Declared`, the window's `SHELL`
+  and `OVER` among it — and `ark_app::host::Routed`: what a route does to
+  the screens. Its tab is selected (its group under `(tabs)`, or
+  `#[tab = "…"]`; `ark_app::shell::Navigates::select`), the screen that
+  shows it (`#[shows(screen)]`, else its nearest layout's) told
+  (`ark_app::App::shown`: harken's page is given the record, its library
+  its list), and a route in no tab whose screen is not the shell's pushed
+  onto the shown tab's stack (`Navigates::push`: harken's `(page)`). The
+  app's `HostedApp::route` asks `routed` first; a route the shell shows
+  outside a tab — money's Category Details in the inspector, Settings, a
+  bank — comes back for the host to carry out itself.
 
 The names follow from that (`ark_app::manifest`): a screen's runtime
 object is `<Screen>App` (`accounts` → `AccountsApp`), its page and message
@@ -1764,14 +1812,15 @@ over by script (`ssr`, `hydrate`: "The Browser's Modes", below) — the way
 ## Addresses
 
 One route model for every app, on every shell (`ark-router`). An app
-declares where it can be once, as a `Route` enum in its domain or app
-crate — `harken_app::routes`, `money_app::routes`, the docs'
-`docs/site/src/routes.rs` — with `#[derive(Routes)]`, a pattern per
-variant (`#[route("/album/:key")]`), and every shell reads that one enum:
-the browser's address bar (arkui-web, `Address::of_url`), the desktop's
-(arkui's `router`, which says the same URL), the phones' deep links and
-back stacks (`route_from_url`, `Route.url()` over UniFFI), a "played from"
-in a listening session, a notification's target, a static site's pages.
+declares where it can be once, as files in its `src/app` folder (Expo
+Router's way: "The App's Declaration"), which `ark_router::routes!` reads
+into its `Route` enum with a pattern per file (`(page)/album/[key].rs` is
+`#[route("/album/:key")]`, through `#[derive(Routes)]`), and every shell
+reads that one enum: the browser's address bar (arkui-web,
+`Address::of_url`), the desktop's (arkui's `router`, which says the same
+URL), the phones' deep links and back stacks (`route_from_url`,
+`Route.url()` over UniFFI), a "played from" in a listening session, a
+notification's target, a static site's pages (`Route::statics()`).
 
 An **address** (`ark_router::Address`) is a path and a query, as Next.js
 has them: the **path** names the content — the page and the ids of what

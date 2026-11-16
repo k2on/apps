@@ -82,26 +82,26 @@ def package_at(root, d):
 
 def app_of(root, app, manifest=None):
     """An app: its app.toml, and what is derived beside it — from its
-    crates (its app crate `<app>/app`, else `<app>` itself; its domain
-    `<app>/core`; its demo `<app>/demo`), its modules, and, where one is
-    given (`manifest`, else `ARK_MANIFEST`), its manifest: what its crate
-    declares (`ark_app::app!`), printed by its generator (`<id>-gen
-    manifest`)."""
+    crates (its app crate `<app>` itself; its domain `<app>/src/core`; its
+    demo `<app>/src/demo`), its modules, and, where one is given
+    (`manifest`, else `ARK_MANIFEST`), its manifest: what its crate
+    declares (`ark_router::routes!` over its src/app), printed by its
+    generator (`<id>-gen manifest`)."""
     a = load(os.path.join(root, app, "app.toml"))
     a["dir"] = app
     a["toml"] = {k for k in a if k != "dir"}
-    crate = package_at(root, os.path.join(app, "app")) or package_at(root, app)
+    crate = package_at(root, app)
     if not crate:
         return a
     a["crate"] = crate
-    core = package_at(root, os.path.join(app, "core"))
+    core = package_at(root, os.path.join(app, "src", "core"))
     if core:
         # An app with data: its domain (`<core>::shared`), its demo, the
         # scheme the server's sign-in sends the code back on (its id),
         # and the object its phones hold (`<Name>Host`).
         a["scheme"] = a["id"]
         ffi = {"host": f"{a['name']}Host", "domain": f"{rust_name(core)}::shared", "app": "App", "route": "Route", "twins": []}
-        demo = package_at(root, os.path.join(app, "demo"))
+        demo = package_at(root, os.path.join(app, "src", "demo"))
         if demo:
             ffi["demo"] = demo
         a["ffi"] = ffi
@@ -1585,7 +1585,7 @@ def views_main(root, a):
 //! {a['name']}'s generator (ark_ui_gen::app::run): its views written as SwiftUI
 //! and Compose, and its manifest, from its crate's declaration. Never committed.
 fn main() {{
-    ark_ui_gen::app::run::<{rust_name(a['crate'])}::App>("{ffi_namespace(a)}", "{crate_dir(root, a)}")
+    ark_ui_gen::app::run::<{rust_name(a['crate'])}::App>("{ffi_namespace(a)}", "{a['dir']}")
 }}
 """
 
@@ -1929,15 +1929,8 @@ def crate_dirs(root, a):
     where it is of a workspace of its own (the docs')."""
     dirs = workspace_dirs(root)
     if a["crate"] not in dirs:
-        dirs[a["crate"]] = crate_dir(root, a)
+        dirs[a["crate"]] = a["dir"]
     return dirs
-
-
-def crate_dir(root, a):
-    """The app's crate's directory: `<app>/app`, or the app's directory
-    itself when its crate is there (an app with no core, server or demo)."""
-    inner = os.path.join(a["dir"], "app")
-    return inner if os.path.exists(os.path.join(root, inner, "Cargo.toml")) else a["dir"]
 
 
 def web_cargo(root, a):
@@ -1946,7 +1939,7 @@ def web_cargo(root, a):
     dirs = crate_dirs(root, a)
     here = os.path.join(a["dir"], ".web")
     rel = lambda c: os.path.relpath(dirs[c], here)
-    workspace = "rust" if a["crate"] in workspace_dirs(root) else crate_dir(root, a)
+    workspace = "rust" if a["crate"] in workspace_dirs(root) else a["dir"]
     # The app's crate natively with its default features (what its export
     # prepares with), in the browser with none.
     plain = lambda c: c == "ark-peer" or (c == a["crate"] and web_static(a)) or bool(bare(a, c))
@@ -2353,6 +2346,13 @@ def check(root):
                 committed = subprocess.run(["git", "-C", root, "ls-files", f"{app}/{d}"], capture_output=True, text=True).stdout.strip()
                 if committed:
                     problems.append(f"{app}/{d} is committed: an Ark app's native projects, phones' library and page are generated (ui/prebuild.py, nix/ark-app.nix)")
+            # An app's crate is its directory, its routes src/app, its core
+            # and demo crates src/core and src/demo (ui/docs/app.md,
+            # "Generated, Not Committed").
+            for d in ("app", "core", "demo", "domain"):
+                committed = subprocess.run(["git", "-C", root, "ls-files", f"{app}/{d}"], capture_output=True, text=True).stdout.strip()
+                if committed:
+                    problems.append(f"{app}/{d} is committed: an app's crate is {app}/Cargo.toml, its routes {app}/src/app, its core and demo {app}/src/core and {app}/src/demo")
     problems += selftest(root)
     for p in problems:
         print(p, file=sys.stderr)

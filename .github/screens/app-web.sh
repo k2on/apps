@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # An app's browser screenshots (apps.md, "The wide windows"), the same for
-# every app: what is the app's is its <app>/demo/shots.json, its `wide`, the
+# every app: what is the app's is its <app>/src/demo/shots.json, its `wide`, the
 # one walk the desktop's window and the Mac take too. The page nix built at
 # the commit (`nix build .#<app>-web`: index.html beside pkg/), served here
 # on the loopback, walked in Playwright's Chromium (web-shots.js): the demo
@@ -46,7 +46,7 @@ EOF
 # An app whose shots are of its demo (shots.json's `wide.web.demo`) is served
 # as the site publishes it (nix/channel.py's `web … demo`): the page is the
 # demo by where it is (`data-ark-demo`), with no `?demo` in its address.
-shots_file=${ARK_WEB_SHOTS:-$PWD/$app/demo/shots.json}
+shots_file=${ARK_WEB_SHOTS:-$PWD/$app/src/demo/shots.json}
 if [ "$(jq -r '.wide.web.demo // false' "$shots_file")" = true ]; then
   served=$conf/site
   python3 -I "$here/../../nix/channel.py" web "$site" "$served" / "$here/../../ui/theme.toml" stable demo

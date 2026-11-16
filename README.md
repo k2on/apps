@@ -114,7 +114,7 @@ this setup in a VM.
 ## The rest
 
 Each app's demo data is beside its code, not in it: money's core's `demo`
-feature (`money/core`), harken's `harken/demo` crate. The demos and tests
+feature (`money/src/core`), harken's `harken/src/demo` crate. The demos and tests
 link it, and its binary (`money-seed`, `harken-seed`) seeds a server's data directory
 for the screenshots or for `nix run .#<app>-demo`. `docs/seed.md` says
 what each holds and the contract they share.

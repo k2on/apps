@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # An app's screenshots from a booted emulator (apps.md), the same for every
-# app: what is the app's is its <app>/demo/shots.json. The APK installed
+# app: what is the app's is its <app>/src/demo/shots.json. The APK installed
 # as it is. An app whose shots.json has a `walk` walks it inside itself
 # (`walk` below, ui/docs/shots.md "In the App"). Any other is driven from
 # outside: signed in, if the app has a server, as a person signs in through
@@ -36,7 +36,7 @@ apk=$2
 app=$3
 server=${4:-}
 here=$(dirname "$0")
-shots="$app/demo/shots.json"
+shots="$app/src/demo/shots.json"
 # The package, as the APK itself says (aapt2, the SDK's newest build tools).
 aapt2=$(find "$ANDROID_HOME/build-tools" -name aapt2 -type f | sort -V | tail -1)
 pkg=$("$aapt2" dump packagename "$apk")

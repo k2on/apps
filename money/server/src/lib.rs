@@ -2,7 +2,7 @@
 //!
 //! The log on the hub, the socket at `/sync`, `/healthz`, the sign-in
 //! routes under `/auth` and the browser client at `/` are `ark_peer`'s and
-//! `ark_auth`'s, generic over any app; the domain is `money/core`'s, in
+//! `ark_auth`'s, generic over any app; the domain is `money/src/core`'s, in
 //! plain Rust. What is money's is the bank importer ([`importer`]: Plaid
 //! over [`plaid`], inside the server, the banks' logins in [`store`]) and
 //! [`start`], the wiring: a [`Config`] read from the environment (what the

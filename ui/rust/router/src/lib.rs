@@ -30,13 +30,84 @@
 //! **Declared, not written by hand.** The derive writes the address, the
 //! reading back and [`Routable`]; a test holds every variant to
 //! [`assert_round_trips`].
+//!
+//! # A Folder of Routes: [`routes!`]
+//!
+//! An app's routes are its `src/app` folder, as Expo Router's are its
+//! `app/`: the macro reads the folder as the crate compiles and writes the
+//! `Route` enum (through the derive), its modules, and — with the app's
+//! type — its screens and what a route does to them.
+//!
+//! ```ignore
+//! // money/src/lib.rs
+//! ark_router::routes! {
+//!     /// Somewhere money can be.
+//!     #[derive(Debug, Clone, ark::twin::Twin)]
+//!     #[ark(ffi_eq)]
+//!     pub enum Route in "src/app";
+//!     /// money as every generated target runs it.
+//!     pub type App = host::Money;
+//! }
+//! ```
+//!
+//! ```text
+//! money/src/app/
+//!   _layout.rs              the shell: tabs and sidebar (MoneyShell); its own modules in _layout/
+//!   +not-found.rs           where a path that names nothing lands: `pub use crate::Route::Budget as Home;`
+//!   (modals)/_layout.rs     the sheets, over every section
+//!   (tabs)/(budget)/_layout.rs           the Budget tab's screen
+//!   (tabs)/(budget)/budget.rs            /budget/
+//!   (tabs)/(accounts)/account/_layout.rs the register
+//!   (tabs)/(accounts)/account/[id].rs    /account/<id>/<slug>/
+//!   (tabs)/(transactions)/inbox.rs       /inbox/, in the Transactions tab
+//!   category/[id].rs                     /category/<id>/<slug>/: the app's own (the inspector)
+//!   join.rs                              /join/?server=…&code=…
+//! ```
+//!
+//! - **A route file** is a path: its folders but a `(group)`, then its
+//!   name, `index.rs` its folder's own path. It declares its struct,
+//!   `#[derive(ark_router::Route)]`, whose name is the variant's, whose
+//!   docs are its docs and whose fields are what the route carries, typed
+//!   ([`Param`]): `[id].rs` is the field `id` (`#[hex]` a row's id, which
+//!   reads only 32 hex digits), `#[slug]` the readable slug after it,
+//!   `#[query]` (`#[query = "key"]`) a query key, and any other field is
+//!   no part of the address (a title). A dynamic route lists what a static
+//!   export writes of it with `fn params() -> Vec<Self>` (Next.js's
+//!   `generateStaticParams`): `Route::statics()` is those and every route
+//!   that carries nothing.
+//! - **`_layout.rs`** is a screen that lays out its folder: its runtime
+//!   marked `#[ark_router::screen(view = view::budget)]` (its further views
+//!   beside, `settings = view::settings`; `name = "…"` where its folder's
+//!   name is not its name; `beside`), its own modules in `_layout/`. The
+//!   root's is the shell (`shell`): the adaptive shell's tabs and sidebar,
+//!   and the stack every other page is pushed on. `(modals)`' goes over
+//!   every section (`sheets`). Each group in `(tabs)` is a tab, its layout
+//!   that tab's screen. Every screen is at the crate's root by its name
+//!   (`crate::budget`).
+//! - **What a route does** (`ark_app::host::Routed`, which the app's
+//!   `HostedApp::route` asks first): the tab it is in selected (its group
+//!   under `(tabs)`, or `#[tab = "accounts/{id}"]`, its fields in braces;
+//!   `ark_app::shell::Navigates::select`), the screen that shows it told
+//!   (`#[shows(screen)]`, else its nearest layout's; `ark_app::App::shown`),
+//!   and a route in no tab whose screen is not the shell pushed
+//!   (`Navigates::push`). A route the shell shows outside a tab is the
+//!   app's own: handed back.
+//! - **`+not-found.rs`** says where an address that names nothing lands
+//!   (`Routable::home`); without it, the root's `index.rs`.
+//! - A folder beside a file of its name (`budget.rs` and `budget/`) is
+//!   that file's own modules, not routes; any other file starting `_` or
+//!   `+` is refused. A file added is read when the crate next compiles:
+//!   touch `lib.rs` if nothing else of it changed.
 extern crate self as ark_router;
 
 pub mod address;
+pub mod param;
 pub mod url;
 
 pub use address::Address;
-pub use ark_router_macros::Routes;
+pub use ark_router_macros::folder as routes;
+pub use ark_router_macros::{screen, Route, Routes};
+pub use param::Param;
 
 /// Every route reads back from its URL as itself — from its address, its
 /// URL, its URL under a base, a phone's link and its URL with the UI's

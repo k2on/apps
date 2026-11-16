@@ -4,10 +4,10 @@ workspace = "../../../rust"
 version = "0.1.0"
 edition.workspace = true
 license.workspace = true
-description = "How an app's routes are spelled as one string: the path every shell uses for a route — the address bar, a deep link, a notification's target, a restored back stack."
+description = "Where an app can be: its routes read from its src/app folder (routes!), each spelled as one path every shell uses — the address bar, a deep link, a notification's target, a restored back stack."
 
-# No UI: a domain spells its `Route` enum with this (`harken/core`'s and
-# `money/core`'s `routes.rs`), and arkui's router writes that path into
+# No UI: a domain spells its `Route` enum with this (`harken/src/core`'s and
+# `money/src/core`'s `routes.rs`), and arkui's router writes that path into
 # the address bar.
 
 [dependencies]
