@@ -489,7 +489,12 @@ public struct ListRow: View {
 /// A sheet up for as long as it is drawn (inside the `if let` of what it
 /// edits); put away by the person, `onDismiss`. With a `confirm`, its bar
 /// has the system's two: Cancel (an ✕) and the confirming ✓, named
-/// `confirm` and enabled while `canConfirm`.
+/// `confirm` and enabled while `canConfirm`. On the Mac it is a sheet as the
+/// Mac draws one: a grouped form (each label in its column, its field
+/// beside it, as System Settings), at `LayoutTokens.sheetWidth` and at
+/// least `sheetHeight`, Cancel and `confirm` said in words at its foot —
+/// Esc cancels and Return confirms — and Done there with no `confirm`
+/// (a Mac's sheet has no swipe down to put it away).
 public struct FormSheet<Content: View>: View {
     let title: String
     let onDismiss: () -> Void
@@ -514,6 +519,33 @@ public struct FormSheet<Content: View>: View {
             .listRowBackground(Color.clear)
             .accessibilityHidden(true)
             .sheet(isPresented: Binding(get: { true }, set: { if !$0 { onDismiss() } })) {
+                #if os(macOS)
+                NavigationStack {
+                    Form { content }
+                        .formStyle(.grouped)
+                        .navigationTitle(title)
+                        .toolbar {
+                            if let confirm, let onConfirm {
+                                ToolbarItem(placement: .cancellationAction) {
+                                    Button("Cancel", role: .cancel, action: onDismiss)
+                                        .keyboardShortcut(.cancelAction)
+                                }
+                                ToolbarItem(placement: .confirmationAction) {
+                                    Button(confirm, action: onConfirm)
+                                        .keyboardShortcut(.defaultAction)
+                                        .disabled(!canConfirm)
+                                }
+                            } else {
+                                ToolbarItem(placement: .confirmationAction) {
+                                    Button("Done", action: onDismiss)
+                                        .keyboardShortcut(.defaultAction)
+                                }
+                            }
+                        }
+                }
+                .frame(minWidth: CGFloat(LayoutTokens.sheetWidth), idealWidth: CGFloat(LayoutTokens.sheetWidth),
+                       minHeight: CGFloat(LayoutTokens.sheetHeight))
+                #else
                 NavigationStack {
                     Form { content }
                         // What scrolls under the sheet's bar is cut off there, not blurred
@@ -535,6 +567,7 @@ public struct FormSheet<Content: View>: View {
                             }
                         }
                 }
+                #endif
             }
     }
 }
@@ -718,6 +751,11 @@ public struct SwitchRow: View {
             Text(title)
             if let note { Text(note).font(.caption).foregroundStyle(.quiet) }
         }
+        // A switch at the row's end, as a Mac's grouped form draws one
+        // (System Settings), not a bare checkbox before its title.
+        #if os(macOS)
+        .toggleStyle(.switch)
+        #endif
     }
 }
 
@@ -838,11 +876,22 @@ public struct WideButton: View {
         .disabled(!enabled || busy)
         // Its title is its name, whatever the spinner beside it says.
         .accessibilityLabel(title)
+        // On the Mac a push button as the Mac draws one, the default one
+        // filled with the accent: its glass drew a pale grey bar there with
+        // faint words (app-screens 43796348626, Welcome's Get Started).
+        #if os(macOS)
+        if prominent {
+            b.buttonStyle(.borderedProminent).tint(Color.accent)
+        } else {
+            b.buttonStyle(.bordered)
+        }
+        #else
         if prominent {
             b.buttonStyle(.glassProminent).tint(Color.accent)
         } else {
             b.buttonStyle(.glass)
         }
+        #endif
     }
 }
 

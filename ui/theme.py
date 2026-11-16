@@ -39,6 +39,8 @@ LAYOUT = {
     "sidebar-width": "A split view's sidebar, at rest.",
     "content-width": "A split view's content column beside a detail, at rest.",
     "inspector-width": "An inspector at the trailing edge, at rest.",
+    "sheet-width": "A sheet on the Mac, a window over the one that opened it: a grouped form's labels and fields side by side.",
+    "sheet-height": "A sheet on the Mac at its least: it grows to what it holds, up to its window.",
     "toolbar-height": "A window's toolbar row.",
     "search-width": "The search field at a toolbar's trailing end.",
     "amount-column-width": "A column of figures in a table or a budget's row.",

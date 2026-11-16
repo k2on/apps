@@ -15,6 +15,10 @@ public enum LayoutTokens {
     public static let contentWidth: Double = 360.0
     /// An inspector at the trailing edge, at rest.
     public static let inspectorWidth: Double = 300.0
+    /// A sheet on the Mac, a window over the one that opened it: a grouped form's labels and fields side by side.
+    public static let sheetWidth: Double = 520.0
+    /// A sheet on the Mac at its least: it grows to what it holds, up to its window.
+    public static let sheetHeight: Double = 560.0
     /// A window's toolbar row.
     public static let toolbarHeight: Double = 52.0
     /// The search field at a toolbar's trailing end.

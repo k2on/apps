@@ -349,6 +349,12 @@ sidebar-min-width = 1200.0
 sidebar-width = 200.0
 content-width = 360.0
 inspector-width = 300.0
+# A sheet's size on the Mac, where it is a window over the window that
+# opened it (a form's: a transaction's, an account's): wide enough for a
+# grouped form's label and its field side by side; it grows to what it
+# holds up to the window. The phones' sheets are the system's.
+sheet-width = 520.0
+sheet-height = 560.0
 # A Mac's unified toolbar row.
 toolbar-height = 52.0
 # The search field at the toolbar's trailing end.

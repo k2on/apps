@@ -263,6 +263,11 @@ public struct DateField: View {
                    selection: Binding(get: { Self.format.date(from: day) ?? Date() }, set: { onChange(Self.format.string(from: $0)) }),
                    displayedComponents: .date)
             .environment(\.timeZone, TimeZone(identifier: "UTC")!)
+            // On the Mac the day as a field that opens a calendar, not the
+            // stepper field a Mac's form draws by default.
+            #if os(macOS)
+            .datePickerStyle(.compact)
+            #endif
     }
 }
 #endif
