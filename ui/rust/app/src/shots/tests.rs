@@ -319,3 +319,34 @@ fn recorded_ids_are_the_walks() {
         Some(vec![Piece::Text("transactions.row:".into()), Piece::Slug("t.payee".into())])
     );
 }
+
+/// The accessory grown into a screen it hosts (harken's full player, the
+/// player runtime's view): that screen's elements are in it, over
+/// everything, beside its close. Falsified by a hosted screen's elements
+/// taken as under the grown accessory (app-screens 43770824445: only Close
+/// reached on the full player).
+#[test]
+fn a_hosted_screen_grown_into_is_reached() {
+    let sent: Sent = Rc::default();
+    let tabs = adaptive_tabs(
+        "budget".to_string(),
+        Msg::Select,
+        section_tab("Budget", "mail", "budget", hosted("budget")),
+    )
+    .accessory(hosted("player.bar"), hosted("player"), Msg::New, Msg::Cancel)
+    .showing(true)
+    .expanded(true)
+    .into();
+    let t = compose(vec![
+        screen("shell", tabs, &sent),
+        screen("budget", budget(false), &sent),
+        screen("player", list_row("Full Song").on_tap(Msg::Open("full".into())).into(), &sent),
+        screen("bar", list_row("Bar Song").on_tap(Msg::Open("bar".into())).into(), &sent),
+    ]);
+    let mut focus = None;
+    let tap = |id: &str| Step::Tap { id: id.into(), text: false };
+    assert_eq!(take(&tap("budget.row:groceries"), &t, &mut focus), Took::NotYet, "{}", tree(&t));
+    assert_eq!(take(&tap("bar.row:bar-song"), &t, &mut focus), Took::NotYet, "{}", tree(&t));
+    assert_eq!(take(&tap("player.row:full-song"), &t, &mut focus), Took::Done, "{}", tree(&t));
+    assert_eq!(take(&tap("shell.cancel"), &t, &mut focus), Took::Done);
+}

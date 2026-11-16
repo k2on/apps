@@ -88,10 +88,13 @@ impl Target {
 pub enum Node {
     Target(Target),
     /// Where the view hosts the screen `name` (`hosted("budget")`); `shown`
-    /// unless it is in what is not on the screen (a tab not selected).
+    /// unless it is in what is not on the screen (a tab not selected), and
+    /// `modal` when it is inside something modal (the now-playing accessory
+    /// grown into the full player): what it hosts is in that too.
     Hosted {
         name: String,
         shown: bool,
+        modal: u32,
     },
 }
 
@@ -428,6 +431,7 @@ impl<M: Clone + Debug + 'static> Walk<M> {
             P::Hosted { name } => self.out.push(Node::Hosted {
                 name: name.to_string(),
                 shown,
+                modal,
             }),
             // The toolkit's own: no element of the app's.
             P::Specimen { .. } => {}
@@ -680,7 +684,7 @@ pub fn compose(mut screens: Vec<Screen>) -> Vec<Target> {
     let mut out = vec![];
     let mut modals = 0;
     for (i, _) in hosted.iter().enumerate().filter(|(_, h)| !**h) {
-        expand(i, &names, &mut taken, &resolve, &mut out, &mut modals);
+        expand(i, &names, &mut taken, &resolve, &mut out, &mut modals, 0);
     }
     // Rows of one title (a payee's charges, newest first): the second and
     // after by their place among them, `row:target~2`, so each record is
@@ -707,6 +711,7 @@ fn expand(
     resolve: &dyn Fn(&str) -> Option<usize>,
     out: &mut Vec<Target>,
     modals: &mut u32,
+    within: u32,
 ) {
     let Some(nodes) = taken[i].take() else { return };
     let base = *modals;
@@ -719,12 +724,16 @@ fn expand(
                 if t.modal > 0 {
                     t.modal += base;
                     *modals = (*modals).max(t.modal);
+                } else {
+                    // A hosted screen's own elements are in what hosts it.
+                    t.modal = within;
                 }
                 out.push(t);
             }
-            Node::Hosted { name, shown: true } => {
+            Node::Hosted { name, shown: true, modal } => {
                 if let Some(j) = resolve(&name) {
-                    expand(j, names, taken, resolve, out, modals);
+                    let within = if modal > 0 { modal + base } else { within };
+                    expand(j, names, taken, resolve, out, modals, within);
                 }
             }
             Node::Hosted { .. } => {}

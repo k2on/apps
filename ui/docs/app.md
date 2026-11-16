@@ -1197,7 +1197,15 @@ device), beside harken-peer's walk; both pass against 77da9807.
    screens, the desktop's the same walk, and the Mac's and the browser's
    screens by their launch arguments (`-screen albums` and the library's
    other kinds are a launch's); app-screens' `which` no longer leaves
-   harken out. The open issue it waited on is found and
+   harken out. Its first run on main (app-screens 43770824445): Android's
+   phone, tablet and Fold walked welcome to the album page and then
+   stopped at the player, whose elements a walk did not reach (a screen
+   hosted inside the grown accessory was taken as under it: fixed in
+   `ark_app::shots`, a hosted name carrying the modal it is in); the
+   desktop has no player shot (its media player device is not wired,
+   so nothing plays there); the iPhone's job hung in the Mac's install
+   of money's build and was cancelled with nothing taken. The open
+   issue it waited on is found and
    fixed: a hub opened on `harken_seed::seeded_disk` (a log standing at
    its start on a snapshot of rows) took a device at cursor 0 for one
    that had it all, and the device took the fill's first part at seq 0

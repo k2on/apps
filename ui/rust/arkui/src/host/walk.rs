@@ -76,7 +76,7 @@ fn hosted(nodes: &[Node]) -> Vec<String> {
     nodes
         .iter()
         .filter_map(|n| match n {
-            Node::Hosted { name, shown: true } => Some(name.clone()),
+            Node::Hosted { name, shown: true, .. } => Some(name.clone()),
             _ => None,
         })
         .collect()

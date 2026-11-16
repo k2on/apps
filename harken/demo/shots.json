@@ -1,5 +1,5 @@
 {
-  "_": "harken's screenshots (.github/screens/apps.md; which phones it is on is flake.nix's list, `publish`): its server is server.sh (the demo's catalogue as a media root its scanner reads), signed in to as `user`, who goes by `name`. `walk`: the phones' and the larger screens' (the same list), walked inside the app from a new install (ui/docs/shots.md, \"In the App\"): `welcome`, the first run's page; then signed in through the first run, landing on Home; and every shot after reached by tapping from where the last left it, each step naming an element by its id (`tab:library`, `library.show:albums`, `library.open-album:<title>`; a shot's `<id>.tree.txt` lists them). `player` plays the album open from its page's Play, grows the now-playing bar into the full player (`shell.open-player`, the accessory's own press) and pauses it there, so the picture holds still; `settings` puts it back and opens Settings from who is signed in. `desktop` is the window's (arkui's `host`, photographed by ui/rust/shots), the same walk signed in straight back from the run's dev server. `screens` and `launch` are the Mac's and the browser's: each screen opened by its launch arguments (the Mac's own window over the demo library, app-mac.sh; the browser's address, app-web.sh, over the demo in the page).",
+  "_": "harken's screenshots (.github/screens/apps.md; which phones it is on is flake.nix's list, `publish`): its server is server.sh (the demo's catalogue as a media root its scanner reads), signed in to as `user`, who goes by `name`. `walk`: the phones' and the larger screens' (the same list), walked inside the app from a new install (ui/docs/shots.md, \"In the App\"): `welcome`, the first run's page; then signed in through the first run, landing on Home; and every shot after reached by tapping from where the last left it, each step naming an element by its id (`tab:library`, `library.show:albums`, `library.open-album:<title>`; a shot's `<id>.tree.txt` lists them). `player` plays the album open from its page's Play, grows the now-playing bar into the full player (`shell.open-player`, the accessory's own press) and pauses it there, so the picture holds still; `settings` puts it back and opens Settings from who is signed in. `desktop` is the window's (arkui's `host`, photographed by ui/rust/shots), the same walk signed in straight back from the run's dev server, but for `player`: the desktop's media player device is not wired yet, so nothing plays there. `screens` and `launch` are the Mac's and the browser's: each screen opened by its launch arguments (the Mac's own window over the demo library, app-mac.sh; the browser's address, app-web.sh, over the demo in the page).",
   "server": {
     "port": 8787,
     "user": "alex",
@@ -239,31 +239,8 @@
         ]
       },
       {
-        "id": "player",
-        "steps": [
-          {
-            "tap": "page.play-all:play"
-          },
-          {
-            "await": "shell.open-player"
-          },
-          {
-            "tap": "shell.open-player"
-          },
-          {
-            "await": "player.toggle"
-          },
-          {
-            "tap": "player.toggle"
-          }
-        ]
-      },
-      {
         "id": "settings",
         "steps": [
-          {
-            "tap": "shell.close-player"
-          },
           {
             "tap": "shell.account"
           }
