@@ -349,6 +349,10 @@ sidebar-min-width = 1200.0
 sidebar-width = 200.0
 content-width = 360.0
 inspector-width = 300.0
+# A page's readable column on a wide window (the desktop's, the browser's
+# and the Mac's alike): its cards, shelves and forms no wider, centred in
+# what the sidebar and the inspector leave. A table takes the width.
+page-width = 960.0
 # A sheet's size on the Mac, where it is a window over the window that
 # opened it (a form's: a transaction's, an account's): wide enough for a
 # grouped form's label and its field side by side; it grows to what it

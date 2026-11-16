@@ -15,6 +15,8 @@ public enum LayoutTokens {
     public static let contentWidth: Double = 360.0
     /// An inspector at the trailing edge, at rest.
     public static let inspectorWidth: Double = 300.0
+    /// A page's readable column on a wide window, centred: its cards, shelves and forms no wider.
+    public static let pageWidth: Double = 960.0
     /// A sheet on the Mac, a window over the one that opened it: a grouped form's labels and fields side by side.
     public static let sheetWidth: Double = 520.0
     /// A sheet on the Mac at its least: it grows to what it holds, up to its window.

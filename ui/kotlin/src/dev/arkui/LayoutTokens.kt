@@ -15,6 +15,8 @@ public object LayoutTokens {
     public const val CONTENT_WIDTH: Float = 360.0f
     /** An inspector at the trailing edge, at rest. */
     public const val INSPECTOR_WIDTH: Float = 300.0f
+    /** A page's readable column on a wide window, centred: its cards, shelves and forms no wider. */
+    public const val PAGE_WIDTH: Float = 960.0f
     /** A sheet on the Mac, a window over the one that opened it: a grouped form's labels and fields side by side. */
     public const val SHEET_WIDTH: Float = 520.0f
     /** A sheet on the Mac at its least: it grows to what it holds, up to its window. */

@@ -82,6 +82,12 @@ public struct TabPage<Content: View, Top: View>: View {
             content
         }
         .groupedList()
+        // On the Mac its column no wider than `LayoutTokens.pageWidth`,
+        // centred, as the desktop's and the browser's pages are.
+        #if os(macOS)
+        .frame(maxWidth: CGFloat(LayoutTokens.pageWidth))
+        .frame(maxWidth: .infinity)
+        #endif
         .refreshable { onRefresh?() }
         .navigationTitle(title)
     }

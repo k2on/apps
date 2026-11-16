@@ -19,7 +19,7 @@ use iced::widget::{button, checkbox, column, container, row, rule, scrollable, s
 use iced::{Alignment, Length, Padding};
 
 use crate::context_menu::Keyed;
-use crate::layout_tokens::{CONTENT_WIDTH, INSPECTOR_WIDTH, SEARCH_WIDTH, SIDEBAR_MIN_WIDTH, SIDEBAR_WIDTH, TOOLBAR_HEIGHT};
+use crate::layout_tokens::{CONTENT_WIDTH, INSPECTOR_WIDTH, PAGE_WIDTH, SEARCH_WIDTH, SIDEBAR_MIN_WIDTH, SIDEBAR_WIDTH, TOOLBAR_HEIGHT};
 use crate::shell::{Frame, Pane, SizeClass};
 use crate::{context_menu, glyphs, icon, layer, parts, sidebar, style};
 
@@ -81,7 +81,7 @@ fn page<M: Clone + 'static>(title: Val<String>, content: View<M>) -> Element<'st
     }
     // Its title is the toolbar's (`shell`), inline or large: not said twice.
     let _ = title;
-    let list = column(body).spacing(10).padding(PAD).max_width(if wide { f32::INFINITY } else { 720.0 });
+    let list = column(body).spacing(10).padding(PAD).max_width(if wide { f32::INFINITY } else { PAGE_WIDTH });
     let mut layers = stack![scrollable(container(list).center_x(Length::Fill)).height(Length::Fill)];
     for v in over {
         let asked = match v {

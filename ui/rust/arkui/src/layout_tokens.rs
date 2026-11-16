@@ -14,6 +14,8 @@ pub const SIDEBAR_WIDTH: f32 = 200.0;
 pub const CONTENT_WIDTH: f32 = 360.0;
 /// An inspector at the trailing edge, at rest.
 pub const INSPECTOR_WIDTH: f32 = 300.0;
+/// A page's readable column on a wide window, centred: its cards, shelves and forms no wider.
+pub const PAGE_WIDTH: f32 = 960.0;
 /// A sheet on the Mac, a window over the one that opened it: a grouped form's labels and fields side by side.
 pub const SHEET_WIDTH: f32 = 520.0;
 /// A sheet on the Mac at its least: it grows to what it holds, up to its window.
