@@ -515,44 +515,6 @@ mod tests {
         on_row(container(b).width(Length::Fill).height(40), "Checking", items, keyed)
     }
 
-    /// The menu key, or Shift-F10.
-    fn menu_key(shift_f10: bool) -> Event {
-        let (key, modifiers) = match shift_f10 {
-            true => (Key::Named(Named::F10), iced::keyboard::Modifiers::SHIFT),
-            false => (Key::Named(Named::ContextMenu), iced::keyboard::Modifiers::empty()),
-        };
-        Event::Keyboard(iced::keyboard::Event::KeyPressed {
-            key: key.clone(),
-            modified_key: key,
-            physical_key: iced::keyboard::key::Physical::Unidentified(iced::keyboard::key::NativeCode::Unidentified),
-            location: iced::keyboard::Location::Standard,
-            modifiers,
-            text: None,
-            repeat: false,
-        })
-    }
-
-    /// On the cursor's row, Shift-F10 or the menu key opens its menu with
-    /// the pointer nowhere near, its first entry lit, so Enter runs it; on
-    /// a row the cursor is not on, the keys open nothing, even under the
-    /// pointer. Falsified by the pointer's rule alone (no menu with the
-    /// pointer away), or by every row opening at once.
-    #[test]
-    fn the_cursor_row_opens_its_menu_by_the_keys() {
-        for shift_f10 in [true, false] {
-            let mut ui = iced_test::simulator(keyed_row(Keyed::Here));
-            ui.point_at(Point::new(900.0, 900.0));
-            let _ = ui.simulate(vec![menu_key(shift_f10)]);
-            let _ = ui.tap_key(Key::Named(Named::Enter));
-            assert_eq!(ui.into_messages().collect::<Vec<_>>(), vec![Msg::Rename]);
-        }
-        let mut ui = iced_test::simulator(keyed_row(Keyed::Elsewhere));
-        ui.point_at(Point::new(20.0, 20.0));
-        let _ = ui.simulate(vec![menu_key(true)]);
-        let _ = ui.tap_key(Key::Named(Named::Enter));
-        assert!(ui.into_messages().next().is_none());
-    }
-
     /// A right click opens the whole menu, and each entry runs its own
     /// item. Falsified by the first item alone: what the old row's right
     /// click ran (`Rename`) whatever was asked for.

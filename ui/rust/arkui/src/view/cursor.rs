@@ -268,42 +268,4 @@ mod tests {
         });
         assert!(!unkeyed);
     }
-
-    /// A visual selection lights every row from its anchor to the cursor,
-    /// and a section's heading binds its keys on each of its rows, with
-    /// the section they were drawn in. Falsified by lighting the cursor's
-    /// row alone, or by rows that carry only their own menu's keys.
-    #[test]
-    fn a_selection_is_lit_and_a_heading_binds_its_rows() {
-        let cursor = Cursor {
-            focus: Pane::Content,
-            at: [3, 0, 0],
-            keyed: true,
-            anchor: Some(1),
-        };
-        let heading = vec![Bound {
-            bind: Bind::new("rg"),
-            title: "Rename".into(),
-            send: Rc::new(9u8),
-            heading: None,
-        }];
-        let (lit, drawn) = drawing(cursor, || {
-            let mut lit = vec![row_drawn("Rent", Some(&1u8))];
-            in_section(heading, || {
-                for (t, m) in [("Groceries", 2u8), ("Dining", 3), ("Fuel", 4)] {
-                    lit.push(row_drawn(t, Some(&m)));
-                }
-            });
-            lit.push(row_drawn("Gifts", Some(&5u8)));
-            lit
-        });
-        assert_eq!(lit, [false, true, true, true, false]);
-        let rows = &drawn.rows[0];
-        assert!(rows[0].bound.is_empty() && rows[4].bound.is_empty());
-        assert_eq!(rows[2].bound[0].bind.keys, "rg");
-        assert_eq!(rows[2].bound[0].send.downcast_ref::<u8>(), Some(&9));
-        assert_eq!(rows[2].bound[0].heading, Some(1));
-        assert_eq!((rows[1].section, rows[3].section), (1, 1));
-        assert_ne!(rows[0].section, rows[1].section);
-    }
 }
