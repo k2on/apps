@@ -7,7 +7,9 @@
 //!   after the message with iced's own task.
 //! - `scanner`: ark-scanner's `Chosen`: a scan or a photo asked for opens
 //!   the desktop's file chooser (`crate::files::choose`), or takes a photo
-//!   dropped on the window while it waits.
+//!   dropped on the window while it waits; one dropped while none waits is
+//!   held for the ask the app makes of it (`Windowed::dropped`), which it
+//!   answers in the chooser's place.
 //! - `media-player`: ark-media-player's `Desktop`, the sound card (rodio
 //!   over symphonia) and MPRIS on the session bus, as the app's name, so
 //!   the media keys and the desktop's now-playing widgets reach it.
@@ -44,6 +46,10 @@ pub struct Devices {
     /// The chooser is open for a scan.
     #[cfg_attr(not(feature = "scanner"), allow(dead_code))]
     choosing: bool,
+    /// A photo dropped with no scan waiting, for the ask the app makes
+    /// of it next (`Windowed::dropped`).
+    #[cfg_attr(not(feature = "scanner"), allow(dead_code))]
+    held: Option<Vec<u8>>,
 }
 
 impl Devices {
@@ -68,6 +74,7 @@ impl Devices {
             #[cfg(feature = "scanner")]
             scanner,
             choosing: false,
+            held: None,
         }
     }
 
@@ -94,9 +101,17 @@ impl Devices {
         #[cfg(feature = "clipboard")]
         tasks.extend(self.clipboard.take().into_iter().map(iced::clipboard::write));
         #[cfg(feature = "scanner")]
-        if self.scanner.waiting() && !self.choosing {
-            self.choosing = true;
-            tasks.push(crate::files::choose("A Photo", &["image/*"]).map(Msg::Chosen));
+        match self.held.take() {
+            // The photo dropped answers the ask it was held for.
+            Some(bytes) if self.scanner.waiting() => {
+                self.scanner.chosen(Some(bytes));
+                self.bell.ring();
+            }
+            _ if self.scanner.waiting() && !self.choosing => {
+                self.choosing = true;
+                tasks.push(crate::files::choose("A Photo", &["image/*"]).map(Msg::Chosen));
+            }
+            _ => {}
         }
         Task::batch(tasks)
     }
@@ -112,14 +127,25 @@ impl Devices {
     }
 
     /// A file dropped on the window: what the scan waiting takes, as if
-    /// chosen; nothing while none waits.
-    pub fn dropped(&mut self, bytes: Vec<u8>) {
+    /// chosen (true). While none waits it is held (false), for the ask the
+    /// app makes of it (`Windowed::dropped`); without a scanner, dropped.
+    pub fn dropped(&mut self, bytes: Vec<u8>) -> bool {
         #[cfg(feature = "scanner")]
-        if self.scanner.waiting() {
-            self.scanner.chosen(Some(bytes));
-            self.bell.ring();
+        {
+            if self.scanner.waiting() {
+                self.scanner.chosen(Some(bytes));
+                self.bell.ring();
+                return true;
+            }
+            self.held = Some(bytes);
         }
         #[cfg(not(feature = "scanner"))]
         let _ = bytes;
+        false
+    }
+
+    /// The photo held for an ask that never came, let go.
+    pub fn let_go(&mut self) {
+        self.held = None;
     }
 }

@@ -92,4 +92,11 @@ pub trait Windowed: HostedApp {
     /// What the toolkit's shell was asked, carried out by the app's part in
     /// a window (Settings shown); signing out is the host's own first.
     fn native(&mut self, _native: ShellAsk, _cx: &mut Cx<'_, Self>) {}
+    /// A photo dropped on the window with no scan waiting for one: the
+    /// message that asks for a photo where the window is (a transaction's
+    /// Choose Photo, its receipt), which the window then answers with the
+    /// one dropped rather than its chooser; none where nothing takes one.
+    fn dropped(&self, _place: &dyn Place<Self::Key, Self::Change>, _now_ms: i64) -> Option<Self::Msg> {
+        None
+    }
 }

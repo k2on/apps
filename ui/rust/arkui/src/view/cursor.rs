@@ -185,6 +185,7 @@ pub(crate) fn in_section<R>(heading: Vec<Bound>, f: impl FnOnce() -> R) -> R {
 /// A row drawn in the pane being drawn, opened by `open`: whether the
 /// cursor (or a visual selection) is on it. Outside [`drawing`] (a view
 /// drawn alone) nothing is.
+#[cfg(test)]
 pub(crate) fn row_drawn<M: Clone + 'static>(title: &str, open: Option<&M>) -> bool {
     row_bound(title, open, vec![]) == Keyed::Here
 }

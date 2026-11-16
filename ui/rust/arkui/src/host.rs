@@ -539,8 +539,21 @@ where
                 Task::none()
             }
             Msg::Dropped(picked) => {
-                self.devices.dropped(picked.bytes);
-                Task::none()
+                // None waited: the app asks for one where the window is,
+                // and the photo held answers it (`Devices::after`).
+                let ask = match self.devices.dropped(picked.bytes) {
+                    true => None,
+                    false => Some(self.app().dropped(&self.seen(), self.now_ms())),
+                };
+                match ask {
+                    Some(Some(ask)) => self.update(Msg::App(ask)),
+                    Some(None) => {
+                        self.devices.let_go();
+                        self.toast.heard("Nothing Here Takes a Photo");
+                        Task::none()
+                    }
+                    None => Task::none(),
+                }
             }
             Msg::Swallow => Task::none(),
         };

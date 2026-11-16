@@ -169,6 +169,14 @@ impl Windowed for Money {
         self.shell.page(place, now_ms).address
     }
 
+    /// A photo dropped on the window: the receipt of the transaction open
+    /// in its sheet, while it has none.
+    fn dropped(&self, place: Seen<'_>, now_ms: i64) -> Option<MoneyMsg> {
+        let t = self.sheets.page(place, now_ms).transaction?;
+        t.receipt.filter(|r| r.can_add)?;
+        Some(MoneyMsg::Sheets(SheetsMsg::ChoosePhoto))
+    }
+
     fn appearance(&self) -> Option<&'static str> {
         self.shell.state().appearance.map(|a| match a {
             Appearance::Light => "light",
