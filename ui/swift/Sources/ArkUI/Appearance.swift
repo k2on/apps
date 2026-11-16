@@ -13,20 +13,22 @@
 //
 // And not only what is on the screen: every view controller of the window
 // (each tab's navigation stack, each page under the top of a stack, the
-// sidebar's and the detail's columns) is brought into the style at once,
-// its bar drawn again, so that nothing switches later, when it comes on
-// the screen. A tab or a page that was off the screen at the switch took
-// the new style only as it appeared, and its navigation bar laid its large
-// title out in the middle of that: drawn over the page's first rows
-// (harken's Library on the iPhone and the iPad, app-screens 43796348626)
-// or in the old theme's colour, white on the light page under a toolbar
-// drawn dark (money's account, budget and review on the iPad on its side).
-// Each tab is its own `UITab`'s controller, off the tab bar controller's
-// children while another is shown: money's budget and account kept the
-// dark ones (app-screens 43926273208), review, the one shown, did not.
-// The traits are applied (`updateTraitsIfNeeded`) before the bars are
-// drawn again, so a bar's colours are resolved in the new style, not the
-// old.
+// sidebar's and the detail's columns, each `UITab`'s) is brought into the
+// style at once, its bar drawn again, so that nothing switches later.
+//
+// A navigation bar's style is not its own: app-screens 43972335223 found
+// money's on the iPad on its side, light, with the bar and all it holds
+// in dark traits (its large title white on the light page, the glass of
+// its items dark) while the window was light and nothing in the bar had a
+// style of its own, every section's until that section's inspector had
+// been put up, which lays its columns out anew. So the style came from
+// above the bar: given on the way down from the window to it, in the old
+// theme, and kept. The window's style is the only one the app gives, so
+// a switch takes away any of the old theme's given below it: a
+// controller's own, its trait overrides, one its container gave it
+// (`overrideTraitCollection(forChild:)`), or a view's between it and its
+// container's. The walk says what was taken (`stale`), and, for a bar
+// still in the other style, each view above it and whose it is.
 //
 // On the Mac, SwiftUI's own `preferredColorScheme`.
 import SwiftUI
@@ -107,11 +109,32 @@ public enum ArkAppearance {
     private static func restyle(_ w: UIWindow) {
         let want = style
         guard w.overrideUserInterfaceStyle != want else { return }
+        let old = w.traitCollection.userInterfaceStyle
         w.overrideUserInterfaceStyle = want
         w.updateTraitsIfNeeded()
-        // Every controller's, off the screen too (above): its traits taken
-        // now, and its navigation bar drawn again in them.
-        for vc in controllers(under: w.rootViewController) {
+        let new = w.traitCollection.userInterfaceStyle
+        // Every controller of the window, on the screen or not (each tab's,
+        // each column's, each page of a stack, what is presented), and
+        // every one whose view is in the window though no parent lists it.
+        var all = controllers(under: w.rootViewController)
+        var seen = Set(all.map { ObjectIdentifier($0) })
+        func owners(_ v: UIView) {
+            if let vc = v.next as? UIViewController {
+                for c in controllers(under: vc) where seen.insert(ObjectIdentifier(c)).inserted { all.append(c) }
+            }
+            for s in v.subviews { owners(s) }
+        }
+        owners(w)
+        // A style of the old theme given on the way down from the window to
+        // a controller is not the app's: the window's is the only one the
+        // app gives (ArkUI sets no other; a page drawn in one theme does it
+        // in SwiftUI's environment, not here). Taken away, what is under it
+        // inherits the window's like everything else.
+        if old != new {
+            for vc in all { unstyle(vc, from: old) }
+        }
+        w.updateTraitsIfNeeded()
+        for vc in all {
             vc.updateTraitsIfNeeded()
             if vc.isViewLoaded, vc.view.window == nil {
                 vc.view.updateTraitsIfNeeded()
@@ -120,22 +143,57 @@ public enum ArkAppearance {
             if let n = vc as? UINavigationController {
                 n.navigationBar.updateTraitsIfNeeded()
                 redraw(n.navigationBar)
-                // Its bar taken down and put up again, as a column's change
-                // does: what it holds made again in the new style. Drawn
-                // again alone, money's on the iPad on its side kept the old
-                // one (its large title white on the light page, the glass
-                // of its items dark, 43957415743) until an inspector put up
-                // or away laid the bar out anew.
-                if !n.isNavigationBarHidden {
-                    n.setNavigationBarHidden(true, animated: false)
-                    n.setNavigationBarHidden(false, animated: false)
-                }
                 n.navigationBar.layoutIfNeeded()
             }
         }
         redraw(w)
         w.setNeedsLayout()
         w.layoutIfNeeded()
+        switched = cleared
+        cleared = []
+    }
+
+    /// What a switch took away (a style of a controller's, or its
+    /// parent's for it, not the app's), said beside the next picture.
+    private static var cleared: [String] = []
+    private static var switched: [String] = []
+
+    /// `vc` given no style of the old theme (`old`) of its own, nor by its
+    /// parent, nor by a view between them: UIKit's two ways of giving one
+    /// (an override, trait overrides) and the older one a container gives
+    /// a child (`setOverrideTraitCollection(_:forChild:)`, a whole trait
+    /// collection, its style the theme it was taken in).
+    private static func unstyle(_ vc: UIViewController, from old: UIUserInterfaceStyle) {
+        let what = "\(type(of: vc))"
+        if vc.overrideUserInterfaceStyle == old {
+            cleared.append("\(what): its own \(name(vc.overrideUserInterfaceStyle))")
+            vc.overrideUserInterfaceStyle = .unspecified
+        }
+        if vc.traitOverrides.contains(UITraitUserInterfaceStyle.self), vc.traitOverrides.userInterfaceStyle == old {
+            cleared.append("\(what): its trait override \(name(vc.traitOverrides.userInterfaceStyle))")
+            vc.traitOverrides.remove(UITraitUserInterfaceStyle.self)
+        }
+        if let p = vc.parent, let given = p.overrideTraitCollection(forChild: vc),
+           given.userInterfaceStyle == old {
+            cleared.append("\(what): \(name(given.userInterfaceStyle)) given by \(type(of: p))")
+            p.setOverrideTraitCollection(given.modifyingTraits { $0.userInterfaceStyle = .unspecified }, forChild: vc)
+        }
+        if vc.isViewLoaded, let v = vc.view {
+            var u: UIView? = v
+            // Its view, and each above it up to its parent's view.
+            let stop = vc.parent?.viewIfLoaded
+            while let x = u, x !== stop, !(x is UIWindow) {
+                if x.overrideUserInterfaceStyle == old {
+                    cleared.append("\(type(of: x)) over \(what): its own \(name(x.overrideUserInterfaceStyle))")
+                    x.overrideUserInterfaceStyle = .unspecified
+                }
+                if x.traitOverrides.contains(UITraitUserInterfaceStyle.self), x.traitOverrides.userInterfaceStyle == old {
+                    cleared.append("\(type(of: x)) over \(what): its trait override \(name(x.traitOverrides.userInterfaceStyle))")
+                    x.traitOverrides.remove(UITraitUserInterfaceStyle.self)
+                }
+                u = x.superview
+            }
+        }
     }
 
     /// `root` and every controller under it, each once: its children, each
@@ -235,13 +293,49 @@ public enum ArkAppearance {
             if !why.isEmpty, out.count < 24 { out.append("\(bar) \(type(of: v)): \(why.joined(separator: ", "))") }
             for s in v.subviews { walk(s, bar) }
         }
+        // Where a bar's style comes from, the first time one is the other's:
+        // each view above it up to the first in the style asked, and each
+        // controller whose view that is, with any style given it.
+        var traced = false
+        func trace(_ bar: UIView) {
+            traced = true
+            var v: UIView? = bar.superview
+            while let x = v {
+                var line = "  above: \(type(of: x)) traits \(name(x.traitCollection.userInterfaceStyle))"
+                if let own = ownStyle(x) { line += ", own \(own)" }
+                if let vc = x.next as? UIViewController {
+                    line += ", the view of \(type(of: vc))"
+                    if vc.overrideUserInterfaceStyle != .unspecified { line += " own \(name(vc.overrideUserInterfaceStyle))" }
+                    if vc.traitOverrides.contains(UITraitUserInterfaceStyle.self) { line += " trait override \(name(vc.traitOverrides.userInterfaceStyle))" }
+                    if let p = vc.parent {
+                        line += " under \(type(of: p))"
+                        if let given = p.overrideTraitCollection(forChild: vc), given.userInterfaceStyle != .unspecified { line += " given \(name(given.userInterfaceStyle))" }
+                    } else {
+                        line += " with no parent"
+                    }
+                }
+                out.append(line)
+                if x.traitCollection.userInterfaceStyle == want { break }
+                v = x.superview
+            }
+        }
         func bars(_ v: UIView) {
             if v.isHidden { return }
-            if v is UITabBar || v is UINavigationBar || v is UIToolbar { walk(v, "\(type(of: v))"); return }
+            if v is UITabBar || v is UINavigationBar || v is UIToolbar {
+                let before = out.count
+                walk(v, "\(type(of: v))")
+                if out.count > before, !traced, v.traitCollection.userInterfaceStyle != want { trace(v) }
+                return
+            }
             for s in v.subviews { bars(s) }
         }
         for scene in UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }) {
             for w in scene.windows { bars(w) }
+        }
+        // What the last switch took away (`unstyle`), said once.
+        if !switched.isEmpty {
+            out.append("the switch took away: " + switched.joined(separator: "; "))
+            switched = []
         }
         return out.isEmpty ? nil : out.joined(separator: "\n")
     }

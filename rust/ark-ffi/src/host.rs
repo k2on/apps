@@ -433,7 +433,8 @@ impl ArkHost {
                 if self.straight(&url) {
                     return;
                 }
-                if let Some(shell) = self.lock().shell.clone() {
+                let shell = self.lock().shell.clone();
+                if let Some(shell) = shell {
                     shell.browse(url)
                 }
             }
@@ -717,7 +718,8 @@ impl ArkHost {
     /// The app came back to the front after it was away: the link dialled
     /// now, and a sign-in that came back empty may go again.
     pub fn foreground(&self) {
-        if let Some((peer, _)) = self.lock().open.clone() {
+        let open = self.lock().open.clone();
+        if let Some((peer, _)) = open {
             peer.dial_now();
         }
         self.event(Event::Foreground);
@@ -782,8 +784,17 @@ impl ArkHost {
     }
 
     /// A number that grows whenever anything the shell shows moved.
+    ///
+    /// The host's own lock let go before the app's part is asked: that part
+    /// holds its session's lock while it tells the host (`changed`, which
+    /// takes the host's), so asking it with the host's held was the two
+    /// taken in the other order. harken's iPhone held there for the rest
+    /// of its walk (app-screens 43972335223, at `player`): the main thread
+    /// in `version` waiting on the session's lock, the host's thread in
+    /// `changed` waiting on the host's.
     pub fn version(&self) -> u64 {
-        self.lock().version + self.app.version()
+        let own = self.lock().version;
+        own + self.app.version()
     }
 
     /// Nothing on its way: the session's peer settled (or no session) and
