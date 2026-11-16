@@ -1280,7 +1280,20 @@ device), beside harken-peer's walk; both pass against 77da9807.
    had the derived squares: the server seeded by server.sh serves every
    cover, but the clients joined its path to the server as shown, with
    no scheme (fixed: `Session::url`). The walk gains `queue`, the full
-   player's queue up (tap `player.row:queue`). The open issue it waited on is
+   player's queue up (tap `player.row:queue`). app-screens 43906735070
+   (ce624386): Android's phone, tablet and Fold walk it all with the
+   seeded server's covers (a song's its album's), the full player
+   standing in the server's listening session ("This Device"), and the
+   queue's sheet; the desktop (43906883066) has the covers and the
+   player, and its queue shot held the sheet in its tree but drew none
+   (a sheet in a hosted view that is not a page was laid out in its
+   column: fixed in arkui's `element`, not yet seen in a shot). Open: the
+   browser's walk (the desktop job's) fails every shot at ce624386 and
+   after, "not ready" with the app idle and still — an image never
+   complete — which it did not at a15b2b96; that window holds this
+   port's covers for songs and arkui-web's picture becoming the image
+   primitive's (b749f136), and is not yet told apart. The iPhone's, the
+   iPad's and the Mac's runs were cancelled by later pushes. The open issue it waited on is
    found and
    fixed: a hub opened on `harken_seed::seeded_disk` (a log standing at
    its start on a snapshot of rows) took a device at cursor 0 for one
