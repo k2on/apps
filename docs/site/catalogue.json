@@ -214,26 +214,9 @@
       "desktop": [
         "cards"
       ],
-      "android": {
-        "at": [
-          "ui/Components.kt: CoverCard"
-        ],
-        "how": [
-          "CoverCard(seed, art, title, under, side, onClick, round = false, opens = false)",
-          "A shelf is a LazyRow of them, `side` from the screen's width."
-        ]
-      },
+      "android": null,
       "ios": null,
-      "shots": [
-        {
-          "id": "cards",
-          "kind": "screenshot",
-          "what": "Cards, square and round.",
-          "phones": [
-            "android"
-          ]
-        }
-      ]
+      "shots": []
     },
     {
       "id": "headers",
@@ -245,12 +228,11 @@
       ],
       "android": {
         "at": [
-          "ui/Components.kt: PageBar, TabTitle, Heading"
+          "ui/Components.kt: PageBar, TabTitle"
         ],
         "how": [
           "PageBar(title, onBack, actions = {})",
-          "TabTitle(title, actions = {})",
-          "Heading(title, modifier, action = null, onAction = {})"
+          "TabTitle(title, actions = {})"
         ]
       },
       "ios": null,
@@ -258,7 +240,7 @@
         {
           "id": "headers",
           "kind": "screenshot",
-          "what": "A page's bar, a tab's title, a heading.",
+          "what": "A page's bar and a tab's title.",
           "phones": [
             "android"
           ]
@@ -271,26 +253,9 @@
       "section": "components",
       "summary": "What a page says while it has nothing to show, or is still asking for it.",
       "desktop": [],
-      "android": {
-        "at": [
-          "ui/Components.kt: Empty, Fetching"
-        ],
-        "how": [
-          "Empty(icon, title, sentence, modifier, action = null, onAction = {})",
-          "Fetching(host, delayMs): said only after a beat, so a quick answer never flashes it."
-        ]
-      },
+      "android": null,
       "ios": null,
-      "shots": [
-        {
-          "id": "empty",
-          "kind": "screenshot",
-          "what": "Nothing here yet, and still asking.",
-          "phones": [
-            "android"
-          ]
-        }
-      ]
+      "shots": []
     },
     {
       "id": "account",
@@ -357,26 +322,9 @@
         "context",
         "panel"
       ],
-      "android": {
-        "at": [
-          "ui/Components.kt: SheetRow, MoreButton"
-        ],
-        "how": [
-          "SheetRow(icon, label, onClick, trailing = {}, emphasis = false) is one entry of a sheet.",
-          "MoreButton(about, origin, onMore) opens it from a row."
-        ]
-      },
+      "android": null,
       "ios": null,
-      "shots": [
-        {
-          "id": "sheet",
-          "kind": "screenshot",
-          "what": "A sheet's entries.",
-          "phones": [
-            "android"
-          ]
-        }
-      ]
+      "shots": []
     },
     {
       "id": "command",
