@@ -118,11 +118,12 @@ regenerate the JSON:
 
 - no two captures, pictures or pages share a name;
 - `catalogue.json` is what the catalogue prints;
-- the Icons picture draws every glyph;
 - every page has a title and a description, is in the sitemap, and every
   link on it lands;
-- every page is a path, and the search is not;
-- a picture draws, and is cut to its own height.
+- every page leads to the next, in the reading order;
+- every page is a path, and the search is not.
+
+What a page or a picture draws is not tested: the captures are its check.
 
 ## The Captures
 

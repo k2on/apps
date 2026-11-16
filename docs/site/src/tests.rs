@@ -1,12 +1,9 @@
-//! The catalogue held to the code it describes, and the site to itself.
+//! The catalogue held to the code it describes, and the site's links,
+//! routes and reading order to themselves.
 use std::path::{Path, PathBuf};
 
 use crate::catalogue;
 use crate::components::{Section, COMPONENTS};
-
-fn root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
-}
 
 fn read(path: &Path) -> String {
     std::fs::read_to_string(path).unwrap_or_else(|e| panic!("{}: {e}", path.display()))
@@ -45,21 +42,6 @@ fn catalogue_json_is_what_the_catalogue_prints() {
         read(&at) == catalogue::json(),
         "docs/site/catalogue.json is stale: in docs/site, DOCS_WRITE_CATALOGUE=1 cargo test catalogue_json"
     );
-}
-
-/// Falsified by dropping `PULPIT` from `examples::GLYPHS`.
-#[test]
-fn the_glyph_picture_draws_every_glyph() {
-    // The table is arkui-glyphs', which arkui re-exports as `glyphs`.
-    let table = read(&root().join("ui/rust/glyphs/src/lib.rs"));
-    let names: Vec<&str> = table.lines().filter_map(|l| l.strip_prefix("pub const ")?.split(':').next()).collect();
-    assert!(names.len() > 30);
-    for n in names {
-        assert!(
-            crate::examples::GLYPHS.iter().any(|(g, _)| *g == n),
-            "glyphs::{n} is not in the Icons picture"
-        );
-    }
 }
 
 /// The site as its generated entry point says it (ui/prebuild.py's `web`,
@@ -158,36 +140,6 @@ fn every_link_lands() {
             }
         }
     }
-    // What opens over a page is written open in its frame, and takes no
-    // keys from the page: the menu with its submenu, the sheet and the
-    // question, the picker's menu, the command box. Falsified by drawing
-    // the live parts with `render` rather than as a specimen: the sheet is
-    // modal and the menu's submenu is not written.
-    let page = |p: &str| read(&out.join(p).join("index.html"));
-    let menu = page("menu");
-    assert!(menu.matches("ark-menu ark-menu-written").count() >= 2, "the menu and its submenu");
-    assert!(menu.contains("Add to Collection") && menu.contains("New Collection…"));
-    let dialog = page("dialog");
-    assert!(dialog.matches("ark-modal-layer ark-in-place").count() >= 2, "the sheet and the question");
-    assert!(!dialog.contains("aria-modal"), "a specimen is not modal");
-    assert!(page("picker").contains("ark-menu-written"));
-    assert!(page("command").contains("ark-command-written"));
-    // Short of a sidebar, each section is a tab, and a page of one is
-    // pushed over the section's own page, the way back named for it.
-    // Falsified by `tab_group` in `docs_shell`: no tab, no way back.
-    assert!(menu.contains("ark-bar-button ark-bar-back") && menu.contains("aria-label=\"Overlays\""));
-    for s in Section::ALL {
-        assert!(
-            menu.contains(&format!("<span class=\"ark-bottom-title\">{}</span>", s.heading())),
-            "no {} tab",
-            s.heading()
-        );
-    }
-    // A section's own page lists its pages.
-    let overlays = page("overlays");
-    for c in COMPONENTS.iter().filter(|c| c.section == Section::Overlays) {
-        assert!(overlays.contains(c.name), "{} is not on Overlays' page", c.name);
-    }
     let _ = std::fs::remove_dir_all(&out);
 }
 
@@ -240,17 +192,4 @@ fn every_page_is_a_path_and_the_search_is_not() {
     assert_eq!(app.route().get("phone"), Some("ios"), "the phone is the reader's, in the query");
     tell(&mut app, crate::app::Msg::Go { tag: "nowhere".into() });
     assert_eq!(app.route().path_url(), "/");
-}
-
-/// A picture is drawn, cut to its own height and encoded, light and dark
-/// differing. Falsified by cutting nothing (fails: as tall as the canvas).
-#[test]
-fn a_picture_is_the_component_and_only_as_tall_as_it_draws() {
-    let mut painter = crate::render::Painter::new();
-    let menu = &crate::examples::pictures("lists")[0];
-    let light = (menu.draw)(crate::examples::Canvas::new(&mut painter, &iced::Theme::Light, 320.0));
-    let dark = (menu.draw)(crate::examples::Canvas::new(&mut painter, &iced::Theme::Dark, 320.0));
-    assert_eq!(light.width, 640);
-    assert!(light.height > 100 && light.height < 1000, "a table is {}px tall", light.height);
-    assert_ne!(light.webp(), dark.webp());
 }

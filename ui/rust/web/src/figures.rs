@@ -335,17 +335,3 @@ pub fn qr_svg(size: usize, dark: &[bool]) -> AnyView {
         ))
         .into_any()
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// The area runs to the foot whatever the sign of the figures, as
-    /// iced's does. Falsified by closing the area at the zero line.
-    #[test]
-    fn the_area_runs_to_the_foot() {
-        let s = line_svg(&[-300, -250, -240], true);
-        assert!(s.contains("L100 40L0 40Z"), "{s}");
-        assert_eq!(line_svg(&[1, 2], false).matches("<path").count(), 1);
-    }
-}

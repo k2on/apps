@@ -1882,10 +1882,10 @@ What is left before an app could turn it on: a bank login's waiting page
 money's own screens served so, and the replica kept per session rather
 than caught up each request.
 
-**Checked**: arkui-serve's tests (tests/static_site.rs) write a fixture
-site from its declared paths — a band each, a link to each declared path, the rest
-disabled, nothing dangling, the bound refused — and round-trip routes.
-The browser's screenshots (`.github/screens/app-web.sh`) are the SPA's,
+**Checked**: the docs site is one, built and published by build.yaml's
+`page`; its every page written with a title, in its sitemap and linking
+nothing it does not have, by the docs crate's `every_link_lands`. What a
+static page draws is not tested. The browser's screenshots (`.github/screens/app-web.sh`) are the SPA's,
 walking the wide windows' one walk (.github/screens/apps.md, "The wide
 windows"); a static site is not photographed there.
 

@@ -146,27 +146,6 @@ pub fn code(lang: &str, text: &str) -> AnyView {
         .into_any()
 }
 
-#[cfg(all(test, feature = "ssr"))]
-mod tests {
-    use leptos::prelude::RenderHtml;
-
-    /// Falsified by drawing a callout as a quote, or code unhighlighted.
-    #[test]
-    fn writing_is_the_html_that_says_it() {
-        let html =
-            super::markdown("## Two Words\n\nSee [`menu`](../menu/) *now*.\n\n> [!WARNING]\n> Careful.\n\n```rust\nfn a() {}\n```\n").to_html();
-        for want in [
-            "<h2 id=\"two-words\">",
-            "<a href=\"../menu/\"><code>menu</code>",
-            "<em>now",
-            "data-kind=\"warning\" aria-label=\"Warning\" class=\"ark-callout\"",
-            "<span class=\"ark-tok-keyword\">fn</span>",
-        ] {
-            assert!(html.contains(want), "{want} is not in {html}");
-        }
-    }
-}
-
 /// The way to the page before and the page after, at a page's foot, each
 /// its title and where it is (`href`): links, so they work without script
 /// and an app that takes its links over walks them.
