@@ -123,6 +123,9 @@ final class ShotsWalk {
     private func say(_ line: String) {
         print("Shots: \(line)")
         log += line + "\n"
+        // Written as it goes: a walk that hangs (its main thread held) is
+        // read from what it had said (.github/screens/apps-ios.sh).
+        try? log.write(to: out.appendingPathComponent("walk.log"), atomically: true, encoding: .utf8)
     }
 
     private func walk() async throws {
@@ -364,6 +367,8 @@ final class ShotsWalk {
     /// a sync) it is looked for again each time the screen is ready anew.
     private func take(_ step: [String: Any], _ id: String) async throws -> String {
         let json = String(decoding: try JSONSerialization.data(withJSONObject: step, options: [.sortedKeys]), as: UTF8.self)
+        // The step under way, for a walk that hangs to be read by.
+        try? "\(id) \(json)\n".write(to: out.appendingPathComponent("at"), atomically: true, encoding: .utf8)
         let until = Date().addingTimeInterval(Self.find)
         let began = Date()
         while true {

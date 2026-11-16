@@ -174,6 +174,16 @@ for w in ${walks[@]+"${walks[@]}"}; do
     fi
     sleep 1
   done
+  # Still running when its time ran out: held, most likely its main thread
+  # (every wait in the walk has a guard of its own). The step it was on,
+  # the screen, and where the main thread is.
+  if ! [ -f "$shots/out/done" ] && ! [ -f "$shots/out/failed" ] && [ -n "$pid" ] && kill -0 "$pid" 2> /dev/null; then
+    echo "::error::$a $kind: the walk held past its time, on: $(cat "$shots/out/at" 2> /dev/null || echo 'no step yet')"
+    xcrun simctl io "$udid" screenshot "$results/held-$a-$kind.png" > /dev/null 2>&1 || true
+    if sample "$pid" 3 1 -mayDie -file "$results/held-$a-$kind.txt" > /dev/null 2>&1; then
+      python3 "$here/sample.py" "$results/held-$a-$kind.txt" 2>&1 | sed 's/^/  /' || true
+    fi
+  fi
   sed 's/^/  /' "$shots/out/walk.log" 2> /dev/null || true
   cp "$shots/out/walk.log" "$results/walk-$a-$kind.log" 2> /dev/null || true
   echo "$a $kind: the walk took $(( $(date +%s) - t ))s"

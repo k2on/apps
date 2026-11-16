@@ -21,6 +21,9 @@
 // (harken's Library on the iPhone and the iPad, app-screens 43796348626)
 // or in the old theme's colour, white on the light page under a toolbar
 // drawn dark (money's account, budget and review on the iPad on its side).
+// Each tab is its own `UITab`'s controller, off the tab bar controller's
+// children while another is shown: money's budget and account kept the
+// dark ones (app-screens 43926273208), review, the one shown, did not.
 // The traits are applied (`updateTraitsIfNeeded`) before the bars are
 // drawn again, so a bar's colours are resolved in the new style, not the
 // old.
@@ -136,6 +139,20 @@ public enum ArkAppearance {
             out.append(vc)
             for c in vc.children { walk(c) }
             for c in (vc as? UITabBarController)?.viewControllers ?? [] { walk(c) }
+            // A tab bar of `UITab`s (iOS 18's, SwiftUI's `sidebarAdaptable`
+            // tabs among them) lists only the shown tab's controller among
+            // its children and none in `viewControllers`: each tab's, and
+            // each of a group's (money's accounts under Accounts), is its
+            // `UITab`'s.
+            if #available(iOS 18.0, *), let t = vc as? UITabBarController {
+                func tabs(_ ts: [UITab]) {
+                    for tab in ts {
+                        walk(tab.viewController)
+                        if let g = tab as? UITabGroup { tabs(g.children) }
+                    }
+                }
+                tabs(t.tabs)
+            }
             for c in (vc as? UISplitViewController)?.viewControllers ?? [] { walk(c) }
             for c in (vc as? UINavigationController)?.viewControllers ?? [] { walk(c) }
             walk(vc.presentedViewController)
