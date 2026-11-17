@@ -515,51 +515,78 @@ operators, file routing, arkui's primitives and generators.
 
 ## Steps
 
-Each step lands on main with both apps working. Nothing is kept for
-compatibility.
+The watch comes first, not last. The new kernel is built to fit a watch
+from its first line, so it never has to shrink, and the first app on it is
+the smallest screen that needs every part of the design. Each step lands
+on main with the apps working. Nothing is kept for compatibility.
 
 1. **This document.**
-2. **The kernel's shape.** `Entry` and `Node::step`; the peer's inputs and
-   the wire become entries. From PR #31: no alone or join modes (an
-   unconnected replica), pending entries kept as records, facts not
-   states, entry ids never renumbered, a journal of refusals only, the
-   machine emitting its own records, `tracing` in place of recording.
-   Then the kernel's budget: the size gate in CI first, then integer ids
-   on the wire, its own codec, no_std + alloc, and `Store` and `Link` as
-   traits.
-3. **Partial sync**, the largest step:
-   - **3a** pull-based `fetch` with index-backed scans, bounded `take`,
-     `related`, running aggregates;
-   - **3b** subscriptions by query, per-client sync records, base rows and
-     aggregate results, atomic batches, move-outs, checksums; whole-table
-     feeds go;
-   - **3c** the indexed store on disk and partial loading with eviction;
-   - **3d** completeness known locally, TTLs, preload.
-4. **The API and middleware.** The routes macro reads `src/app/api/`;
+2. **The watch's facts, and the watch in CI.**
+   - On a real Pebble Time 2: a Rust watchapp linked against the SDK, with
+     an allocator in the app's heap, that measures how much an app can
+     store, the largest stored value, whether a native app can reach a
+     file API, the AppMessage sizes and throughput, and whether the
+     phone's script can hold a WebSocket open. If storage is tiny, the
+     design changes here, before anything is built on it.
+   - In CI: the kernel built for `thumbv7em-none-eabihf` at
+     `opt-level = "z"` and failed past its budget; its tests run under
+     QEMU for the Cortex-M4; the `.pbw` built in nix. Later, screenshot
+     walks in the Pebble emulator, as app-screens does for phones.
+3. **The new kernel, fresh and within budget.** A new crate, no_std +
+   alloc: `Entry`, `Node::step`, its own codec with integer ids, the
+   `Store` and `Link` traits, the incremental operators ported from
+   `plan.rs`, the protocol from `peer.rs`, held to the protocol vectors
+   and the fuzzer. From PR #31: an unconnected replica in place of alone
+   and join modes, pending entries kept as records, facts not states,
+   entry ids never renumbered, a journal of refusals only, `tracing` in
+   place of recording. The old kernel runs the apps until each moves,
+   then it is deleted.
+4. **Partial sync, enough for the slice:** pull-based `fetch` with
+   index-backed scans and a bounded `take`; subscriptions by query, with
+   base rows, per-client sync records, atomic batches and move-outs; the
+   session space with its rate rules.
+5. **The watch slice: harken's now playing.** The track, its position,
+   play, pause and skip, and the next few in the queue, offline and synced
+   through the phone. A Pebble host (its storage, AppMessage, the event
+   loop driving `Node::step`), a stateless relay script on the phone, an
+   arkui renderer for Pebble's layers (text, a stack, a menu, a glyph, the
+   action bar), and the `(glance)` route group. When this works offline
+   and reconnecting, the kernel is proven.
+6. **Every other host onto the new kernel:** phones, desktop, web and the
+   server. The old kernel is deleted.
+7. **The rest of partial sync:** the indexed store on disk with partial
+   loading and eviction, `related`, running aggregates synced in parts,
+   completeness known locally, TTLs, preload, checksums.
+8. **The API and middleware.** The routes macro reads `src/app/api/`;
    mutators move there with `Cx<Role>`; middleware replaces `Scope`;
    calls go by full path.
-5. **Pages.** `#[view]` structs with `#[state]` in their route files;
+9. **Pages.** `#[view]` structs with `#[state]` in their route files;
    `App`, `Msg` and `update` go.
-6. **Reactions and the server host.** Jobs become reactions; each app's
-   `server/` folds into `api/` and `on/server/`; the server host bounds
-   its threads.
-7. **Versions.** Frozen schemas and APIs, rule 0, lenses, the connect
-   handshake that says a build is too old.
-8. **The session space.** harken's listening session moves onto it,
-   through middleware, so one person's listening reaches only their own
-   devices.
-9. **Crates.** Merge and rename into `ark`, `ark-ui` and `ark-app`.
-10. **The watch.** First measure, on a real watch, how much an app can
-    store and how large an AppMessage can be. Then a Pebble host
-    (its storage, AppMessage, the clock, the event loop driving
-    `Node::step`), a stateless relay script on the phone that passes bytes
-    to the server, an arkui renderer for Pebble's layers, and `.pbw`
-    packaging. harken first (now playing and the next ten in the queue),
-    then money.
+10. **Reactions and the server host.** Jobs become reactions; each app's
+    `server/` folds into `api/` and `on/server/`; the server host bounds
+    its threads.
+11. **Versions.** Frozen schemas and APIs, rule 0, lenses, the connect
+    handshake that says a build is too old.
+12. **Crates.** Merge and rename into `ark`, `ark-ui` and `ark-app`.
+13. **money on the watch.**
+
+An app reaches a watch through a route group for the smallest windows,
+not by naming a platform:
+
+```
+src/app/
+  (tabs)/          phones, tablets, desktop
+  (glance)/        the smallest windows: a watch
+    _layout.rs
+    now-playing.rs
+```
+
+An app with no `(glance)` group has no watch app.
 
 Three bugs on main today are fixed by these steps rather than separately:
-live rows fanned out to every account (step 8), unbounded call threads
-(step 6), and calls matched by the last part of their name (step 4).
+live rows fanned out to every account (steps 4 and 8, the session space
+through middleware), unbounded call threads (step 10), and calls matched
+by the last part of their name (step 3, the new kernel's integer ids).
 
 ## Prior Art
 
