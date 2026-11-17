@@ -44,6 +44,10 @@ h1, h2, h3, p { margin: 0; font: inherit; }
 
 /* * The shell */
 .ark-split-sidebar { display: flex; height: 100%; }
+/* A shell's sections, and what its accessory grew into over them: the one
+   shape either way (shell.rs, `Part::Tabs`), the sections the whole of it. */
+.ark-tabs-host { position: relative; display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.ark-tabs-host > * { flex: 1 1 auto; min-height: 0; }
 .ark-sidebar {
   width: var(--ark-sidebar-width); flex: none; display: flex; flex-direction: column;
   background: var(--ark-container-low); border-right: 1px solid var(--ark-hairline);
@@ -102,7 +106,10 @@ button.ark-sidebar-heading:hover, button.ark-sidebar-heading.ark-on { color: var
 .ark-top-tab { padding: 5px 12px; border-radius: 999px; display: inline-flex; gap: 4px; align-items: center; white-space: nowrap; }
 .ark-top-tab.ark-on { background: var(--ark-surface); color: var(--ark-accent); box-shadow: 0 1px 2px rgb(0 0 0 / 0.12); }
 .ark-count-badge { font-size: 10px; line-height: 14px; min-width: 14px; padding: 0 4px; border-radius: 7px; background: var(--ark-error); color: var(--ark-on-error); text-align: center; }
-.ark-bottom-tabs { display: flex; flex: none; border-top: 1px solid var(--ark-hairline); background: var(--ark-surface); padding: 2px 8px; }
+/* The tab bar at the foot is a plane over the page, as the phones' bars are:
+   the theme's surface, and above what is drawn before it, so nothing of the
+   page shows through it. */
+.ark-bottom-tabs { position: relative; z-index: 2; display: flex; flex: none; border-top: 1px solid var(--ark-hairline); background: var(--ark-surface); padding: 2px 8px; }
 .ark-bottom-tab { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 6px 0; color: color-mix(in srgb, var(--ark-ink) 60%, transparent); }
 .ark-bottom-tab.ark-on { color: var(--ark-accent); }
 .ark-bottom-mark { display: inline-flex; gap: 2px; align-items: flex-start; }
@@ -432,6 +439,11 @@ button.ark-sidebar-heading:hover, button.ark-sidebar-heading.ark-on { color: var
 .ark-stack.ark-z { display: grid; }
 .ark-stack.ark-z > * { grid-area: 1 / 1; }
 .ark-v.ark-align-start { align-items: flex-start; }
+/* What lies in a column that takes what its row leaves (`grow`), or in a
+   column within it, is never wider than it, however it is aligned: a line
+   cut short, `lines(1)`, is cut at the column's edge, before what is at
+   the row's end, not at its own full length. A bleed says its own width. */
+:where(.ark-grow.ark-v, .ark-grow.ark-v .ark-v) > * { max-width: 100%; }
 .ark-v.ark-align-center { align-items: center; }
 .ark-v.ark-align-end { align-items: flex-end; }
 .ark-h.ark-align-start { align-items: flex-start; }

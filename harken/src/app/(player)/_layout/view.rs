@@ -16,8 +16,11 @@ pub fn now_playing(p: &PlayerPage) -> View<PlayerMsg> {
     vstack((
         hstack((
             artwork(p.now.art, p.now.seed, p.now.title),
-            title_stack(p.now.title).under(p.now.under).plain().one_line(),
-            spacer_min(Space::Xs),
+            // The words take what the cover and the buttons leave, and are
+            // cut short there, as a media row's are.
+            vstack(View::from(title_stack(p.now.title).under(p.now.under).plain().one_line()))
+                .align(Align::Start)
+                .grow(),
             glyph_button(p.play_glyph, p.play_label, TextStyle::Title, Ink::Ink, PlayerMsg::Toggle),
             glyph_button("skip-forward", "Next", TextStyle::Title, Ink::Ink, PlayerMsg::Next),
         ))

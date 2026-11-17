@@ -246,11 +246,11 @@ fn shell_part<M: Clone + std::fmt::Debug + 'static>(p: Part<M>, ctx: &mut Ctx<'_
                     (None, None)
                 }
             };
+            // One shape whether the accessory is grown or not, so a page
+            // under it is kept as it is (where it is scrolled to) as it
+            // grows and shrinks back.
             let sections = tab_sections(selected, select, *tabs, *footer, bar, ctx);
-            match full {
-                Some(full) => html::div().class("ark-fill ark-stack").child((sections, full)).into_any(),
-                None => sections,
-            }
+            html::div().class("ark-tabs-host").child((sections, full)).into_any()
         }
         Part::SectionTab { content, .. } | Part::SettingsPane { content, .. } => draw(*content, ctx),
         Part::TabGroup { tabs, .. } => draw(*tabs, ctx),
@@ -720,15 +720,14 @@ thread_local! {
     static GROWN: Cell<bool> = const { Cell::new(false) };
 }
 
-/// What is shown, with the accessory's bar at its foot while there is one.
+/// What is shown, with the accessory's bar at its foot while there is one:
+/// one shape with the bar or without, so the page shown is kept as it is
+/// (where it is scrolled to) when the bar first comes and when it goes.
 fn with_bar(shown: AnyView, bar: Option<AnyView>) -> AnyView {
-    match bar {
-        Some(bar) => html::div()
-            .class("ark-column ark-fill")
-            .child((html::div().class("ark-shell-main").child(shown), bar))
-            .into_any(),
-        None => shown,
-    }
+    html::div()
+        .class("ark-column ark-fill")
+        .child((html::div().class("ark-shell-main").child(shown), bar))
+        .into_any()
 }
 
 /// The accessory's bar: on the raised surface, rounded as a card, pressed

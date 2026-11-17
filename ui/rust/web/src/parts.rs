@@ -101,8 +101,16 @@ fn drawn<M: Clone + std::fmt::Debug + 'static>(v: View<M>) -> Option<AnyView> {
             ))
             .into_any(),
         // An inspector's page of cards, as iced's `Part::Detail` is: its
-        // cards one under another in the pane's own scroll.
-        Part::Detail { content } => html::div().class("ark-inspector-body ark-detail").child(nodes(*content)).into_any(),
+        // cards one under another in the pane's own scroll. Anywhere else
+        // (a page pushed onto its section, a split's detail) it is a page
+        // that scrolls itself, in a tab's page's column.
+        Part::Detail { content } => match crate::drawn(|d| d.pane) {
+            crate::Pane::Inspector => html::div().class("ark-inspector-body ark-detail").child(nodes(*content)).into_any(),
+            _ => html::div()
+                .class("ark-page")
+                .child(html::div().class("ark-page-column ark-detail").child(nodes(*content)))
+                .into_any(),
+        },
         Part::Tile { glyph, tint } => tile(&glyph.get(), crate::figures::Tint::named(&tint.get()).tile()),
         Part::StatusBadge { figure, tint } => crate::figures::status_badge(figure.get(), crate::figures::Tint::named(&tint.get())),
         Part::Meter { fraction, tint } => {
