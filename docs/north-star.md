@@ -78,7 +78,7 @@ A Pebble Time 2 or Round 2 app gets 128 KB of RAM for its code and heap
 together (Pebble 2 Duo: 64 KB, a later target). The kernel's budget is
 **48 KB of code and 24 KB of heap**, leaving room for an app's domain, its
 views and the renderer. CI gates it: a build of the kernel for
-`thumbv7em-none-eabihf` at `opt-level = "z"` that fails when it grows past
+`thumbv7m-none-eabi` at `opt-level = "z"` that fails when it grows past
 the budget.
 
 Measured today, linking the real `Peer::step` at those settings: about
@@ -470,8 +470,9 @@ Serving a downstream node (running its subscriptions, keeping its sync
 record) is host code that phones, desktops and the server run and a watch
 never does, so it doesn't count against the kernel's budget.
 
-On a phone, the app itself is the watch's upstream, talking to the watch
-through Pebble's native phone SDK. When it isn't installed or running, a
+On an Android phone, the app itself is the watch's upstream, talking to
+the watch through PebbleKit 2; iOS has no such path (see "Open
+Questions"). When it isn't installed or running, a
 stateless relay script in the Pebble phone app can connect the watch
 straight to the server instead. The protocol is the same, so the watch
 doesn't care which; it only loses working with its phone while the phone
@@ -568,7 +569,7 @@ on main with the apps working. Nothing is kept for compatibility.
      file API, the AppMessage sizes and throughput, and whether the
      phone's script can hold a WebSocket open. If storage is tiny, the
      design changes here, before anything is built on it.
-   - In CI: the kernel built for `thumbv7em-none-eabihf` at
+   - In CI: the kernel built for `thumbv7m-none-eabi` at
      `opt-level = "z"` and failed past its budget; its tests run under
      QEMU for the Cortex-M4; the `.pbw` built in nix. Later, screenshot
      walks in the Pebble emulator, as app-screens does for phones.
@@ -650,17 +651,20 @@ by the last part of their name (step 3, the new kernel's integer ids).
   server decide. Each mutation may need to say.
 - Server state per client means a client must keep reaching the server
   that holds it, and old records must be collected.
-- How much a watch can store and how often its flash can be written, which
-  bound the watch's replica and pending queue. Classic Pebble C apps got
-  256 bytes per stored value and about 4 KB in all; the new models'
-  limits, and whether a native app can reach the file API the JavaScript
-  SDK has, are unverified.
+- A watch's storage, measured in the Time 2's emulator: 1 MiB per app in
+  all, but 256 bytes per stored value, and no file API for native apps.
+  The watch's store has to be paged over 256-byte values, and its writes
+  (about 13 ms each in the emulator) batched. Still to measure on the real
+  watch.
 - Whether the kernel really shrinks 3×, and Rust on the Pebble SDK, which
   is community-grade today.
 - The phone can see the watch's bytes until frames are encrypted end to
   end.
-- What Core's phone app lets a third-party phone app do with a watch on
-  iOS and Android, and how long iOS keeps our app alive to serve the watch
-  in the background (harken is alive while it plays; money isn't).
+- A phone app can be a watch's upstream on Android only. Core's phone app
+  supports native companions there (PebbleKit 2: the watchapp names its
+  phone apps, and Core's app keeps a companion's service bound while the
+  watchapp runs), but not on iOS, where PebbleKit iOS is discontinued. On
+  an iPhone the watch's upstream is the relay script to the server, so it
+  works offline alone but not with an offline phone.
 - Sorts by a closure no index provides stay unbounded; how often the apps
   need them decides whether that matters.
