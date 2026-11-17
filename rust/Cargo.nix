@@ -137,6 +137,16 @@ rec {
       # File a bug if you depend on any for non-debug work!
       debug = internal.debugCrate { inherit packageId; };
     };
+    "ark-kernel" = rec {
+      packageId = "ark-kernel";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "ark-kernel";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
     "ark-macros" = rec {
       packageId = "ark-macros";
       build = internal.buildRustCrateWithFeatures {
@@ -1686,6 +1696,14 @@ rec {
           "ffi" = [ "dep:uniffi" ];
         };
         resolvedDefaultFeatures = [ "ffi" ];
+      };
+      "ark-kernel" = rec {
+        crateName = "ark-kernel";
+        version = "0.1.0";
+        edition = "2021";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./kernel; };
+        libName = "ark_kernel";
+
       };
       "ark-macros" = rec {
         crateName = "ark-macros";

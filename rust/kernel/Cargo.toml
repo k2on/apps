@@ -1,0 +1,17 @@
+[package]
+name = "ark-kernel"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+description = "The new kernel (docs/north-star.md): the one entry, its spaces, a compact codec with integer ids, the store and link traits and one step, no_std and small enough for a watch."
+
+# No dependencies, no std: only `core` and `alloc`. The same build runs on
+# a server, a phone and a Cortex-M4 watch, and `checks.kernel-size` holds
+# it to the watch's budget. Renamed `ark` when the old kernel goes.
+
+[dependencies]
+
+[lints.rust]
+# `ark_selftest` builds the tests into the crate as a list, for a runner
+# with no test harness: the watch's tests under QEMU (watch/selftest.rs).
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(ark_selftest)"] }

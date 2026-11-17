@@ -1799,6 +1799,29 @@
             installPhase = "touch $out";
           };
 
+          # The watch (docs/north-star.md, "The Kernel's Budget"): the new
+          # kernel (rust/kernel) built for a Pebble's Cortex-M4,
+          # thumbv7em-none-eabihf, by the workspace's toolchain with that
+          # target's core and alloc added. It has no dependencies, so it is
+          # compiled by rustc alone (rust/kernel/watch/build.sh): the size
+          # probe at the budget's settings (opt-level "z", LTO, panic abort),
+          # the selftest beside it, and the probe's code in bytes.
+          watchRust = rust.override { targets = [ "thumbv7em-none-eabihf" ]; };
+          kernel-watch = pkgs.runCommand "ark-kernel-watch" { nativeBuildInputs = [ watchRust pkgs.binutils-unwrapped ]; } ''
+            bash ${only [ "rust/kernel" ]}/rust/kernel/watch/build.sh $out
+          '';
+          # QEMU for the selftest: the 32-bit Arm machines alone, with no
+          # display, sound, tools or debug info, and without the firmware
+          # sources (roms/) it does not build: nixpkgs' whole QEMU is 2 GB
+          # with what it links. Built here, then substituted from the cache.
+          qemuArm = (pkgs.qemu.override { minimal = true; hostCpuTargets = [ "arm-softmmu" ]; }).overrideAttrs (old: {
+            separateDebugInfo = false;
+            configureFlags = old.configureFlags ++ [ "--disable-debug-info" ];
+            postUnpack = (old.postUnpack or "") + ''
+              rm -rf "$sourceRoot/roms"
+            '';
+          });
+
           # harken's domain (harken/src/core: plain Rust, §1.16) built, and
           # its schema's hash held to the one its tests pin.
           harken-domain = crateTests {
@@ -2259,6 +2282,33 @@
             ] ++ memberClippy (args: docsCrate (removeAttrs args [ "unified" ])) { packageId = "docs"; });
             # The workspace formatted as each crate's rustfmt.toml says.
             fmt = rustfmtCheck "arkdb" (only (rustDirs ++ [ "ui/rustfmt.toml" ]));
+            # The new kernel fits the watch: its size probe's code (.text and
+            # .rodata), built for thumbv7em-none-eabihf at opt-level "z" with
+            # LTO and panic abort, is at most the budget's 48 KB.
+            kernel-size = pkgs.runCommand "kernel-size" { } ''
+              code=$(cat ${kernel-watch}/code-bytes)
+              budget=$((48 * 1024))
+              echo "the kernel's code for the watch: $code bytes of the $budget its budget allows"
+              if [ "$code" -gt "$budget" ]; then
+                echo "the kernel is $((code - budget)) bytes past its budget (docs/north-star.md, The Kernel's Budget)" >&2
+                exit 1
+              fi
+              echo "$code" > $out
+            '';
+            # And its tests pass on a Cortex-M4: the selftest under QEMU's
+            # mps2-an386, printing by semihosting, which exits 0 only once
+            # every test has passed. A check of its own, since it builds
+            # QEMU (`qemuArm`) until the cache has it.
+            kernel-qemu = pkgs.runCommand "kernel-qemu" { nativeBuildInputs = [ qemuArm ]; } ''
+              if ! timeout 300 qemu-system-arm -machine mps2-an386 -cpu cortex-m4 -nographic -monitor none -serial null \
+                  -semihosting-config enable=on,target=native -kernel ${kernel-watch}/selftest > log 2>&1; then
+                cat log
+                echo "the kernel's tests failed on the Cortex-M4" >&2
+                exit 1
+              fi
+              cat log
+              cp log $out
+            '';
             # harken's domain crate builds, and its schema's hash is the one
             # pinned (harken/src/core/tests/port.rs).
             inherit harken-domain;

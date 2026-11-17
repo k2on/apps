@@ -10,8 +10,9 @@
 # beside each of their crates holds that inside the code too.
 
 [layers.kernel]
-# The database's kernel: the log, the format, the hash.
-crates = ["ark", "ark-macros"]
+# The database's kernel: the log, the format, the hash; and the new one
+# (rust/kernel), which uses nothing at all.
+crates = ["ark", "ark-macros", "ark-kernel"]
 uses = []
 external = ["serde", "serde_json", "sha2", "memcomparable", "postcard", "proc-macro2", "quote", "syn"]
 
