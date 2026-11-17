@@ -1,0 +1,30 @@
+[package]
+name = "pebble-probe"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "The probe watchapp's Rust: a no_std static library over the Pebble app heap"
+
+[lib]
+name = "probe"
+path = "src/lib.rs"
+crate-type = ["staticlib"]
+test = false
+bench = false
+
+# No dependencies: core and alloc only, so a build needs no registry.
+
+# Its own workspace: it builds for the watch with its own profile, apart from
+# the repository's `rust/` workspace.
+[workspace]
+
+[profile.dev]
+panic = "abort"
+opt-level = "z"
+
+[profile.release]
+panic = "abort"
+opt-level = "z"
+lto = true
+codegen-units = 1
+debug = false

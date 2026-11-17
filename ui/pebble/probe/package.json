@@ -1,0 +1,37 @@
+{
+  "name": "ark-probe",
+  "author": "ark",
+  "version": "1.0.0",
+  "keywords": ["pebble-app"],
+  "private": true,
+  "dependencies": {},
+  "pebble": {
+    "displayName": "Ark Probe",
+    "uuid": "370e1a59-bf4b-45f1-ae6b-d3945940f94a",
+    "sdkVersion": "3",
+    "enableMultiJS": true,
+    "targetPlatforms": ["emery"],
+    "watchapp": {
+      "watchface": false
+    },
+    "messageKeys": ["CMD", "SRC", "SEQ", "TARGET", "ECHO_LEN", "DATA", "XHR", "WS"],
+    "usesPermissions": [
+      {
+        "name": "Internet",
+        "parameters": { "domains": ["example.com", "echo.websocket.org", "ws.postman-echo.com"] }
+      }
+    ],
+    "companionApp": {
+      "android": {
+        "apps": [
+          { "package": "us.koon.harken" },
+          { "package": "us.koon.money" }
+        ],
+        "required": false
+      }
+    },
+    "resources": {
+      "media": []
+    }
+  }
+}

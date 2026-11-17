@@ -1,0 +1,3 @@
+# What `pebble build` leaves.
+/build/
+.lock-waf*

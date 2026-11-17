@@ -1,0 +1,66 @@
+#
+# The probe's build: the SDK's rules, plus the Rust static library in rust/,
+# built by cargo and linked into the app ahead of the SDK's libpebble.
+#
+import os
+import subprocess
+
+top = '.'
+out = 'build'
+
+# The SDK compiles apps for -mcpu=cortex-m3 with the soft-float ABI, and its
+# libpebble is built so, whatever the watch's core: thumbv7m-none-eabi is
+# the Rust target that links with it (thumbv7em-none-eabihf objects do not:
+# "uses VFP register arguments").
+RUST_TARGET = 'thumbv7m-none-eabi'
+
+
+def options(ctx):
+    ctx.load('pebble_sdk')
+
+
+def configure(ctx):
+    ctx.load('pebble_sdk')
+
+
+def build_rust(ctx):
+    """Builds rust/ with cargo, or takes PROBE_RUST_LIB (a built libprobe.a)."""
+    given = os.environ.get('PROBE_RUST_LIB')
+    if given:
+        return ctx.root.find_node(os.path.abspath(given))
+    target_dir = ctx.path.get_bld().make_node('rust')
+    subprocess.check_call([
+        'cargo', 'build', '--release', '--offline',
+        '--target', RUST_TARGET,
+        '--manifest-path', ctx.path.find_node('rust/Cargo.toml').abspath(),
+        '--target-dir', target_dir.abspath(),
+    ])
+    return target_dir.find_node('{}/release/libprobe.a'.format(RUST_TARGET))
+
+
+def build(ctx):
+    ctx.load('pebble_sdk')
+    rust_lib = build_rust(ctx)
+    if rust_lib is None:
+        ctx.fatal('libprobe.a was not built')
+
+    binaries = []
+    cached_env = ctx.env
+    for platform in ctx.env.TARGET_PLATFORMS:
+        ctx.env = ctx.all_envs[platform]
+        ctx.set_group(ctx.env.PLATFORM_NAME)
+        app_elf = '{}/pebble-app.elf'.format(ctx.env.BUILD_DIR)
+        app = ctx.pbl_build(source=ctx.path.ant_glob('src/c/**/*.c'), target=app_elf, bin_type='app',
+                            stlib=['probe'], stlibpath=[rust_lib.parent.abspath()])
+        # Relink when the Rust library changes.
+        app.post()
+        app.link_task.dep_nodes.append(rust_lib)
+        binaries.append({'platform': platform, 'app_elf': app_elf})
+    ctx.env = cached_env
+
+    ctx.set_group('bundle')
+    ctx.pbl_bundle(binaries=binaries,
+                   js=ctx.path.ant_glob(['src/pkjs/**/*.js',
+                                         'src/pkjs/**/*.json',
+                                         'src/common/**/*.js']),
+                   js_entry_file='src/pkjs/index.js')
