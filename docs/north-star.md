@@ -60,8 +60,10 @@ everything that differs by platform, given to the kernel through traits:
   desktop and the server, OPFS on the web.
 - `Link`: bytes to and from the other end. A socket, a phone relay, a test
   harness.
-- `Clock` and `Rng`: time and ids, so the kernel stays deterministic.
 - `Port`s: everything else the app asks for.
+
+Time comes in as an input and ids are drawn deterministically from the
+entry, so the kernel needs no clock or random-number trait.
 - The server's host adds what only an authority has: the master log on
   disk, the record of what each client holds, threads, HTTP.
 
@@ -69,6 +71,44 @@ Because the kernel is no_std and does no I/O, the rule "if it fits on a
 watch, it fits everywhere" keeps it honest: every choice the watch forces
 (no threads inside, operators that don't hold their inputs, a compact
 wire) is also a better choice on a server.
+
+### The Kernel's Budget
+
+A Pebble Time 2 or Round 2 app gets 128 KB of RAM for its code and heap
+together (Pebble 2 Duo: 64 KB, a later target). The kernel's budget is
+**48 KB of code and 24 KB of heap**, leaving room for an app's domain, its
+views and the renderer. CI gates it: a build of the kernel for
+`thumbv7em-none-eabihf` at `opt-level = "z"` that fails when it grows past
+the budget.
+
+Measured today, linking the real `Peer::step` at those settings: about
+**133 KB** of Thumb-2 code with its dependencies (ark 79 KB, postcard
+9 KB, serde_json 9 KB, BTreeMap 7 KB, `core::fmt` 6 KB, sha2 2 KB, glue
+20 KB). The kernel has to shrink about 3×. It doesn't build for the watch
+at all yet: serde and `thiserror` 1 need std, and ark itself uses a
+`Mutex` (`json.rs`), a `thread_local!` (`db.rs`) and `io::Read`
+(`file.rs`).
+
+What leaves the kernel for the hosts, and the choices that brings, all of
+them good on every platform:
+
+- **Integer ids on the wire**, per version, in place of function, table,
+  role and actor names as strings.
+- **Its own compact codec** with a decoder that reads frames in parts, in
+  place of serde, postcard and serde_json.
+- **Refusals as codes**, worded by the host, not formatted text.
+- **JSON, dynamic rows and files** move to host crates (`ark-json`,
+  `ark-files`). Disk and threads stay in the drivers.
+- **The authority's sequencing** is its own type, which a device never
+  links. Per-connection feeds and fan-out live in the server host.
+- **Rate rules are the session space's**, with the rate a subscriber wants
+  stated when it subscribes. A playback position is an anchor each device
+  extrapolates from, not a stream.
+
+Two choices would cost the server, so they are host choices behind the
+same traits and wire, never different semantics: an arena store (the
+server keeps its B-tree), and operators that don't keep their inputs (a
+host may let a view cache them).
 
 ## The Entry
 
@@ -484,7 +524,9 @@ compatibility.
    unconnected replica), pending entries kept as records, facts not
    states, entry ids never renumbered, a journal of refusals only, the
    machine emitting its own records, `tracing` in place of recording.
-   no_std + alloc, with `Store`, `Link`, `Clock` and `Rng` as traits.
+   Then the kernel's budget: the size gate in CI first, then integer ids
+   on the wire, its own codec, no_std + alloc, and `Store` and `Link` as
+   traits.
 3. **Partial sync**, the largest step:
    - **3a** pull-based `fetch` with index-backed scans, bounded `take`,
      `related`, running aggregates;
@@ -507,7 +549,13 @@ compatibility.
    through middleware, so one person's listening reaches only their own
    devices.
 9. **Crates.** Merge and rename into `ark`, `ark-ui` and `ark-app`.
-10. **The watch.** A Pebble host and an arkui generator for it.
+10. **The watch.** First measure, on a real watch, how much an app can
+    store and how large an AppMessage can be. Then a Pebble host
+    (its storage, AppMessage, the clock, the event loop driving
+    `Node::step`), a stateless relay script on the phone that passes bytes
+    to the server, an arkui renderer for Pebble's layers, and `.pbw`
+    packaging. harken first (now playing and the next ten in the queue),
+    then money.
 
 Three bugs on main today are fixed by these steps rather than separately:
 live rows fanned out to every account (step 8), unbounded call threads
@@ -535,6 +583,13 @@ live rows fanned out to every account (step 8), unbounded call threads
 - Server state per client means a client must keep reaching the server
   that holds it, and old records must be collected.
 - How much a watch can store and how often its flash can be written, which
-  bound the watch's replica and pending queue.
+  bound the watch's replica and pending queue. Classic Pebble C apps got
+  256 bytes per stored value and about 4 KB in all; the new models'
+  limits, and whether a native app can reach the file API the JavaScript
+  SDK has, are unverified.
+- Whether the kernel really shrinks 3×, and Rust on the Pebble SDK, which
+  is community-grade today.
+- The phone can see the watch's bytes until frames are encrypted end to
+  end.
 - Sorts by a closure no index provides stay unbounded; how often the apps
   need them decides whether that matters.
