@@ -2296,17 +2296,21 @@
               fi
               echo "$code" > $out
             '';
-            # And its tests pass on a Cortex-M3: the selftest under QEMU's
-            # mps2-an385, printing by semihosting, which exits 0 only once
-            # every test has passed. A check of its own, since it builds
-            # QEMU (`qemuArm`) until the cache has it.
+            # And it works on a Cortex-M3, under QEMU's mps2-an385, printing
+            # by semihosting: the selftest, which exits 0 only once every
+            # test has passed; then the probe, which runs the watch's slice
+            # in small and exits 1 if it held more than the budget's 24 KB
+            # of heap. A check of its own, since it builds QEMU (`qemuArm`)
+            # until the cache has it.
             kernel-qemu = pkgs.runCommand "kernel-qemu" { nativeBuildInputs = [ qemuArm ]; } ''
-              if ! timeout 300 qemu-system-arm -machine mps2-an385 -cpu cortex-m3 -nographic -monitor none -serial null \
-                  -semihosting-config enable=on,target=native -kernel ${kernel-watch}/selftest > log 2>&1; then
-                cat log
-                echo "the kernel's tests failed on the Cortex-M3" >&2
-                exit 1
-              fi
+              for program in selftest probe; do
+                if ! timeout 300 qemu-system-arm -machine mps2-an385 -cpu cortex-m3 -nographic -monitor none -serial null \
+                    -semihosting-config enable=on,target=native -kernel ${kernel-watch}/$program >> log 2>&1; then
+                  cat log
+                  echo "the kernel's $program failed on the Cortex-M3" >&2
+                  exit 1
+                fi
+              done
               cat log
               cp log $out
             '';

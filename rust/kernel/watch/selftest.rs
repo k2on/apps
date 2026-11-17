@@ -1,7 +1,7 @@
 //! The kernel's tests on the watch's processor: each test of the crate's
 //! list (`ark_kernel::selftest`, built with `--cfg ark_selftest`) run in
-//! turn under QEMU, printed with the most heap it held, the heap given
-//! back after each. A failure prints its panic and exits 1.
+//! turn under QEMU, printed with the most heap it held (live blocks
+//! and their headers), the heap given back after each. A failure prints its panic and exits 1.
 
 #![no_std]
 #![no_main]
@@ -14,7 +14,7 @@ mod rt;
 use core::fmt::Write;
 
 #[global_allocator]
-static HEAP: rt::Bump<{ 2 * 1024 * 1024 }> = rt::Bump::new();
+static HEAP: rt::Heap<{ 2 * 1024 * 1024 }> = rt::Heap::new();
 
 struct Out;
 

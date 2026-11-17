@@ -10,8 +10,8 @@
 //!
 //! A step's writes go into an [`Overlay`] over its space's store, which
 //! reads as the store with the writes made, and become [`Writes`] that the
-//! store applies at once or not at all. The same overlay is what pending
-//! entries are run on over confirmed rows.
+//! store applies at once or not at all. A node's pending entries' writes
+//! are a [`Layer`] over its confirmed rows, read through a [`View`].
 
 use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
@@ -200,25 +200,34 @@ impl Store for Memory {
     }
 }
 
-/// Writes held over a store, which read as the store with them made: a
-/// step's transaction, kept or dropped whole.
-pub struct Overlay<'a> {
-    base: &'a dyn Read,
-    /// By `path`: a row's new value, or `None` for its removal.
-    writes: BTreeMap<Vec<u8>, Option<Vec<u8>>>,
-}
+/// Writes kept by `path`: each row's new value, or `None` for its
+/// removal. What an [`Overlay`] holds, and what a node's pending entries
+/// have written over its confirmed rows.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Layer(BTreeMap<Vec<u8>, Option<Vec<u8>>>);
 
-impl<'a> Overlay<'a> {
-    pub fn new(base: &'a dyn Read) -> Overlay<'a> {
-        Overlay {
-            base,
-            writes: BTreeMap::new(),
+/// A layer with no writes, to view a store as it is.
+pub(crate) static EMPTY: Layer = Layer(BTreeMap::new());
+
+impl Layer {
+    pub fn new() -> Layer {
+        Layer::default()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    /// Makes every write over what the layer holds.
+    pub fn apply(&mut self, writes: &Writes) {
+        for w in &writes.0 {
+            self.0.insert(path(w.table, &w.key), w.value.clone());
         }
     }
 
-    /// The writes held, for the store to apply.
+    /// The writes held, in table and key order.
     pub fn into_writes(self) -> Writes {
-        let writes = self.writes.into_iter().map(|(mut key, value)| {
+        let writes = self.0.into_iter().map(|(mut key, value)| {
             let table = TableId(u32::from_be_bytes([key[0], key[1], key[2], key[3]]));
             key.drain(..4);
             Write { table, key, value }
@@ -227,21 +236,31 @@ impl<'a> Overlay<'a> {
     }
 }
 
-impl Read for Overlay<'_> {
+/// A store read with a layer's writes made, changing neither.
+pub struct View<'a> {
+    pub base: &'a dyn Read,
+    pub layer: &'a Layer,
+}
+
+impl Read for View<'_> {
     fn get(&self, table: TableId, key: &[u8]) -> Option<Vec<u8>> {
-        match self.writes.get(&path(table, key)) {
+        match self.layer.0.get(&path(table, key)) {
             Some(w) => w.clone(),
             None => self.base.get(table, key),
         }
     }
 
     fn scan(&self, table: TableId, range: Range<'_>, f: &mut dyn FnMut(&[u8], &[u8]) -> bool) {
-        // The writes in the range, in its order, merged into the store's.
+        // The layer's writes in the range, in its order, merged into the
+        // store's.
         let mut held: Vec<(&[u8], Option<&[u8]>)> = Vec::new();
-        each(&self.writes, table, range, &mut |k, v| {
+        each(&self.layer.0, table, range, &mut |k, v| {
             held.push((k, v.as_deref()));
             true
         });
+        if held.is_empty() {
+            return self.base.scan(table, range, f);
+        }
         let mut i = 0;
         let mut open = true;
         self.base.scan(table, range, &mut |k, v| {
@@ -279,13 +298,48 @@ impl Read for Overlay<'_> {
     }
 }
 
+/// Writes held over a store, which read as the store with them made: a
+/// step's transaction, kept or dropped whole.
+pub struct Overlay<'a> {
+    base: &'a dyn Read,
+    layer: Layer,
+}
+
+impl<'a> Overlay<'a> {
+    pub fn new(base: &'a dyn Read) -> Overlay<'a> {
+        Overlay { base, layer: Layer::new() }
+    }
+
+    /// The writes held, for the store to apply.
+    pub fn into_writes(self) -> Writes {
+        self.layer.into_writes()
+    }
+
+    fn view(&self) -> View<'_> {
+        View {
+            base: self.base,
+            layer: &self.layer,
+        }
+    }
+}
+
+impl Read for Overlay<'_> {
+    fn get(&self, table: TableId, key: &[u8]) -> Option<Vec<u8>> {
+        self.view().get(table, key)
+    }
+
+    fn scan(&self, table: TableId, range: Range<'_>, f: &mut dyn FnMut(&[u8], &[u8]) -> bool) {
+        self.view().scan(table, range, f)
+    }
+}
+
 impl Store for Overlay<'_> {
     fn put(&mut self, table: TableId, key: &[u8], value: &[u8]) {
-        self.writes.insert(path(table, key), Some(value.to_vec()));
+        self.layer.0.insert(path(table, key), Some(value.to_vec()));
     }
 
     fn delete(&mut self, table: TableId, key: &[u8]) {
-        self.writes.insert(path(table, key), None);
+        self.layer.0.insert(path(table, key), None);
     }
 }
 

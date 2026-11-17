@@ -1,8 +1,14 @@
-//! The size probe: a watch program that links the kernel's whole public
-//! surface (the codec, the entry, both stores and the node) as an app
-//! would, for `checks.kernel-size` to measure at the watch's settings. Its
-//! inputs are opaque to the optimiser (`black_box`), so nothing is folded
-//! away; under QEMU it runs and exits 0.
+//! The probe: a watch program that links what of the kernel a device runs
+//! (the codec, the entry, the stores, the node and its frames; not the
+//! authority, which only a server links) as an app would, for
+//! `checks.kernel-size` to measure at the watch's settings. Its inputs are
+//! opaque to the optimiser (`black_box`), so nothing is folded away.
+//!
+//! Under QEMU (`checks.kernel-qemu`) it runs the watch's slice in small: a
+//! queue of sixteen tracks confirmed, eight writes made offline and kept
+//! as pending records through a restart, then pushed, rebased over
+//! another device's write and confirmed, every frame read in parts. It
+//! prints the most heap it held and exits 1 past the budget's 24 KB.
 
 #![no_std]
 #![no_main]
@@ -21,7 +27,7 @@ use ark_kernel::store::Range;
 use ark_kernel::*;
 
 #[global_allocator]
-static HEAP: rt::Bump<{ 32 * 1024 }> = rt::Bump::new();
+static HEAP: rt::Heap<{ 1024 * 1024 }> = rt::Heap::new();
 
 #[panic_handler]
 fn panic(_: &core::panic::PanicInfo) -> ! {
@@ -29,6 +35,7 @@ fn panic(_: &core::panic::PanicInfo) -> ! {
 }
 
 /// An app's body: a row put, and a tap that asks for one.
+#[derive(Clone)]
 enum Msg {
     Put { table: u32, key: Vec<u8>, value: Vec<u8> },
     Tap { key: u8 },
@@ -113,6 +120,38 @@ static HANDLERS: [Handler<Msg>; 2] = [
     },
 ];
 
+/// A row of the watch's slice: a queue's track, its title padded as a
+/// real one would be.
+fn track(i: u8) -> Msg {
+    let mut value = [b' '; 32];
+    value[0] = b'A' + i;
+    Msg::Put {
+        table: 1,
+        key: [0, i].into(),
+        value: value.into(),
+    }
+}
+
+/// What a server would say: each entry logged with the writes it made, in
+/// frames.
+fn logged(wire: &mut Vec<u8>, e: Entry<Msg>, seq: u64, facts: Writes) {
+    let id = e.id;
+    put_frame(
+        wire,
+        &Down::Logged(Logged {
+            entry: Entry { seq: Some(Seq(seq)), ..e },
+            facts,
+        }),
+    );
+    put_frame(
+        wire,
+        &Down::<Msg>::Verdict {
+            id,
+            verdict: Verdict::At { seq: Seq(seq), last: id.n },
+        },
+    );
+}
+
 fn main() -> ! {
     let stores = Spaces {
         local: Memory::new(),
@@ -122,53 +161,121 @@ fn main() -> ! {
     };
     let mut node = Node::new(Origin(black_box(7)), black_box(0), Version(1), &HANDLERS, stores);
     node.set_actor(Actor(black_box(3)));
-    let mut sent: Vec<Entry<Msg>> = Vec::new();
-    for key in 0..black_box(4u8) {
-        let tap = node.make(Space::Local, Msg::Tap { key }, black_box(1_000));
-        node.route(tap, &mut sent);
-    }
-
-    // What was sent comes back through the wire, in parts, confirmed.
+    let mut up: Vec<Up<Msg>> = Vec::new();
     let mut wire = Vec::new();
-    for (i, e) in sent.drain(..).enumerate() {
-        put_frame(
-            &mut wire,
-            &Entry {
-                seq: Some(Seq(i as u64 + 1)),
-                ..e
-            },
-        );
+
+    // The phone's queue of sixteen tracks, confirmed, arriving in parts.
+    let mut phone = Node::new(
+        Origin(black_box(9)),
+        0,
+        Version(1),
+        &HANDLERS,
+        Spaces {
+            local: Memory::new(),
+            device: Memory::new(),
+            session: Memory::new(),
+            shared: Memory::new(),
+        },
+    );
+    let mut seq = 0;
+    for i in 0..black_box(16u8) {
+        let e = phone.make(Space::Shared, track(i), black_box(1_000));
+        let facts = Writes(alloc::vec![Write {
+            table: TableId(1),
+            key: [0, i].into(),
+            value: match &e.body {
+                Msg::Put { value, .. } => Some(value.clone()),
+                _ => None,
+            }
+        }]);
+        seq += 1;
+        logged(&mut wire, e, seq, facts);
     }
     let mut frames = Frames::new(black_box(512));
-    for part in wire.chunks(black_box(5)) {
-        frames.push(part);
-        while let Ok(Some(e)) = frames.read::<Entry<Msg>>() {
-            node.receive(e, &mut sent);
+    let mut take = |node: &mut Node<Msg, Memory>, wire: &mut Vec<u8>, up: &mut Vec<Up<Msg>>| {
+        for part in wire.chunks(black_box(7)) {
+            frames.push(part);
+            while let Ok(Some(down)) = frames.read::<Down<Msg>>() {
+                node.receive(down, up);
+            }
         }
+        wire.clear();
+    };
+    take(&mut node, &mut wire, &mut up);
+
+    // Offline: eight taps, each a pending write seen at once.
+    for key in 0..black_box(8u8) {
+        let tap = node.make(Space::Local, Msg::Tap { key }, black_box(2_000));
+        node.route(tap, &mut up);
+    }
+    // A restart: the pending records kept and put back.
+    let kept = to_vec(&node.pending().to_vec());
+    if let Ok(pending) = from_slice::<Vec<Pending<Msg>>>(&kept) {
+        node.resume(node.cursor(), pending);
     }
 
-    // Writes as facts would travel, applied to a copy.
-    let mut copy = Memory::new();
-    let mut over = Overlay::new(node.store(Space::Shared));
-    over.delete(TableId(1), &[black_box(0)]);
-    let lo = [black_box(1u8)];
-    over.scan(
+    // Connected: the pushes go up as frames; the server logs another
+    // device's write first, so the rest rebase, then confirms them.
+    up.clear();
+    node.connect(&mut up);
+    let pushed = to_vec(&up);
+    let Ok(pushed) = from_slice::<Vec<Up<Msg>>>(&pushed) else {
+        rt::exit(false)
+    };
+    let other = phone.make(Space::Shared, track(1), black_box(3_000));
+    seq += 1;
+    logged(
+        &mut wire,
+        other,
+        seq,
+        Writes(alloc::vec![Write {
+            table: TableId(1),
+            key: [0, 1].into(),
+            value: None
+        }]),
+    );
+    take(&mut node, &mut wire, &mut up);
+    for p in pushed {
+        if let Up::Push(e) = p {
+            let facts = node
+                .pending()
+                .iter()
+                .find(|p| p.entry.id == e.id)
+                .map(|p| p.writes.clone())
+                .unwrap_or_default();
+            seq += 1;
+            logged(&mut wire, e, seq, facts);
+        }
+    }
+    take(&mut node, &mut wire, &mut up);
+
+    // A scan of the view, as a list on the watch reads it.
+    let view = node.view(Space::Shared);
+    let lo = [black_box(0u8)];
+    view.scan(
         TableId(1),
         Range {
             lo: Bound::Included(&lo),
             hi: Bound::Unbounded,
-            reverse: true,
+            reverse: black_box(false),
         },
         &mut |k, v| {
             black_box((k, v));
             true
         },
     );
-    let writes = over.into_writes();
-    if let Ok(w) = from_slice::<Writes>(&to_vec(&writes)) {
-        copy.apply(&w);
-    }
 
-    black_box((node.take_refused(), node.made(), node.clock(), copy.len(TableId(1)), frames.buffered()));
-    rt::exit(true)
+    black_box((
+        node.take_refused(),
+        node.made(),
+        node.clock(),
+        node.pending().len(),
+        node.store(Space::Shared).len(TableId(1)),
+    ));
+    // The heap at most, against the kernel's budget of 24 KB.
+    let peak = HEAP.peak();
+    rt::print("the kernel's probe held at most ");
+    rt::print_number(peak);
+    rt::print(" bytes of heap, of the 24576 its budget allows\n");
+    rt::exit(peak <= 24 * 1024 && node.pending().is_empty())
 }
