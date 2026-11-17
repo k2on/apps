@@ -36,6 +36,8 @@ pub fn art_url(server: &str, art: &str) -> String {
 pub struct Covers {
     server: String,
     by: std::collections::BTreeMap<String, String>,
+    /// Each song's album's name, by the song's id (its hex).
+    albums: std::collections::BTreeMap<String, String>,
 }
 
 impl Covers {
@@ -54,7 +56,16 @@ impl Covers {
             .iter()
             .filter_map(|d| art.get(d.album_id.as_str()).map(|a| (d.media_id.hex(), a.to_string())))
             .collect();
-        Covers { server: server.into(), by }
+        let albums = details
+            .iter()
+            .filter(|d| !d.album.is_empty())
+            .map(|d| (d.media_id.hex(), d.album.clone()))
+            .collect();
+        Covers {
+            server: server.into(),
+            by,
+            albums,
+        }
     }
 
     /// The covers as a screen's views hold them.
@@ -67,6 +78,12 @@ impl Covers {
     /// for none.
     pub fn track(&self, media: &str) -> String {
         self.by.get(media).map_or(String::new(), |a| art_url(&self.server, a))
+    }
+
+    /// The name of the album the song `media` (its id's hex) is on; none
+    /// for none.
+    pub fn album(&self, media: &str) -> String {
+        self.albums.get(media).cloned().unwrap_or_default()
     }
 }
 

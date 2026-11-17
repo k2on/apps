@@ -727,6 +727,18 @@ impl<W: WebHosted> WebHost<W> {
         self.with_place(|_, place| old.close(place));
         self.follow();
     }
+
+    /// Back or forward: the app's part opened again as [`WebHost::rewind`]
+    /// opens it, for the address to bring where it says, with what the
+    /// device holds kept (`HostedApp::keep`): a sound that plays plays on,
+    /// its bar and controls with it, as a phone's back leaves it.
+    pub fn went(&mut self) {
+        self.with_place(|hosting, place| {
+            let session = place.session();
+            hosting.reopen_keeping(&session, place)
+        });
+        self.follow();
+    }
 }
 
 /// The launch arguments every shell reads, as the address's query says

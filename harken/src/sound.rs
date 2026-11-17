@@ -289,6 +289,12 @@ impl MediaSound {
         MediaSound { s }
     }
 
+    /// The port's listener this sound again, after another sound over the
+    /// same port took it and was let go (`Listen::keep`).
+    pub fn listen_again(&self) {
+        self.s.port.set_listener(Some(Arc::new(Hears(self.s.clone()))));
+    }
+
     /// The device's own volume, as the session's for it, in place of the
     /// player's gain (a phone's media stream).
     pub fn with_knob(self, knob: Arc<dyn Knob>) -> MediaSound {

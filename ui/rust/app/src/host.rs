@@ -493,6 +493,14 @@ pub trait HostedApp: Sized + 'static {
     fn moved(&mut self, _cx: &mut Cx<'_, Self>) {}
     /// A link taken while the app shows: what shows put away, then gone to.
     fn link(&mut self, link: Link, cx: &mut Cx<'_, Self>);
+    /// What `old` held of the device carried into this part, just made
+    /// anew over the same session and place to stand where an address
+    /// says ([`Hosting::reopen_keeping`]: the browser's back and forward).
+    /// The screens are this part's own, their first; what the device does
+    /// that outlives them (a sound that plays, its queue) is the old
+    /// part's, so it goes on with its controls. None, the default: nothing
+    /// is carried.
+    fn keep(&mut self, _old: &mut Self, _cx: &mut Cx<'_, Self>) {}
     /// The launch's own arguments, once its runtimes run.
     fn launched(&mut self, args: Vec<String>, cx: &mut Cx<'_, Self>);
     /// Its live space, as `device` stands in it: what every host opens its
@@ -587,6 +595,18 @@ impl<H: HostedApp> Hosting<H> {
         for s in old.screens() {
             s.close(place);
         }
+    }
+
+    /// The app's part made anew over the same session and place, as
+    /// [`Hosting::open`] makes it, with what the device holds carried over
+    /// from the part it replaces ([`HostedApp::keep`]), which is closed
+    /// after. The version goes on growing.
+    pub fn reopen_keeping(&mut self, session: &Session, place: &mut dyn Place<H::Key, H::Change>) {
+        let base = self.version() + 1;
+        let mut old = std::mem::replace(self, Hosting::open(session, place));
+        self.base = base;
+        self.with(place, |app, cx| app.keep(&mut old.app, cx));
+        old.close(place);
     }
 
     /// The app's part, as it is.

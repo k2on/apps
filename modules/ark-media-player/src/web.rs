@@ -197,6 +197,36 @@ impl Browser {
     }
 }
 
+/// The sizes a system's media controls pick their artwork from (Windows'
+/// overlay, Chrome's notification, a lock screen): the one cover at each,
+/// the system scaling it to the one it draws.
+const ARTWORK_SIZES: [u32; 6] = [96, 128, 192, 256, 384, 512];
+
+/// `src` as the session's artwork: an image at each of [`ARTWORK_SIZES`],
+/// its type by its file's extension where that says it.
+fn artwork(src: &str) -> Array {
+    let path = src.split(['?', '#']).next().unwrap_or_default().to_ascii_lowercase();
+    let kind = match path.rsplit('.').next().unwrap_or_default() {
+        "jpg" | "jpeg" => Some("image/jpeg"),
+        "png" => Some("image/png"),
+        "webp" => Some("image/webp"),
+        "gif" => Some("image/gif"),
+        "svg" => Some("image/svg+xml"),
+        _ => None,
+    };
+    let images = Array::new();
+    for n in ARTWORK_SIZES {
+        let image = Object::new();
+        set(&image, "src", src);
+        set(&image, "sizes", format!("{n}x{n}"));
+        if let Some(k) = kind {
+            set(&image, "type", k);
+        }
+        images.push(&image);
+    }
+    images
+}
+
 fn playback_state(state: &str) {
     if let Some(s) = session() {
         set(&s, "playbackState", state);
@@ -285,9 +315,7 @@ impl MediaPlayer for Browser {
         set(&init, "artist", info.artist.as_str());
         set(&init, "album", info.album.as_str());
         if let Some(art) = &info.artwork {
-            let image = Object::new();
-            set(&image, "src", art.as_str());
-            set(&init, "artwork", Array::of1(&image));
+            set(&init, "artwork", artwork(art));
         }
         let Some(window) = web_sys::window() else { return };
         if let Ok(ctor) = Reflect::get(&window, &"MediaMetadata".into()) {

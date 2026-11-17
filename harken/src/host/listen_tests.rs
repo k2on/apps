@@ -307,6 +307,55 @@ fn the_accessory_and_the_volume_follow_the_player() {
     assert_eq!((p.now.volume, p.now.muted), (30, true));
 }
 
+/// What plays is shown to the system — the lock screen, the browser's
+/// and the desktop's media controls — with its title and who it is by and
+/// the controls it offers, and anew when it moves on; nothing once
+/// nothing plays. Falsified by the host never telling the media player
+/// what plays (as it did once the player was the shared host's): the
+/// system showed nothing.
+#[test]
+fn what_plays_is_shown_to_the_system() {
+    let fake = Fake::new();
+    let (mut h, mut place) = hosted(alone(&fake));
+    assert_eq!(fake.now_playing(), None);
+    let songs = songs(&mut h, &mut place);
+    h.send::<Library>(LibraryMsg::Play { id: songs[0].id.clone() }, &mut place);
+    let shown = fake.now_playing().expect("shown");
+    assert_eq!(shown.title, songs[0].title);
+    assert!(!shown.artist.is_empty(), "{shown:?}");
+    assert_eq!(shown.rate, 1.0);
+    let c = fake.controls();
+    assert!(c.has_previous && c.has_next == (songs.len() > 1), "{c:?}");
+    h.send::<Player>(PlayerMsg::Next, &mut place);
+    assert_eq!(fake.now_playing().map(|n| n.title), Some(songs[1].title.clone()));
+    h.send::<Player>(PlayerMsg::Toggle, &mut place);
+    assert_eq!(fake.now_playing().map(|n| n.rate), Some(0.0));
+}
+
+/// Made anew over the same place to stand where an address says (the
+/// browser's back and forward), the part keeps what this device plays:
+/// the bar still shows it, its toggle still pauses the sound, and the
+/// player is still heard. Falsified by making the part afresh
+/// (`Hosting::open`): the sound played on with nothing drawing it and no
+/// control over it.
+#[test]
+fn back_keeps_what_plays_and_its_controls() {
+    let fake = Fake::new();
+    let (mut h, mut place) = hosted(alone(&fake));
+    let first = songs(&mut h, &mut place)[0].clone();
+    h.send::<Library>(LibraryMsg::Play { id: first.id.clone() }, &mut place);
+    h.send::<HarkenShell>(ShellMsg::OpenPlayer, &mut place);
+    let session = place.session();
+    h.reopen_keeping(&session, &mut place);
+    assert!(fake.listened(), "the player still heard");
+    let shell = h.app().shell.page(&place, NOW);
+    assert!(shell.playing && !shell.player_open, "{shell:?}");
+    assert_eq!(h.app().player.page(&place, NOW).now.title, first.title);
+    fake.take();
+    h.send::<HarkenShell>(ShellMsg::Toggle, &mut place);
+    assert!(fake.take().iter().any(|a| a == "pause"));
+}
+
 /// A car browses the library through the media player: the root is the
 /// library's kinds; Albums is held and answered at the next step; an
 /// album's tracks carry where they were found, and choosing one plays the

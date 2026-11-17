@@ -105,8 +105,42 @@ impl Windowed for Harken {
     }
 
     /// Where the window is: Settings' pane while it shows, the page pushed
-    /// over a section, else the section (the library's by its kind).
+    /// over a section, else the section (the library's by its kind); with
+    /// `player=1` while the player has grown over it, so opening it is a
+    /// step of its own that back undoes, as a phone's back closes it.
     fn address(&self, place: Seen<'_>, now_ms: i64) -> String {
+        let at = self.place_address(place, now_ms);
+        match self.shell.state().player_open && !self.settings {
+            true => ark_router::Address::of_url(&at, "/").with(PLAYER, "1").url(),
+            false => at,
+        }
+    }
+
+    fn appearance(&self) -> Option<&'static str> {
+        self.shell.state().appearance.map(|a| match a {
+            Appearance::Light => "light",
+            Appearance::Dark => "dark",
+        })
+    }
+
+    fn native(&mut self, native: ShellAsk, _cx: &mut Cx<'_, Harken>) {
+        match native {
+            ShellAsk::Settings { .. } => self.settings = true,
+            ShellAsk::Reset | ShellAsk::SignOut => self.settings = false,
+            // Add a Device's page is a phone's.
+            ShellAsk::AddDevice => {}
+        }
+    }
+}
+
+/// The query key the grown player is said by (`?player=1`).
+pub const PLAYER: &str = "player";
+
+impl Harken {
+    /// Where the window is, under what has grown over it: Settings' pane
+    /// while it shows, the page pushed over a section, else the section
+    /// (the library's by its kind).
+    fn place_address(&self, place: Seen<'_>, now_ms: i64) -> String {
         if self.settings {
             let pane = self.shell.page(place, now_ms).pane.to_lowercase();
             return Route::Settings.address().with("pane", pane).url();
@@ -128,22 +162,6 @@ impl Windowed for Harken {
             },
             "search" => "/search/".into(),
             _ => "/".into(),
-        }
-    }
-
-    fn appearance(&self) -> Option<&'static str> {
-        self.shell.state().appearance.map(|a| match a {
-            Appearance::Light => "light",
-            Appearance::Dark => "dark",
-        })
-    }
-
-    fn native(&mut self, native: ShellAsk, _cx: &mut Cx<'_, Harken>) {
-        match native {
-            ShellAsk::Settings { .. } => self.settings = true,
-            ShellAsk::Reset | ShellAsk::SignOut => self.settings = false,
-            // Add a Device's page is a phone's.
-            ShellAsk::AddDevice => {}
         }
     }
 }

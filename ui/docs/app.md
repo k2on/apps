@@ -257,7 +257,12 @@ server writes (arkui-serve). The address arrives as a link
 the app's (`Windowed::address`) after every message: a new history entry
 for a move the person made, the entry replaced for a refinement (what is
 typed in a field, the page arriving where its address says); back and
-forward bring the app where the address says. (`data-ark-address`, the part's `address`) beside its ready signal.
+forward bring the app where the address says, its part made anew as a
+load would make it but for what the device holds (`HostedApp::keep`,
+`Hosting::reopen_keeping`): what plays plays on, its bar and the system's
+controls with it. What grows over the place is part of the address, so
+back puts it away as a phone's back does (harken's full player,
+`?player=1`). (`data-ark-address`, the part's `address`) beside its ready signal.
 
 ### Export
 

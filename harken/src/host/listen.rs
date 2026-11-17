@@ -13,7 +13,7 @@
 
 use ark::format::Encode;
 use ark_app::host::{Cx, Session};
-use ark_app::modules::media_player::MediaPlayer;
+use ark_app::modules::media_player::{MediaControls, MediaPlayer, NowPlaying};
 use harken_domain::host::Listening;
 use harken_domain::player::{Change, Level, Loaded, Press, Reconciler, Say, Sound, View};
 use harken_domain::{HarkenChange, HarkenView, LibraryEntry, Track};
@@ -32,10 +32,16 @@ pub struct Listen {
     pub own: Option<Playing>,
     /// Its queue, as the player lists it.
     pub queue: Vec<crate::player::QueueRow>,
+    /// The songs' covers and albums, as the last step read them.
+    covers: words::Covers,
     /// The clock the sound is timed by, which the player's timeline counts
     /// on from (the demo's day is not it).
     clock: ark_app::host::Clock,
 }
+
+/// How far an episode's skips move, as the system's controls offer them.
+const JOG_BACK_S: u32 = 15;
+const JOG_FORWARD_S: u32 = 30;
 
 /// Every song, as the host reads a track a screen named.
 pub fn songs() -> HarkenView {
@@ -82,6 +88,7 @@ impl Listen {
             sound: None,
             own: None,
             queue: vec![],
+            covers: words::Covers::default(),
             clock: cx.place.clock(),
         };
         l.attach(&session.url, cx);
@@ -165,6 +172,69 @@ impl Listen {
             true => None,
             false => own(&covers, sound, (self.clock)()),
         };
+        self.covers = covers;
+    }
+
+    /// What plays (`now`, as the player draws it, the session's or this
+    /// device's own; none for nothing), shown to the system — the lock
+    /// screen, the notification, the browser's and the desktop's media
+    /// controls, a headset, a watch — with the controls it offers: a
+    /// track's next and previous, an episode's skips of seconds, the
+    /// scrubber where it has a length. Told only when it changed (`MediaSound::show`).
+    pub fn show(&self, now: Option<&Playing>, cx: &Cx<'_, Harken>) {
+        let Some(sound) = self.sound.as_ref() else { return };
+        let Some(p) = now else {
+            return sound.show(None, MediaControls::default());
+        };
+        let episode = cx
+            .rows::<Vec<u8>>(&songs())
+            .iter()
+            .filter_map(|b| LibraryEntry::from_bytes(b).ok())
+            .any(|e| e.id.hex() == p.key && e.kind == "episode");
+        let album = self.covers.album(&p.key);
+        let at_ms = match p.playing {
+            true => p.at_ms + ((self.clock)() - p.since_ms).max(0),
+            false => p.at_ms,
+        };
+        let info = NowPlaying {
+            title: p.title.clone(),
+            artist: p.under.clone(),
+            // With no cover, or none to be had, the derived square the
+            // screens draw for it.
+            placeholder: Some(if album.is_empty() { p.title.clone() } else { album.clone() }),
+            album,
+            artwork: (!p.art.is_empty()).then(|| p.art.clone()),
+            duration_ms: p.length_ms,
+            position_ms: match p.length_ms > 0 {
+                true => at_ms.clamp(0, p.length_ms),
+                false => at_ms.max(0),
+            },
+            rate: if p.playing { 1.0 } else { 0.0 },
+        };
+        let controls = MediaControls {
+            has_next: p.can_forward,
+            has_previous: p.can_back,
+            skip_forward_s: if episode { JOG_FORWARD_S } else { 0 },
+            skip_back_s: if episode { JOG_BACK_S } else { 0 },
+            can_seek: p.length_ms > 0,
+            can_rate: false,
+            can_add: true,
+        };
+        sound.show(Some(info), controls);
+    }
+
+    /// What `old` held of this device carried into this one, made anew
+    /// over the same place (the browser's back and forward,
+    /// `HostedApp::keep`): its sound and the queue it plays, its
+    /// reconciler with them, so what plays plays on with its controls.
+    /// The sound this one made in their place is let go first, so the
+    /// player is heard by the one kept.
+    pub fn keep(&mut self, old: &mut Listen) {
+        std::mem::swap(self, old);
+        old.sound = None;
+        if let Some(s) = &self.sound {
+            s.listen_again();
+        }
     }
 
     /// A press: a live call while this device stands in the session, done

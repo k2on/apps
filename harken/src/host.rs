@@ -225,25 +225,22 @@ impl HostedApp for Harken {
             Link::Launch(args) => return self.shell.send(ShellMsg::Launch { args }, cx),
             Link::Address(address) => address,
         };
-        match section_of(&address) {
-            "" | "home" => self.shell.send(ShellMsg::Select { tag: "home".into() }, cx),
-            "search" => self.shell.send(ShellMsg::Select { tag: "search".into() }, cx),
-            "library/playlists" => {
-                self.shell.send(ShellMsg::Select { tag: "library".into() }, cx);
-                self.library.send(LibraryMsg::Show { kind: "playlists".into() }, cx)
-            }
-            // Settings, on the pane its query names (`?pane=diagnostics`).
-            "settings" => {
-                let pane = address.split_once("pane=").map(|(_, p)| p.split('&').next().unwrap_or_default());
-                let mut args = vec!["-screen".to_string(), "settings".into()];
-                args.extend(pane.into_iter().flat_map(|p| ["-pane".to_string(), p.to_string()]));
-                self.shell.send(ShellMsg::Launch { args }, cx)
-            }
-            _ => {
-                let route = <Route as ark_router::Routable>::route_of(&address);
-                self.route(route, cx)
-            }
+        // The player grown over the place (`?player=1`, the window's
+        // address while it shows), once the place is there: while
+        // something plays.
+        let grown = ark_router::Address::of_url(&address, "/").get(crate::window::PLAYER) == Some("1");
+        self.go(&address, cx);
+        if grown {
+            self.shell.send(ShellMsg::OpenPlayer, cx);
         }
+    }
+
+    /// Made anew over the same place (the browser's back and forward):
+    /// what plays plays on, and the player and the bar say it.
+    fn keep(&mut self, old: &mut Harken, cx: &mut Cx<'_, Harken>) {
+        self.listen.keep(&mut old.listen);
+        self.listen.step(cx);
+        self.tell(cx);
     }
 
     fn launched(&mut self, args: Vec<String>, cx: &mut Cx<'_, Harken>) {
@@ -268,6 +265,30 @@ impl HostedApp for Harken {
 }
 
 impl Harken {
+    /// An address gone to: a section's own (`/`, `/search`), Settings',
+    /// else a route's page.
+    fn go(&mut self, address: &str, cx: &mut Cx<'_, Harken>) {
+        match section_of(address) {
+            "" | "home" => self.shell.send(ShellMsg::Select { tag: "home".into() }, cx),
+            "search" => self.shell.send(ShellMsg::Select { tag: "search".into() }, cx),
+            "library/playlists" => {
+                self.shell.send(ShellMsg::Select { tag: "library".into() }, cx);
+                self.library.send(LibraryMsg::Show { kind: "playlists".into() }, cx)
+            }
+            // Settings, on the pane its query names (`?pane=diagnostics`).
+            "settings" => {
+                let pane = address.split_once("pane=").map(|(_, p)| p.split('&').next().unwrap_or_default());
+                let mut args = vec!["-screen".to_string(), "settings".into()];
+                args.extend(pane.into_iter().flat_map(|p| ["-pane".to_string(), p.to_string()]));
+                self.shell.send(ShellMsg::Launch { args }, cx)
+            }
+            _ => {
+                let route = <Route as ark_router::Routable>::route_of(address);
+                self.route(route, cx)
+            }
+        }
+    }
+
     /// The player told what it draws from that the views do not hold: who
     /// and where this device is, and what plays here alone; and the shell
     /// whether anything plays, for its accessory — each only when it
@@ -302,6 +323,7 @@ impl Harken {
         if self.player.state().now != now {
             self.player.send(PlayerMsg::Now { key: now }, cx);
         }
+        self.listen.show(page.has.then_some(&page.now), cx);
         let playing = page.has;
         if self.shell.state().playing != playing {
             self.shell.send(ShellMsg::Playing { on: playing }, cx);

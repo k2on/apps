@@ -637,7 +637,9 @@ pub fn run<W: WebHosted>(app: WebHost<W>) {
 /// forward, or a screenshot's driver walking its shots in one page
 /// (ui/docs/shots.md) — which puts the app back where it opens, the page's
 /// own menus, popovers, command box and focus with it, then brings it
-/// where the address says, as a fresh page would be.
+/// where the address says, as a fresh page would be — but for what the
+/// device holds (`WebHost::went`): a sound that plays plays on, its bar
+/// still there to stop it.
 fn listen<W: WebHosted>(app: &Rc<RefCell<WebHost<W>>>) {
     keys::listen::<W>(app.clone());
     listen_for_gestures();
@@ -651,7 +653,7 @@ fn listen<W: WebHosted>(app: &Rc<RefCell<WebHost<W>>>) {
     let moved = {
         let app = app.clone();
         Closure::<dyn FnMut(web_sys::Event)>::new(move |_: web_sys::Event| {
-            app.borrow_mut().rewind();
+            app.borrow_mut().went();
             if let Some(el) = web_sys::window()
                 .and_then(|w| w.document())
                 .and_then(|d| d.active_element())
