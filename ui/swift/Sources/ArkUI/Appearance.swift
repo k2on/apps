@@ -35,9 +35,11 @@
 // money's accounts, review and insights, first shown after the switch on
 // the iPad on its side). So as each controller appears, its navigation
 // controller's bars, if they were off the screen at the switch, are taken
-// through the other style and back, every view in them, now and once more
-// on the next turn of the main queue, as the items are put in; then not
-// again until the next switch. The walk says, for a bar still in the other
+// through the other style and back, every view in them: the other at once,
+// the app's on the next turn of the main queue, each drawn (taken through
+// both in one turn, the glass of money's budget and insights was left in
+// the other, 44006879474); then not again until the next switch. That is a
+// frame of the other style on those bars' items, once a switch. The walk says, for a bar still in the other
 // style, each view above it, whose it is and any style given it.
 //
 // On the Mac, SwiftUI's own `preferredColorScheme`.
@@ -239,26 +241,22 @@ public enum ArkAppearance {
         if let t = n.toolbar { all.append(t) }
         let bars = all.filter { pending.contains($0) && $0.window != nil }
         guard !bars.isEmpty else { return }
-        for b in bars { again(b) }
+        for b in bars { pending.remove(b) }
+        // The other style now, the app's on the next turn: taken through
+        // both in one turn, the glass of a bar shown at the switch was left
+        // in the other (app-screens 44006879474: money's budget and
+        // insights, on the iPad on its side, light).
+        let want = style
+        for b in bars { give(b, want == .dark ? .light : .dark) }
         DispatchQueue.main.async {
             MainActor.assumeIsolated {
-                for b in bars {
-                    pending.remove(b)
-                    again(b)
+                for b in bars where b.window != nil && style == want {
+                    give(b, want)
+                    redraw(b)
+                    b.layoutIfNeeded()
                 }
             }
         }
-    }
-
-    /// A bar and every view in it taken through the other style and back
-    /// to the app's, its glass drawn again in it.
-    private static func again(_ b: UIView) {
-        let want = style
-        guard want != .unspecified, b.window != nil else { return }
-        give(b, want == .dark ? .light : .dark)
-        give(b, want)
-        redraw(b)
-        b.layoutIfNeeded()
     }
 
     /// The style `v` is given of its own, by either of UIKit's ways (its
