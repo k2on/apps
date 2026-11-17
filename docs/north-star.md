@@ -14,7 +14,7 @@ last section here says how to get from one to the other, step by step.
   has no I/O and needs no standard library, only an allocator. Nothing is
   a "lite" version of anything.
 - **Offline first.** Every device works with no connection, keeps its
-  changes, and syncs when it reconnects, a watch through its phone.
+  changes, and syncs when it reconnects, a watch with its phone.
 - **Partial sync.** A device holds only what its views read, from the
   server and from its own disk, as Zero does and further: offline writes,
   old clients that keep working, and loading from an index on disk.
@@ -58,8 +58,8 @@ everything that differs by platform, given to the kernel through traits:
 
 - `Store`: rows and indexes. In memory on a watch, SQLite on phones,
   desktop and the server, OPFS on the web.
-- `Link`: bytes to and from the other end. A socket, a phone relay, a test
-  harness.
+- `Link`: bytes to and from the node's upstream. A socket, Bluetooth to a
+  phone, a test harness.
 - `Port`s: everything else the app asks for.
 
 Time comes in as an input and ids are drawn deterministically from the
@@ -430,12 +430,52 @@ release.
 | desktop | SQLite | socket | iced windows |
 | phone | SQLite | socket | SwiftUI or Compose |
 | web | OPFS | socket | the generated page |
-| watch | in memory, persisted to the watch's storage | the phone, as a pipe | Pebble UI |
+| watch | in memory, persisted to the watch's storage | its phone, over Bluetooth | Pebble UI |
 
 The watch runs a full node: its queries, its pending entries, its views,
-offline. When the phone is in reach it is only the watch's link to the
-server; the watch syncs end to end itself. Live entries (playback position)
-arrive through the phone into the watch's own loop like any other.
+offline. Its upstream is the phone (see "Upstreams"), so it needs no
+internet, server address or token of its own.
+
+## Upstreams
+
+Every node has one upstream, and every link speaks the same protocol:
+
+```
+server  ←  phone  ←  watch
+   ↑
+ laptop
+```
+
+A node that serves another answers it exactly as the server answers it:
+
+- **Subscriptions.** A downstream node subscribes to its queries at its
+  upstream, which runs them on its own replica, sends the rows, and keeps
+  the record of what the downstream holds.
+- **Pending entries.** A downstream node's entries reach its upstream as
+  pending, keep their origin, and travel on to the server with the
+  upstream's own. Only the server confirms; confirmations come back down
+  the same path, so "confirmed" still means final everywhere.
+- **Its view of the world** is its upstream's: confirmed facts and the
+  upstream's pending entries, so a watch and its phone always agree, even
+  when neither reaches the server.
+- **Session state belongs to the node that owns it.** A phone's player is
+  the authority for its own playback, so a pause on its watch reaches it
+  over Bluetooth with no server. A laptop controlling the same player goes
+  through the server, which forwards to the phone.
+- **Versions.** An upstream translates for its downstream through the
+  version chain, as the server does, so an upstream must be at least as
+  new as what it serves.
+
+Serving a downstream node (running its subscriptions, keeping its sync
+record) is host code that phones, desktops and the server run and a watch
+never does, so it doesn't count against the kernel's budget.
+
+On a phone, the app itself is the watch's upstream, talking to the watch
+through Pebble's native phone SDK. When it isn't installed or running, a
+stateless relay script in the Pebble phone app can connect the watch
+straight to the server instead. The protocol is the same, so the watch
+doesn't care which; it only loses working with its phone while the phone
+is offline.
 
 ## An App
 
@@ -546,9 +586,10 @@ on main with the apps working. Nothing is kept for compatibility.
    base rows, per-client sync records, atomic batches and move-outs; the
    session space with its rate rules.
 5. **The watch slice: harken's now playing.** The track, its position,
-   play, pause and skip, and the next few in the queue, offline and synced
-   through the phone. A Pebble host (its storage, AppMessage, the event
-   loop driving `Node::step`), a stateless relay script on the phone, an
+   play, pause and skip, and the next few in the queue, offline and with
+   the phone as its upstream. A Pebble host (its storage, AppMessage, the
+   event loop driving `Node::step`), harken's phone app serving the watch
+   (with the relay script as the fallback), an
    arkui renderer for Pebble's layers (text, a stack, a menu, a glyph, the
    action bar), and the `(glance)` route group. When this works offline
    and reconnecting, the kernel is proven.
@@ -618,12 +659,8 @@ by the last part of their name (step 3, the new kernel's integer ids).
   is community-grade today.
 - The phone can see the watch's bytes until frames are encrypted end to
   end.
-- Session state owned by one device needs a closer authority than the
-  server. A pause pressed on the watch must reach the phone that plays the
-  audio when neither can reach the server. The likely answer: the device
-  that owns a piece of session state (its player) is its authority, and
-  entries for it go straight to that device's node when it is in reach,
-  through the server otherwise. Shared data keeps the server as its one
-  authority. To settle before the watch slice.
+- What Core's phone app lets a third-party phone app do with a watch on
+  iOS and Android, and how long iOS keeps our app alive to serve the watch
+  in the background (harken is alive while it plays; money isn't).
 - Sorts by a closure no index provides stay unbounded; how often the apps
   need them decides whether that matters.
