@@ -26,11 +26,19 @@
 // drawing it again, its traits asked for again and the bar put down and up
 // did not move it, only a column's change did (a section's inspector put
 // up). Given to the bar alone, the bar took it and the glass of its items,
-// under it, still did not (43988749425). Still not right: a tab's bar
-// items made after the switch, as its tab is first shown, can come in the
-// old theme (43994409464: money's accounts, review and insights on the
-// iPad on its side). The walk says, for a bar still in the other style,
-// each view above it, whose it is and any style given it.
+// under it, still did not (43988749425).
+//
+// And a bar off the screen at the switch is given it again as it comes on:
+// the glass of its items is drawn as it is put in the window, and kept the
+// old theme there, each item's capsule dark under a light bar, or the items
+// in it said dark with no style given them (app-screens 44000216902:
+// money's accounts, review and insights, first shown after the switch on
+// the iPad on its side). So as each controller appears, its navigation
+// controller's bars, if they were off the screen at the switch, are taken
+// through the other style and back, every view in them, now and once more
+// on the next turn of the main queue, as the items are put in; then not
+// again until the next switch. The walk says, for a bar still in the other
+// style, each view above it, whose it is and any style given it.
 //
 // On the Mac, SwiftUI's own `preferredColorScheme`.
 import SwiftUI
@@ -73,6 +81,9 @@ public enum ArkAppearance {
     /// A screenshot walk's theme, over the app's while it is set.
     private static var forced: Bool? = nil
     private static var watching: NSObjectProtocol?
+    /// The bars off the screen at the last switch, not yet shown since.
+    private static let pending = NSHashTable<UIView>.weakObjects()
+    private static var hooked = false
 
     /// The app's own choice (Settings, a launch's `-appearance`).
     public static func app(dark: Bool?) {
@@ -96,6 +107,7 @@ public enum ArkAppearance {
     /// Every window of every scene in the style; and every window shown
     /// after, as it is.
     private static func apply() {
+        hook()
         if watching == nil {
             // Seen on the main queue: every window styled again (the one
             // just shown among them).
@@ -124,6 +136,8 @@ public enum ArkAppearance {
             if let n = vc as? UINavigationController {
                 redraw(n.navigationBar)
                 n.navigationBar.layoutIfNeeded()
+                if n.navigationBar.window == nil { pending.add(n.navigationBar) }
+                if let t = n.toolbar, t.window == nil { pending.add(t) }
             }
         }
         redraw(w)
@@ -197,11 +211,54 @@ public enum ArkAppearance {
         for s in v.subviews { redraw(s) }
     }
 
-    /// `v` and every view in it given the app's style.
-    private static func give(_ v: UIView) {
-        if v.overrideUserInterfaceStyle != style { v.overrideUserInterfaceStyle = style }
-        for s in v.subviews { give(s) }
+    /// `v` and every view in it given the app's style (or `to`).
+    private static func give(_ v: UIView, _ to: UIUserInterfaceStyle? = nil) {
+        let to = to ?? style
+        if v.overrideUserInterfaceStyle != to { v.overrideUserInterfaceStyle = to }
+        for s in v.subviews { give(s, to) }
         v.updateTraitsIfNeeded()
+    }
+
+    /// Each controller's appearing told to `appeared` (UIKit's
+    /// `viewDidAppear`, every controller's, its own first): once.
+    private static func hook() {
+        guard !hooked else { return }
+        hooked = true
+        let c = UIViewController.self
+        guard let was = class_getInstanceMethod(c, #selector(UIViewController.viewDidAppear(_:))),
+              let now = class_getInstanceMethod(c, #selector(UIViewController.arkAppearanceDidAppear(_:))) else { return }
+        method_exchangeImplementations(was, now)
+    }
+
+    /// `vc` on the screen: its navigation controller's bars, if they were
+    /// off it at the switch, given the style again (the file's head).
+    fileprivate static func appeared(_ vc: UIViewController) {
+        guard style != .unspecified, pending.count > 0,
+              let n = vc as? UINavigationController ?? vc.navigationController else { return }
+        var all: [UIView] = [n.navigationBar]
+        if let t = n.toolbar { all.append(t) }
+        let bars = all.filter { pending.contains($0) && $0.window != nil }
+        guard !bars.isEmpty else { return }
+        for b in bars { again(b) }
+        DispatchQueue.main.async {
+            MainActor.assumeIsolated {
+                for b in bars {
+                    pending.remove(b)
+                    again(b)
+                }
+            }
+        }
+    }
+
+    /// A bar and every view in it taken through the other style and back
+    /// to the app's, its glass drawn again in it.
+    private static func again(_ b: UIView) {
+        let want = style
+        guard want != .unspecified, b.window != nil else { return }
+        give(b, want == .dark ? .light : .dark)
+        give(b, want)
+        redraw(b)
+        b.layoutIfNeeded()
     }
 
     /// The style `v` is given of its own, by either of UIKit's ways (its
@@ -308,6 +365,15 @@ public enum ArkAppearance {
             }
         }
         return out.joined(separator: "\n")
+    }
+}
+
+extension UIViewController {
+    /// UIKit's `viewDidAppear`, exchanged for this (`ArkAppearance.hook`):
+    /// the controller's own, then the app's style given its bars again.
+    @objc fileprivate func arkAppearanceDidAppear(_ animated: Bool) {
+        arkAppearanceDidAppear(animated)
+        ArkAppearance.appeared(self)
     }
 }
 #endif
