@@ -16,19 +16,21 @@
 // sidebar's and the detail's columns, each `UITab`'s) is brought into the
 // style at once, its bar drawn again, so that nothing switches later.
 //
-// A bar's style is given it, the app's, and to each view in it, not left
-// to come down from the window: on the iPad, after a switch while the app
-// ran, money's navigation bars kept the old theme whole (their large
-// titles white on the light page, the glass of their items dark) while the
-// navigation controller's view they are in had the new one, as did its
-// parent, and nothing gave the bar a style of its own (app-screens
-// 43972335223, and 43982815086's trace above each bar); drawing it again,
-// its traits asked for again and the bar put down and up did not move it,
-// only a column's change did (a section's inspector put up). Given to the
-// bar alone, the bar took it and the glass of its items, under it, still
-// did not (43988749425), nor the iPhone's tab bar's selection under its
-// platter. The walk says, for a bar still in the other style, each view
-// above it, whose it is and any style given it.
+// A navigation bar's or a toolbar's style is given it, the app's, and to
+// each view in it, not left to come down from the window: on the iPad,
+// after a switch while the app ran, money's navigation bars kept the old
+// theme whole (their large titles white on the light page, the glass of
+// their items dark) while the navigation controller's view they are in had
+// the new one, as did its parent, and nothing gave the bar a style of its
+// own (app-screens 43972335223, and 43982815086's trace above each bar);
+// drawing it again, its traits asked for again and the bar put down and up
+// did not move it, only a column's change did (a section's inspector put
+// up). Given to the bar alone, the bar took it and the glass of its items,
+// under it, still did not (43988749425). Still not right: a tab's bar
+// items made after the switch, as its tab is first shown, can come in the
+// old theme (43994409464: money's accounts, review and insights on the
+// iPad on its side). The walk says, for a bar still in the other style,
+// each view above it, whose it is and any style given it.
 //
 // On the Mac, SwiftUI's own `preferredColorScheme`.
 import SwiftUI
@@ -182,10 +184,13 @@ public enum ArkAppearance {
             t.standardAppearance = t.standardAppearance
             if let a = t.scrollEdgeAppearance { t.scrollEdgeAppearance = a }
         }
-        // A bar, and what it holds, does not take its style from the view
-        // it is in (the file's head): each view of it is given the app's.
+        // A navigation bar or a toolbar, and what it holds, does not take
+        // its style from the view it is in (the file's head): each view of
+        // it is given the app's. Not a tab bar: given its style so, the
+        // iPhone's glass was drawn in the old theme over views whose traits
+        // all said the new one (43994409464); it takes it as it is.
+        if v is UINavigationBar || v is UIToolbar { give(v) }
         if v is UITabBar || v is UINavigationBar || v is UIToolbar {
-            give(v)
             v.setNeedsLayout()
             v.setNeedsDisplay()
         }
