@@ -1,5 +1,9 @@
 # docs
 
+`north-star.md` is the target every part is moving toward: one loop, one
+kernel small enough for a watch, partial sync, typed permissions and
+versions, and the steps from today to there.
+
 `plan-v5.md` is the design and the record of what landed; the other
 `plan-*.md` files are the plans each piece was built from, and
 `arkdb.md` the earlier specification, kept as history. Plans that are only
