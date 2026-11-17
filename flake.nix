@@ -1800,13 +1800,14 @@
           };
 
           # The watch (docs/north-star.md, "The Kernel's Budget"): the new
-          # kernel (rust/kernel) built for a Pebble's Cortex-M4,
-          # thumbv7em-none-eabihf, by the workspace's toolchain with that
+          # kernel (rust/kernel) built as a Pebble app is, for a Cortex-M3
+          # with soft floats, thumbv7m-none-eabi (a hard-float library does
+          # not link into a watchapp), by the workspace's toolchain with that
           # target's core and alloc added. It has no dependencies, so it is
           # compiled by rustc alone (rust/kernel/watch/build.sh): the size
           # probe at the budget's settings (opt-level "z", LTO, panic abort),
           # the selftest beside it, and the probe's code in bytes.
-          watchRust = rust.override { targets = [ "thumbv7em-none-eabihf" ]; };
+          watchRust = rust.override { targets = [ "thumbv7m-none-eabi" ]; };
           kernel-watch = pkgs.runCommand "ark-kernel-watch" { nativeBuildInputs = [ watchRust pkgs.binutils-unwrapped ]; } ''
             bash ${only [ "rust/kernel" ]}/rust/kernel/watch/build.sh $out
           '';
@@ -2283,7 +2284,7 @@
             # The workspace formatted as each crate's rustfmt.toml says.
             fmt = rustfmtCheck "arkdb" (only (rustDirs ++ [ "ui/rustfmt.toml" ]));
             # The new kernel fits the watch: its size probe's code (.text and
-            # .rodata), built for thumbv7em-none-eabihf at opt-level "z" with
+            # .rodata), built for thumbv7m-none-eabi at opt-level "z" with
             # LTO and panic abort, is at most the budget's 48 KB.
             kernel-size = pkgs.runCommand "kernel-size" { } ''
               code=$(cat ${kernel-watch}/code-bytes)
@@ -2295,15 +2296,15 @@
               fi
               echo "$code" > $out
             '';
-            # And its tests pass on a Cortex-M4: the selftest under QEMU's
-            # mps2-an386, printing by semihosting, which exits 0 only once
+            # And its tests pass on a Cortex-M3: the selftest under QEMU's
+            # mps2-an385, printing by semihosting, which exits 0 only once
             # every test has passed. A check of its own, since it builds
             # QEMU (`qemuArm`) until the cache has it.
             kernel-qemu = pkgs.runCommand "kernel-qemu" { nativeBuildInputs = [ qemuArm ]; } ''
-              if ! timeout 300 qemu-system-arm -machine mps2-an386 -cpu cortex-m4 -nographic -monitor none -serial null \
+              if ! timeout 300 qemu-system-arm -machine mps2-an385 -cpu cortex-m3 -nographic -monitor none -serial null \
                   -semihosting-config enable=on,target=native -kernel ${kernel-watch}/selftest > log 2>&1; then
                 cat log
-                echo "the kernel's tests failed on the Cortex-M4" >&2
+                echo "the kernel's tests failed on the Cortex-M3" >&2
                 exit 1
               fi
               cat log

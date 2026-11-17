@@ -43,6 +43,6 @@ fn main() -> ! {
             ran += 1;
         }
     }
-    let _ = writeln!(Out, "{ran} tests passed on a Cortex-M4");
+    let _ = writeln!(Out, "{ran} tests passed on a Cortex-M3");
     rt::exit(true)
 }

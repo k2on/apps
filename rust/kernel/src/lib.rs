@@ -10,7 +10,7 @@
 //! numbers. Time comes in on the entries and ids are counted, so the same
 //! entries give the same rows on a server, a phone and a watch.
 //! `checks.kernel-size` holds its code to the watch's budget of 48 KB, and
-//! `checks.kernel-qemu` runs these tests on a Cortex-M4.
+//! `checks.kernel-qemu` runs these tests on a Cortex-M3, as a Pebble's.
 //!
 //! The old kernel (`rust/ark`) runs the apps until each moves here.
 

@@ -1,5 +1,5 @@
-/* The watch's builds laid out for QEMU's mps2-an386: a Cortex-M4 with an
-   FPU and 4 MB of RAM at 0, which QEMU loads the ELF into. The vector
+/* The watch's builds laid out for QEMU's mps2-an385: a Cortex-M3 with
+   4 MB of RAM at 0, which QEMU loads the ELF into. The vector
    table is first: the stack's top, then the reset and fault handlers
    (rt.rs). */
 MEMORY

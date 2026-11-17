@@ -228,7 +228,7 @@ jobs:
           - { name: lint, checks: "fmt theme theme-contrast layers channels" }
           - { name: apps, checks: "prebuild money-native harken-native revelation-native money-web-sync money-desktop harken-desktop" }
           # The new kernel on the watch: its size against the budget, and
-          # its tests under QEMU on a Cortex-M4 (docs/north-star.md).
+          # its tests under QEMU on a Cortex-M3 (docs/north-star.md).
           - { name: watch, checks: "kernel-size kernel-qemu" }
     name: checks (${{ matrix.group.name }})
     runs-on: ubuntu-latest

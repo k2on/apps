@@ -1,4 +1,4 @@
-//! What a bare Cortex-M4 needs to run the kernel, and nothing else: the
+//! What a bare Cortex-M3 needs to run the kernel, and nothing else: the
 //! vector table and reset (link.x lays them out), an allocator over a
 //! fixed arena, and semihosting, by which a program under QEMU prints and
 //! exits. Shared by the size probe and the selftest, each of which says
@@ -30,11 +30,6 @@ unsafe extern "C" fn reset() -> ! {
         p.write_volatile(0);
         p = p.add(1);
     }
-    // The FPU on (CPACR: CP10 and CP11, full access), as the eabihf
-    // target's code may use it.
-    let cpacr = 0xE000_ED88 as *mut u32;
-    cpacr.write_volatile(cpacr.read_volatile() | (0xF << 20));
-    core::arch::asm!("dsb", "isb");
     crate::main()
 }
 

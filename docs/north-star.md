@@ -571,7 +571,7 @@ on main with the apps working. Nothing is kept for compatibility.
      design changes here, before anything is built on it.
    - In CI: the kernel built for `thumbv7m-none-eabi` at
      `opt-level = "z"` and failed past its budget; its tests run under
-     QEMU for the Cortex-M4; the `.pbw` built in nix. Later, screenshot
+     QEMU for the Cortex-M3; the `.pbw` built in nix. Later, screenshot
      walks in the Pebble emulator, as app-screens does for phones.
 3. **The new kernel, fresh and within budget.** A new crate, no_std +
    alloc: `Entry`, `Node::step`, its own codec with integer ids, the
