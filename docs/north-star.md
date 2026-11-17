@@ -618,5 +618,12 @@ by the last part of their name (step 3, the new kernel's integer ids).
   is community-grade today.
 - The phone can see the watch's bytes until frames are encrypted end to
   end.
+- Session state owned by one device needs a closer authority than the
+  server. A pause pressed on the watch must reach the phone that plays the
+  audio when neither can reach the server. The likely answer: the device
+  that owns a piece of session state (its player) is its authority, and
+  entries for it go straight to that device's node when it is in reach,
+  through the server otherwise. Shared data keeps the server as its one
+  authority. To settle before the watch slice.
 - Sorts by a closure no index provides stay unbounded; how often the apps
   need them decides whether that matters.
