@@ -16,17 +16,19 @@
 // sidebar's and the detail's columns, each `UITab`'s) is brought into the
 // style at once, its bar drawn again, so that nothing switches later.
 //
-// A navigation bar's or a toolbar's style is given it, the app's, not
-// left to come down from the window: on the iPad, after a switch while the
-// app ran, money's navigation bars kept the old theme whole (their large
+// A bar's style is given it, the app's, and to each view in it, not left
+// to come down from the window: on the iPad, after a switch while the app
+// ran, money's navigation bars kept the old theme whole (their large
 // titles white on the light page, the glass of their items dark) while the
 // navigation controller's view they are in had the new one, as did its
 // parent, and nothing gave the bar a style of its own (app-screens
-// 43972335223 and 43982815086's walk, `stale`'s trace above each bar);
-// drawing it again, its traits asked for again and the bar put down and up
-// did not move it, only a column's change did (a section's inspector put
-// up). The walk says, for a bar still in the other style, each view above
-// it, whose it is and any style given it.
+// 43972335223, and 43982815086's trace above each bar); drawing it again,
+// its traits asked for again and the bar put down and up did not move it,
+// only a column's change did (a section's inspector put up). Given to the
+// bar alone, the bar took it and the glass of its items, under it, still
+// did not (43988749425), nor the iPhone's tab bar's selection under its
+// platter. The walk says, for a bar still in the other style, each view
+// above it, whose it is and any style given it.
 //
 // On the Mac, SwiftUI's own `preferredColorScheme`.
 import SwiftUI
@@ -180,17 +182,21 @@ public enum ArkAppearance {
             t.standardAppearance = t.standardAppearance
             if let a = t.scrollEdgeAppearance { t.scrollEdgeAppearance = a }
         }
-        // A navigation bar or a toolbar does not take its style from the
-        // view it is in (the file's head): it is given the app's itself.
-        if v is UINavigationBar || v is UIToolbar, v.overrideUserInterfaceStyle != style {
-            v.overrideUserInterfaceStyle = style
-            v.updateTraitsIfNeeded()
-        }
+        // A bar, and what it holds, does not take its style from the view
+        // it is in (the file's head): each view of it is given the app's.
         if v is UITabBar || v is UINavigationBar || v is UIToolbar {
+            give(v)
             v.setNeedsLayout()
             v.setNeedsDisplay()
         }
         for s in v.subviews { redraw(s) }
+    }
+
+    /// `v` and every view in it given the app's style.
+    private static func give(_ v: UIView) {
+        if v.overrideUserInterfaceStyle != style { v.overrideUserInterfaceStyle = style }
+        for s in v.subviews { give(s) }
+        v.updateTraitsIfNeeded()
     }
 
     /// The style `v` is given of its own, by either of UIKit's ways (its
