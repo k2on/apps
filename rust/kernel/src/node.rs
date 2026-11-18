@@ -42,11 +42,18 @@
 //!
 //! The entries a shared handler emits are taken from its first run here
 //! only, never from a rebase.
+//!
+//! **What changed.** The node notes each row of the shared view that its
+//! own writes, facts, fills and rebases touch, with what it read before;
+//! [`Node::take_changes`] answers what changed since the host last asked,
+//! for the queries over the view ([`crate::plan`]). The host takes them
+//! after each step or receive; until then they gather.
 
 use alloc::collections::VecDeque;
 use alloc::vec::Vec;
 
 use crate::entry::{Actor, Entry, EntryId, Hlc, Origin, Seq, Space, Version};
+use crate::plan::{Changes, Diff};
 use crate::store::{Layer, Overlay, Range, Read, Store, TableId, View, Writes, EMPTY};
 use crate::sync::{Down, Logged, Pending, Up, Verdict};
 
@@ -208,6 +215,11 @@ pub struct Node<B: 'static, S> {
     refused: Vec<(EntryId, Refusal)>,
     /// A fill under way: the `seq` it reaches and the parts still to come.
     filling: Option<(Seq, u32)>,
+    /// The shared view's rows touched since the changes were last taken,
+    /// each with what it read before; or everything, after a fill or a
+    /// resume.
+    touched: Layer,
+    reset: bool,
     /// How many confirmations ran nothing again: what the tests see of a
     /// skipped replay.
     #[cfg(any(test, ark_selftest))]
@@ -232,6 +244,8 @@ impl<B: Body + Clone + 'static, S: Store> Node<B, S> {
             layer: Layer::new(),
             refused: Vec::new(),
             filling: None,
+            touched: Layer::new(),
+            reset: false,
             #[cfg(any(test, ark_selftest))]
             skipped: 0,
         }
@@ -248,6 +262,30 @@ impl<B: Body + Clone + 'static, S: Store> Node<B, S> {
             self.layer.apply(&p.writes);
         }
         self.pending = pending;
+        self.reset = true;
+    }
+
+    /// What changed in the shared view since this was last called, its
+    /// rows as the view reads them now.
+    pub fn take_changes(&mut self) -> Changes {
+        let touched = core::mem::take(&mut self.touched);
+        let reset = core::mem::take(&mut self.reset);
+        let view = View {
+            base: &self.stores.shared,
+            layer: &self.layer,
+        };
+        let rows = touched.into_writes().0.into_iter().filter(|_| !reset).filter_map(|w| {
+            let new = view.get(w.table, &w.key);
+            (w.value != new).then_some((
+                w.table,
+                Diff {
+                    key: w.key,
+                    old: w.value,
+                    new,
+                },
+            ))
+        });
+        Changes { reset, rows: rows.collect() }
     }
 
     /// Who the entries this node makes are from.
@@ -368,6 +406,7 @@ impl<B: Body + Clone + 'static, S: Store> Node<B, S> {
             layer: &self.layer,
         };
         let (writes, made) = run(self.handlers, &view, &e).unwrap_or_default();
+        note(&mut self.touched, &view, writes.0.iter().map(|w| (w.table, &w.key[..])));
         self.layer.apply(&writes);
         let made = made.into_iter().map(|m| self.made_by(&e, m)).collect();
         self.pending.push(Pending {
@@ -432,11 +471,13 @@ impl<B: Body + Clone + 'static, S: Store> Node<B, S> {
                     }
                 }
                 self.filling = Some((seq, parts));
+                self.reset = true;
                 self.filled();
             }
             Down::Rows(rows) => {
                 if let Some((_, parts)) = &mut self.filling {
                     self.stores.shared.apply(&rows);
+                    self.reset = true;
                     *parts = parts.saturating_sub(1);
                     self.filled();
                 }
@@ -461,6 +502,11 @@ impl<B: Body + Clone + 'static, S: Store> Node<B, S> {
             return;
         };
         self.clock = self.clock.witness(l.entry.at, l.entry.at.wall);
+        let view = View {
+            base: &self.stores.shared,
+            layer: &self.layer,
+        };
+        note(&mut self.touched, &view, l.facts.0.iter().map(|w| (w.table, &w.key[..])));
         self.stores.shared.apply(&l.facts);
         self.cursor = seq;
         let id = l.entry.id;
@@ -470,7 +516,8 @@ impl<B: Body + Clone + 'static, S: Store> Node<B, S> {
         if previewed && self.pending.len() + 1 == before {
             // The server wrote what this node's run did, so the confirmed
             // rows are what the entries after it ran over: their writes
-            // stand, and only the layer is made again without it.
+            // stand, and only the layer is made again without it, which
+            // reads the same.
             self.layer = Layer::new();
             for p in &self.pending {
                 self.layer.apply(&p.writes);
@@ -516,6 +563,11 @@ impl<B: Body + Clone + 'static, S: Store> Node<B, S> {
 
     /// Runs every pending entry again, in order, over the confirmed rows.
     fn rebase(&mut self) {
+        let view = View {
+            base: &self.stores.shared,
+            layer: &self.layer,
+        };
+        note(&mut self.touched, &view, self.layer.keys());
         let mut layer = Layer::new();
         for p in &mut self.pending {
             let view = View {
@@ -525,7 +577,17 @@ impl<B: Body + Clone + 'static, S: Store> Node<B, S> {
             p.writes = run(self.handlers, &view, &p.entry).map(|(writes, _)| writes).unwrap_or_default();
             layer.apply(&p.writes);
         }
+        // A row only the new layer writes was read from the confirmed rows
+        // before, which the facts did not touch, or it would be noted.
+        note(&mut self.touched, &self.stores.shared, layer.keys());
         self.layer = layer;
+    }
+}
+
+/// Notes what each of `keys` reads in `view` now, unless it is noted.
+fn note<'k>(touched: &mut Layer, view: &dyn Read, keys: impl Iterator<Item = (TableId, &'k [u8])>) {
+    for (table, key) in keys {
+        touched.keep(table, key, || view.get(table, key));
     }
 }
 

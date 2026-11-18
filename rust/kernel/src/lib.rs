@@ -6,7 +6,9 @@
 //! space's store and returns the entries it made, each routed by its space
 //! ([`Route`]). For the shared space, a node keeps its own entries pending
 //! over the confirmed rows and rebases them on the facts the [`Authority`]
-//! logs, speaking to its upstream in [`sync`]'s frames.
+//! logs, speaking to its upstream in [`sync`]'s frames. Queries are
+//! [`plan`]s of incremental operators, pulled from the store in order and
+//! pushed the changes a node's view takes ([`Node::take_changes`]).
 //!
 //! It is `no_std` with `alloc`: no I/O, no threads, no clock and no random
 //! numbers. Time comes in on the entries and ids are counted, so the same
@@ -24,6 +26,7 @@ pub mod authority;
 pub mod codec;
 pub mod entry;
 pub mod node;
+pub mod plan;
 pub mod store;
 pub mod sync;
 
@@ -31,6 +34,7 @@ pub use authority::{Authority, Conn};
 pub use codec::{Decode, Encode, Frames};
 pub use entry::{Actor, Entry, EntryId, Hlc, Origin, Seq, Space, Version};
 pub use node::{Body, Cx, Handler, HandlerId, Link, Machine, Node, Refusal, Route, Spaces};
+pub use plan::{scan, Changes, Diff, Live, Patch, Plan};
 pub use store::{Layer, Memory, Overlay, Read, Store, TableId, View, Write, Writes};
 pub use sync::{Down, Feed, Logged, Pending, Up, Verdict};
 
@@ -48,6 +52,7 @@ pub mod selftest {
         crate::entry::tests::ALL,
         crate::store::tests::ALL,
         crate::node::tests::ALL,
+        crate::plan::tests::ALL,
         crate::sync::tests::ALL,
         crate::authority::tests::ALL,
     ];

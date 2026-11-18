@@ -225,6 +225,18 @@ impl Layer {
         }
     }
 
+    /// Holds `value` for the row, unless the layer holds one for it.
+    pub(crate) fn keep(&mut self, table: TableId, key: &[u8], value: impl FnOnce() -> Option<Vec<u8>>) {
+        if let alloc::collections::btree_map::Entry::Vacant(v) = self.0.entry(path(table, key)) {
+            v.insert(value());
+        }
+    }
+
+    /// The rows the layer has written, in table and key order.
+    pub(crate) fn keys(&self) -> impl Iterator<Item = (TableId, &[u8])> {
+        self.0.keys().map(|p| (TableId(u32::from_be_bytes([p[0], p[1], p[2], p[3]])), &p[4..]))
+    }
+
     /// The writes held, in table and key order.
     pub fn into_writes(self) -> Writes {
         let writes = self.0.into_iter().map(|(mut key, value)| {

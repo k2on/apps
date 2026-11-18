@@ -7,8 +7,11 @@
 //! Under QEMU (`checks.kernel-qemu`) it runs the watch's slice in small: a
 //! queue of sixteen tracks confirmed, eight writes made offline and kept
 //! as pending records through a restart, then pushed, rebased over
-//! another device's write and confirmed, every frame read in parts. It
-//! prints the most heap it held and exits 1 past the budget's 24 KB.
+//! another device's write and confirmed, every frame read in parts; and
+//! two queries kept live over it all, as the watch's screen keeps them:
+//! the next four tracks (a bounded take of a filter) and how many there
+//! are (a group). It prints the most heap it held and exits 1 past the
+//! budget's 24 KB.
 
 #![no_std]
 #![no_main]
@@ -23,6 +26,7 @@ use core::hint::black_box;
 use core::ops::Bound;
 
 use ark_kernel::codec::{from_slice, put_frame, to_vec, Error, Reader};
+use ark_kernel::plan::Agg;
 use ark_kernel::store::Range;
 use ark_kernel::*;
 
@@ -191,12 +195,31 @@ fn main() -> ! {
         seq += 1;
         logged(&mut wire, e, seq, facts);
     }
+    // The screen's queries: the next four tracks, and how many there are.
+    let all = || scan(TableId(1), Bound::Unbounded, Bound::Unbounded);
+    let mut queries = [
+        all()
+            .filter(|_, v| v[0] != b' ')
+            .take(black_box(4), black_box(false))
+            .live(&node.view(Space::Shared)),
+        all()
+            .group(|_, _| Vec::new(), |_, v| v.len() as i64, black_box(false), true)
+            .live(&node.view(Space::Shared)),
+    ];
+    let mut shown = 0;
+    let mut watch = |node: &mut Node<Msg, Memory>| {
+        let changes = node.take_changes();
+        for q in &mut queries {
+            shown += q.push(&node.view(Space::Shared), &changes).len();
+        }
+    };
     let mut frames = Frames::new(black_box(512));
     let mut take = |node: &mut Node<Msg, Memory>, wire: &mut Vec<u8>, up: &mut Vec<Up<Msg>>| {
         for part in wire.chunks(black_box(7)) {
             frames.push(part);
             while let Ok(Some(down)) = frames.read::<Down<Msg>>() {
                 node.receive(down, up);
+                watch(node);
             }
         }
         wire.clear();
@@ -265,7 +288,14 @@ fn main() -> ! {
         },
     );
 
+    // The queries kept live are what a fresh run over the view answers.
+    let view = node.view(Space::Shared);
+    let next = all().filter(|_, v| v[0] != b' ').take(4, false).live(&view);
+    let total = from_slice::<Agg>(&queries[1].rows()[0].1).map_or(0, |a| a.count);
+    let right = queries[0].rows() == next.rows() && total == node.store(Space::Shared).len(TableId(1)) as u64;
+
     black_box((
+        shown,
         node.take_refused(),
         node.made(),
         node.clock(),
@@ -277,5 +307,5 @@ fn main() -> ! {
     rt::print("the kernel's probe held at most ");
     rt::print_number(peak);
     rt::print(" bytes of heap, of the 24576 its budget allows\n");
-    rt::exit(peak <= 24 * 1024 && node.pending().is_empty())
+    rt::exit(peak <= 24 * 1024 && node.pending().is_empty() && right)
 }

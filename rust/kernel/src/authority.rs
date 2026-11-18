@@ -256,10 +256,13 @@ pub(crate) mod tests {
     use super::*;
     use crate::node::app::*;
     use crate::node::Node;
+    use crate::plan::tests::{diff, splice};
+    use crate::plan::{scan, Live, Row};
     use crate::store::{Memory, Read};
     use crate::Rng;
     use alloc::collections::VecDeque;
     use alloc::vec;
+    use core::ops::Bound;
 
     fn authority() -> Authority<Msg, Memory> {
         Authority::new(&HANDLERS, Memory::new())
@@ -452,6 +455,20 @@ pub(crate) mod tests {
         /// server took from its actor's other devices while it was
         /// connected.
         expect: BTreeMap<u8, u64>,
+        /// Queries over its shared view, each with the list its patches
+        /// splice, and the view's rows when its changes were last taken.
+        lives: Vec<(Live, Vec<Row>)>,
+        seen: Memory,
+    }
+
+    /// The queries each device keeps over its shared view: a bounded take
+    /// of a filter, and a group of every row.
+    fn queries(last: bool) -> [crate::plan::Plan; 2] {
+        let all = || scan(COUNTS, Bound::Unbounded, Bound::Unbounded);
+        [
+            all().filter(|_, v| v[0] % 3 != 0).take(2, last),
+            all().group(|_, _| Vec::new(), |_, v| i64::from(v[0]), true, true),
+        ]
     }
 
     impl Device {
@@ -459,6 +476,32 @@ pub(crate) mod tests {
         fn send(&mut self, said: Vec<Up<Msg>>) {
             if self.online {
                 self.up.extend(said);
+            }
+        }
+
+        /// Takes the node's changes: they are what its shared view did, and
+        /// pushed through the queries, each answer is a fresh run's and its
+        /// patches splice the list.
+        fn watch(&mut self, seed: u64) {
+            let changes = self.node.take_changes();
+            let view = self.node.view(Space::Shared);
+            if !changes.reset {
+                assert_eq!(
+                    changes,
+                    diff(&self.seen, &view, &[COUNTS, POSITIONS]),
+                    "seed {seed}: the changes are the view's"
+                );
+            }
+            let mut seen = Memory::new();
+            for (k, v) in rows(&view) {
+                seen.put(COUNTS, &k, &v);
+            }
+            self.seen = seen;
+            for ((live, shown), fresh) in self.lives.iter_mut().zip(queries(seed.is_multiple_of(2))) {
+                splice(shown, &live.push(&view, &changes));
+                let fresh = fresh.live(&view);
+                assert_eq!(live.rows(), fresh.rows(), "seed {seed}: a query over the view");
+                assert_eq!(shown, fresh.rows(), "seed {seed}: its patches");
             }
         }
     }
@@ -502,6 +545,8 @@ pub(crate) mod tests {
                 made: BTreeSet::new(),
                 refused: BTreeSet::new(),
                 expect: BTreeMap::new(),
+                lives: queries(seed.is_multiple_of(2)).map(|q| (q.live(&Memory::new()), Vec::new())).into(),
+                seen: Memory::new(),
             })
             .collect();
         // The second device knows who it is from the start; the others
@@ -517,6 +562,7 @@ pub(crate) mod tests {
             dev.node.set_actor(dev.actor);
             let mut said = Vec::new();
             dev.node.connect(&mut said);
+            dev.watch(seed);
             said.push(Up::Rate {
                 table: POSITIONS,
                 every: [0, 0, 15][rng.below(3) as usize],
@@ -561,6 +607,7 @@ pub(crate) mod tests {
                     dev.made.insert(e.id);
                     let mut said = Vec::new();
                     dev.node.route(e, &mut said);
+                    dev.watch(seed);
                     dev.send(said);
                 }
                 // The server takes what the device sent.
@@ -593,6 +640,7 @@ pub(crate) mod tests {
                     let mut said = Vec::new();
                     let skipped = dev.node.skipped;
                     dev.node.receive(down, &mut said);
+                    dev.watch(seed);
                     seen.skipped += dev.node.skipped - skipped;
                     if let Some((key, value, before)) = live {
                         let writer = actors[usize::from(key / 10)];
