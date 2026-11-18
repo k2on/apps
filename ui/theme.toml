@@ -432,3 +432,44 @@ type-subheadline = 12.0
 type-footnote = 12.0
 type-caption = 11.0
 type-figure = 28.0
+# A Pebble Time 2's (ui/docs/pebble.md): its 200 by 228 pixels at about
+# 200 to the inch, in the system's own face. The phones' steps would leave
+# a watch no room, so the watch has its own, in pixels, each the same role
+# as the phones' step of its name.
+pebble-space-xs = 2.0
+pebble-space-s = 4.0
+pebble-space-m = 6.0
+pebble-space-l = 8.0
+pebble-space-xl = 12.0
+pebble-space-xxl = 16.0
+pebble-page-margin = 6.0
+pebble-section-gap = 4.0
+pebble-card-corner = 4.0
+pebble-corner = 2.0
+# The size of Gothic, the system font, each type style is set in: it has
+# 14, 18, 24 and 28 (and 9), each also bold, which the headline, the
+# titles and the figure are, as everywhere.
+pebble-type-large-title = 28.0
+pebble-type-title = 24.0
+pebble-type-headline = 18.0
+pebble-type-body = 18.0
+pebble-type-subheadline = 18.0
+pebble-type-footnote = 14.0
+pebble-type-caption = 14.0
+pebble-type-figure = 28.0
+# A line of Gothic is this many times its size tall (a text layer's
+# frame), and is drawn this far below its frame's top: what a list's row
+# lifts its words by.
+pebble-line-height = 1.25
+pebble-text-lift = 4.0
+# A list's row (a title over the line under it) and its section's heading.
+pebble-row-height = 34.0
+pebble-header-height = 18.0
+# A meter: the bar as tall as this, over a track this thick.
+pebble-progress-height = 6.0
+pebble-track-height = 2.0
+# An action bar's glyphs, a side (the SDK's icons are 18 to 28).
+pebble-action-glyph = 18.0
+# A glyph's stroke, in Lucide's units of its 24 (2 is Lucide's own): a
+# little heavier on the watch, whose pixels are larger and one colour.
+pebble-glyph-stroke = 2.5

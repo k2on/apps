@@ -30,6 +30,7 @@ KOTLIN_LAYOUT = "ui/kotlin/src/dev/arkui/LayoutTokens.kt"
 SWIFT_LAYOUT = "ui/swift/Sources/ArkUICore/LayoutTokens.swift"
 RUST_LAYOUT = "ui/rust/arkui/src/layout_tokens.rs"
 CSS = "ui/rust/web/theme.css"
+PEBBLE = "ui/pebble/host/rust/src/tokens.rs"
 
 # The layout tokens, in the order they are written, and each one's sentence.
 LAYOUT = {
@@ -79,6 +80,44 @@ LAYOUT = {
     "type-caption": "The desktop's caption: the smallest words.",
     "type-figure": "The desktop's large figure: a card's amount, bold.",
 }
+
+# Pebble's own layout tokens ([layout]'s `pebble-*`), in the order they are
+# written, and each one's sentence: what ark-pebble's generated screens are
+# laid out by (ui/docs/pebble.md). In pixels, but the line's height.
+PEBBLE_LAYOUT = {
+    "pebble-space-xs": "The least gap: a figure from its label.",
+    "pebble-space-s": "A small gap: a glyph from its words.",
+    "pebble-space-m": "A row's inset above and below its words.",
+    "pebble-space-l": "A card's inset.",
+    "pebble-space-xl": "A large gap.",
+    "pebble-space-xxl": "The largest gap.",
+    "pebble-page-margin": "From the window's edges to its words.",
+    "pebble-section-gap": "One part from the next.",
+    "pebble-card-corner": "A card's corners.",
+    "pebble-corner": "A small thing's corners: a meter's bar.",
+    "pebble-line-height": "A line of Gothic, as a multiple of its size.",
+    "pebble-text-lift": "How far Gothic draws below its frame's top: a row lifts its words by it.",
+    "pebble-row-height": "A list's row: its title over the line under it.",
+    "pebble-header-height": "A list's section heading.",
+    "pebble-progress-height": "A meter's bar.",
+    "pebble-track-height": "A meter's track, under its bar.",
+    "pebble-action-glyph": "An action bar's glyph, a side.",
+    "pebble-glyph-stroke": "A glyph's stroke, in eighths of Lucide's units of its 24 (16 is Lucide's own).",
+}
+# The type styles, as ark_app::view::TextStyle has them, and whether each
+# is bold (`TextStyle::bold`).
+PEBBLE_TYPE = {
+    "large-title": True,
+    "title": True,
+    "headline": True,
+    "body": False,
+    "subheadline": False,
+    "footnote": False,
+    "caption": False,
+    "figure": True,
+}
+# The sizes Pebble's system face, Gothic, comes in.
+GOTHIC = (9, 14, 18, 24, 28)
 
 # The motion tokens, in the order they are written, and each one's sentence.
 MOTION = {
@@ -762,6 +801,63 @@ def rust_layout(t):
     return "\n".join(out) + "\n"
 
 
+def gcolor(hex_):
+    """The nearest of the Time 2's 64 colours (two bits a channel, 0x55
+    apart), as PebbleOS's `GColor8` byte: opaque, then red, green, blue."""
+    r, g, b = (round(c / 0x55) for c in rgb(hex_))
+    return 0xC0 | r << 4 | g << 2 | b
+
+
+def pebble(t):
+    m = t["layout"]
+    missing = [k for k in PEBBLE_LAYOUT if k not in m] + [f"pebble-type-{k}" for k in PEBBLE_TYPE if f"pebble-type-{k}" not in m]
+    if missing:
+        sys.exit(f"theme.toml [layout] lacks {', '.join(missing)}")
+    out = [
+        f"//! {HEADER}",
+        "//!",
+        "//! Pebble's tokens (ui/theme.toml `[layout]`'s `pebble-*`, ui/docs/pebble.md): what a",
+        "//! generated screen is laid out and drawn by, in pixels and `GColor8` bytes. The colours",
+        "//! are the dark side's, each the nearest of the Time 2's 64.",
+        "",
+        "use crate::ui::Font;",
+        "",
+    ]
+    for k, doc in PEBBLE_LAYOUT.items():
+        name = screaming(k.removeprefix("pebble-"))
+        out.append(f"/// {doc}")
+        if k == "pebble-line-height":
+            out.append(f"pub const {name}: f32 = {float(m[k])!r};")
+        elif k == "pebble-glyph-stroke":
+            out.append(f"pub const {name}: i16 = {round(m[k] * 8)};")
+        else:
+            v = m[k]
+            assert float(v).is_integer(), f"[layout] {k} is a whole number of pixels, not {v}"
+            out.append(f"pub const {name}: i16 = {int(v)};")
+    for k, bold in PEBBLE_TYPE.items():
+        size = m[f"pebble-type-{k}"]
+        assert size in GOTHIC, f"[layout] pebble-type-{k} is {size}: Gothic comes in {GOTHIC}"
+        line = round(size * m["pebble-line-height"])
+        name = screaming(k)
+        out.append(f"/// The {k.replace('-', ' ')} style: Gothic {int(size)}{', bold' if bold else ''}.")
+        out.append(f"pub const FONT_{name}: Font = Font {{ size: {int(size)}, bold: {str(bold).lower()} }};")
+        out.append(f"/// A line of it: its frame's height.")
+        out.append(f"pub const LINE_{name}: i16 = {line};")
+        out.append(f"/// A glyph set in it: a side of its size.")
+        out.append(f"pub const SIDE_{name}: i16 = {int(size)};")
+    out.append("/// A list's section heading: the caption's size, bold.")
+    out.append(f"pub const FONT_HEADER: Font = Font {{ size: {int(m['pebble-type-caption'])}, bold: true }};")
+    dark = side_colors(t, "dark")
+    for name, doc in roles().items():
+        out.append(f"/// {doc}")
+        out.append(f"pub const {screaming(name)}: u8 = {gcolor(dark[name]):#04x};")
+    for a, accent in t["accent"].items():
+        for name, doc in ACCENT.items():
+            out.append(f"/// {a.capitalize()}'s {doc[0].lower() + doc[1:]}")
+            out.append(f"pub const {screaming(a)}_{screaming(name)}: u8 = {gcolor(accent['dark'][name]):#04x};")
+    return "\n".join(out) + "\n"
+
+
 def spring_curve(stiffness, damping, rest):
     """A spring from rest to rest as CSS has it: how long it takes to come
     within `rest` of where it goes, in ms, and `linear()` sampled along it.
@@ -925,6 +1021,7 @@ def files(t):
     out |= {KOTLIN_MOTION: kotlin_motion(t), SWIFT_MOTION: swift_motion(t), RUST_MOTION: rust_motion(t)}
     out |= {KOTLIN_LAYOUT: kotlin_layout(t), SWIFT_LAYOUT: swift_layout(t), RUST_LAYOUT: rust_layout(t)}
     out[CSS] = css(t)
+    out[PEBBLE] = pebble(t)
     for accent in t["accent"].values():
         for path in accent["colorsets"]:
             out[os.path.join(path, "Contents.json")] = colorset(accent)
