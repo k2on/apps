@@ -32,7 +32,10 @@
 //! watch) subscribes to each by its number and arguments, never by sending
 //! a query; it says its subscriptions at each connection before its hello.
 //! The upstream runs each and sends the rows its plan keeps of its table,
-//! whole: its hello is answered with a fill of them; a subscription after
+//! whole: its hello is answered with a fill of them, or, when the
+//! upstream kept its record of what the node holds, with a fill that
+//! empties nothing and carries only what changed since its cursor
+//! ([`crate::Serve`]); a subscription after
 //! it with the rows the node did not hold, in `Moved` parts, then `Got`,
 //! which says the query's rows are all there. After that each logged entry
 //! comes with the facts of the rows the node holds, and the rows that

@@ -30,15 +30,17 @@ pub mod codec;
 pub mod entry;
 pub mod node;
 pub mod plan;
+pub mod serve;
 pub mod store;
 pub mod sync;
 
 pub use anchor::Anchor;
-pub use authority::{Authority, Conn, Query};
+pub use authority::Authority;
 pub use codec::{Decode, Encode, Frames};
 pub use entry::{Actor, Entry, EntryId, Hlc, Origin, Seq, Space, Version};
 pub use node::{Body, Cx, Handler, HandlerId, Link, Machine, Node, Refusal, Route, Spaces};
 pub use plan::{scan, Changes, Diff, Live, Patch, Plan};
+pub use serve::{Conn, Query, Serve};
 pub use store::{Layer, Memory, Overlay, Read, Store, TableId, View, Write, Writes};
 pub use sync::{Down, Feed, Logged, Pending, QueryId, Up, Verdict};
 
@@ -60,6 +62,7 @@ pub mod selftest {
         crate::plan::tests::ALL,
         crate::sync::tests::ALL,
         crate::authority::tests::ALL,
+        crate::serve::tests::ALL,
     ];
 }
 
