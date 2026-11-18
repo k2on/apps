@@ -792,8 +792,9 @@ on main with the apps working. Nothing is kept for compatibility.
    with a depth, a move and each row's identity. Every incremental answer
    equals a fresh run's, no sink is told twice in a settle, and the walk
    visits nothing whose reads did not change. The unsafe core is one
-   module, run under Miri on the host. **Done**, but for Miri, which the
-   machine it was built on did not have.
+   module, run under Miri on the host. **Done**: the kernel's whole suite
+   runs clean under Miri (Stacked Borrows; the slot, cell and source tests
+   under Tree Borrows too), the property tests at a few seeds.
 7. **The watch on bindings.** The emitter writes binding tables from the
    view's paths in place of `draw(record)`; the Pebble host is the sink,
    its layers pulling at draw; the demo loses its `Face` record. Within a

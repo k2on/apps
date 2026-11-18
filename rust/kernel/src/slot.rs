@@ -15,8 +15,15 @@
 //! - A read names its type ([`Slots::get`]); a slot of another type reads
 //!   as nothing, so a handle can never read a value as what it is not.
 //!
-//! Its tests run under Miri on the host (`cargo miri test -p ark-kernel
-//! slot`) as well as on the watch.
+//! Its tests run under Miri on the host as well as on the watch: with a
+//! nightly that has Miri (none is in the flake or CI; a one-off from the
+//! flake's rust-overlay, `rust-bin.selectLatestNightlyWith (t:
+//! t.minimal.override { extensions = [ "miri" "rust-src" ]; })`), `cargo
+//! miri test -p ark-kernel slot`, and with `MIRIFLAGS=-Zmiri-tree-borrows`.
+//! The whole suite runs clean too, its property tests at a few seeds
+//! (`ARK_CELLS=3 ARK_PLANS=3 ARK_SEEDS=1 ARK_STEPS=30`, about 16 minutes),
+//! but for the convergence test's closing assertions that each of its
+//! paths was taken, which so few steps cannot meet.
 
 use alloc::boxed::Box;
 use alloc::vec::Vec;

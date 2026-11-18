@@ -6,14 +6,6 @@ known bugs, kept here so there is one list.
 
 ## Kernel
 
-### The Cell Core Is Unsafe and Has Never Run Under Miri
-
-Cells are type-erased slots (a pointer and a vtable), so their core is
-`unsafe`. It is kept to one module behind typed handles, and its tests
-check every value is dropped exactly once, but it has not run under Miri:
-the build machine has only stable Rust. Run `cargo miri test -p ark-kernel
-slot` on a nightly toolchain.
-
 ### Partial to Full Sync Must Start Over
 
 A device that goes from holding its queries' rows to holding everything
