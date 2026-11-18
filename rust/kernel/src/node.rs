@@ -361,19 +361,24 @@ impl<B: Body + Clone + 'static, S: Store> Node<B, S> {
     pub fn take_changes(&mut self, space: Space) -> Changes {
         let touched = core::mem::take(&mut self.touched[space as usize]);
         let reset = space == Space::Shared && core::mem::take(&mut self.reset);
-        let view = self.view(space);
-        let rows = touched.into_writes().0.into_iter().filter(|_| !reset).filter_map(|w| {
-            let new = view.get(w.table, &w.key);
-            (w.value != new).then_some((
-                w.table,
-                Diff {
-                    key: w.key,
-                    old: w.value,
-                    new,
-                },
-            ))
-        });
-        Changes { reset, rows: rows.collect() }
+        let mut rows = Vec::new();
+        if !reset {
+            let view = self.view(space);
+            for w in touched.into_writes().0 {
+                let new = view.get(w.table, &w.key);
+                if w.value != new {
+                    rows.push((
+                        w.table,
+                        Diff {
+                            key: w.key,
+                            old: w.value,
+                            new,
+                        },
+                    ));
+                }
+            }
+        }
+        Changes { reset, rows }
     }
 
     /// Who the entries this node makes are from.
@@ -485,6 +490,15 @@ impl<B: Body + Clone + 'static, S: Store> Node<B, S> {
         self.entry(space, body, cause.actor, Some(cause.id), self.clock.wall)
     }
 
+    /// The entries `cause`'s handler emitted, made this node's.
+    fn made_all(&mut self, cause: &Entry<B>, made: Vec<(Space, B)>) -> Vec<Entry<B>> {
+        let mut out = Vec::new();
+        for m in made {
+            out.push(self.made_by(cause, m));
+        }
+        out
+    }
+
     /// The next entry of this node's origin, at wall time `now`.
     fn entry(&mut self, space: Space, body: B, actor: Actor, cause: Option<EntryId>, now: u64) -> Entry<B> {
         self.clock = self.clock.tick(now);
@@ -523,7 +537,7 @@ impl<B: Body + Clone + 'static, S: Store> Node<B, S> {
                 let space = e.space as usize;
                 note(&mut self.touched[space], self.stores.get(e.space), &mut rows_of(&writes));
                 self.stores.get_mut(e.space).apply(&writes);
-                made.into_iter().map(|m| self.made_by(&e, m)).collect()
+                self.made_all(&e, made)
             }
             Err(why) => {
                 self.refused.push((e.id, why));
@@ -546,7 +560,7 @@ impl<B: Body + Clone + 'static, S: Store> Node<B, S> {
         let (writes, made) = run(self.handlers, &view, &e).unwrap_or_default();
         note(&mut self.touched[Space::Shared as usize], &view, &mut rows_of(&writes));
         self.layer.apply(&writes);
-        let made = made.into_iter().map(|m| self.made_by(&e, m)).collect();
+        let made = self.made_all(&e, made);
         self.pending.push(Pending {
             entry: e,
             writes,

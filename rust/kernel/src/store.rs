@@ -340,12 +340,13 @@ impl Layer {
 
     /// The writes held, in table and key order.
     pub fn into_writes(self) -> Writes {
-        let writes = self.0.into_iter().map(|(mut key, value)| {
+        let mut out = Vec::with_capacity(self.0.len());
+        for (mut key, value) in self.0 {
             let table = TableId(u32::from_be_bytes([key[0], key[1], key[2], key[3]]));
             key.drain(..4);
-            Write { table, key, value }
-        });
-        Writes(writes.collect())
+            out.push(Write { table, key, value });
+        }
+        Writes(out)
     }
 }
 

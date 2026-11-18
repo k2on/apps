@@ -387,8 +387,13 @@ impl Op for Scan {
 
     fn push(&mut self, s: &Settle<'_>) -> Vec<Diff> {
         let (lo, hi) = (self.lo.as_ref().map(Vec::as_slice), self.hi.as_ref().map(Vec::as_slice));
-        let mine = s.changes.rows.iter().filter(|(t, d)| *t == self.table && within(lo, hi, &d.key));
-        mine.map(|(_, d)| d.clone()).collect()
+        let mut out = Vec::new();
+        for (t, d) in &s.changes.rows {
+            if *t == self.table && within(lo, hi, &d.key) {
+                out.push(d.clone());
+            }
+        }
+        out
     }
 
     fn hydrate(&mut self, _: &dyn Read) {}
@@ -602,7 +607,8 @@ impl Op for Take {
         let end = old.as_deref();
         // The input's changes in the window as it stood, and how many of
         // the input's rows are there now.
-        let mut kept: Vec<Diff> = d.into_iter().filter(|x| inside(end, last, &x.key)).collect();
+        let mut kept = d;
+        kept.retain(|x| inside(end, last, &x.key));
         let mut count = self.size;
         for x in &kept {
             count = count + usize::from(x.new.is_some()) - usize::from(x.old.is_some());
@@ -919,13 +925,17 @@ struct Related {
 /// The rows of a parent's children, over `db`, as diffs: each a removal
 /// (`gone`) or an insert.
 fn children(op: &dyn Op, db: &dyn Read, gone: bool) -> Vec<Diff> {
-    let each = fetch(op, db, Bound::Unbounded, false, usize::MAX).into_iter();
-    each.map(|(key, v)| Diff {
-        key,
-        old: gone.then(|| v.clone()),
-        new: (!gone).then_some(v),
-    })
-    .collect()
+    let mut out = Vec::new();
+    op.fetch(db, Bound::Unbounded, false, &mut |k, v| {
+        let (key, v) = (k.to_vec(), Some(v.to_vec()));
+        out.push(if gone {
+            Diff { key, old: v, new: None }
+        } else {
+            Diff { key, old: None, new: v }
+        });
+        true
+    });
+    out
 }
 
 /// Children's diffs placed under their parent's place `at`, onto `out`.
@@ -1321,17 +1331,16 @@ impl Live {
         let was = View { base: db, layer: &layer };
         let s = Settle { db, was: &was, changes };
         if changes.reset {
-            self.op.push(&s);
-            let new = fetch(&*self.op, db, Bound::Unbounded, false, usize::MAX);
-            let diff = |rows: Vec<Row>, old: bool| {
-                let each = rows.into_iter().map(|(key, v)| Diff {
-                    key,
-                    old: old.then(|| v.clone()),
-                    new: (!old).then_some(v),
+            let mut old = Vec::with_capacity(self.rows.len());
+            for (key, v) in &self.rows {
+                old.push(Diff {
+                    key: key.clone(),
+                    old: Some(v.clone()),
+                    new: None,
                 });
-                each.collect()
-            };
-            merge(diff(self.rows.clone(), true), diff(new, false))
+            }
+            self.op.push(&s);
+            merge(old, children(&*self.op, db, false))
         } else {
             self.op.push(&s)
         }
