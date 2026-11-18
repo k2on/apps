@@ -29,9 +29,10 @@
 //!   after it ran over those very rows, so nothing is run again.
 //! - A node too far behind for its upstream's log is sent a fill: the
 //!   confirmed rows at a `seq` ([`Down::Fill`], then [`Down::Rows`]), in
-//!   place of the log up to it, then the log after it. Its pending entries
-//!   are rebased once the fill ends; one interrupted is started again at
-//!   the next connection, its first part emptying what the last left.
+//!   place of the log up to it, then the log after it. Its parts are held
+//!   until the last, which empties the tables it names and takes the rows
+//!   at once; then the pending entries are rebased. One interrupted is let
+//!   go, the rows as they were, and started again at the next connection.
 //! - An entry the server refuses is dropped, and its refusal kept in the
 //!   node's journal of refusals for the host to show. It never blocks the
 //!   entries after it: each is judged on its own.
@@ -46,8 +47,15 @@
 //! **Subscriptions.** A node that holds only what its queries read
 //! subscribes to them ([`Node::subscribe`]), says them again at every
 //! connection before its hello, and takes the rows its upstream sends for
-//! them ([`Down::Moved`]) into its confirmed rows, as it takes facts. A
-//! query is complete ([`Node::complete`]) once its upstream says so.
+//! them ([`Down::Moved`]) into its confirmed rows, as it takes facts. It
+//! keeps the queries it wants and whether each is got, as Zero's desired
+//! and got sets: while one it wants is not got, the rows that move are
+//! held apart, unread, and a fact for a row held there is made there, so
+//! a view never shows half a subscription. They are taken at once when
+//! every query it wants is got ([`Down::Got`]), and a query is complete
+//! ([`Node::complete`]) only then. A connection lost with rows held lets
+//! them go and says, at its next hello, the cursor it had when it began
+//! to hold them, so its upstream sends them again.
 //!
 //! **The session space** is live state each node holds in memory: its own
 //! session entries are stepped here and sent upstream, and another node's
@@ -227,8 +235,13 @@ pub struct Node<B: 'static, S> {
     /// as over the confirmed rows.
     layer: Layer,
     refused: Vec<(EntryId, Refusal)>,
-    /// A fill under way: the `seq` it reaches and the parts still to come.
-    filling: Option<(Seq, u32)>,
+    /// A fill under way: the `seq` it reaches, the parts still to come and
+    /// the tables it empties.
+    filling: Option<(Seq, u32, Vec<TableId>)>,
+    /// Rows a fill or the upstream's moves sent, held until they are all
+    /// here; and the cursor when the first came.
+    incoming: Layer,
+    since: Seq,
     /// Each space's rows touched since its changes were last taken, each
     /// with what it read before; and whether the shared view changed
     /// whole, after a fill or a resume.
@@ -260,6 +273,8 @@ impl<B: Body + Clone + 'static, S: Store> Node<B, S> {
             layer: Layer::new(),
             refused: Vec::new(),
             filling: None,
+            incoming: Layer::new(),
+            since: Seq(0),
             touched: Default::default(),
             reset: false,
             subs: Vec::new(),
@@ -481,17 +496,20 @@ impl<B: Body + Clone + 'static, S: Store> Node<B, S> {
         }
     }
 
-    /// Whether a subscription's rows are all here.
+    /// Whether a subscription's rows are all here, and taken.
     pub fn complete(&self, query: QueryId, args: &[u8]) -> bool {
-        self.subs.iter().any(|s| s.0 == query && s.1 == args && s.2)
+        self.incoming.is_empty() && self.subs.iter().any(|s| s.0 == query && s.1 == args && s.2)
     }
 
     /// What this node says at each connection: its subscriptions, its
     /// cursor, then every pending entry again, oldest first. The upstream
-    /// judges each once. A fill the last connection left unfinished is let
-    /// go.
+    /// judges each once. A fill the last connection left unfinished, and
+    /// rows held for queries not got, are let go: the hello says the cursor
+    /// from before they came.
     pub fn connect(&mut self, link: &mut dyn Link<B>) {
         self.filling = None;
+        let cursor = if self.incoming.is_empty() { self.cursor } else { self.since };
+        self.incoming = Layer::new();
         for (query, args, got) in &mut self.subs {
             *got = false;
             link.send(Up::Subscribe {
@@ -499,7 +517,7 @@ impl<B: Body + Clone + 'static, S: Store> Node<B, S> {
                 args: args.clone(),
             });
         }
-        link.send(Up::Hello { cursor: self.cursor });
+        link.send(Up::Hello { cursor });
         for p in &self.pending {
             link.send(Up::Push(p.entry.clone()));
         }
@@ -516,40 +534,44 @@ impl<B: Body + Clone + 'static, S: Store> Node<B, S> {
                 self.run(made.into(), link);
             }
             Down::Fill { seq, tables, parts } => {
-                for table in tables {
-                    let mut keys = Vec::new();
-                    self.stores.shared.scan(table, Range::all(), &mut |k, _| {
-                        keys.push(k.to_vec());
-                        true
-                    });
-                    for k in keys {
-                        self.stores.shared.delete(table, &k);
-                    }
-                }
-                self.filling = Some((seq, parts));
-                self.reset = true;
+                self.filling = Some((seq, parts, tables));
                 self.filled();
             }
             Down::Rows(rows) => {
-                if let Some((_, parts)) = &mut self.filling {
-                    self.stores.shared.apply(&rows);
-                    self.reset = true;
+                if let Some((_, parts, _)) = &mut self.filling {
                     *parts = parts.saturating_sub(1);
+                    self.hold(&rows);
                     self.filled();
                 }
             }
             Down::Live(_) => {}
-            Down::Moved(rows) => self.moved(rows),
+            Down::Moved(rows) => {
+                self.hold(&rows);
+                self.flush();
+            }
             Down::Got { query, args } => {
                 for s in &mut self.subs {
                     s.2 |= s.0 == query && s.1 == args;
                 }
+                self.flush();
             }
         }
     }
 
-    /// Takes rows that moved into or out of its queries.
-    fn moved(&mut self, rows: Writes) {
+    /// Holds rows apart until they are all here.
+    fn hold(&mut self, rows: &Writes) {
+        if self.incoming.is_empty() {
+            self.since = self.cursor;
+        }
+        self.incoming.apply(rows);
+    }
+
+    /// Takes the rows held, once every query this node wants is got.
+    fn flush(&mut self) {
+        if self.filling.is_some() || self.incoming.is_empty() || self.subs.iter().any(|s| !s.2) {
+            return;
+        }
+        let rows = core::mem::take(&mut self.incoming).into_writes();
         let view = View {
             base: &self.stores.shared,
             layer: &self.layer,
@@ -563,10 +585,23 @@ impl<B: Body + Clone + 'static, S: Store> Node<B, S> {
         self.rebase();
     }
 
-    /// Ends a fill whose every part has come: the node is at its `seq`.
+    /// Ends a fill whose every part has come: its tables emptied and its
+    /// rows taken at once, the node is at its `seq`.
     fn filled(&mut self) {
-        let Some((seq, 0)) = self.filling else { return };
-        self.filling = None;
+        let Some((seq, 0, _)) = self.filling else { return };
+        let Some((_, _, tables)) = self.filling.take() else { return };
+        for table in tables {
+            let mut keys = Vec::new();
+            self.stores.shared.scan(table, Range::all(), &mut |k, _| {
+                keys.push(k.to_vec());
+                true
+            });
+            for k in keys {
+                self.stores.shared.delete(table, &k);
+            }
+        }
+        self.stores.shared.apply(&core::mem::take(&mut self.incoming).into_writes());
+        self.reset = true;
         self.cursor = seq;
         self.pending.retain(|p| p.judged.is_none_or(|j| j > seq));
         self.rebase();
@@ -580,6 +615,10 @@ impl<B: Body + Clone + 'static, S: Store> Node<B, S> {
             return;
         };
         self.clock = self.clock.witness(l.entry.at, l.entry.at.wall);
+        // A fact for a row held apart is made there, to be taken with it.
+        let mut facts = l.facts;
+        let incoming = &mut self.incoming;
+        facts.0.retain(|w| !incoming.update(w));
         let view = View {
             base: &self.stores.shared,
             layer: &self.layer,
@@ -587,12 +626,12 @@ impl<B: Body + Clone + 'static, S: Store> Node<B, S> {
         note(
             &mut self.touched[Space::Shared as usize],
             &view,
-            l.facts.0.iter().map(|w| (w.table, &w.key[..])),
+            facts.0.iter().map(|w| (w.table, &w.key[..])),
         );
-        self.stores.shared.apply(&l.facts);
+        self.stores.shared.apply(&facts);
         self.cursor = seq;
         let id = l.entry.id;
-        let previewed = self.pending.first().is_some_and(|p| p.entry.id == id && p.writes == l.facts);
+        let previewed = self.pending.first().is_some_and(|p| p.entry.id == id && p.writes == facts);
         let before = self.pending.len();
         self.pending.retain(|p| p.entry.id != id && p.judged.is_none_or(|j| j > seq));
         if previewed && self.pending.len() + 1 == before {
@@ -1031,10 +1070,10 @@ pub(crate) mod tests {
         assert_eq!((m.skipped, count(&m.view(Space::Shared), 1)), (0, 10));
     }
 
-    /// A fill empties the tables it names, takes its rows in parts, and
-    /// at its end puts the node at its `seq`, lets go of what that
-    /// confirms, and rebases the rest. One interrupted is let go at the
-    /// next connection.
+    /// A fill holds its parts apart; at its end it empties the tables it
+    /// names and takes its rows at once, puts the node at its `seq`, lets
+    /// go of what that confirms, and rebases the rest. One interrupted is
+    /// let go at the next connection, the rows as they were.
     #[cfg_attr(test, test)]
     fn a_fill_replaces_the_confirmed_rows() {
         let mut n = node(1);
@@ -1065,13 +1104,18 @@ pub(crate) mod tests {
             },
             &mut up,
         );
-        assert_eq!((count(n.store(Space::Shared), 1), n.cursor()), (0, Seq(1)));
-        // The log is not taken during a fill.
+        n.take_changes(Space::Shared);
+        assert_eq!((count(n.store(Space::Shared), 1), n.cursor()), (3, Seq(1)));
+        // The log is not taken during a fill, and its parts are not read
+        // until the last.
         n.receive(logged(&theirs, 2, count_is(1, 50)), &mut up);
         n.receive(Down::Rows(count_is(2, 1)), &mut up);
         assert_eq!(n.cursor(), Seq(1));
+        assert_eq!((count(n.store(Space::Shared), 1), count(n.store(Space::Shared), 2)), (3, 0));
+        assert_eq!(n.take_changes(Space::Shared), Changes::default());
         n.receive(Down::Rows(count_is(3, 4)), &mut up);
         assert_eq!(n.cursor(), Seq(5));
+        assert!(n.take_changes(Space::Shared).reset);
         assert_eq!(
             rows(n.store(Space::Shared)),
             [(vec![2], 1u64.to_le_bytes().to_vec()), (vec![3], 4u64.to_le_bytes().to_vec())]
@@ -1092,9 +1136,12 @@ pub(crate) mod tests {
             &mut up,
         );
         n.receive(Down::Rows(count_is(7, 1)), &mut up);
+        up.clear();
         n.connect(&mut up);
+        assert_eq!(up, [Up::Hello { cursor: Seq(6) }]);
         n.receive(Down::Rows(count_is(8, 1)), &mut up);
         assert_eq!((count(n.store(Space::Shared), 8), n.cursor()), (0, Seq(6)));
+        assert_eq!(count(n.store(Space::Shared), 2), 11);
         // An empty fill ends at once.
         n.receive(
             Down::Fill {
@@ -1105,6 +1152,61 @@ pub(crate) mod tests {
             &mut up,
         );
         assert_eq!((rows(n.store(Space::Shared)), n.cursor()), (vec![], Seq(9)));
+    }
+
+    /// A subscription's rows are held apart until every query the node
+    /// wants is got, then taken at once; a fact for a row held is made
+    /// there; a connection lost lets them go, and its hello asks again
+    /// from the cursor before they came. Rows that move while every query
+    /// is got are taken as they come.
+    #[cfg_attr(test, test)]
+    fn a_subscriptions_rows_come_at_once() {
+        let mut n = node(1);
+        let mut up = Vec::new();
+        let theirs = node(2).make(Space::Shared, Msg::Add { key: 9, by: 1 }, 10);
+        n.subscribe(QueryId(0), vec![], &mut up);
+        n.subscribe(QueryId(1), vec![], &mut up);
+        n.receive(Down::Moved(count_is(1, 1)), &mut up);
+        n.receive(Down::Moved(count_is(2, 2)), &mut up);
+        // A fact for a row held, and one for another.
+        let facts = Writes(vec![count_is(2, 5).0[0].clone(), count_is(9, 1).0[0].clone()]);
+        n.receive(logged(&theirs, 1, facts), &mut up);
+        assert_eq!(rows(n.store(Space::Shared)), [(vec![9], 1u64.to_le_bytes().to_vec())]);
+        n.receive(
+            Down::Got {
+                query: QueryId(0),
+                args: vec![],
+            },
+            &mut up,
+        );
+        // The first is got, the second not: nothing is taken yet.
+        assert_eq!(n.store(Space::Shared).len(COUNTS), 1);
+        assert!(!n.complete(QueryId(0), &[]));
+        n.take_changes(Space::Shared);
+        n.receive(Down::Moved(count_is(3, 3)), &mut up);
+        n.receive(
+            Down::Got {
+                query: QueryId(1),
+                args: vec![],
+            },
+            &mut up,
+        );
+        assert!(n.complete(QueryId(0), &[]) && n.complete(QueryId(1), &[]));
+        assert_eq!((count(n.store(Space::Shared), 2), n.store(Space::Shared).len(COUNTS)), (5, 4));
+        assert_eq!(n.take_changes(Space::Shared).rows.len(), 3);
+        // Got, a move is taken as it comes.
+        n.receive(Down::Moved(count_is(4, 4)), &mut up);
+        assert_eq!(count(n.store(Space::Shared), 4), 4);
+        // A third, its rows lost with the connection: the hello asks from
+        // the cursor they came at, though the log went on.
+        n.subscribe(QueryId(2), vec![], &mut up);
+        n.receive(Down::Moved(count_is(5, 5)), &mut up);
+        n.receive(logged(&theirs, 2, Writes::default()), &mut up);
+        up.clear();
+        n.connect(&mut up);
+        assert_eq!(up[3], Up::Hello { cursor: Seq(1) });
+        assert_eq!((count(n.store(Space::Shared), 5), n.cursor()), (0, Seq(2)));
+        assert!(!n.complete(QueryId(0), &[]));
     }
 
     /// A session entry is stepped where it is made and sent; another
@@ -1175,6 +1277,7 @@ pub(crate) mod tests {
         a_fill_replaces_the_confirmed_rows,
         session_entries_are_sent_and_taken,
         each_spaces_changes_are_taken,
+        a_subscriptions_rows_come_at_once,
         routes,
     );
 }

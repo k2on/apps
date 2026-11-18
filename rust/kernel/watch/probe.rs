@@ -8,7 +8,8 @@
 //! queue of sixteen tracks confirmed, eight writes made offline and kept
 //! as pending records through a restart, then pushed, rebased over
 //! another device's write and confirmed, every frame read in parts, its
-//! queue subscribed to at the connection; and two queries kept live over
+//! queue subscribed to at the connection and a row that moved into it held
+//! until the query is got; and two queries kept live over
 //! it all, as the watch's screen keeps them:
 //! the next four tracks (a bounded take of a filter) and how many there
 //! are (a group); and the phone's playback position, an anchor in the
@@ -297,6 +298,15 @@ fn main() -> ! {
             logged(&mut wire, e, seq, facts);
         }
     }
+    // A row that came into its query, held until the query is got.
+    put_frame(
+        &mut wire,
+        &Down::<Msg>::Moved(Writes(alloc::vec![Write {
+            table: TableId(1),
+            key: [0, black_box(20)].into(),
+            value: Some([b'Z'; 32].into()),
+        }])),
+    );
     put_frame(
         &mut wire,
         &Down::<Msg>::Got {
@@ -326,7 +336,9 @@ fn main() -> ! {
     let view = node.view(Space::Shared);
     let next = all().filter(|_, v| v[0] != b' ').take(4, false).live(&view);
     let total = from_slice::<Agg>(&queries[1].rows()[0].1).map_or(0, |a| a.count);
-    let right = queries[0].rows() == next.rows() && total == node.store(Space::Shared).len(TableId(1)) as u64;
+    let right = queries[0].rows() == next.rows()
+        && total == node.store(Space::Shared).len(TableId(1)) as u64
+        && node.store(Space::Shared).get(TableId(1), &[0, 20]).is_some();
     // Its position two and a half seconds on, and when the screen's
     // seconds next change.
     let now = black_box(3_500);

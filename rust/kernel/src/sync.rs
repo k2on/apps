@@ -39,7 +39,14 @@
 //! moved into or out of its queries (a move-out is a removal), so a batch
 //! lands at its one `seq`. An unsubscription is answered with the
 //! move-outs of the rows no other query of the node holds. A node that
-//! subscribes to nothing holds every row, and is sent every fact.
+//! subscribes to nothing holds every row, and is sent every fact. A query
+//! the upstream does not have is got at once, with no rows.
+//!
+//! **Atomic.** A node holds what moves, and a fill's parts, apart until
+//! every query it wants is got (a fill: until its last part), then takes
+//! them at once, so a view never shows half a subscription. An upstream
+//! sends a subscription's `Moved` parts and its `Got` together, nothing
+//! between them.
 //!
 //! **Session entries.** `Live` carries a session entry, which is forwarded
 //! to its actor's other nodes and never logged. A node states with `Rate`

@@ -88,6 +88,8 @@ struct Peer<B> {
     actor: Actor,
     feed: Feed<B>,
     hello: bool,
+    /// The subscriptions it said before its hello, each told `Got` then.
+    said: Vec<(QueryId, Vec<u8>)>,
     subs: Vec<Sub>,
     /// The rows it holds, with how many subscriptions read each; `None`
     /// for every row.
@@ -174,6 +176,7 @@ impl<B: Body + Clone + 'static, S: Store> Authority<B, S> {
             actor,
             feed: Feed::default(),
             hello: false,
+            said: Vec::new(),
             subs: Vec::new(),
             held: None,
         };
@@ -195,7 +198,7 @@ impl<B: Body + Clone + 'static, S: Store> Authority<B, S> {
         let out = match up {
             Up::Hello { cursor } => {
                 peer.hello = true;
-                let mut out = if peer.subs.is_empty() {
+                let mut out = if peer.said.is_empty() {
                     peer.held = None;
                     self.hello(cursor)
                 } else {
@@ -205,8 +208,14 @@ impl<B: Body + Clone + 'static, S: Store> Authority<B, S> {
                 out.extend(live.map(|(_, e)| Down::Live(e.clone())));
                 out
             }
-            Up::Subscribe { query, args } => self.subscribe(conn, query, args),
+            Up::Subscribe { query, args } => {
+                if !peer.hello && !peer.said.iter().any(|s| s.0 == query && s.1 == args) {
+                    peer.said.push((query, args.clone()));
+                }
+                self.subscribe(conn, query, args)
+            }
             Up::Unsubscribe { query, args } => {
+                peer.said.retain(|s| s.0 != query || s.1 != args);
                 let Some(i) = peer.subs.iter().position(|s| s.query == query && s.args == args) else {
                     return Vec::new();
                 };
@@ -258,13 +267,18 @@ impl<B: Body + Clone + 'static, S: Store> Authority<B, S> {
         rows.chunks(self.part).map(|c| Down::Moved(Writes(c.to_vec()))).collect()
     }
 
-    /// Runs a query for `conn`, and sends what it holds now.
+    /// Runs a query for `conn`, and sends what it holds now. One the build
+    /// does not have is got at once, with no rows.
     fn subscribe(&mut self, conn: Conn, query: QueryId, args: Vec<u8>) -> Vec<Down<B>> {
-        let Some(make) = self.queries.get(query.0 as usize) else {
-            return Vec::new();
-        };
         let Some(peer) = self.conns.get_mut(&conn) else {
             return Vec::new();
+        };
+        let Some(make) = self.queries.get(query.0 as usize) else {
+            return if peer.hello {
+                Vec::from([Down::Got { query, args }])
+            } else {
+                Vec::new()
+            };
         };
         if peer.subs.iter().any(|s| s.query == query && s.args == args) {
             return Vec::new();
@@ -323,11 +337,11 @@ impl<B: Body + Clone + 'static, S: Store> Authority<B, S> {
             })
             .collect();
         let got: Vec<Down<B>> = peer
-            .subs
+            .said
             .iter()
-            .map(|s| Down::Got {
-                query: s.query,
-                args: s.args.clone(),
+            .map(|(query, args)| Down::Got {
+                query: *query,
+                args: args.clone(),
             })
             .collect();
         peer.held = Some(held);
@@ -368,7 +382,7 @@ impl<B: Body + Clone + 'static, S: Store> Authority<B, S> {
                 }
             }
             let facts = match &peer.held {
-                _ if !peer.hello && !peer.subs.is_empty() => continue,
+                _ if !peer.hello && !peer.said.is_empty() => continue,
                 None => l.facts.clone(),
                 Some(held) => {
                     for w in &l.facts.0 {
@@ -830,6 +844,22 @@ pub(crate) mod tests {
         deliver(push(&mut a, 0, 4), &mut watch);
         assert_eq!(rows(watch.store(Space::Shared)), rows(a.store()).into_iter().take(2).collect::<Vec<_>>());
         assert!(watch.complete(QueryId(1), &[]) && !watch.complete(QueryId(0), &[1]));
+        // A query the build does not have is got at once, empty, before
+        // the hello and after it.
+        watch.subscribe(QueryId(7), vec![], &mut up);
+        take(&mut up, &mut a, &mut watch);
+        assert!(watch.complete(QueryId(7), &[]));
+        let mut late = node(3);
+        late.subscribe(QueryId(7), vec![1], &mut up);
+        late.connect(&mut up);
+        a.open(Conn(3), ME);
+        for u in core::mem::take(&mut up) {
+            for (_, down) in a.receive(Conn(3), u, 0) {
+                late.receive(down, &mut Vec::new());
+            }
+        }
+        assert!(late.complete(QueryId(7), &[1]));
+        assert_eq!((late.store(Space::Shared).len(COUNTS), late.cursor()), (0, a.head()));
     }
 
     /// A device in the convergence test: its node, what is in flight on

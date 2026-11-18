@@ -232,6 +232,13 @@ impl Layer {
         }
     }
 
+    /// Makes `w` here if the layer holds its row: whether it did.
+    pub(crate) fn update(&mut self, w: &Write) -> bool {
+        let Some(v) = self.0.get_mut(&path(w.table, &w.key)) else { return false };
+        v.clone_from(&w.value);
+        true
+    }
+
     /// The rows the layer has written, in table and key order.
     pub(crate) fn keys(&self) -> impl Iterator<Item = (TableId, &[u8])> {
         self.0.keys().map(|p| (TableId(u32::from_be_bytes([p[0], p[1], p[2], p[3]])), &p[4..]))
