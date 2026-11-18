@@ -304,7 +304,7 @@ fn main() -> ! {
     let watches = [
         node.watch(0, &[], next),
         node.watch(1, &[], lists),
-        node.watch(2, &[], || all().group(|_, _| Vec::new(), |_, v| v.len() as i64, black_box(false), true)),
+        node.watch(2, &[], || all().group(|_, _| Vec::new(), |_, v| v.len() as i64)),
     ];
     // The screen's leaves: the track's position, and the list.
     let (at, list) = (node.reader(), node.reader());

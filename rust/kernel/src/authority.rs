@@ -679,7 +679,7 @@ pub(crate) mod tests {
         let all = || scan(COUNTS, Bound::Unbounded, Bound::Unbounded);
         [
             all().filter(|_, v| v[0] % 3 != 0).take(2, last),
-            all().group(|_, _| Vec::new(), |_, v| i64::from(v[0]), true, true),
+            all().group(|_, _| Vec::new(), |_, v| i64::from(v[0])),
             noted().take(1, last),
             all().related(move |k, _| prefix(NOTES, k).take(1, last)).take(3, last),
         ]
