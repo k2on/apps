@@ -184,9 +184,17 @@ pub struct Host<A: App> {
     armed: Option<u64>,
     flush_armed: bool,
     refused: u32,
+    /// When the node next measures its offset again while linked
+    /// ([`Node::ping`]): riding on whatever wakes the watch, never a timer
+    /// of its own.
+    ping_at: u64,
     /// The most of the app heap seen in use, after a callback.
     heap_peak: usize,
 }
+
+/// How often a linked watch measures its offset again: its clock drifts
+/// slowly.
+const PING_EVERY: u64 = 10 * 60 * 1000;
 
 /// A row's path on the disk: its space, its table, its key.
 fn path(out: &mut Vec<u8>, space: Space, table: TableId, key: &[u8]) {
@@ -272,6 +280,7 @@ fn open<A: App>(app: A) -> Box<Host<A>> {
         armed: None,
         flush_armed: false,
         refused: 0,
+        ping_at: 0,
         heap_peak: 0,
     });
     crate::log!(
@@ -369,8 +378,13 @@ impl<A: App> Host<A> {
         if self.node.made() + 4 >= self.disk.lease() {
             self.flush();
         }
+        let now = sys::now();
+        if self.link.online() && now >= self.ping_at {
+            self.node.ping(&mut self.link, now);
+            self.ping_at = now + PING_EVERY;
+        }
         if self.wake != self.armed {
-            let ms = self.wake.map(|t| t.saturating_sub(sys::now()).min(u64::from(u32::MAX - 1)) as u32);
+            let ms = self.wake.map(|t| t.saturating_sub(now).min(u64::from(u32::MAX - 1)) as u32);
             sys::timer(timer::WAKE, ms);
             self.armed = self.wake;
         }
@@ -513,6 +527,7 @@ impl<A: App> Driver for Host<A> {
         if self.link.epoch_set(epoch) {
             self.frames = Frames::new(FRAME_MOST);
             self.node.connect(&mut self.link, sys::now());
+            self.ping_at = sys::now() + PING_EVERY;
             crate::log!(
                 "link up, epoch ",
                 epoch,

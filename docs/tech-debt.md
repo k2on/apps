@@ -6,13 +6,6 @@ known bugs, kept here so there is one list.
 
 ## Kernel
 
-### Live State Could Heal More Simply
-
-A reconnect's healing of session rows has several rules (owned rows taken
-from no hello, rows the hello leaves out dropped, an owner re-saying its
-own after the welcome). A simpler rule, re-sending owned rows on every
-reconnect, saves about 100 bytes but costs traffic on each reconnect.
-
 ### The Cell Core Is Unsafe and Has Never Run Under Miri
 
 Cells are type-erased slots (a pointer and a vtable), so their core is
@@ -20,26 +13,6 @@ Cells are type-erased slots (a pointer and a vtable), so their core is
 check every value is dropped exactly once, but it has not run under Miri:
 the build machine has only stable Rust. Run `cargo miri test -p ark-kernel
 slot` on a nightly toolchain.
-
-### A Sort No Index Provides Holds Its Input
-
-A `sort` by a closure no index provides keeps its whole input, so a long
-list sorted that way costs its whole length in memory. A `take` over an
-index-ordered input stays bounded. Materialize and index the value if a
-real list needs it.
-
-### Min and Max Refold
-
-Count and sum are running totals, constant time per change. Min and max
-are refolded over the group's held numbers when the extreme row leaves,
-so a group holds its rows' numbers.
-
-### No Explicit Memo
-
-A binding that mixes a fast input (`now`) with an expensive value
-computed outside a plan re-runs the expensive part on every tick. Plans,
-per-leaf bindings and `Text` templates cover nearly every case. An
-explicit memo waits until a real screen measures slow.
 
 ### Partial to Full Sync Must Start Over
 
@@ -67,29 +40,7 @@ the client. A phone keeps its watch's refusal rows, through its own whole
 fills, until the watch says hello past them; a watch that never connects
 again leaves them at the phone.
 
-### Two Healing Rules Have Only Unit Tests
-
-Removing "ignore the hello for owned rows" or "drop rows the hello left
-out" does not fail the convergence property test; only unit tests catch
-it. The property test should be extended until it does.
-
 ## Sync Edge Cases
-
-### The Clock Offset Is Measured Only at a Hello
-
-A node's offset to its upstream is measured from the hello and welcome, so
-a watch connected for a long time drifts until it next reconnects.
-
-### A Server's Control for a Phone-Owned Row Can Be Lost
-
-A control made on the server for a row a phone owns, while that phone is
-cut off from the server, is overridden when the phone reconnects: the
-control is lost, not delayed.
-
-### An Offline Phone Answers Its Watch Only After a Hello
-
-A phone offline from the server can write its watch's rows only after the
-watch has said hello to it.
 
 ### The Phone Can Read the Watch's Frames
 
@@ -143,11 +94,6 @@ list, row taps, `.width`, `.side`, `.square`, `.max_width` and `.bleed`, a
 tint read from data, and every part but the screen's own. A list shows at
 most six rows, an action bar can only be a screen's root, and nothing
 animates.
-
-### Restarts Skip Entry Ids
-
-The watch keeps its entry count as a lease 32 ahead, so a restart skips up
-to 32 ids. The server accepts the gaps.
 
 ### Nothing Has Run on a Real Watch
 

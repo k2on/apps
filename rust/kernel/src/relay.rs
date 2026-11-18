@@ -34,9 +34,12 @@
 //!   downstream connection, the watch's own too; its own and its
 //!   upstream's go down. What the relay greets a watch with is the phone's
 //!   session rows. The phone answers for the rows its downstream nodes own
-//!   ([`Node::answer_for`]), as for its own: so what a watch set while the
-//!   phone was away from the server reaches it when the phone connects,
-//!   and what the server kept for them meanwhile is not taken.
+//!   ([`Node::answer_for`]), as for its own, from when it knows of them (a
+//!   phone that knows its watch says so as it starts; [`Relay::open`] at
+//!   a connection, before its hello): so offline from the server it plays
+//!   and pauses its watch's rows, what a watch set while the phone was
+//!   away from the server reaches it when the phone connects, and what the
+//!   server kept for them meanwhile is not taken.
 //!
 //! The host routes the phone's own entries through [`Relay::route`], what
 //! its upstream sends through [`Relay::down`], and what a downstream sends
@@ -84,6 +87,18 @@ impl<B: Body + Clone + 'static> Relay<B> {
     /// downstream that says no subscription holds nothing.
     pub fn serve(&mut self) -> &mut Serve<B> {
         &mut self.serve
+    }
+
+    /// A downstream connection opened, signed in as `actor`, from `client`
+    /// ([`Serve::open`]): the node answers for the client's session rows
+    /// from now ([`Node::answer_for`]), before its hello. A phone that
+    /// knows its watch says so as it starts, with no connection yet, so
+    /// that offline it answers for the watch's rows from the start.
+    pub fn open<S: Store>(&mut self, node: &mut Node<B, S>, conn: Conn, actor: crate::entry::Actor, client: Option<crate::entry::Origin>) {
+        self.serve.open(conn, actor, client);
+        if let Some(c) = client {
+            node.answer_for(c);
+        }
     }
 
     /// A downstream connection closed at `now` ([`Serve::close`]).
@@ -202,6 +217,15 @@ impl<B: Body + Clone + 'static> Relay<B> {
             Up::Subscribe { query, args } => served.out = to(self.serve.subscribe(conn, query, args, &view, head)),
             Up::Unsubscribe { query, args } => served.out = to(self.serve.unsubscribe(conn, query, args, head, now)),
             Up::Rate { table, every } => self.serve.rate(conn, table, every),
+            Up::Ping { time } => {
+                served.out = Vec::from([(
+                    conn,
+                    Down::Welcome {
+                        sent: time,
+                        time: node.time(now),
+                    },
+                )])
+            }
             Up::Push(e) => {
                 // One judged already comes down with the log, or the next
                 // hello's fill.
@@ -512,5 +536,28 @@ pub(crate) mod tests {
         );
     }
 
-    crate::listed!(a_phone_serves_its_watch, the_session_through_a_phone);
+    /// A phone that knows its watch answers for the watch's rows from the
+    /// start: offline, before the watch has said hello, its pause of the
+    /// watch's row is applied, not refused; another's row it does not own
+    /// is refused.
+    #[cfg_attr(test, test)]
+    fn an_offline_phone_answers_for_its_watch_before_its_hello() {
+        let mut phone = node(1);
+        phone.set_actor(ME);
+        phone.answer_for(Origin(2));
+        let mut relay: Relay<Msg> = Relay::default();
+        let mut said = Vec::new();
+        let pause = phone.make(Space::Session, Msg::Set { key: 15, value: 1 }, 10);
+        relay.route(&mut phone, pause.clone(), &mut said, 10);
+        let other = phone.make(Space::Session, Msg::Set { key: 25, value: 1 }, 10);
+        relay.route(&mut phone, other.clone(), &mut said, 10);
+        assert_eq!(phone.take_refused(), [(other.id, Refusal::OFFLINE)]);
+        assert_eq!(phone.store(Space::Session).unwrap().get(POSITIONS, &at(15)).map(|v| v[0]), Some(1));
+    }
+
+    crate::listed!(
+        an_offline_phone_answers_for_its_watch_before_its_hello,
+        a_phone_serves_its_watch,
+        the_session_through_a_phone
+    );
 }

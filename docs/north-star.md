@@ -617,20 +617,25 @@ A node that serves another answers it exactly as the server answers it:
   over Bluetooth with no server. A laptop controlling the same player goes
   through the server, which forwards to the phone. A row's key begins
   with its owner's origin, so every node knows whose it is, and a phone
-  answers for its watch's rows as for its own.
+  answers for its watch's rows as for its own, from the start: offline,
+  before the watch has said hello, it plays and pauses them.
 - **Live controls don't queue.** A session entry is delivered only while
   connected: offline, a control of another node's row is refused where it
   is made, so the control shows that it can't reach the player and
   nothing fires later. An owner's own rows are always applied. Every
   hello is answered with the latest of every session row the node may
-  see, its own included: a row it doesn't own takes its upstream's, and
-  one it owns takes nothing from the answer and is said again, newer than
-  anything kept upstream while it was away. Any divergence heals on
-  reconnect.
+  see, its own included, and three rules heal it: a row it doesn't own
+  takes its upstream's, and goes when the answer leaves it out (the
+  upstream started again); a row it owns and holds takes nothing from the
+  answer (one it holds none of, after its own restart, takes the
+  upstream's); and every row it owns is said again, newer than anything
+  kept upstream while it was away. Any divergence heals on reconnect, and
+  the convergence test fails if either of the first two is left out.
 - **The tree's clock.** A hello carries the node's time and its answer the
   upstream's estimate of the root's, so each node measures its offset
-  NTP's way (the shortest round trip of its last few hellos), composed
-  down the tree. Anchors are written and extrapolated in that time, the
+  NTP's way (the shortest round trip of its last few hellos, and of the
+  pings a node connected for long says now and then so it does not drift),
+  composed down the tree. Anchors are written and extrapolated in that time, the
   owner's whatever a watch's clock says.
 - **Versions.** An upstream translates for its downstream through the
   version chain, as the server does, so an upstream must be at least as
@@ -862,6 +867,33 @@ Three bugs on main today are fixed by these steps rather than separately:
 live rows fanned out to every account (steps 4 and 12, the session space
 through middleware), unbounded call threads (step 17), and calls matched
 by the last part of their name (step 3, the new kernel's integer ids).
+
+## Accepted Limits
+
+Choices made knowingly, each the cheaper side of a trade a real screen has
+not asked to change. They are not debt (docs/tech-debt.md); each would be
+revisited only if one measured wrong.
+
+- **A sort no index provides holds its input.** A `sort` by a closure no
+  index answers keeps its whole input, so a long list sorted that way costs
+  its length in memory; a `take` over an index-ordered input stays bounded.
+  A list that needs it materializes and indexes the value it sorts by.
+- **Min and max refold.** Count and sum are running totals, constant time
+  per change; min and max are folded again over the group's held numbers
+  when the row that was the least or the most leaves, so a group holds its
+  rows' numbers.
+- **No explicit memo.** A binding that mixes a fast input (the time) with
+  an expensive value worked out outside a plan runs the expensive part on
+  every tick. Plans, bindings per leaf, results shared within a settle and
+  `Text` templates cover the screens there are.
+- **A restart skips entry ids.** A watch keeps its count of entries as a
+  lease 32 ahead on its disk, so a restart skips up to 32 ids; the server
+  takes the gaps.
+- **A control for a row whose owner is cut off is lost.** Live controls
+  don't queue: a control made on the server for a row a phone owns, while
+  the phone is cut off from the server, is overridden when the phone
+  reconnects and says its rows again. It is lost, not delayed, as a pause
+  pressed while the player is away should be.
 
 ## Prior Art
 

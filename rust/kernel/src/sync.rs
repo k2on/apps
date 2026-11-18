@@ -3,7 +3,7 @@
 //!
 //! ```text
 //! Up     Hello { cursor, time } | Push(Entry) | Live(Entry) | Rate { table, every }
-//!        | Subscribe { query, args } | Unsubscribe { query, args }
+//!        | Subscribe { query, args } | Unsubscribe { query, args } | Ping { time }
 //! Down   Logged { entry, facts } | Live(Entry)
 //!        | Rows { rows, end } | Welcome { sent, time }
 //! End    More | Moved | Fill { seq, whole, judged } | Got { query, args }
@@ -78,7 +78,9 @@
 //! **Time.** A hello says the node's clock (`time`); `Welcome` says it
 //! back (`sent`) with the tree's time at the upstream when it answered
 //! (the root's clock, as the upstream estimates it), from which the node
-//! takes its offset ([`crate::Node::offset`]).
+//! takes its offset ([`crate::Node::offset`]). A node connected for long
+//! says `Ping` with its clock now and then, answered with a `Welcome` of
+//! its own, which only measures the offset again: so it does not drift.
 //!
 //! Ported from `rust/ark`'s `frames.rs` and `peer.rs` as far as pending
 //! entries, facts and the rebase need: schemas, calls and files are for
@@ -206,6 +208,11 @@ pub enum Up<B> {
     Unsubscribe {
         query: QueryId,
         args: Vec<u8>,
+    },
+    /// This node's clock now: answered with a [`Down::Welcome`], from which
+    /// it measures its offset again.
+    Ping {
+        time: u64,
     },
 }
 
@@ -400,6 +407,10 @@ impl<B: Encode> Encode for Up<B> {
                 query.0.encode(out);
                 args.encode(out);
             }
+            Up::Ping { time } => {
+                6u32.encode(out);
+                time.encode(out);
+            }
         }
     }
 }
@@ -425,6 +436,7 @@ impl<B: Decode> Decode for Up<B> {
                 query: QueryId(u32::decode(r)?),
                 args: Vec::decode(r)?,
             }),
+            6 => Ok(Up::Ping { time: u64::decode(r)? }),
             _ => Err(Error::Tag),
         }
     }
@@ -565,6 +577,7 @@ pub(crate) mod tests {
                 query: QueryId(3),
                 args: vec![],
             },
+            Up::Ping { time: 1_700_000_000_999 },
         ];
         for up in ups {
             assert_eq!(from_slice::<Up<Vec<u8>>>(&to_vec(&up)), Ok(up));

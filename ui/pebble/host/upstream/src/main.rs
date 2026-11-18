@@ -95,6 +95,7 @@ fn up(u: &Up<Msg>) -> String {
         Up::Rate { table, every } => format!("Rate table {} every {every}", table.0),
         Up::Subscribe { query, .. } => format!("Subscribe query {}", query.0),
         Up::Unsubscribe { query, .. } => format!("Unsubscribe query {}", query.0),
+        Up::Ping { time } => format!("Ping at its {time}"),
     }
 }
 

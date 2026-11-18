@@ -43,7 +43,10 @@ the screen as its sink: each layer whose recorded reads changed is marked
 dirty, and PebbleOS draws it again, pulling its words from its source as
 it draws. A change to
 what the disk keeps arms a flush 400 ms later, so a burst of frames is
-written once; the host flushes at exit too.
+written once; the host flushes at exit too. Linked for ten minutes since
+it last did, a settle also pings upstream (`Node::ping`), whose answer
+measures the clock's offset again, so a watch connected for hours does not
+drift; it rides on whatever woke the watch and sets no timer of its own.
 
 **The store** (`disk.rs`). Persistent storage is 1 MiB per app with at most
 256 bytes per value, no files, and about 13 ms a write in the emulator, so

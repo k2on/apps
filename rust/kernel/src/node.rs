@@ -84,18 +84,22 @@
 //! - **Rows it does not own are its upstream's**: it takes what comes,
 //!   its own entries said back too, so it ends where its upstream does;
 //!   its own control shows at once, until the upstream says otherwise.
-//! - **Every hello heals.** Its upstream answers a hello with the latest
-//!   of every row the node may see, its own included, and ends the answer
-//!   with [`Down::Welcome`]. A row it does not own takes the answer's
-//!   (one the answer leaves out goes), unless the node set it since it
-//!   connected; a row it owns takes nothing from it, and is said again, as
-//!   a new entry caused by its last, when the answer did not say that
-//!   entry: newer than anything its upstream kept while it was away, so
-//!   no control made then fires later.
+//! - **Every hello heals**, by three rules. Its upstream answers a hello
+//!   with the latest of every row the node may see, its own included, and
+//!   ends the answer with [`Down::Welcome`]. A row it does not own takes
+//!   the answer's, and one the answer leaves out goes (an upstream that
+//!   started again lost it), unless the node set it since it connected. A
+//!   row it owns and holds takes nothing from the answer, so no control
+//!   made while it was away fires later; one it holds none of (it started
+//!   again) takes the answer's. And at the welcome every row it owns is
+//!   said again, as a new entry caused by its last: newer than anything
+//!   its upstream kept while it was away.
 //! - **The tree's clock.** A hello says the node's time and the welcome
 //!   says it back with the upstream's estimate of the tree's time (its
 //!   root's clock), so a node measures its offset NTP's way, from the
-//!   shortest round trip of its last four hellos ([`Node::offset`]); an
+//!   shortest round trip of its last four hellos, and of the pings a node
+//!   connected for long says now and then ([`Node::ping`]), so it does not
+//!   drift ([`Node::offset`]); an
 //!   upstream's own offset is in what it says, so the offsets compose down
 //!   the tree. An owner writes its anchors in the tree's time
 //!   ([`Node::time`]), and a view extrapolates them in it.
@@ -804,9 +808,7 @@ impl<B: Body + Clone + 'static, S: Store> Node<B, S> {
                         continue;
                     }
                     let made = self.step(e.clone());
-                    // Its own row set while its hello is answered is said
-                    // again after: its upstream may keep a newer one.
-                    self.keep(&e, !(own && self.greeting));
+                    self.keep(&e);
                     link.send(Up::Live(e));
                     queue.extend(made);
                 }
@@ -815,18 +817,18 @@ impl<B: Body + Clone + 'static, S: Store> Node<B, S> {
     }
 
     /// Notes the entry a session row was last set by.
-    fn keep(&mut self, e: &Entry<B>, said: bool) {
+    fn keep(&mut self, e: &Entry<B>) {
         let Some((table, key)) = e.body.row() else { return };
         match self.rows.iter_mut().find(|k| k.table == table && k.key == key) {
             Some(k) => {
                 k.entry = e.clone();
-                k.said = said;
+                k.said = true;
             }
             None => self.rows.push(Kept {
                 table,
                 key,
                 entry: e.clone(),
-                said,
+                said: true,
             }),
         }
     }
@@ -849,33 +851,27 @@ impl<B: Body + Clone + 'static, S: Store> Node<B, S> {
             return true;
         };
         if self.owns(&key) {
-            let kept = self.rows.iter_mut().find(|k| k.table == table && k.key == key);
-            if upstream && self.greeting {
-                if let Some(k) = kept.filter(|k| k.entry.id == e.id) {
-                    k.said = true;
-                }
-                return false;
-            }
-            if kept.is_some_and(|k| (k.entry.at, k.entry.id) >= (e.at, e.id)) {
+            let kept = self.rows.iter().find(|k| k.table == table && k.key == key);
+            // Its hello's answer says it only to show what its upstream
+            // has, unless it holds none (it started again): then its
+            // upstream's is its own.
+            if kept.is_some_and(|k| (upstream && self.greeting) || (k.entry.at, k.entry.id) >= (e.at, e.id)) {
                 return false;
             }
         }
-        self.keep(&e, true);
+        self.keep(&e);
         let made = self.step(e);
         self.run(made, link);
         true
     }
 
-    /// The end of the answer to its hello: its upstream's clock, sent at
-    /// the tree's time `time` in answer to a hello said at this node's
-    /// `sent`, taken at `now`. Of its session rows, one it does not own
-    /// that the answer did not say is gone upstream, and goes; one it owns
-    /// that its upstream does not have as it is is said again, newer than
-    /// anything its upstream kept while it was away.
+    /// Its upstream's clock, sent at the tree's time `time` in answer to a
+    /// hello or a ping said at this node's `sent`, taken at `now`; and the
+    /// end of the answer to its hello. Of its session rows, one it does
+    /// not own that the answer did not say is gone upstream, and goes;
+    /// every one it owns is said again, newer than anything its upstream
+    /// kept while it was away.
     fn welcome(&mut self, sent: u64, time: u64, now: u64, link: &mut dyn Link<B>) {
-        if !core::mem::take(&mut self.greeting) {
-            return;
-        }
         if let Some(trip) = now.checked_sub(sent) {
             // NTP's estimate, the answer taken as made halfway: the offset
             // of the shortest round trip of the last few is the least wrong.
@@ -884,12 +880,13 @@ impl<B: Body + Clone + 'static, S: Store> Node<B, S> {
             self.sample = (self.sample + 1) % SAMPLES;
             self.offset = self.samples.iter().min_by_key(|s| s.0).map_or(0, |s| s.1);
         }
+        if !core::mem::take(&mut self.greeting) {
+            return;
+        }
         let mut i = 0;
         while let Some(k) = self.rows.get(i) {
             let (said, own) = (k.said, self.owns(&k.key));
-            if said {
-                i += 1;
-            } else if own {
+            if own {
                 self.clock = self.clock.tick(self.clock.wall);
                 self.made += 1;
                 let id = self.next_id();
@@ -897,8 +894,9 @@ impl<B: Body + Clone + 'static, S: Store> Node<B, S> {
                 k.entry.cause = Some(k.entry.id);
                 k.entry.id = id;
                 k.entry.at = self.clock;
-                k.said = true;
                 link.send(Up::Live(k.entry.clone()));
+                i += 1;
+            } else if said {
                 i += 1;
             } else {
                 let k = self.rows.swap_remove(i);
@@ -962,6 +960,15 @@ impl<B: Body + Clone + 'static, S: Store> Node<B, S> {
         link.send(Up::Hello { cursor, time: now });
         for p in &self.pending {
             link.send(Up::Push(p.entry.clone()));
+        }
+    }
+
+    /// Measures its offset to its upstream again, at this node's time `now`:
+    /// what a node connected for long says now and then, so that it does
+    /// not drift. Nothing while it has no link.
+    pub fn ping(&self, link: &mut dyn Link<B>, now: u64) {
+        if self.linked {
+            link.send(Up::Ping { time: now });
         }
     }
 
@@ -1833,10 +1840,10 @@ pub(crate) mod tests {
     /// The answer to a hello heals the session: a row the node does not
     /// own takes its upstream's latest (a control lost in flight is
     /// undone) and one its upstream did not say goes, unless the node set
-    /// it since it connected; a row it owns takes nothing from the answer,
-    /// and is said again, as a new entry, when its upstream's is not its
-    /// own latest. After the answer, a row it owns takes only newer
-    /// entries.
+    /// it since it connected; a row it owns takes nothing from the answer
+    /// (but one it holds none of, as after a restart), and every one it
+    /// holds is said again, as a new entry. After the answer, a row it owns
+    /// takes only newer entries.
     #[cfg_attr(test, test)]
     fn a_hello_heals_the_session() {
         let value = |db: &dyn Read, key| db.get(POSITIONS, &at(key)).map(|v| u64::from_le_bytes(v.try_into().unwrap()));
@@ -1865,8 +1872,8 @@ pub(crate) mod tests {
         watch.route(since, &mut up);
         watch.take_changes(Space::Session);
         up.clear();
-        // The answer: the phone's playing, an old entry of its row 15 and
-        // its own latest of 16.
+        // The answer: the phone's playing, an old entry of its row 15, its
+        // own latest of 16, and its row 17, which it holds none of.
         let old = Entry {
             id: EntryId { origin: Origin(3), n: 1 },
             ..sixteen.clone()
@@ -1875,7 +1882,12 @@ pub(crate) mod tests {
             body: Msg::Set { key: 15, value: 0 },
             ..old
         };
-        for e in [playing.clone(), old, sixteen.clone()] {
+        let seventeen = Entry {
+            id: EntryId { origin: Origin(3), n: 2 },
+            body: Msg::Set { key: 17, value: 2 },
+            ..sixteen.clone()
+        };
+        for e in [playing.clone(), old, sixteen.clone(), seventeen] {
             watch.receive(Down::Live(e), &mut up, 110);
         }
         assert_eq!(
@@ -1887,16 +1899,30 @@ pub(crate) mod tests {
         );
         watch.receive(Down::Welcome { sent: 100, time: 5110 }, &mut up, 120);
         let s = watch.store(Space::Session).unwrap();
-        assert_eq!([1, 2, 3, 15, 16].map(|k| value(s, k)), [Some(3), None, Some(9), Some(1), Some(4)]);
-        let session = watch.take_changes(Space::Session);
-        assert_eq!(session.rows.iter().map(|(_, d)| d.key.clone()).collect::<Vec<_>>(), [at(1), at(2)]);
-        // Row 15 said again, newer than anything the answer held, caused
-        // by the entry it says again.
-        let [Up::Live(again)] = &up[..] else { panic!("{up:?}") };
         assert_eq!(
-            (again.body.clone(), again.id.origin, again.cause),
-            (Msg::Set { key: 15, value: 1 }, Origin(2), Some(fifteen.id))
+            [1, 2, 3, 15, 16, 17].map(|k| value(s, k)),
+            [Some(3), None, Some(9), Some(1), Some(4), Some(2)]
         );
+        let session = watch.take_changes(Space::Session);
+        assert_eq!(
+            session.rows.iter().map(|(_, d)| d.key.clone()).collect::<Vec<_>>(),
+            [at(1), at(2), at(17)]
+        );
+        // Each of its rows said again, newer than anything the answer held,
+        // caused by the entry it says again.
+        let said: Vec<_> = up
+            .iter()
+            .map(|u| {
+                if let Up::Live(e) = u {
+                    (e.body.clone(), e.cause)
+                } else {
+                    panic!("{up:?}")
+                }
+            })
+            .collect();
+        assert_eq!(said.len(), 3);
+        assert!(said.contains(&(Msg::Set { key: 15, value: 1 }, Some(fifteen.id))));
+        let Some(Up::Live(again)) = up.last() else { panic!() };
         assert!(again.at > sixteen.at && again.id.n == watch.made());
         // The clock: half the 20 ms trip after 5110, against 120.
         assert_eq!((watch.offset(), watch.time(1000)), (5000, 6000));
@@ -1909,12 +1935,12 @@ pub(crate) mod tests {
         control.at = Hlc { wall: 200, logical: 0 };
         watch.receive(Down::Live(control), &mut up, 130);
         assert_eq!(value(watch.store(Space::Session).unwrap(), 15), Some(7));
-        assert_eq!(watch.latest().count(), 4);
+        assert_eq!(watch.latest().count(), 5);
     }
 
     /// The offset is the one of the shortest round trip of the last few
-    /// hellos: a slow answer does not move it until the fast one is four
-    /// hellos old.
+    /// hellos and pings: a slow answer does not move it until the fast one
+    /// is four answers old.
     #[cfg_attr(test, test)]
     fn the_clock_takes_the_shortest_trip() {
         let mut n = node(1);
@@ -1930,9 +1956,20 @@ pub(crate) mod tests {
         assert_eq!(hello(&mut n, 3000, 3500, 3600), -105);
         assert_eq!(hello(&mut n, 4000, 4500, 4600), -105);
         assert_eq!(hello(&mut n, 5000, 5500, 5600), 200);
-        // A welcome with no hello waiting is not taken.
-        n.receive(Down::Welcome { sent: 0, time: 0 }, &mut up, 9000);
-        assert_eq!(n.offset(), 200);
+        // Connected for long, it pings: each answer is a sample, so the
+        // offset follows its clock's drift without a hello.
+        let mut said = Vec::new();
+        n.ping(&mut said, 6000);
+        assert_eq!(said, [Up::Ping { time: 6000 }]);
+        for t in [6000, 7000, 8000, 9000] {
+            n.receive(Down::Welcome { sent: t, time: t + 300 }, &mut up, t + 10);
+        }
+        assert_eq!(n.offset(), 295);
+        // With no link, it says nothing.
+        n.disconnect();
+        said.clear();
+        n.ping(&mut said, 10_000);
+        assert_eq!(said, []);
     }
 
     #[cfg_attr(test, test)]

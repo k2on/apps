@@ -198,6 +198,8 @@ impl<B: Body + Clone + 'static, S: Store> Authority<B, S> {
                 self.serve.rate(conn, table, every);
                 Vec::new()
             }
+            // The root of the tree: its clock is the tree's.
+            Up::Ping { time } => Vec::from([Down::Welcome { sent: time, time: now }]),
             Up::Live(e) => {
                 let e = stamped(actor, e).ok().filter(|e| e.space == Space::Session && actor != Actor::NONE);
                 return e.and_then(|e| self.serve.live(actor, e, now)).unwrap_or_default();
@@ -347,7 +349,7 @@ impl<B: Body + Clone + 'static, S: Store> Authority<B, S> {
 pub(crate) mod tests {
     use super::*;
     use crate::node::app::*;
-    use crate::node::Node;
+    use crate::node::{Node, Spaces};
     use crate::plan::tests::{diff, splice};
     use crate::plan::{prefix, scan, Live, Row};
     use crate::store::{Memory, Read};
@@ -733,6 +735,8 @@ pub(crate) mod tests {
         up: VecDeque<Up<Msg>>,
         down: VecDeque<Down<Msg>>,
         online: bool,
+        /// Whether the answer to its hello is still coming.
+        greeting: bool,
         made: BTreeSet<EntryId>,
         refused: BTreeSet<EntryId>,
         /// Queries over its shared view, each with the list its patches
@@ -840,6 +844,14 @@ pub(crate) mod tests {
         /// Refusals a device learned from a fill: its connection dropped
         /// before the log brought them.
         filled_refusals: u32,
+        /// Devices started again, their session rows lost; the server's
+        /// live state lost; a hello's answer that told a device of a row it
+        /// owns and held, newer than its own (and changed nothing); and one
+        /// that left out a row a device held, which went.
+        restarts: u32,
+        forgot: u32,
+        unheeded: u32,
+        dropped: u32,
     }
 
     /// The phone, which serves the watch through its relay.
@@ -888,6 +900,7 @@ pub(crate) mod tests {
                 up: VecDeque::new(),
                 down: VecDeque::new(),
                 online: false,
+                greeting: false,
                 made: BTreeSet::new(),
                 refused: BTreeSet::new(),
                 lives: queries(seed.is_multiple_of(2)).map(|q| (q.live(&Memory::new()), Vec::new())).into(),
@@ -906,6 +919,9 @@ pub(crate) mod tests {
         // learn it at their first connection, their writes before it
         // stamped by the server.
         devices[PHONE].node.set_actor(ME);
+        // The phone knows its watch from the start, and answers for the
+        // watch's rows offline before the watch has said hello.
+        devices[PHONE].node.answer_for(origin(WATCH));
         let mut log: BTreeMap<Seq, Logged<Msg>> = BTreeMap::new();
         let clock = core::cell::Cell::new(0u64);
         let mut value = 0u64;
@@ -925,13 +941,15 @@ pub(crate) mod tests {
             devices[PHONE].watch(seed, Some(s.changes));
         };
         let connect = |rng: &mut Rng, server: &mut Authority<Msg, Memory>, relay: &mut Relay, devices: &mut Vec<Device>, d: usize, now: u64| {
+            if d == WATCH {
+                let actor = devices[d].actor;
+                relay.open(&mut devices[PHONE].node, Conn(d as u32), actor, Some(origin(d)));
+            } else {
+                server.open(Conn(d as u32), devices[d].actor, Some(origin(d)));
+            }
             let dev = &mut devices[d];
             dev.online = true;
-            if d == WATCH {
-                relay.serve().open(Conn(d as u32), dev.actor, Some(origin(d)));
-            } else {
-                server.open(Conn(d as u32), dev.actor, Some(origin(d)));
-            }
+            dev.greeting = true;
             dev.node.set_actor(dev.actor);
             let mut said = Vec::new();
             dev.node.connect(&mut said, now);
@@ -949,6 +967,38 @@ pub(crate) mod tests {
             } else {
                 devices[d].watch(seed, None);
             }
+        };
+        // Started again, offline: its session rows are lost; its confirmed
+        // rows, its pending records and its subscriptions are put back.
+        let restart = |devices: &mut Vec<Device>, d: usize| {
+            let dev = &mut devices[d];
+            let old = &dev.node;
+            let stores = Spaces {
+                device: old.store(Space::Device).unwrap().clone(),
+                session: Memory::new(),
+                shared: old.store(Space::Shared).unwrap().clone(),
+            };
+            let mut n = Node::new(origin(d), old.made(), crate::Version(1), &HANDLERS, stores);
+            n.cell(0u64);
+            n.resume(old.cursor(), old.pending().to_vec());
+            for (query, args) in &dev.subs {
+                n.subscribe(*query, args.clone(), &mut Vec::new());
+            }
+            dev.node = n;
+            dev.seen_live = Memory::new();
+            dev.watch(seed, None);
+        };
+        let disconnect = |server: &mut Authority<Msg, Memory>, relay: &mut Relay, devices: &mut Vec<Device>, d: usize, now: u64| {
+            let dev = &mut devices[d];
+            dev.online = false;
+            dev.node.disconnect();
+            if d == WATCH {
+                relay.close(Conn(d as u32), now);
+            } else {
+                server.close(Conn(d as u32), now);
+            }
+            dev.up.clear();
+            dev.down.clear();
         };
         let mut step = |rng: &mut Rng,
                         server: &mut Authority<Msg, Memory>,
@@ -1052,6 +1102,21 @@ pub(crate) mod tests {
                     let pending: BTreeSet<EntryId> = dev.node.pending().iter().map(|p| p.entry.id).collect();
                     let skipped = dev.node.skipped;
                     let fill = matches!(down, Down::Rows { end: End::Fill { .. }, .. });
+                    // The rows it owns (the phone: its watch's too) and holds,
+                    // and the keys of the rows it holds, as the answer to its
+                    // hello comes.
+                    let owned: Vec<u8> = (0..4u8)
+                        .filter(|&o| usize::from(o) == d || (d == PHONE && usize::from(o) == WATCH))
+                        .flat_map(|o| [10 * o, 10 * o + 1])
+                        .collect();
+                    let session = |dev: &Device, key: u8| position(dev.node.store(Space::Session).unwrap(), key);
+                    let before: Vec<Option<u64>> = owned.iter().map(|&k| session(dev, k)).collect();
+                    let held: Vec<u8> = (0..40u8).filter(|&k| session(dev, k).is_some()).collect();
+                    let answer = dev
+                        .greeting
+                        .then_some(&down)
+                        .and_then(|d| if let Down::Live(e) = d { Some(e.clone()) } else { None });
+                    let welcome = matches!(down, Down::Welcome { .. });
                     let mut said = Vec::new();
                     if d == PHONE {
                         if matches!(down, Down::Rows { end: End::Fill { .. }, .. }) {
@@ -1066,6 +1131,22 @@ pub(crate) mod tests {
                     }
                     let dev = &mut devices[d];
                     seen.skipped += dev.node.skipped - skipped;
+                    // A hello's answer changes no row the device owns and
+                    // holds: what its upstream kept while it was away (a
+                    // control made then) never fires later.
+                    if let Some(e) = &answer {
+                        for (&k, &was) in owned.iter().zip(&before) {
+                            if was.is_some() {
+                                assert_eq!(session(dev, k), was, "seed {seed}: device {d}'s row {k} took its hello's answer");
+                                let Msg::Set { key, value } = e.body else { unreachable!() };
+                                seen.unheeded += u32::from(key == k && Some(value) != was);
+                            }
+                        }
+                    }
+                    if welcome && dev.greeting {
+                        dev.greeting = false;
+                        seen.dropped += held.iter().filter(|&&k| session(dev, k).is_none()).count() as u32;
+                    }
                     // What the watch lets go of the server has judged.
                     if d == WATCH {
                         for p in &pending {
@@ -1086,7 +1167,13 @@ pub(crate) mod tests {
                 9 | 10 => {
                     let mut said = Vec::new();
                     let mut out = Vec::new();
-                    let o = rng.below(4) as usize;
+                    // Mostly, a device of its actor's that is away, if
+                    // one is: what its hello must not take when it comes back.
+                    let away: Vec<usize> = (0..4).filter(|&o| o != d && actors[o] == actors[d] && !devices[o].online).collect();
+                    let o = match away.len() {
+                        n if n > 0 && rng.below(4) != 0 => away[rng.below(n as u64) as usize],
+                        _ => rng.below(4) as usize,
+                    };
                     let owner = if o != d && actors[o] == actors[d] { o } else { d };
                     for _ in 0..1 + rng.below(3) {
                         value += 1;
@@ -1097,7 +1184,8 @@ pub(crate) mod tests {
                                 continue;
                             }
                             if d == PHONE && owner == WATCH {
-                                // Its own to answer for, once the watch has said hello.
+                                // Its own to answer for: it knows its watch
+                                // from the start.
                             } else if dev.node.linked() {
                                 seen.controls += 1;
                             } else {
@@ -1116,8 +1204,7 @@ pub(crate) mod tests {
                         // Offline, a control is refused: not applied, not
                         // sent, never to fire later.
                         let refused = dev.node.refusals().contains(&(id, Refusal::OFFLINE));
-                        // (The phone answers for the watch's rows once the
-                        // watch has said hello to it.)
+                        // (The phone answers for its watch's rows.)
                         if !(d == PHONE && owner == WATCH) {
                             assert_eq!(refused, !dev.node.linked() && d != owner, "seed {seed}: refused only offline");
                         }
@@ -1143,6 +1230,17 @@ pub(crate) mod tests {
                     if rng.below(3) == 0 {
                         let head = server.head().0;
                         server.trim(Seq(rng.below(head + 1)));
+                    }
+                    // The server starts again: its live state is lost, and
+                    // every connection to it.
+                    if rng.below(4) == 0 {
+                        server.serve.retain_latest(|_| false);
+                        for d in [0, PHONE, 2] {
+                            if devices[d].online {
+                                disconnect(server, relay, devices, d, now);
+                            }
+                        }
+                        seen.forgot += 1;
                     }
                 }
                 // The third device or the watch lets go of a query, or
@@ -1178,6 +1276,9 @@ pub(crate) mod tests {
                         }
                         dev.up.clear();
                         dev.down.clear();
+                    } else if (d == 0 || d == 2) && rng.below(3) == 0 {
+                        restart(devices, d);
+                        seen.restarts += 1;
                     } else {
                         connect(rng, server, relay, devices, d, now);
                     }
@@ -1186,6 +1287,47 @@ pub(crate) mod tests {
         };
         for _ in 0..steps {
             step(&mut rng, &mut server, &mut relay, &mut devices, &mut log, seen, false);
+        }
+        // Everyone connected and quiet, then two scenes, so that each rule
+        // of a hello's healing is held by what follows. First, device 0
+        // away while the phone controls its row, newer than anything it set:
+        // its hello's answer must not take it. Then device 0 started again,
+        // its rows lost, and the server's live state lost too: every other
+        // device's hello must let its rows go.
+        let mut quiet = |rng: &mut Rng,
+                         server: &mut Authority<Msg, Memory>,
+                         relay: &mut Relay,
+                         devices: &mut Vec<Device>,
+                         log: &mut BTreeMap<Seq, Logged<Msg>>,
+                         seen: &mut Seen| {
+            for d in 0..4 {
+                if !devices[d].online {
+                    connect(rng, server, relay, devices, d, clock.get());
+                }
+            }
+            while devices.iter().any(|dev| !dev.up.is_empty() || !dev.down.is_empty()) {
+                step(rng, server, relay, devices, log, seen, true);
+            }
+        };
+        quiet(&mut rng, &mut server, &mut relay, &mut devices, &mut log, seen);
+        disconnect(&mut server, &mut relay, &mut devices, 0, clock.get());
+        if devices[PHONE].node.store(Space::Session).unwrap().get(POSITIONS, &at(0)).is_some() {
+            let control = devices[PHONE]
+                .node
+                .make(Space::Session, Msg::Set { key: 0, value: 1 << 40 }, clock.get() + 1000);
+            let mut said = Vec::new();
+            let s = relay.route(&mut devices[PHONE].node, control, &mut said, clock.get());
+            served(s, said, &mut devices);
+        }
+        quiet(&mut rng, &mut server, &mut relay, &mut devices, &mut log, seen);
+        disconnect(&mut server, &mut relay, &mut devices, 0, clock.get());
+        restart(&mut devices, 0);
+        // The server starts again: every connection to it is lost.
+        server.serve.retain_latest(|_| false);
+        for d in [PHONE, 2] {
+            if devices[d].online {
+                disconnect(&mut server, &mut relay, &mut devices, d, clock.get());
+            }
         }
         // Everyone connected, then quiet, the timers run out.
         for d in 0..4 {
@@ -1329,6 +1471,11 @@ pub(crate) mod tests {
         assert!(seen.relayed > 0 && seen.queued > 0 && seen.refills > 0);
         assert!(seen.controls > 0 && seen.offline > 0 && seen.read > 0 && seen.children > 0);
         assert!(seen.filled_refusals > 0);
+        assert!(
+            seen.restarts > 0 && seen.forgot > 0 && seen.unheeded > 0 && seen.dropped > 0,
+            "{:?}",
+            (seen.restarts, seen.forgot, seen.unheeded, seen.dropped)
+        );
     }
 
     crate::listed!(
