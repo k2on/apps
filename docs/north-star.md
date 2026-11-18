@@ -279,7 +279,10 @@ its closures make recorded. The target adds what lets it run partially:
   and fetches neighbours when a row leaves. A sort by a closure no index
   provides keeps today's behaviour.
 - **`related`**: a parent with its children, held as an index from parent
-  key to children, with per-parent limits.
+  key to children, with per-parent limits. Its answer is one ordered list
+  of nested places, a row's parent the nearest row before it whose place
+  begins its own, so a view shows it as a nested list from the same
+  positional patches; `join` is the same without the parents' rows.
 - **Aggregates as running state.** Count, sum and average update in
   constant time; min and max refetch only when the extreme leaves.
 

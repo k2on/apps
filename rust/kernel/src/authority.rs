@@ -287,7 +287,7 @@ pub(crate) mod tests {
     use crate::node::app::*;
     use crate::node::Node;
     use crate::plan::tests::{diff, splice};
-    use crate::plan::{scan, Live, Row};
+    use crate::plan::{prefix, scan, Live, Row};
     use crate::store::{Memory, Read};
     use crate::sync::QueryId;
     use crate::Rng;
@@ -516,14 +516,24 @@ pub(crate) mod tests {
     }
 
     /// The tests' queries: the counts whose value is odd or even as the
-    /// argument says; the first two; and the counts with notes ([`noted`]).
-    pub(crate) static QUERIES: [Query; 3] = [
+    /// argument says; the first two; the counts with notes ([`noted`]);
+    /// each count with its first note (related); and the notes of the odd
+    /// counts, each paired with its count's value (a join).
+    pub(crate) static QUERIES: [Query; 5] = [
         |args| {
             let odd = args.first().copied().unwrap_or(0);
             scan(COUNTS, Bound::Unbounded, Bound::Unbounded).filter(move |_, v| v[0] % 2 == odd)
         },
         |_| scan(COUNTS, Bound::Unbounded, Bound::Unbounded).take(2, false),
         |_| noted(),
+        |_| scan(COUNTS, Bound::Unbounded, Bound::Unbounded).related(|k, _| prefix(NOTES, k).take(1, false)),
+        |_| {
+            let odd = scan(COUNTS, Bound::Unbounded, Bound::Unbounded).filter(|_, v| v[0] % 2 == 1);
+            odd.join(|k, v| {
+                let count = v[0];
+                prefix(NOTES, k).map(move |_, n| [n, &[count]].concat())
+            })
+        },
     ];
 
     /// The counts that have a note, found by a scan of the notes from the
@@ -660,14 +670,15 @@ pub(crate) mod tests {
     }
 
     /// The queries each device keeps over its shared view: a bounded take
-    /// of a filter, a group of every row, and the first of the counts with
-    /// notes.
-    fn queries(last: bool) -> [crate::plan::Plan; 3] {
+    /// of a filter, a group of every row, the first of the counts with
+    /// notes, and the first three rows of the counts with a note each.
+    fn queries(last: bool) -> [crate::plan::Plan; 4] {
         let all = || scan(COUNTS, Bound::Unbounded, Bound::Unbounded);
         [
             all().filter(|_, v| v[0] % 3 != 0).take(2, last),
             all().group(|_, _| Vec::new(), |_, v| i64::from(v[0]), true, true),
             noted().take(1, last),
+            all().related(move |k, _| prefix(NOTES, k).take(1, last)).take(3, last),
         ]
     }
 
@@ -743,8 +754,11 @@ pub(crate) mod tests {
         controls: u32,
         offline: u32,
         /// Rows a device holding only its queries' rows held because a
-        /// query's closures read them.
+        /// query's closures read them, or as a count's children.
         read: u32,
+        /// Notes a device held as a count's children, by `related` or a
+        /// join.
+        children: u32,
     }
 
     /// The phone, which serves the watch through its relay.
@@ -1035,7 +1049,7 @@ pub(crate) mod tests {
                 12 if d == 2 || d == WATCH => {
                     let dev = &mut devices[d];
                     let mut said = Vec::new();
-                    let query = [QueryId(0), QueryId(2)][rng.below(2) as usize];
+                    let query = [QueryId(0), QueryId(2), QueryId(3), QueryId(4)][rng.below(4) as usize];
                     match dev.subs.iter().position(|s| s.0 == query) {
                         Some(i) => {
                             let (query, args) = dev.subs.remove(i);
@@ -1116,7 +1130,11 @@ pub(crate) mod tests {
                     assert!(dev.node.complete(*query, args), "seed {seed}: {query:?} complete");
                 }
                 held = read.into_iter().collect();
-                seen.read += held.iter().filter(|(t, ..)| *t == NOTES).count() as u32;
+                let notes = held.iter().filter(|(t, ..)| *t == NOTES).count() as u32;
+                seen.read += notes;
+                if dev.subs.iter().any(|s| s.0 .0 >= 3) {
+                    seen.children += notes;
+                }
             }
             assert_eq!(shared(dev.node.store(Space::Shared)), held, "seed {seed}: device {d}");
             assert_eq!(shared(&dev.node.view(Space::Shared)), held, "seed {seed}: device {d}");
@@ -1180,7 +1198,7 @@ pub(crate) mod tests {
         }
         assert!(seen.skipped > 0 && seen.fills > 0 && seen.forged > 0 && seen.held > 0 && seen.deltas > 0);
         assert!(seen.relayed > 0 && seen.queued > 0 && seen.refills > 0);
-        assert!(seen.controls > 0 && seen.offline > 0 && seen.read > 0);
+        assert!(seen.controls > 0 && seen.offline > 0 && seen.read > 0 && seen.children > 0);
     }
 
     crate::listed!(

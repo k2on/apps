@@ -142,6 +142,16 @@ fn track(i: u8) -> Msg {
 
 /// The table of albums, by a track's number.
 const ALBUMS: TableId = TableId(4);
+/// The table of playlists, whose tracks are the queue's rows under its key.
+const PLAYLISTS: TableId = TableId(5);
+
+fn playlist() -> Msg {
+    Msg::Put {
+        table: PLAYLISTS.0,
+        key: [0].into(),
+        value: b"Queue".into(),
+    }
+}
 
 /// A track's album, named by one letter.
 fn album(i: u8, name: u8) -> Msg {
@@ -219,6 +229,19 @@ fn main() -> ! {
         seq += 1;
         logged(&mut wire, e, seq, facts);
     }
+    // The queue's playlist, whose tracks are its children.
+    let list = phone.make(Space::Shared, playlist(), black_box(1_000));
+    seq += 1;
+    logged(
+        &mut wire,
+        list,
+        seq,
+        Writes(alloc::vec![Write {
+            table: PLAYLISTS,
+            key: [0].into(),
+            value: Some(b"Queue".into()),
+        }]),
+    );
     // Two tracks' albums, which the screen reads beside them.
     for i in [black_box(1u8), 2] {
         let e = phone.make(Space::Shared, album(i, b'a'), black_box(1_000));
@@ -255,8 +278,11 @@ fn main() -> ! {
             })
             .take(black_box(4), black_box(false))
     };
+    // The playlists, each with its first two tracks.
+    let lists = || scan(PLAYLISTS, Bound::Unbounded, Bound::Unbounded).related(|k, _| prefix(TableId(1), k).take(2, false));
     let mut queries = [
         next().live(&node.view(Space::Shared)),
+        lists().live(&node.view(Space::Shared)),
         all()
             .group(|_, _| Vec::new(), |_, v| v.len() as i64, black_box(false), true)
             .live(&node.view(Space::Shared)),
@@ -384,8 +410,10 @@ fn main() -> ! {
     // The queries kept live are what a fresh run over the view answers.
     let view = node.view(Space::Shared);
     let next = next().live(&view);
-    let total = from_slice::<Agg>(&queries[1].rows()[0].1).map_or(0, |a| a.count);
+    let total = from_slice::<Agg>(&queries[2].rows()[0].1).map_or(0, |a| a.count);
     let right = queries[0].rows() == next.rows()
+        && queries[1].rows() == lists().live(&view).rows()
+        && queries[1].rows().len() == 3
         && queries[0].rows().iter().any(|(k, v)| k[..] == [0, 2] && v.last() == Some(&b'b'))
         && total == node.store(Space::Shared).len(TableId(1)) as u64
         && node.store(Space::Shared).get(TableId(1), &[0, 20]).is_some();

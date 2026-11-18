@@ -77,14 +77,14 @@ pub trait Read {
     /// Calls `f` with each row in `range`, in its order, until `f` returns
     /// false.
     fn scan(&self, table: TableId, range: Range<'_>, f: &mut dyn FnMut(&[u8], &[u8]) -> bool);
-
-    /// Every table it may hold a row of (a view's may be named twice): what
-    /// a fill that replaces every row empties.
-    fn tables(&self) -> Vec<TableId>;
 }
 
 /// Reading and writing rows.
 pub trait Store: Read {
+    /// Every table it may hold a row of: what a fill that replaces every
+    /// row empties. An overlay names the tables its writes do.
+    fn tables(&self) -> Vec<TableId>;
+
     fn put(&mut self, table: TableId, key: &[u8], value: &[u8]);
 
     fn delete(&mut self, table: TableId, key: &[u8]);
@@ -152,6 +152,57 @@ fn paths(table: TableId, range: Range<'_>) -> Option<Paths> {
 /// and an operator's state alike, so that its code is linked once.
 pub(crate) type Tree = BTreeMap<Vec<u8>, Option<Vec<u8>>>;
 
+/// A tree rows are put in and taken out of. A row taken out is left as
+/// `None` (a B-tree's removal links its rebalancing, the most code it has),
+/// and the tree is built again without them once they are half of it.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct Sparse {
+    pub(crate) tree: Tree,
+    dead: usize,
+}
+
+impl Sparse {
+    pub(crate) fn get(&self, k: &Vec<u8>) -> Option<&Vec<u8>> {
+        self.tree.get(k)?.as_ref()
+    }
+
+    pub(crate) fn put(&mut self, k: Vec<u8>, v: Vec<u8>) {
+        if let Some(None) = self.tree.insert(k, Some(v)) {
+            self.dead -= 1;
+        }
+    }
+
+    pub(crate) fn take(&mut self, k: &Vec<u8>) {
+        let Some(v @ Some(_)) = self.tree.get_mut(k) else { return };
+        *v = None;
+        self.dead += 1;
+        if self.dead * 2 > self.tree.len() {
+            let mut tree = Tree::new();
+            for (k, v) in core::mem::take(&mut self.tree) {
+                if v.is_some() {
+                    tree.insert(k, v);
+                }
+            }
+            *self = Sparse { tree, dead: 0 };
+        }
+    }
+}
+
+/// Two are equal when they hold the same rows, whatever they took out.
+impl PartialEq for Sparse {
+    fn eq(&self, other: &Sparse) -> bool {
+        let live = |t: &Tree| {
+            t.iter()
+                .filter(|(_, v)| v.is_some())
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect::<Vec<_>>()
+        };
+        live(&self.tree) == live(&other.tree)
+    }
+}
+
+impl Eq for Sparse {}
+
 /// Calls `f` with each of `rows` from `lo` to `hi`, in order or reversed,
 /// until `f` returns false.
 pub(crate) fn walk<'r>(rows: &'r Tree, lo: Bound<&[u8]>, hi: Bound<&[u8]>, reverse: bool, f: &mut dyn FnMut(&'r [u8], &'r Option<Vec<u8>>) -> bool) {
@@ -181,7 +232,7 @@ fn each<'r>(rows: &'r Tree, table: TableId, range: Range<'_>, f: &mut dyn FnMut(
 /// Rows in memory: one B-tree, every table's rows in it by `path`.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Memory {
-    rows: Tree,
+    rows: Sparse,
 }
 
 impl Memory {
@@ -192,7 +243,7 @@ impl Memory {
     /// How many rows the table holds.
     pub fn len(&self, table: TableId) -> usize {
         let mut n = 0;
-        each(&self.rows, table, Range::all(), &mut |_, _| {
+        self.scan(table, Range::all(), &mut |_, _| {
             n += 1;
             true
         });
@@ -202,15 +253,11 @@ impl Memory {
 
 impl Read for Memory {
     fn get(&self, table: TableId, key: &[u8]) -> Option<Vec<u8>> {
-        self.rows.get(&path(table, key)).cloned().flatten()
+        self.rows.get(&path(table, key)).cloned()
     }
 
     fn scan(&self, table: TableId, range: Range<'_>, f: &mut dyn FnMut(&[u8], &[u8]) -> bool) {
-        each(&self.rows, table, range, &mut |k, v| v.as_deref().is_none_or(|v| f(k, v)));
-    }
-
-    fn tables(&self) -> Vec<TableId> {
-        tables(&self.rows)
+        each(&self.rows.tree, table, range, &mut |k, v| v.as_deref().is_none_or(|v| f(k, v)));
     }
 }
 
@@ -234,12 +281,16 @@ fn tables(rows: &Tree) -> Vec<TableId> {
 }
 
 impl Store for Memory {
+    fn tables(&self) -> Vec<TableId> {
+        tables(&self.rows.tree)
+    }
+
     fn put(&mut self, table: TableId, key: &[u8], value: &[u8]) {
-        self.rows.insert(path(table, key), Some(value.to_vec()));
+        self.rows.put(path(table, key), value.to_vec());
     }
 
     fn delete(&mut self, table: TableId, key: &[u8]) {
-        self.rows.remove(&path(table, key));
+        self.rows.take(&path(table, key));
     }
 }
 
@@ -305,12 +356,6 @@ pub struct View<'a> {
 }
 
 impl Read for View<'_> {
-    fn tables(&self) -> Vec<TableId> {
-        let mut out = self.base.tables();
-        out.extend(tables(&self.layer.0));
-        out
-    }
-
     fn get(&self, table: TableId, key: &[u8]) -> Option<Vec<u8>> {
         match self.layer.0.get(&path(table, key)) {
             Some(w) => w.clone(),
@@ -392,10 +437,6 @@ impl<'a> Overlay<'a> {
 }
 
 impl Read for Overlay<'_> {
-    fn tables(&self) -> Vec<TableId> {
-        self.view().tables()
-    }
-
     fn get(&self, table: TableId, key: &[u8]) -> Option<Vec<u8>> {
         self.view().get(table, key)
     }
@@ -406,6 +447,10 @@ impl Read for Overlay<'_> {
 }
 
 impl Store for Overlay<'_> {
+    fn tables(&self) -> Vec<TableId> {
+        tables(&self.layer.0)
+    }
+
     fn put(&mut self, table: TableId, key: &[u8], value: &[u8]) {
         self.layer.0.insert(path(table, key), Some(value.to_vec()));
     }
@@ -608,5 +653,35 @@ pub(crate) mod tests {
         }
     }
 
-    crate::listed!(memory_scans_ranges, an_overlay_reads_through, an_overlay_is_its_writes_made);
+    /// Rows taken out are left in the tree until they are half of it, then
+    /// it is built again without them: a store that churns stays the size
+    /// of what it holds.
+    #[cfg_attr(test, test)]
+    fn rows_taken_out_are_let_go() {
+        let mut m = Memory::new();
+        for round in 0..50u8 {
+            for k in 0..20u8 {
+                m.put(T, &[k], &[round]);
+            }
+            for k in 0..20u8 {
+                if (k + round) % 3 != 0 {
+                    m.delete(T, &[k]);
+                }
+            }
+            assert!(m.rows.tree.len() <= 2 * m.len(T) + 1, "{} for {}", m.rows.tree.len(), m.len(T));
+            assert_eq!(m.get(T, &[round % 3]).is_some(), (round % 3 + round) % 3 == 0);
+        }
+        let mut again = Memory::new();
+        for (k, v) in read(&m, T, Range::all()) {
+            again.put(T, &k, &v);
+        }
+        assert_eq!(m, again);
+    }
+
+    crate::listed!(
+        memory_scans_ranges,
+        an_overlay_reads_through,
+        an_overlay_is_its_writes_made,
+        rows_taken_out_are_let_go
+    );
 }

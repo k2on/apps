@@ -52,7 +52,7 @@ pub use authority::Authority;
 pub use codec::{Decode, Encode, Frames};
 pub use entry::{Actor, Entry, EntryId, Hlc, Origin, Seq, Space, Version};
 pub use node::{Body, Cx, Handler, HandlerId, Link, Node, Refusal, Route, Spaces};
-pub use plan::{scan, Changes, Diff, Live, Patch, Plan};
+pub use plan::{prefix, scan, Changes, Diff, Live, Patch, Plan};
 #[cfg(feature = "upstream")]
 pub use relay::{Relay, Served};
 #[cfg(feature = "upstream")]

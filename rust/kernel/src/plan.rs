@@ -4,6 +4,7 @@
 //!
 //! ```text
 //! scan(table, lo, hi) . filter(f) . map(f) . sort(by) . take(n) . group(by, of)
+//!   . related(children) . join(children)
 //! ```
 //!
 //! A row of a result is its **place**, bytes whose order is the row's
@@ -26,6 +27,7 @@
 //! | `take` | its size and its last place | fetches the neighbours of its window that come in or go out |
 //! | `sort` | its input, sorted | the expensive case: a sort no index provides |
 //! | `group` | each group's running count, sum, min and max | count and sum in constant time; min or max fetched again when the extreme leaves |
+//! | `related`, `join` | per parent, its children's plan (a take's size and bound), never their rows | a parent's children pushed the settle; a parent that changed, its children made again |
 //!
 //! **Push.** One settle's [`Changes`] (what a node's overlay or the log's
 //! facts did to what it reads, its store already after them) go up through
@@ -46,11 +48,21 @@
 //! An operator whose closures read holds those ranges for every row of its
 //! input, and nothing for a row that read nothing.
 //!
+//! **Parents and children.** `related` answers each of its input's rows (a
+//! parent) followed by its children, the rows of a plan made for it (a
+//! [`prefix`] of an index by the parent's key, say, limited by a `take`):
+//! Zero's hierarchical join. Places nest, a parent's escaped and ended and
+//! its child's after it, so the answer is one ordered list a view shows as
+//! a nested one: a row's parent is the nearest row before it whose place
+//! begins its own, and a patch's position is in that list. `join` is the
+//! same without the parents' own rows: an equi-join, each pair a child.
+//!
 //! **What syncs.** An upstream sends a subscriber the base rows its query's
 //! answer is made of ([`Live::base`]): each answer row's row of its scan,
-//! and the rows its closures read for it, so the node runs the same plan
-//! over what it holds and gets the same answer. A subscription's query is a
-//! scan, its filters, maps and takes; sorts and groups are the node's own.
+//! the rows its closures read for it, and a child's parent's, so the node
+//! runs the same plan over what it holds and gets the same answer. A
+//! subscription's query is a scan, its filters, maps, takes, related and
+//! joins; sorts and groups are the node's own.
 
 use alloc::boxed::Box;
 use alloc::collections::BTreeMap;
@@ -59,7 +71,7 @@ use core::cell::RefCell;
 use core::ops::Bound;
 
 use crate::codec::{from_slice, put_bytes, to_vec, Decode, Encode, Error, Reader};
-use crate::store::{walk, Layer, Range, Read, TableId, Tree, View};
+use crate::store::{walk, Layer, Range, Read, Sparse, TableId, Tree, View};
 
 /// A row of an answer: its place and its value.
 pub type Row = (Vec<u8>, Vec<u8>);
@@ -172,7 +184,7 @@ fn span<'a>(lo: Bound<&'a [u8]>, hi: Bound<&'a [u8]>, from: Bound<&'a [u8]>, rev
 fn fetch_map(rows: &Tree, from: Bound<&[u8]>, reverse: bool, f: &mut dyn FnMut(&[u8], &[u8]) -> bool) {
     // One end is open, so the range is never one a `BTreeMap` refuses.
     let r = span(Bound::Unbounded, Bound::Unbounded, from, reverse);
-    walk(rows, r.lo, r.hi, reverse, &mut |k, v| f(k, v.as_deref().unwrap_or_default()));
+    walk(rows, r.lo, r.hi, reverse, &mut |k, v| v.as_deref().is_none_or(|v| f(k, v)));
 }
 
 /// Two lists of diffs in place order as one, a place in both taking its
@@ -229,10 +241,6 @@ impl<'a> Recorder<'a> {
 }
 
 impl Read for Recorder<'_> {
-    fn tables(&self) -> Vec<TableId> {
-        self.db.tables()
-    }
-
     fn get(&self, table: TableId, key: &[u8]) -> Option<Vec<u8>> {
         self.note(table, Bound::Included(key), Bound::Included(key));
         self.db.get(table, key)
@@ -281,7 +289,7 @@ fn bound<'a>(r: &mut Reader<'a>) -> Result<Bound<&'a [u8]>, Error> {
 /// What an operator's closures read, by the place of the input row each
 /// run was for. A row whose run read nothing holds nothing.
 #[derive(Default)]
-struct Reads(Tree);
+struct Reads(Sparse);
 
 impl Reads {
     /// Runs `f` over `db` for the row at `place`, keeping what it read in
@@ -292,9 +300,9 @@ impl Reads {
         if let (Some(reads), Some(s)) = (reads, r.spans) {
             let s = s.into_inner();
             if s.is_empty() {
-                reads.0.remove(place);
+                reads.0.take(place);
             } else {
-                reads.0.insert(place.clone(), Some(s));
+                reads.0.put(place.clone(), s);
             }
         }
         out
@@ -303,7 +311,7 @@ impl Reads {
     /// Lets go of what the row at `place` read: it left the input.
     fn drop(reads: &mut Option<Reads>, place: &Vec<u8>) {
         if let Some(reads) = reads {
-            reads.0.remove(place);
+            reads.0.take(place);
         }
     }
 
@@ -314,8 +322,9 @@ impl Reads {
         let mut out = input.push(s);
         let Some(reads) = reads else { return out };
         let changes = &s.changes.rows;
-        for (place, read) in &reads.0 {
-            let mut read = spans(read.as_deref().unwrap_or_default());
+        for (place, read) in &reads.0.tree {
+            let Some(read) = read else { continue };
+            let mut read = spans(read);
             if !read.any(|(t, lo, hi)| changes.iter().any(|(ct, d)| *ct == t && within(lo, hi, &d.key))) {
                 continue;
             }
@@ -342,10 +351,10 @@ impl Reads {
     /// Calls `f` with each row `db` holds that the row at `place` read.
     #[cfg(feature = "upstream")]
     fn base(reads: &Option<Reads>, db: &dyn Read, place: &[u8], f: &mut dyn FnMut(TableId, &[u8])) {
-        let Some(read) = reads.as_ref().and_then(|r| r.0.get(place)) else {
+        let Some(read) = reads.as_ref().and_then(|r| r.0.get(&place.to_vec())) else {
             return;
         };
-        for (t, lo, hi) in spans(read.as_deref().unwrap_or_default()) {
+        for (t, lo, hi) in spans(read) {
             db.scan(t, Range { lo, hi, reverse: false }, &mut |k, _| {
                 f(t, k);
                 true
@@ -356,7 +365,7 @@ impl Reads {
     /// The bytes it holds.
     #[cfg(any(test, ark_selftest))]
     fn held(reads: &Option<Reads>) -> usize {
-        reads.as_ref().map_or(0, |r| held(&r.0))
+        reads.as_ref().map_or(0, |r| held(&r.0.tree))
     }
 }
 
@@ -458,7 +467,7 @@ impl Op for Each {
 struct Sort {
     input: Box<dyn Op>,
     by: Fun<Vec<u8>>,
-    rows: Tree,
+    rows: Sparse,
     reads: Option<Reads>,
 }
 
@@ -471,7 +480,7 @@ fn sorted(by: &Fun<Vec<u8>>, db: &dyn Read, k: &[u8], v: &[u8]) -> Vec<u8> {
 
 impl Op for Sort {
     fn fetch(&self, _: &dyn Read, from: Bound<&[u8]>, reverse: bool, f: &mut dyn FnMut(&[u8], &[u8]) -> bool) {
-        fetch_map(&self.rows, from, reverse, f);
+        fetch_map(&self.rows.tree, from, reverse, f);
     }
 
     fn push(&mut self, s: &Settle<'_>) -> Vec<Diff> {
@@ -483,7 +492,7 @@ impl Op for Sort {
         for d in Reads::pull(&self.reads, &mut *self.input, s) {
             if let Some(old) = d.old {
                 let at = sorted(&self.by, s.was, &d.key, &old);
-                self.rows.remove(&at);
+                self.rows.take(&at);
                 out.insert(
                     at.clone(),
                     Diff {
@@ -499,7 +508,7 @@ impl Op for Sort {
             };
             let by = &self.by;
             let at = Reads::run(&mut self.reads, s.db, &d.key, |db| sorted(by, db, &d.key, &new));
-            self.rows.insert(at.clone(), Some(new.clone()));
+            self.rows.put(at.clone(), new.clone());
             out.entry(at.clone())
                 .or_insert(Diff {
                     key: at,
@@ -513,12 +522,12 @@ impl Op for Sort {
 
     fn hydrate(&mut self, db: &dyn Read) {
         self.input.hydrate(db);
-        self.rows = Tree::new();
+        self.rows = Sparse::default();
         self.reads = self.reads.take().map(|_| Reads::default());
         for (k, v) in fetch(&*self.input, db, Bound::Unbounded, false, usize::MAX) {
             let by = &self.by;
             let at = Reads::run(&mut self.reads, db, &k, |db| sorted(by, db, &k, &v));
-            self.rows.insert(at, Some(v));
+            self.rows.put(at, v);
         }
     }
 
@@ -528,7 +537,7 @@ impl Op for Sort {
 
     #[cfg(any(test, ark_selftest))]
     fn held(&self) -> usize {
-        self.input.held() + held(&self.rows) + Reads::held(&self.reads)
+        self.input.held() + held(&self.rows.tree) + Reads::held(&self.reads)
     }
 }
 
@@ -731,7 +740,7 @@ struct Group {
     of: Fun<i64>,
     extremes: bool,
     prefix: bool,
-    groups: Tree,
+    groups: Sparse,
     reads: Option<Reads>,
 }
 
@@ -766,13 +775,7 @@ impl Group {
     /// Adds `n` to group `g`, or takes it away: whether the group lost its
     /// least or most.
     fn count(&mut self, g: Vec<u8>, n: i64, add: bool) -> bool {
-        let mut agg: Agg = self
-            .groups
-            .get(&g)
-            .cloned()
-            .flatten()
-            .and_then(|b| from_slice(&b).ok())
-            .unwrap_or_default();
+        let mut agg: Agg = self.groups.get(&g).and_then(|b| from_slice(b).ok()).unwrap_or_default();
         let mut lost = false;
         if add {
             agg.add(n, self.extremes);
@@ -782,9 +785,9 @@ impl Group {
             lost = self.extremes && (agg.min == Some(n) || agg.max == Some(n));
         }
         if agg.count == 0 {
-            self.groups.remove(&g);
+            self.groups.take(&g);
         } else {
-            self.groups.insert(g, Some(to_vec(&agg)));
+            self.groups.put(g, to_vec(&agg));
         }
         lost
     }
@@ -792,7 +795,7 @@ impl Group {
 
 impl Op for Group {
     fn fetch(&self, _: &dyn Read, from: Bound<&[u8]>, reverse: bool, f: &mut dyn FnMut(&[u8], &[u8]) -> bool) {
-        fetch_map(&self.groups, from, reverse, f);
+        fetch_map(&self.groups.tree, from, reverse, f);
     }
 
     fn push(&mut self, s: &Settle<'_>) -> Vec<Diff> {
@@ -812,7 +815,7 @@ impl Op for Group {
                 let Some(v) = v else { continue };
                 let (g, n) = self.place(if add { s.db } else { s.was }, &d.key, v, add);
                 if let Err(i) = before.binary_search_by(|x| x.key.cmp(&g)) {
-                    let old = self.groups.get(&g).cloned().flatten();
+                    let old = self.groups.get(&g).cloned();
                     before.insert(
                         i,
                         Diff {
@@ -829,20 +832,20 @@ impl Op for Group {
         }
         // The extremes that left, fetched again once every change is in.
         for g in stale {
-            if self.groups.contains_key(&g) {
+            if self.groups.get(&g).is_some() {
                 let agg = to_vec(&self.refetch(s.db, &g));
-                self.groups.insert(g, Some(agg));
+                self.groups.put(g, agg);
             }
         }
         for d in &mut before {
-            d.new = self.groups.get(&d.key).cloned().flatten();
+            d.new = self.groups.get(&d.key).cloned();
         }
         merge(before, Vec::new())
     }
 
     fn hydrate(&mut self, db: &dyn Read) {
         self.input.hydrate(db);
-        self.groups.clear();
+        self.groups = Sparse::default();
         self.reads = self.reads.take().map(|_| Reads::default());
         for (k, v) in fetch(&*self.input, db, Bound::Unbounded, false, usize::MAX) {
             let (g, n) = self.place(db, &k, &v, true);
@@ -856,7 +859,199 @@ impl Op for Group {
 
     #[cfg(any(test, ark_selftest))]
     fn held(&self) -> usize {
-        self.input.held() + held(&self.groups) + Reads::held(&self.reads)
+        self.input.held() + held(&self.groups.tree) + Reads::held(&self.reads)
+    }
+}
+
+/// What makes a parent's children's plan, from its place and value.
+type Children = Box<dyn Fn(&[u8], &[u8]) -> Plan>;
+
+/// A parent's place among its children's: its own place escaped (each 0
+/// as 0 1) and ended by 0 0, so that no parent's is a prefix of another's
+/// and each comes before every place that begins with it.
+fn escaped(place: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(place.len() + 2);
+    for &b in place {
+        out.push(b);
+        if b == 0 {
+            out.push(1);
+        }
+    }
+    out.extend_from_slice(&[0, 0]);
+    out
+}
+
+/// A place of a related answer: its parent's place, and the child's within
+/// it (empty for the parent's own row); `None` if it is not one.
+#[cfg(feature = "upstream")]
+fn unescaped(place: &[u8]) -> Option<(Vec<u8>, &[u8])> {
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < place.len() {
+        let b = place[i];
+        i += 1;
+        if b == 0 {
+            let next = *place.get(i)?;
+            i += 1;
+            if next == 0 {
+                return Some((out, &place[i..]));
+            }
+        }
+        out.push(b);
+    }
+    None
+}
+
+/// Each of its input's rows (a parent), placed by [`escaped`], followed by
+/// its children: the rows of the plan `make` makes for it, each placed by
+/// the parent's escaped place and then its own. Holds per parent its
+/// children's operators only (an index of parent place to children: a take
+/// among them holds its size and bound, so per-parent limits are a take),
+/// never their rows. A parent's children are made again when its row
+/// changes. When `flat`, the parents' own rows are left out: a join.
+struct Related {
+    input: Box<dyn Op>,
+    make: Children,
+    flat: bool,
+    kids: Vec<(Vec<u8>, Box<dyn Op>)>,
+}
+
+/// The rows of a parent's children, over `db`, as diffs: each a removal
+/// (`gone`) or an insert.
+fn children(op: &dyn Op, db: &dyn Read, gone: bool) -> Vec<Diff> {
+    let each = fetch(op, db, Bound::Unbounded, false, usize::MAX).into_iter();
+    each.map(|(key, v)| Diff {
+        key,
+        old: gone.then(|| v.clone()),
+        new: (!gone).then_some(v),
+    })
+    .collect()
+}
+
+/// Children's diffs placed under their parent's place `at`, onto `out`.
+fn under(out: &mut Vec<Diff>, at: &[u8], diffs: Vec<Diff>) {
+    for mut d in diffs {
+        let mut key = at.to_vec();
+        key.append(&mut d.key);
+        out.push(Diff { key, ..d });
+    }
+}
+
+impl Related {
+    /// The children's operators for a parent row, built over `db`.
+    fn made(&self, db: &dyn Read, p: &[u8], v: &[u8]) -> Box<dyn Op> {
+        let mut op = (self.make)(p, v).0;
+        op.hydrate(db);
+        op
+    }
+
+    fn kid(&self, p: &[u8]) -> Option<&dyn Op> {
+        let i = self.kids.binary_search_by(|k| k.0[..].cmp(p)).ok()?;
+        Some(&*self.kids[i].1)
+    }
+}
+
+/// Whether `k` is at or past `from` in a fetch's direction.
+fn reached(from: Bound<&[u8]>, reverse: bool, k: &[u8]) -> bool {
+    match from {
+        Bound::Unbounded => true,
+        Bound::Included(x) => k == x || (k > x) != reverse,
+        Bound::Excluded(x) => k != x && (k > x) != reverse,
+    }
+}
+
+impl Op for Related {
+    fn fetch(&self, db: &dyn Read, from: Bound<&[u8]>, reverse: bool, f: &mut dyn FnMut(&[u8], &[u8]) -> bool) {
+        let mut on = true;
+        self.input.fetch(db, Bound::Unbounded, reverse, &mut |p, v| {
+            let at = escaped(p);
+            // A parent wholly before where the fetch starts is passed over.
+            if let Bound::Included(x) | Bound::Excluded(x) = from {
+                if if reverse { at[..] > *x } else { at[..] < *x && !x.starts_with(&at) } {
+                    return true;
+                }
+            }
+            let mut emit = |k: &[u8], v: &[u8]| !reached(from, reverse, k) || f(k, v);
+            if !reverse && !self.flat {
+                on = emit(&at, v);
+            }
+            if let (true, Some(kid)) = (on, self.kid(p)) {
+                kid.fetch(db, Bound::Unbounded, reverse, &mut |c, cv| {
+                    on = emit(&[&at[..], c].concat(), cv);
+                    on
+                });
+            }
+            if on && reverse && !self.flat {
+                on = emit(&at, v);
+            }
+            on
+        });
+    }
+
+    fn push(&mut self, s: &Settle<'_>) -> Vec<Diff> {
+        if s.changes.reset {
+            self.hydrate(s.db);
+            return Vec::new();
+        }
+        let d = self.input.push(s);
+        // The children of the parents that stay take the settle.
+        let mut out = Vec::new();
+        for (p, op) in &mut self.kids {
+            if d.binary_search_by(|x| x.key.cmp(p)).is_err() {
+                under(&mut out, &escaped(p), op.push(s));
+            }
+        }
+        // A parent that changed: its children before, over the rows before,
+        // and its children made again.
+        let mut changed = Vec::new();
+        for x in d {
+            let at = escaped(&x.key);
+            let mut gone = Vec::new();
+            if let Ok(i) = self.kids.binary_search_by(|k| k.0.cmp(&x.key)) {
+                let (_, op) = self.kids.remove(i);
+                gone = children(&*op, s.was, true);
+            }
+            let mut came = Vec::new();
+            if let Some(v) = &x.new {
+                let op = self.made(s.db, &x.key, v);
+                came = children(&*op, s.db, false);
+                let i = self.kids.binary_search_by(|k| k.0.cmp(&x.key)).unwrap_or_else(|i| i);
+                self.kids.insert(i, (x.key, op));
+            }
+            if !self.flat {
+                changed.push(Diff {
+                    key: at.clone(),
+                    old: x.old,
+                    new: x.new,
+                });
+            }
+            under(&mut changed, &at, merge(gone, came));
+        }
+        merge(out, changed)
+    }
+
+    fn hydrate(&mut self, db: &dyn Read) {
+        self.input.hydrate(db);
+        self.kids = Vec::new();
+        for (p, v) in fetch(&*self.input, db, Bound::Unbounded, false, usize::MAX) {
+            let op = self.made(db, &p, &v);
+            self.kids.push((p, op));
+        }
+    }
+
+    #[cfg(feature = "upstream")]
+    fn base(&self, db: &dyn Read, place: &[u8], f: &mut dyn FnMut(TableId, &[u8])) {
+        let Some((p, c)) = unescaped(place) else { return };
+        // A child is made from its parent: the parent's rows go with it.
+        self.input.base(db, &p, f);
+        if let (false, Some(kid)) = (c.is_empty(), self.kid(&p)) {
+            kid.base(db, c, f);
+        }
+    }
+
+    #[cfg(any(test, ark_selftest))]
+    fn held(&self) -> usize {
+        self.input.held() + self.kids.iter().map(|(p, op)| p.len() + op.held()).sum::<usize>()
     }
 }
 
@@ -873,6 +1068,22 @@ pub struct Plan(Box<dyn Op>);
 /// index.
 pub fn scan(table: TableId, lo: Bound<Vec<u8>>, hi: Bound<Vec<u8>>) -> Plan {
     Plan(Box::new(Scan { table, lo, hi }))
+}
+
+/// A table's rows whose keys begin with `prefix`: an index's rows for one
+/// value, as a parent's children are.
+pub fn prefix(table: TableId, prefix: &[u8]) -> Plan {
+    // The first key past every key that begins with it, if one is.
+    let mut hi = prefix.to_vec();
+    while hi.pop_if(|b| *b == 0xff).is_some() {}
+    let hi = match hi.last_mut() {
+        Some(b) => {
+            *b += 1;
+            Bound::Excluded(hi)
+        }
+        None => Bound::Unbounded,
+    };
+    scan(table, Bound::Included(prefix.to_vec()), hi)
 }
 
 impl Plan {
@@ -924,7 +1135,7 @@ impl Plan {
         Plan(Box::new(Sort {
             input: self.0,
             by,
-            rows: Tree::new(),
+            rows: Sparse::default(),
             reads: reads.then(Reads::default),
         }))
     }
@@ -979,8 +1190,37 @@ impl Plan {
             of,
             extremes,
             prefix,
-            groups: Tree::new(),
+            groups: Sparse::default(),
             reads: reads.then(Reads::default),
+        }))
+    }
+
+    /// Each row followed by its children: the rows of the plan `children`
+    /// makes from its place and value (often a [`prefix`] of an index, by
+    /// its key), each placed after it. A row's place is its own escaped
+    /// and ended (so that none is a prefix of another), and a child's is
+    /// its parent's and then its own: a row's parent is the nearest row
+    /// before it whose place begins its own, at any depth, so an answer is
+    /// a nested list in order. Children are not held, only their plans'
+    /// state per parent: a `take` among them is a limit per parent. Their
+    /// changes come under their parent's place.
+    pub fn related(self, children: impl Fn(&[u8], &[u8]) -> Plan + 'static) -> Plan {
+        self.relate(Box::new(children), false)
+    }
+
+    /// The children [`Plan::related`] finds, without their parents: an
+    /// equi-join, each child placed under its parent as there. To pair
+    /// values, `children` maps its rows with what it takes of the parent's.
+    pub fn join(self, children: impl Fn(&[u8], &[u8]) -> Plan + 'static) -> Plan {
+        self.relate(Box::new(children), true)
+    }
+
+    fn relate(self, make: Children, flat: bool) -> Plan {
+        Plan(Box::new(Related {
+            input: self.0,
+            make,
+            flat,
+            kids: Vec::new(),
         }))
     }
 
@@ -1225,7 +1465,7 @@ pub(crate) mod tests {
         let (lo, hi) = (key(&mut rng), key(&mut rng));
         let mut p = scan(T, bound(&mut rng, lo), bound(&mut rng, hi));
         for _ in 0..rng.below(5) {
-            p = match rng.below(11) {
+            p = match rng.below(14) {
                 0 => {
                     let m = 2 + rng.below(3) as u8;
                     p.filter(move |_, v| v[0] % m != 0)
@@ -1240,6 +1480,15 @@ pub(crate) mod tests {
                 7 => p.filter_with(|db, k, _| db.get(U, &k[..1]).is_none_or(|u| u[0] % 2 == 0)),
                 8 => p.map_with(|db, k, v| vec![v[0], first(db, &k[..1])]),
                 9 => p.sort_with(|db, _, v| vec![first(db, &[v[0] % 6]) % 3]),
+                // Each row with its children of the other table, by its
+                // first byte: the first two, or those whose parent's first
+                // byte has a row (read); or the children alone, paired.
+                11 => p.related(|k, _| prefix(U, &k[..1]).take(2, false)),
+                12 => p.related(|k, _| prefix(U, &k[..1]).filter_with(|db, k, _| db.get(T, &k[..1]).is_some())),
+                13 => p.join(|k, v| {
+                    let v0 = v[0];
+                    prefix(U, &k[..1]).map(move |_, c| vec![c[0], v0])
+                }),
                 _ => p.group_with(
                     |db, k, _| vec![db.get(U, &k[..1]).map_or(9, |u| u[0] % 2)],
                     |db, _, v| i64::from(v[0]) + i64::from(first(db, &[])),

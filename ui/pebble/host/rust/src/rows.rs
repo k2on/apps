@@ -50,13 +50,13 @@ impl Read for Rows {
     fn scan(&self, table: TableId, range: Range<'_>, f: &mut dyn FnMut(&[u8], &[u8]) -> bool) {
         self.mem.scan(table, range, f)
     }
-
-    fn tables(&self) -> Vec<TableId> {
-        self.tables.clone()
-    }
 }
 
 impl Store for Rows {
+    fn tables(&self) -> Vec<TableId> {
+        self.tables.clone()
+    }
+
     fn put(&mut self, table: TableId, key: &[u8], value: &[u8]) {
         if let Err(i) = self.tables.binary_search(&table) {
             self.tables.insert(i, table);
