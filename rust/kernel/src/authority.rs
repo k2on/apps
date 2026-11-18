@@ -9,16 +9,23 @@
 //! keeps of them is a [`Serve`]'s, which any upstream serves its
 //! downstream nodes with.
 //!
-//! **Pushes.** It judges each pushed entry once. Each origin's entries are
-//! judged in the order of their count, as a node pushes them, so a count
-//! at or below the last one judged from its origin is a repeat (a push sent
-//! again at a connection): it is answered with the refusal the authority
-//! journaled for it, or `At { seq, last }`, and not run again. Any other is
-//! run on the confirmed rows: refused, it is journaled and answered so;
-//! kept, its writes are its facts, and it is logged at the next `seq` and
-//! sent to every connection. A refusal never holds back the entries after
-//! it. Entries pushed from a connection keep their origin, whichever node
-//! made them: a phone forwards its watch's.
+//! **Pushes.** It judges each pushed entry once, and answers none: its
+//! judgment is the log's. Each origin's entries are judged in the order of
+//! their count, as a node pushes them, so a count at or below the last one
+//! judged from its origin is a repeat (a push sent again at a connection),
+//! not run again and not answered: the node learns of it from the log, or
+//! from the fill its next hello is answered with, which says each of its
+//! origins' last count judged. Any other is run on the confirmed rows and
+//! logged at the next `seq`: kept, with its writes as its facts, sent to
+//! every connection; refused, with one fact, its row of
+//! [`crate::sync::REFUSALS`], which goes only to the connection of its
+//! origin or of the node it came through, and is journaled. A refusal never
+//! holds back the entries after it. Entries pushed from a connection keep
+//! their origin, whichever node made them: a phone forwards its watch's.
+//! A refusal's row is let go at the hello of the node it went to, once that
+//! hello's cursor is at or past its `seq`: the node has applied it. An entry
+//! that is not the shared space's, or is logged already, is journaled as
+//! not pushable and not logged: no node's pending entry is one.
 //!
 //! **The actor is the connection's.** An entry made before its node knew
 //! who it was for ([`Actor::NONE`]) is stamped with its connection's actor;
@@ -61,6 +68,7 @@
 use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
 
+use crate::codec::{from_slice, to_vec};
 use crate::entry::{Actor, Entry, EntryId, Origin, Seq, Space};
 use crate::node::{run, Body, Handler, Refusal};
 use crate::plan::{Changes, Diff};
@@ -68,7 +76,7 @@ use crate::serve::{frames, stamped, Serve};
 pub use crate::serve::{Conn, Out};
 use crate::store::{Range, Store, Write};
 pub use crate::sync::Query;
-use crate::sync::{Down, End, Logged, Up, Verdict};
+use crate::sync::{Down, End, Logged, Refused, Up, REFUSALS};
 
 pub struct Authority<B: 'static, S> {
     handlers: &'static [Handler<B>],
@@ -76,7 +84,9 @@ pub struct Authority<B: 'static, S> {
     /// The log after `base`: the entry at `seq` is `log[seq - base - 1]`.
     log: Vec<Logged<B>>,
     base: u64,
-    last: BTreeMap<Origin, u64>,
+    /// Per origin, the last count judged, and the client its entries
+    /// came through.
+    last: BTreeMap<Origin, (u64, Option<Origin>)>,
     refused: BTreeMap<EntryId, Refusal>,
     serve: Serve<B>,
 }
@@ -165,8 +175,11 @@ impl<B: Body + Clone + 'static, S: Store> Authority<B, S> {
         let head = self.head();
         let out = match up {
             Up::Hello { cursor, time } => {
-                let (all, frames) = self.serve.hello(conn, cursor, &self.store, head, now);
-                let mut out = if all { self.hello(cursor) } else { Vec::new() };
+                let client = self.serve.client(conn);
+                self.forget(client, cursor);
+                let judged = self.judged(client);
+                let (all, frames) = self.serve.hello(conn, cursor, &self.store, head, now, judged.clone());
+                let mut out = if all { self.hello(conn, cursor, judged) } else { Vec::new() };
                 out.extend(frames);
                 // The root of the tree: its clock is the tree's.
                 out.push(Down::Welcome { sent: time, time: now });
@@ -175,12 +188,11 @@ impl<B: Body + Clone + 'static, S: Store> Authority<B, S> {
             Up::Subscribe { query, args } => self.serve.subscribe(conn, query, args, &self.store, head),
             Up::Unsubscribe { query, args } => self.serve.unsubscribe(conn, query, args, head, now),
             Up::Push(e) => {
-                let (verdict, logged) = self.push(actor, e);
-                let mut out = Vec::from([(conn, verdict)]);
-                if let Some((l, changes)) = logged {
-                    out.extend(self.serve.feed(&self.store, &changes, Some(&l), self.head()));
-                }
-                return out;
+                let via = self.serve.client(conn);
+                let Some((l, changes)) = self.push(actor, via, e) else {
+                    return Vec::new();
+                };
+                return self.serve.feed(&self.store, &changes, Some(&l), self.head());
             }
             Up::Rate { table, every } => {
                 self.serve.rate(conn, table, every);
@@ -211,9 +223,39 @@ impl<B: Body + Clone + 'static, S: Store> Authority<B, S> {
         self.serve.next_tick()
     }
 
-    /// The answer to a node's hello: the log after its cursor, or, when
-    /// that is let go, a fill of the rows at the head.
-    fn hello(&self, cursor: Seq) -> Vec<Down<B>> {
+    /// The last count judged of each origin whose entries came through
+    /// `client`, its own too: what a fill says to it.
+    fn judged(&self, client: Option<Origin>) -> Vec<(Origin, u64)> {
+        let Some(c) = client else { return Vec::new() };
+        self.last
+            .iter()
+            .filter(|(&o, l)| o == c || l.1 == Some(c))
+            .map(|(&o, l)| (o, l.0))
+            .collect()
+    }
+
+    /// Lets go of the refusal rows that went to `client` and were logged
+    /// at or before `cursor`: its hello says it has applied them.
+    fn forget(&mut self, client: Option<Origin>, cursor: Seq) {
+        let Some(c) = client else { return };
+        let mut gone = Vec::new();
+        self.store.scan(REFUSALS, Range::all(), &mut |k, v| {
+            let to = |r: Refused| Refused::id(k).is_some_and(|id| id.origin == c) || r.via == c;
+            if from_slice::<Refused>(v).is_ok_and(|r| to(r) && r.seq <= cursor) {
+                gone.push(k.to_vec());
+            }
+            true
+        });
+        for k in gone {
+            self.store.delete(REFUSALS, &k);
+        }
+    }
+
+    /// The answer to a node's hello on `conn`: the log after its cursor,
+    /// or, when that is let go, a fill of the rows at the head (the
+    /// refusal rows only those it sees), with its origins' last counts
+    /// judged.
+    fn hello(&self, conn: Conn, cursor: Seq, judged: Vec<(Origin, u64)>) -> Vec<Down<B>> {
         if cursor.0 >= self.base {
             let from = ((cursor.0 - self.base) as usize).min(self.log.len());
             return self.log[from..].iter().cloned().map(Down::Logged).collect();
@@ -221,11 +263,14 @@ impl<B: Body + Clone + 'static, S: Store> Authority<B, S> {
         let mut rows = Vec::new();
         for table in self.store.tables() {
             self.store.scan(table, Range::all(), &mut |k, v| {
-                rows.push(Write {
+                let w = Write {
                     table,
                     key: k.to_vec(),
                     value: Some(v.to_vec()),
-                });
+                };
+                if self.serve.sees(conn, &w) {
+                    rows.push(w);
+                }
                 true
             });
         }
@@ -235,56 +280,63 @@ impl<B: Body + Clone + 'static, S: Store> Authority<B, S> {
             End::Fill {
                 seq: self.head(),
                 whole: true,
+                judged,
             },
         )
     }
 
-    /// Judges an entry `actor`'s connection pushed: the verdict for its
-    /// node, and what it logged with what that changed, for every node.
-    fn push(&mut self, actor: Actor, e: Entry<B>) -> (Down<B>, Option<(Logged<B>, Changes)>) {
+    /// Judges an entry `actor`'s connection pushed, through `via`: what it
+    /// logged, kept or refused, with what that changed, for every node; or
+    /// nothing, for a repeat or an entry no node pends.
+    fn push(&mut self, actor: Actor, via: Option<Origin>, e: Entry<B>) -> Option<(Logged<B>, Changes)> {
         let id = e.id;
-        let answer = |verdict| Down::Verdict { id, verdict };
         if e.space != Space::Shared || e.seq.is_some() {
-            return (answer(Verdict::Refused(Refusal::NOT_PUSHABLE)), None);
+            self.refused.insert(id, Refusal::NOT_PUSHABLE);
+            return None;
         }
-        let last = self.last.get(&id.origin).copied().unwrap_or(0);
-        if id.n <= last {
-            let verdict = match self.refused.get(&id) {
-                Some(&why) => Verdict::Refused(why),
-                None => Verdict::At(self.head()),
-            };
-            return (answer(verdict), None);
+        if id.n <= self.last.get(&id.origin).map_or(0, |l| l.0) {
+            return None;
         }
-        self.last.insert(id.origin, id.n);
-        match stamped(actor, e).and_then(|e| run(self.handlers, &self.store, &e, None).map(|(facts, ..)| (e, facts))) {
+        self.last.insert(id.origin, (id.n, via));
+        let seq = Seq(self.head().0 + 1);
+        let (e, facts) = match stamped(actor, e.clone()).and_then(|e| run(self.handlers, &self.store, &e, None).map(|(facts, ..)| (e, facts))) {
+            Ok(kept) => kept,
             Err(why) => {
                 self.refused.insert(id, why);
-                (answer(Verdict::Refused(why)), None)
-            }
-            Ok((e, facts)) => {
-                let changes = facts.0.iter().filter_map(|w| {
-                    let old = self.store.get(w.table, &w.key);
-                    let diff = Diff {
-                        key: w.key.clone(),
-                        old,
-                        new: w.value.clone(),
-                    };
-                    (diff.old != diff.new).then_some((w.table, diff))
-                });
-                let changes = Changes {
-                    reset: false,
-                    rows: changes.collect(),
+                let row = Refused {
+                    why,
+                    actor,
+                    via: via.unwrap_or(id.origin),
+                    seq,
                 };
-                self.store.apply(&facts);
-                let seq = Seq(self.head().0 + 1);
-                let logged = Logged {
-                    entry: Entry { seq: Some(seq), ..e },
-                    facts,
-                };
-                self.log.push(logged.clone());
-                (answer(Verdict::At(seq)), Some((logged, changes)))
+                let facts = crate::store::Writes(Vec::from([Write {
+                    table: REFUSALS,
+                    key: Refused::key(id).to_vec(),
+                    value: Some(to_vec(&row)),
+                }]));
+                (Entry { actor, ..e }, facts)
             }
-        }
+        };
+        let changes = facts.0.iter().filter_map(|w| {
+            let old = self.store.get(w.table, &w.key);
+            let diff = Diff {
+                key: w.key.clone(),
+                old,
+                new: w.value.clone(),
+            };
+            (diff.old != diff.new).then_some((w.table, diff))
+        });
+        let changes = Changes {
+            reset: false,
+            rows: changes.collect(),
+        };
+        self.store.apply(&facts);
+        let logged = Logged {
+            entry: Entry { seq: Some(seq), ..e },
+            facts,
+        };
+        self.log.push(logged.clone());
+        Some((logged, changes))
     }
 }
 
@@ -324,29 +376,17 @@ pub(crate) mod tests {
         n.set_actor(ME);
         let e = n.make(Space::Shared, Msg::Add { key: 1, by: 2 }, 10);
         let out = a.receive(Conn(1), Up::Push(e.clone()), 0);
-        let verdict = Down::Verdict {
-            id: e.id,
-            verdict: Verdict::At(Seq(1)),
-        };
+        // Its judgment is its place in the log, which goes to everyone.
         let logged = Down::Logged(a.log()[0].clone());
-        assert_eq!(to(1, &out), [verdict, logged.clone()]);
+        assert_eq!(to(1, &out), core::slice::from_ref(&logged));
         assert_eq!(to(2, &out), [logged]);
         assert_eq!(a.log()[0].entry.seq, Some(Seq(1)));
         assert_eq!(count(a.store(), 1), 2);
-        // Pushed again, it is answered where its origin stands, not run.
+        // Pushed again, it is not run, and not answered.
         let mut other = node(2);
         other.set_actor(Actor(6));
         a.receive(Conn(2), Up::Push(other.make(Space::Shared, Msg::Add { key: 1, by: 1 }, 10)), 0);
-        assert_eq!(
-            a.receive(Conn(1), Up::Push(e.clone()), 0),
-            [(
-                Conn(1),
-                Down::Verdict {
-                    id: e.id,
-                    verdict: Verdict::At(Seq(2))
-                }
-            )]
-        );
+        assert_eq!(a.receive(Conn(1), Up::Push(e.clone()), 0), []);
         assert_eq!(count(a.store(), 1), 3);
         // A hello is answered with the log after its cursor, then the
         // welcome: the time it said, and the authority's.
@@ -362,37 +402,62 @@ pub(crate) mod tests {
         assert_eq!(a.receive(Conn(3), Up::Hello { cursor: Seq(0), time: 0 }, 0), []);
     }
 
+    /// A refusal is logged, its one fact its row, which goes only to the
+    /// connection of its origin (or of the node it came through), with the
+    /// log and in a fill, until that node says hello past it.
     #[cfg_attr(test, test)]
-    fn a_refusal_is_journaled_and_holds_nothing_back() {
+    fn a_refusal_is_a_row_of_its_owners() {
         let mut a = authority();
-        a.open(Conn(1), Actor::NONE, None);
+        a.open(Conn(1), Actor::NONE, Some(Origin(1)));
+        a.open(Conn(2), ME, Some(Origin(2)));
         a.receive(Conn(1), Up::Hello { cursor: Seq(0), time: 0 }, 0);
+        a.receive(Conn(2), Up::Hello { cursor: Seq(0), time: 0 }, 0);
         let mut n = node(1);
         let take = n.make(Space::Shared, Msg::Take { key: 1 }, 10);
         let add = n.make(Space::Shared, Msg::Add { key: 1, by: 1 }, 10);
-        let refused = (
-            Conn(1),
-            Down::Verdict {
-                id: take.id,
-                verdict: Verdict::Refused(NONE_LEFT),
-            },
-        );
-        assert_eq!(a.receive(Conn(1), Up::Push(take.clone()), 0), core::slice::from_ref(&refused));
+        let out = a.receive(Conn(1), Up::Push(take.clone()), 0);
+        let row = crate::store::Write {
+            table: REFUSALS,
+            key: Refused::key(take.id).to_vec(),
+            value: Some(to_vec(&Refused {
+                why: NONE_LEFT,
+                actor: Actor::NONE,
+                via: Origin(1),
+                seq: Seq(1),
+            })),
+        };
+        let Down::Logged(mine) = &to(1, &out)[0] else { panic!("{out:?}") };
+        assert_eq!((mine.entry.id, mine.facts.0.as_slice()), (take.id, core::slice::from_ref(&row)));
+        // Another node is told it is judged, not why.
+        let Down::Logged(theirs) = &to(2, &out)[0] else { panic!("{out:?}") };
+        assert_eq!((theirs.entry.id, theirs.facts.0.len()), (take.id, 0));
+        // It holds nothing back, and a repeat is not answered.
         assert_eq!(a.receive(Conn(1), Up::Push(add), 0).len(), 2);
-        // The refusal is said again to a repeat.
-        assert_eq!(a.receive(Conn(1), Up::Push(take), 0), [refused]);
+        assert_eq!(a.receive(Conn(1), Up::Push(take.clone()), 0), []);
+        assert_eq!(a.refused().get(&take.id), Some(&NONE_LEFT));
+        // Behind the log's start, its node is filled with the row, and
+        // told its count judged; another node is not sent the row.
+        a.trim(Seq(2));
+        let fill = a.receive(Conn(1), Up::Hello { cursor: Seq(0), time: 0 }, 0);
+        let rows: Vec<_> = fill
+            .iter()
+            .filter_map(|(_, d)| if let Down::Rows { rows, .. } = d { Some(rows.0.clone()) } else { None })
+            .flatten()
+            .collect();
+        assert!(rows.contains(&row), "{fill:?}");
+        assert!(fill
+            .iter()
+            .any(|(_, d)| matches!(d, Down::Rows { end: End::Fill { judged, .. }, .. } if judged == &[(Origin(1), 2)])));
+        let fill = a.receive(Conn(2), Up::Hello { cursor: Seq(0), time: 0 }, 0);
+        assert!(!alloc::format!("{fill:?}").contains("TableId(4294967294)"), "{fill:?}");
+        // Its node said hello past it: let go.
+        a.receive(Conn(1), Up::Hello { cursor: Seq(2), time: 0 }, 0);
+        assert_eq!(a.store().len(REFUSALS), 0);
+        // An entry no node pends is journaled, not logged.
         let local = n.make(Space::Local, Msg::Seen, 10);
-        assert_eq!(
-            a.receive(Conn(1), Up::Push(local.clone()), 0),
-            [(
-                Conn(1),
-                Down::Verdict {
-                    id: local.id,
-                    verdict: Verdict::Refused(Refusal::NOT_PUSHABLE)
-                }
-            )]
-        );
-        assert_eq!(a.head(), Seq(1));
+        assert_eq!(a.receive(Conn(1), Up::Push(local.clone()), 0), []);
+        assert_eq!(a.refused().get(&local.id), Some(&Refusal::NOT_PUSHABLE));
+        assert_eq!(a.head(), Seq(2));
     }
 
     /// An entry that names no one is the connection's; one that names
@@ -408,20 +473,13 @@ pub(crate) mod tests {
         assert_eq!(a.log()[0].entry.actor, ME);
         n.set_actor(Actor(6));
         let forged = n.make(Space::Shared, Msg::Add { key: 1, by: 1 }, 10);
-        assert_eq!(
-            a.receive(Conn(1), Up::Push(forged.clone()), 0),
-            [(
-                Conn(1),
-                Down::Verdict {
-                    id: forged.id,
-                    verdict: Verdict::Refused(Refusal::NOT_YOURS)
-                }
-            )]
-        );
+        a.receive(Conn(1), Up::Push(forged.clone()), 0);
         assert_eq!(a.refused().get(&forged.id), Some(&Refusal::NOT_YOURS));
+        // Logged refused, as its connection's.
+        assert_eq!((a.log()[1].entry.id, a.log()[1].entry.actor), (forged.id, ME));
         let live = n.make(Space::Session, Msg::Set { key: 1, value: 1 }, 10);
         assert_eq!(a.receive(Conn(1), Up::Live(live), 0), []);
-        assert_eq!(a.head(), Seq(1));
+        assert_eq!(a.head(), Seq(2));
     }
 
     /// A session entry goes to its actor's connections, back to its own
@@ -511,7 +569,11 @@ pub(crate) mod tests {
         assert!(matches!(
             &fill[2],
             Down::Rows {
-                end: End::Fill { seq: Seq(5), whole: true },
+                end: End::Fill {
+                    seq: Seq(5),
+                    whole: true,
+                    ..
+                },
                 ..
             }
         ));
@@ -718,7 +780,9 @@ pub(crate) mod tests {
                 self.seen_live.put(POSITIONS, k, v);
                 true
             });
-            let changes = shared.unwrap_or_else(|| self.node.take_changes(Space::Shared));
+            let mut changes = shared.unwrap_or_else(|| self.node.take_changes(Space::Shared));
+            // A phone keeps its watch's refusal rows: no query reads them.
+            changes.rows.retain(|(t, _)| *t != REFUSALS);
             let view = self.node.view(Space::Shared);
             if !changes.reset {
                 assert_eq!(
@@ -770,6 +834,9 @@ pub(crate) mod tests {
         /// Notes a device held as a count's children, by `related` or a
         /// join.
         children: u32,
+        /// Refusals a device learned from a fill: its connection dropped
+        /// before the log brought them.
+        filled_refusals: u32,
     }
 
     /// The phone, which serves the watch through its relay.
@@ -981,6 +1048,7 @@ pub(crate) mod tests {
                     }
                     let pending: BTreeSet<EntryId> = dev.node.pending().iter().map(|p| p.entry.id).collect();
                     let skipped = dev.node.skipped;
+                    let fill = matches!(down, Down::Rows { end: End::Fill { .. }, .. });
                     let mut said = Vec::new();
                     if d == PHONE {
                         if matches!(down, Down::Rows { end: End::Fill { .. }, .. }) {
@@ -1005,8 +1073,9 @@ pub(crate) mod tests {
                             }
                         }
                     }
-                    let refused = dev.node.take_refused().into_iter();
-                    dev.refused.extend(refused.filter(|r| r.1 != Refusal::OFFLINE).map(|(id, _)| id));
+                    let refused: Vec<_> = dev.node.take_refused().into_iter().filter(|r| r.1 != Refusal::OFFLINE).collect();
+                    seen.filled_refusals += u32::from(fill && !refused.is_empty());
+                    dev.refused.extend(refused.into_iter().map(|(id, _)| id));
                 }
                 // Session values, a few at once as a position streams: each
                 // device sets its own keys, or, as a control, another of its
@@ -1136,6 +1205,30 @@ pub(crate) mod tests {
             }
         }
 
+        // Each says hello once more, at the head: every refusal's row is
+        // let go, by the server and by the phone, its node having seen it.
+        for d in 0..4 {
+            let dev = &mut devices[d];
+            dev.online = false;
+            dev.node.disconnect();
+            if d == WATCH {
+                relay.close(Conn(d as u32), clock.get());
+            } else {
+                server.close(Conn(d as u32), clock.get());
+            }
+            connect(&mut rng, &mut server, &mut relay, &mut devices, d, clock.get());
+            while devices.iter().any(|dev| !dev.up.is_empty() || !dev.down.is_empty()) {
+                step(&mut rng, &mut server, &mut relay, &mut devices, &mut log, seen, true);
+            }
+        }
+        assert_eq!(server.store().len(REFUSALS), 0, "seed {seed}: the server's refusal rows let go");
+        for (d, dev) in devices.iter().enumerate() {
+            assert_eq!(
+                dev.node.store(Space::Shared).unwrap().len(REFUSALS),
+                0,
+                "seed {seed}: device {d}'s refusal rows"
+            );
+        }
         let logged: Vec<EntryId> = log.values().map(|l| l.entry.id).collect();
         let once: BTreeSet<EntryId> = logged.iter().copied().collect();
         assert_eq!(once.len(), logged.len(), "an entry logged twice");
@@ -1170,10 +1263,7 @@ pub(crate) mod tests {
             assert_eq!(dev.node.pending(), [], "seed {seed}");
             assert_eq!(dev.node.cursor(), server.head(), "seed {seed}: device {d}'s cursor");
             for id in &dev.made {
-                assert!(
-                    once.contains(id) != server.refused().contains_key(id),
-                    "seed {seed}: {id:?} logged or refused"
-                );
+                assert!(once.contains(id), "seed {seed}: {id:?} judged in the log");
             }
             let theirs: BTreeSet<EntryId> = server.refused().keys().filter(|id| dev.made.contains(id)).copied().collect();
             assert_eq!(dev.refused, theirs, "seed {seed}: told of every refusal; made {:?}", dev.made);
@@ -1225,17 +1315,22 @@ pub(crate) mod tests {
         // Deeper at build time: `ARK_SEEDS=3000 ARK_STEPS=400 cargo test`.
         let depth = |name: Option<&str>, or: u64| name.and_then(|n| n.parse().ok()).unwrap_or(or);
         let steps = depth(option_env!("ARK_STEPS"), 160) as usize;
+        // One seed alone, to look at: `ARK_SEED=1059`.
+        if let Some(seed) = option_env!("ARK_SEED").and_then(|s| s.parse().ok()) {
+            return converge(seed, steps, &mut seen);
+        }
         for seed in 0..depth(option_env!("ARK_SEEDS"), 60) {
             converge(seed, steps, &mut seen);
         }
         assert!(seen.skipped > 0 && seen.fills > 0 && seen.forged > 0 && seen.held > 0 && seen.deltas > 0);
         assert!(seen.relayed > 0 && seen.queued > 0 && seen.refills > 0);
         assert!(seen.controls > 0 && seen.offline > 0 && seen.read > 0 && seen.children > 0);
+        assert!(seen.filled_refusals > 0);
     }
 
     crate::listed!(
         a_push_is_judged_once,
-        a_refusal_is_journaled_and_holds_nothing_back,
+        a_refusal_is_a_row_of_its_owners,
         the_actor_is_the_connections,
         session_entries_go_to_the_owners_other_connections,
         a_hello_is_told_the_latest_session_rows,

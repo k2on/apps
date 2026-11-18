@@ -19,15 +19,14 @@
 //! - **Pending entries.** A watch's push keeps its origin: the relay holds
 //!   it and passes it upstream, now and at each of the phone's
 //!   connections, until the upstream judges it. The phone never runs it
-//!   and never judges it: the upstream's verdict goes down to the watch's
-//!   connection that pushed it, and its confirmation with the log, so
-//!   "confirmed" still means the server's. A verdict covers the entries of
-//!   its origin pushed before it, so it must not reach a watch before
-//!   theirs: the relay keeps the upstream's refusals of its watch's
-//!   entries and, per origin, the last entry an `At` answered, and answers
-//!   a push again from them at once; any other awaits the upstream's
-//!   verdict, which, the upstream's link being ordered and the held pushes
-//!   sent again oldest first, comes after those before it.
+//!   and never judges it: its judgment is the log's, kept or refused, which
+//!   goes down to the watch with the phone's log as every entry does, so
+//!   "confirmed" still means the server's. A refusal's row the upstream
+//!   sends the phone for its watch (the node it came through) the phone
+//!   keeps, in its view, for the watch's fills, until the watch says hello
+//!   past it ([`Node::forget`]); and the last count judged of the watch's
+//!   origin, which it fills the watch with ([`Node::judged`]). A push
+//!   judged already is not passed on.
 //! - **Session entries** pass between every side, as the phone's node
 //!   takes them ([`Node`]'s rules: a row it owns takes only a newer entry,
 //!   any other is its upstream's): a watch's, which the phone takes (its
@@ -45,15 +44,15 @@
 //! the shared view's changes come back with them, as the relay has taken
 //! them from the node for its downstream, for the phone's own queries.
 
-use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
 
-use crate::entry::{Entry, EntryId, Origin, Seq, Space};
-use crate::node::{Body, Link, Node, Refusal};
+use crate::entry::{Entry, Seq, Space};
+use crate::node::{Body, Link, Node};
 use crate::plan::Changes;
 use crate::serve::{stamped, Conn, Out, Serve};
 use crate::store::Store;
-use crate::sync::{Down, Logged, Up, Verdict};
+use crate::store::Writes;
+use crate::sync::{Down, End, Logged, Up, REFUSALS};
 
 /// What a call answers: the frames for downstream connections, and what
 /// it changed in the node's shared view, for the host's own queries.
@@ -68,13 +67,6 @@ pub struct Relay<B> {
     serve: Serve<B>,
     /// Downstream pushes not yet judged upstream, oldest first.
     forwarded: Vec<Entry<B>>,
-    /// Downstream pushes awaiting the upstream's verdict, by the
-    /// connection that pushed each.
-    awaiting: Vec<(Conn, EntryId)>,
-    /// The upstream's refusals of downstream entries, and per origin the
-    /// last entry an `At` answered, with that answer's `seq`.
-    refused: BTreeMap<EntryId, Refusal>,
-    judged: BTreeMap<Origin, (Seq, u64)>,
 }
 
 impl<B: Body + Clone + 'static> Default for Relay<B> {
@@ -82,9 +74,6 @@ impl<B: Body + Clone + 'static> Default for Relay<B> {
         Relay {
             serve: Serve::new(false),
             forwarded: Vec::new(),
-            awaiting: Vec::new(),
-            refused: BTreeMap::new(),
-            judged: BTreeMap::new(),
         }
     }
 }
@@ -97,11 +86,9 @@ impl<B: Body + Clone + 'static> Relay<B> {
         &mut self.serve
     }
 
-    /// A downstream connection closed at `now` ([`Serve::close`]): what
-    /// awaited a verdict for it is let go.
+    /// A downstream connection closed at `now` ([`Serve::close`]).
     pub fn close(&mut self, conn: Conn, now: u64) {
         self.serve.close(conn, now);
-        self.awaiting.retain(|a| a.0 != conn);
     }
 
     /// The downstream pushes it holds, oldest first.
@@ -136,32 +123,6 @@ impl<B: Body + Clone + 'static> Relay<B> {
         let mut out = Vec::new();
         let mut logged = None;
         match down {
-            // The upstream judged a downstream push: it goes to the
-            // connections awaiting it, and it and those before it of its
-            // origin, whose verdicts came before it, are held no longer.
-            Down::Verdict { id, verdict } if id.origin != node.origin() => {
-                match verdict {
-                    Verdict::Refused(why) => {
-                        self.refused.insert(id, why);
-                    }
-                    Verdict::At(seq) => {
-                        let judged = self.judged.entry(id.origin).or_insert((seq, id.n));
-                        *judged = (seq.max(judged.0), id.n.max(judged.1));
-                    }
-                }
-                self.forwarded.retain(|e| e.id.origin != id.origin || e.id.n > id.n);
-                let serve = &self.serve;
-                self.awaiting.retain(|&(c, a)| {
-                    if a == id && serve.actor(c).is_some() {
-                        out.push((c, Down::Verdict { id, verdict }));
-                    }
-                    a != id
-                });
-                return Served {
-                    out,
-                    changes: Changes::default(),
-                };
-            }
             Down::Live(e) => {
                 let mut said = Vec::new();
                 if node.take_live(e.clone(), true, &mut said) {
@@ -171,12 +132,27 @@ impl<B: Body + Clone + 'static> Relay<B> {
             }
             down => {
                 let welcome = matches!(down, Down::Welcome { .. });
-                if let Down::Logged(l) = &down {
-                    logged = Some(Logged {
-                        entry: l.entry.clone(),
-                        facts: Default::default(),
-                    });
+                // What the upstream judged of the downstream's pushes is
+                // held no longer: an entry of the log, and what it judged
+                // before it of that origin; a fill's counts.
+                let mut judged = Vec::new();
+                match &down {
+                    Down::Logged(l) => {
+                        judged.push((l.entry.id.origin, l.entry.id.n));
+                        // Down with it, its refusal's row, if one.
+                        let refusal = l.facts.0.iter().filter(|w| w.table == REFUSALS).cloned();
+                        logged = Some(Logged {
+                            entry: l.entry.clone(),
+                            facts: Writes(refusal.collect()),
+                        });
+                    }
+                    Down::Rows {
+                        end: End::Fill { judged: j, .. },
+                        ..
+                    } => judged.clone_from(j),
+                    _ => {}
                 }
+                self.forwarded.retain(|e| !judged.iter().any(|&(o, n)| e.id.origin == o && e.id.n <= n));
                 let mut said = Vec::new();
                 node.receive(down, &mut said, now);
                 // The rows the node let go at its hello's end go here too.
@@ -201,16 +177,20 @@ impl<B: Body + Clone + 'static> Relay<B> {
             changes: Changes::default(),
         };
         let Some(actor) = self.serve.actor(conn) else { return served };
-        // The phone answers for the rows its downstream node owns.
-        if let (Up::Hello { .. }, Some(client)) = (&up, self.serve.client(conn)) {
+        // The phone answers for the rows its downstream node owns, and
+        // lets go of the refusal rows it has applied.
+        let client = self.serve.client(conn);
+        if let (Up::Hello { cursor, .. }, Some(client)) = (&up, client) {
             node.answer_for(client);
+            node.forget(client, *cursor);
         }
         let head = node.cursor();
         let view = node.view(Space::Shared);
         let to = |frames: Vec<Down<B>>| frames.into_iter().map(|d| (conn, d)).collect();
         match up {
             Up::Hello { cursor, time } => {
-                served.out = to(self.serve.hello(conn, cursor, &view, head, now).1);
+                let judged = client.map(|c| Vec::from([(c, node.judged(c))])).unwrap_or_default();
+                served.out = to(self.serve.hello(conn, cursor, &view, head, now, judged).1);
                 served.out.push((
                     conn,
                     Down::Welcome {
@@ -223,18 +203,11 @@ impl<B: Body + Clone + 'static> Relay<B> {
             Up::Unsubscribe { query, args } => served.out = to(self.serve.unsubscribe(conn, query, args, head, now)),
             Up::Rate { table, every } => self.serve.rate(conn, table, every),
             Up::Push(e) => {
-                let id = e.id;
-                let answer = |verdict| Vec::from([(conn, Down::Verdict { id, verdict })]);
-                if let Some(&why) = self.refused.get(&id) {
-                    served.out = answer(Verdict::Refused(why));
-                } else if let Some(&(seq, _)) = self.judged.get(&id.origin).filter(|j| id.n <= j.1) {
-                    served.out = answer(Verdict::At(seq));
-                } else {
-                    if !self.forwarded.iter().any(|f| f.id == id) {
+                // One judged already comes down with the log, or the next
+                // hello's fill.
+                if e.id.n > node.judged(e.id.origin) {
+                    if !self.forwarded.iter().any(|f| f.id == e.id) {
                         self.forwarded.push(e.clone());
-                    }
-                    if !self.awaiting.contains(&(conn, id)) {
-                        self.awaiting.push((conn, id));
                     }
                     link.send(Up::Push(e));
                 }
@@ -297,7 +270,9 @@ impl<B: Body + Clone + 'static> Relay<B> {
         let head = node.cursor();
         let view = node.view(Space::Shared);
         let out = if changes.reset {
-            self.serve.refill(&view, &changes, before, head)
+            self.serve.refill(&view, &changes, before, head, &|c| {
+                c.map(|c| Vec::from([(c, node.judged(c))])).unwrap_or_default()
+            })
         } else if logged.is_some() || !changes.rows.is_empty() {
             self.serve.feed(&view, &changes, logged, head)
         } else {
@@ -323,7 +298,8 @@ pub(crate) mod tests {
     /// write is in the watch's rows at once; the watch's write, made while
     /// the phone is offline, waits at the phone, keeps its origin, and is
     /// confirmed only when the server logs it, which reaches the watch
-    /// with the log; a refusal reaches it as the server's verdict.
+    /// with the log; a refusal reaches it as a row, with the log, and with
+    /// its fill when it was away.
     #[cfg_attr(test, test)]
     fn a_phone_serves_its_watch() {
         let mut server = Authority::new(&HANDLERS, Memory::new());
@@ -384,18 +360,48 @@ pub(crate) mod tests {
             let served = relay.down(&mut phone, down, &mut to_server, 30);
             deliver(served.out, &mut watch);
         }
-        assert_eq!(server.head(), Seq(2));
-        assert_eq!((watch.pending(), watch.cursor()), (&[][..], Seq(2)));
+        // The refusal is logged too, its row to the phone, which keeps it
+        // for the watch and passes it down with the log.
+        assert_eq!(server.head(), Seq(3));
+        assert_eq!((watch.pending(), watch.cursor()), (&[][..], Seq(3)));
         assert_eq!(watch.take_refused(), [(refused.id, NONE_LEFT)]);
         assert_eq!(count(watch.store(Space::Shared).unwrap(), 1), 1);
         assert_eq!((relay.forwarded(), phone.pending()), (&[][..], &[][..]));
-        // Pushed again, the watch's entries are answered by the phone from
-        // what the server said: no frame goes up.
-        for e in [take, refused] {
+        assert_eq!(phone.judged(Origin(2)), refused.id.n);
+        assert_eq!(phone.store(Space::Shared).unwrap().len(crate::sync::REFUSALS), 1);
+        // Pushed again, the watch's entries are judged already: nothing
+        // goes up, nothing is answered.
+        for e in [take, refused.clone()] {
             let served = relay.up(&mut phone, Conn(9), Up::Push(e), &mut to_server, 40);
-            assert!(matches!(served.out[..], [(_, Down::Verdict { .. })]));
+            assert_eq!(served.out.len(), 0);
         }
         assert_eq!(to_server, []);
+        // The watch connects again behind its refusal: its fill carries the
+        // row and its count judged. Past it, the phone lets the row go.
+        let mut again = node(2);
+        again.set_actor(ME);
+        again.subscribe(QueryId(1), vec![], &mut Vec::new());
+        again.resume(
+            Seq(0),
+            vec![crate::sync::Pending {
+                entry: refused.clone(),
+                writes: Default::default(),
+            }],
+        );
+        let mut up = Vec::new();
+        again.connect(&mut up, 0);
+        relay.close(Conn(9), 50);
+        relay.serve().open(Conn(9), ME, Some(Origin(2)));
+        for u in core::mem::take(&mut up) {
+            let served = relay.up(&mut phone, Conn(9), u, &mut to_server, 50);
+            deliver(served.out, &mut again);
+        }
+        assert_eq!((again.take_refused(), again.pending().len()), (vec![(refused.id, NONE_LEFT)], 0));
+        again.connect(&mut up, 0);
+        for u in core::mem::take(&mut up) {
+            relay.up(&mut phone, Conn(9), u, &mut to_server, 60);
+        }
+        assert_eq!(phone.store(Space::Shared).unwrap().len(crate::sync::REFUSALS), 0);
     }
 
     /// The session through a phone: the watch's clock composes the

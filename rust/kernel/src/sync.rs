@@ -4,21 +4,33 @@
 //! ```text
 //! Up     Hello { cursor, time } | Push(Entry) | Live(Entry) | Rate { table, every }
 //!        | Subscribe { query, args } | Unsubscribe { query, args }
-//! Down   Logged { entry, facts } | Verdict { id, verdict } | Live(Entry)
+//! Down   Logged { entry, facts } | Live(Entry)
 //!        | Rows { rows, end } | Welcome { sent, time }
-//! End    More | Moved | Fill { seq, whole } | Got { query, args }
-//! Verdict  At(seq) | Refused(code)
-//! Pending  { entry, writes, judged }
+//! End    More | Moved | Fill { seq, whole, judged } | Got { query, args }
+//! Pending  { entry, writes }
 //! ```
 //!
 //! A node says `Hello` with the last `seq` it has applied, then pushes its
 //! pending entries, oldest first, each as it is made and all of them again
 //! at every connection. The upstream answers the hello with the log after
-//! that cursor, an entry and its facts at a time, and each push with a
-//! verdict: refused, or `At(seq)`, its log's head when it answered: the
-//! entry, and every entry of its origin pushed before it, is in the log at
-//! or below `seq`, or was refused (whose verdict came first). So a push
-//! that arrives twice is judged once.
+//! that cursor, an entry and its facts at a time. A push is not answered:
+//! **its judgment is the log's.** Every entry judged is logged at its
+//! `seq`, kept or refused, so each origin's entries come down in the order
+//! of their count and a node lets go of each as it comes: its count, the
+//! origin's **last judged**, is carried by every entry of the log, and by
+//! a fill, which says it for each origin of the node's (`judged`). A push
+//! that arrives twice is judged once, and a repeat is not answered.
+//!
+//! **Refusals are rows.** A refused entry is logged with one fact: a row
+//! of [`REFUSALS`], keyed by the entry's id, saying why ([`Refused`]). It
+//! goes only to the connection of the entry's origin, or of the node it
+//! came through ([`Refused::via`]: a phone, for its watch), with the log
+//! entry or in a fill, as every row does, so a dropped connection cannot
+//! lose it: what a node missed comes with its next hello. A node takes its
+//! own refusal rows as it applies them, journaling those of its pending
+//! entries, and never keeps them; a node serving others keeps theirs. An
+//! upstream lets go of a refusal row once its owner (or the node it came
+//! through) says hello at or past its `seq`: it has applied it.
 //!
 //! **Rows.** Every change that is rows and not a logged entry's facts (a
 //! fill, a subscription's rows, rows that moved) is one frame, `Rows`, cut
@@ -75,7 +87,7 @@
 use alloc::vec::Vec;
 
 use crate::codec::{Decode, Encode, Error, Reader};
-use crate::entry::{Entry, EntryId, Seq};
+use crate::entry::{Entry, EntryId, Origin, Seq};
 #[cfg(feature = "upstream")]
 use crate::node::Body;
 use crate::node::Refusal;
@@ -101,13 +113,59 @@ pub struct Logged<B> {
     pub facts: Writes,
 }
 
-/// The authority's answer to one pushed entry.
+/// The table of refusals: a row per refused entry, keyed by its id
+/// ([`Refused::key`]), until its owner has seen it.
+pub const REFUSALS: TableId = TableId(u32::MAX - 1);
+
+/// A refused entry's row ([`REFUSALS`]): why, whose, through which node,
+/// and the `seq` its refusal was logged at.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Verdict {
-    /// It and its origin's entries before it are judged, those not
-    /// refused in the log at or below this `seq`.
-    At(Seq),
-    Refused(Refusal),
+pub struct Refused {
+    pub why: Refusal,
+    /// The actor whose connection pushed it.
+    pub actor: crate::entry::Actor,
+    /// The node it was pushed through: its origin's, or a relay's.
+    pub via: crate::entry::Origin,
+    pub seq: Seq,
+}
+
+impl Refused {
+    /// The row's key: the entry's origin and count, big-endian.
+    pub fn key(id: EntryId) -> [u8; 16] {
+        let mut k = [0; 16];
+        k[..8].copy_from_slice(&id.origin.0.to_be_bytes());
+        k[8..].copy_from_slice(&id.n.to_be_bytes());
+        k
+    }
+
+    /// The entry a row's key names.
+    pub fn id(key: &[u8]) -> Option<EntryId> {
+        let (o, n) = (key.get(..8)?, key.get(8..16)?);
+        Some(EntryId {
+            origin: crate::entry::Origin(u64::from_be_bytes(o.try_into().ok()?)),
+            n: u64::from_be_bytes(n.try_into().ok()?),
+        })
+    }
+}
+
+impl Encode for Refused {
+    fn encode(&self, out: &mut Vec<u8>) {
+        self.why.encode(out);
+        self.actor.0.encode(out);
+        self.via.0.encode(out);
+        self.seq.encode(out);
+    }
+}
+
+impl Decode for Refused {
+    fn decode(r: &mut Reader<'_>) -> Result<Self, Error> {
+        Ok(Refused {
+            why: Refusal::decode(r)?,
+            actor: crate::entry::Actor(u64::decode(r)?),
+            via: crate::entry::Origin(u64::decode(r)?),
+            seq: Seq::decode(r)?,
+        })
+    }
 }
 
 /// An entry this node made in the shared space and the server has not
@@ -119,9 +177,6 @@ pub struct Pending<B> {
     /// What its last run here wrote over the confirmed rows and the
     /// pending entries before it; none if that run refused.
     pub writes: Writes,
-    /// Judged by the authority at or below this `seq`, by an `At` verdict:
-    /// it is let go once this node has applied the log that far.
-    pub judged: Option<Seq>,
 }
 
 /// From a node to its upstream.
@@ -157,10 +212,9 @@ pub enum Up<B> {
 /// From an upstream to a node.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Down<B> {
-    /// The next entry of the master log.
+    /// The next entry of the master log: kept, with its facts, or refused,
+    /// with its refusal's row.
     Logged(Logged<B>),
-    /// The answer to a push.
-    Verdict { id: EntryId, verdict: Verdict },
     /// A session entry from another of the user's nodes.
     Live(Entry<B>),
     /// Rows, held by the node until `end` says what they were: one
@@ -184,8 +238,10 @@ pub enum End {
     Moved,
     /// The confirmed rows at `seq`, in place of the log up to it: the
     /// node's cursor was below what its upstream keeps. When `whole`, they
-    /// replace every row the node holds.
-    Fill { seq: Seq, whole: bool },
+    /// replace every row the node holds. With them, the last count judged
+    /// of each origin the node pushes for: its entries up to it are in
+    /// these rows, or refused (their rows among them).
+    Fill { seq: Seq, whole: bool, judged: Vec<(Origin, u64)> },
     /// A subscription's rows, all sent.
     Got { query: QueryId, args: Vec<u8> },
 }
@@ -297,36 +353,10 @@ impl<B: Decode> Decode for Logged<B> {
     }
 }
 
-impl Encode for Verdict {
-    fn encode(&self, out: &mut Vec<u8>) {
-        match self {
-            Verdict::At(seq) => {
-                0u32.encode(out);
-                seq.encode(out);
-            }
-            Verdict::Refused(why) => {
-                1u32.encode(out);
-                why.encode(out);
-            }
-        }
-    }
-}
-
-impl Decode for Verdict {
-    fn decode(r: &mut Reader<'_>) -> Result<Self, Error> {
-        match u32::decode(r)? {
-            0 => Ok(Verdict::At(Seq::decode(r)?)),
-            1 => Ok(Verdict::Refused(Refusal::decode(r)?)),
-            _ => Err(Error::Tag),
-        }
-    }
-}
-
 impl<B: Encode> Encode for Pending<B> {
     fn encode(&self, out: &mut Vec<u8>) {
         self.entry.encode(out);
         self.writes.encode(out);
-        self.judged.encode(out);
     }
 }
 
@@ -335,7 +365,6 @@ impl<B: Decode> Decode for Pending<B> {
         Ok(Pending {
             entry: Entry::decode(r)?,
             writes: Writes::decode(r)?,
-            judged: Option::decode(r)?,
         })
     }
 }
@@ -408,25 +437,25 @@ impl<B: Encode> Encode for Down<B> {
                 0u32.encode(out);
                 l.encode(out);
             }
-            Down::Verdict { id, verdict } => {
-                1u32.encode(out);
-                id.encode(out);
-                verdict.encode(out);
-            }
             Down::Live(e) => {
-                2u32.encode(out);
+                1u32.encode(out);
                 e.encode(out);
             }
             Down::Rows { rows, end } => {
-                3u32.encode(out);
+                2u32.encode(out);
                 rows.encode(out);
                 match end {
                     End::More => 0u32.encode(out),
                     End::Moved => 1u32.encode(out),
-                    End::Fill { seq, whole } => {
+                    End::Fill { seq, whole, judged } => {
                         2u32.encode(out);
                         seq.encode(out);
                         whole.encode(out);
+                        crate::codec::put_varint(out, judged.len() as u64);
+                        for (o, n) in judged {
+                            o.0.encode(out);
+                            n.encode(out);
+                        }
                     }
                     End::Got { query, args } => {
                         3u32.encode(out);
@@ -436,7 +465,7 @@ impl<B: Encode> Encode for Down<B> {
                 }
             }
             Down::Welcome { sent, time } => {
-                4u32.encode(out);
+                3u32.encode(out);
                 sent.encode(out);
                 time.encode(out);
             }
@@ -448,12 +477,8 @@ impl<B: Decode> Decode for Down<B> {
     fn decode(r: &mut Reader<'_>) -> Result<Self, Error> {
         match u32::decode(r)? {
             0 => Ok(Down::Logged(Logged::decode(r)?)),
-            1 => Ok(Down::Verdict {
-                id: EntryId::decode(r)?,
-                verdict: Verdict::decode(r)?,
-            }),
-            2 => Ok(Down::Live(Entry::decode(r)?)),
-            3 => Ok(Down::Rows {
+            1 => Ok(Down::Live(Entry::decode(r)?)),
+            2 => Ok(Down::Rows {
                 rows: Writes::decode(r)?,
                 end: match u32::decode(r)? {
                     0 => End::More,
@@ -461,6 +486,14 @@ impl<B: Decode> Decode for Down<B> {
                     2 => End::Fill {
                         seq: Seq::decode(r)?,
                         whole: bool::decode(r)?,
+                        judged: {
+                            let n = r.count()?;
+                            let mut judged = Vec::new();
+                            for _ in 0..n {
+                                judged.push((Origin(u64::decode(r)?), u64::decode(r)?));
+                            }
+                            judged
+                        },
                     },
                     3 => End::Got {
                         query: QueryId(u32::decode(r)?),
@@ -469,7 +502,7 @@ impl<B: Decode> Decode for Down<B> {
                     _ => return Err(Error::Tag),
                 },
             }),
-            4 => Ok(Down::Welcome {
+            3 => Ok(Down::Welcome {
                 sent: u64::decode(r)?,
                 time: u64::decode(r)?,
             }),
@@ -541,14 +574,6 @@ pub(crate) mod tests {
                 entry: entry(1, Some(Seq(5))),
                 facts: facts.clone(),
             }),
-            Down::Verdict {
-                id: entry(1, None).id,
-                verdict: Verdict::At(Seq(5)),
-            },
-            Down::Verdict {
-                id: entry(2, None).id,
-                verdict: Verdict::Refused(Refusal(300)),
-            },
             Down::Live(entry(3, None)),
             Down::Rows {
                 rows: facts.clone(),
@@ -560,7 +585,11 @@ pub(crate) mod tests {
             },
             Down::Rows {
                 rows: Writes::default(),
-                end: End::Fill { seq: Seq(9), whole: true },
+                end: End::Fill {
+                    seq: Seq(9),
+                    whole: true,
+                    judged: vec![(Origin(9), 4), (Origin(12), 1)],
+                },
             },
             Down::Rows {
                 rows: facts.clone(),
@@ -580,10 +609,18 @@ pub(crate) mod tests {
         let p = Pending {
             entry: entry(4, None),
             writes: facts,
-            judged: Some(Seq(2)),
         };
         assert_eq!(from_slice::<Pending<Vec<u8>>>(&to_vec(&p)), Ok(p));
-        assert_eq!(from_slice::<Verdict>(&[2]), Err(Error::Tag));
+        let r = Refused {
+            why: Refusal(300),
+            actor: Actor(2),
+            via: Origin(7),
+            seq: Seq(3),
+        };
+        assert_eq!(from_slice::<Refused>(&to_vec(&r)), Ok(r));
+        let id = entry(4, None).id;
+        assert_eq!(Refused::id(&Refused::key(id)), Some(id));
+        assert_eq!(from_slice::<Down<Vec<u8>>>(&[4]), Err(Error::Tag));
     }
 
     #[cfg(feature = "upstream")]

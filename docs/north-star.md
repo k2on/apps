@@ -198,7 +198,7 @@ space, and returns what must travel. The host routes what comes out:
 |---|---|
 | `local` | feeds it back in |
 | `session` | steps it here and sends it, never logs it |
-| `shared` | keeps it as pending, sends it; it comes back with `seq`, or refused |
+| `shared` | keeps it as pending, sends it; it comes back in the log with `seq`, kept or refused |
 | a port | hands it to the driver; the answer returns as an entry with `cause` set |
 
 Every step, and everything received from upstream, ends in one
@@ -259,6 +259,15 @@ A client:
 - re-runs only its own pending entries on top, with its own version's code
   (the rebase);
 - drops a refused entry, and shows the refusal.
+
+A push is not answered on its own: its judgment is the log's. Every entry
+judged is logged, kept with its facts or refused with one, a row of a
+small refusals table that goes only to the node whose entry it was (or
+the node it came through, a phone for its watch), as Zero's mutation
+results do; a fill says each of the node's origins' last count judged,
+its rows the refusal rows still to be seen. So a dropped connection
+loses nothing: what a node missed comes with its next hello. A refusal's
+row is let go once its node says hello past it.
 
 A device with no server is a replica that isn't connected, nothing more:
 there is no separate offline mode. Pending entries are kept as records, so
@@ -630,8 +639,8 @@ never does, so it doesn't count against the kernel's budget. It is
 `ark-upstream`'s (today the kernel's `upstream` feature, which a watch's
 build never enables): `Serve` (the server's authority runs it) and a phone's
 `Relay`, which answers its watch from the phone's view, holds the watch's
-pushes until the server judges them, and passes the verdicts back to the
-connection that pushed each.
+pushes until the server judges them, and keeps the refusal rows the
+server sends it for the watch until the watch has seen them.
 
 On an Android phone, the app itself is the watch's upstream, talking to
 the watch through PebbleKit 2; iOS has no such path (see "Open

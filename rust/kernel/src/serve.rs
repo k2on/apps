@@ -59,7 +59,7 @@ use crate::entry::{Actor, Entry, Origin, Seq};
 use crate::node::{Body, Refusal};
 use crate::plan::{Changes, Live};
 use crate::store::{Read, TableId, Write, Writes};
-use crate::sync::{Down, End, Feed, Logged, Query, QueryId};
+use crate::sync::{Down, End, Feed, Logged, Query, QueryId, Refused, REFUSALS};
 
 /// A connection, by the host's number for it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -254,6 +254,45 @@ impl Record {
     }
 }
 
+impl<B> Peer<B> {
+    /// Whether it is sent `w`: any row but a refusal's, and a refusal's
+    /// only for the node whose entry it refused or the node that entry
+    /// came through (by the actor, for a connection whose client is not
+    /// known).
+    fn sees(&self, w: &Write) -> bool {
+        if w.table != REFUSALS {
+            return true;
+        }
+        let (Some(id), Some(r)) = (
+            Refused::id(&w.key),
+            w.value.as_deref().and_then(|v| crate::codec::from_slice::<Refused>(v).ok()),
+        ) else {
+            return false;
+        };
+        match self.client {
+            Some(c) => id.origin == c || r.via == c,
+            None => r.actor == self.actor,
+        }
+    }
+}
+
+/// The refusal rows of `db` that `peer` sees.
+fn refusals<B>(peer: &Peer<B>, db: &dyn Read) -> Vec<Write> {
+    let mut out = Vec::new();
+    db.scan(REFUSALS, crate::store::Range::all(), &mut |k, v| {
+        let w = Write {
+            table: REFUSALS,
+            key: k.to_vec(),
+            value: Some(v.to_vec()),
+        };
+        if peer.sees(&w) {
+            out.push(w);
+        }
+        true
+    });
+    out
+}
+
 /// What an upstream keeps of a connection.
 struct Peer<B> {
     actor: Actor,
@@ -368,6 +407,12 @@ impl<B: Body + Clone> Serve<B> {
         self.conns.get(&conn).map(|p| p.actor)
     }
 
+    /// Whether `conn` is sent `w` (a refusal's row only by its node's, or
+    /// the one it came through, connection).
+    pub fn sees(&self, conn: Conn, w: &Write) -> bool {
+        self.conns.get(&conn).is_some_and(|p| p.sees(w))
+    }
+
     /// The open connection of a client.
     pub fn conn(&self, client: Origin) -> Option<Conn> {
         self.conns.iter().find(|(_, p)| p.client == Some(client)).map(|(&c, _)| c)
@@ -435,10 +480,12 @@ impl<B: Body + Clone> Serve<B> {
     /// `conn` says hello at `cursor`, over `db`, the upstream's rows at
     /// `head`: whether it holds every row (and the upstream answers it
     /// from its log), and the frames that answer it besides: a fill of the
-    /// rows it holds and `Got` for each subscription it said, unless it
-    /// holds every row; then its actor's latest session entries, its own
-    /// included. The caller ends the answer with [`Down::Welcome`].
-    pub fn hello(&mut self, conn: Conn, cursor: Seq, db: &dyn Read, head: Seq, now: u64) -> (bool, Vec<Down<B>>) {
+    /// rows it holds, the refusal rows it sees and the last count `judged`
+    /// of each origin it pushes for, and `Got` for each subscription it
+    /// said, unless it holds every row; then its actor's latest session
+    /// entries, its own included. The caller ends the answer with
+    /// [`Down::Welcome`].
+    pub fn hello(&mut self, conn: Conn, cursor: Seq, db: &dyn Read, head: Seq, now: u64, judged: Vec<(Origin, u64)>) -> (bool, Vec<Down<B>>) {
         let Some(peer) = self.conns.get_mut(&conn) else {
             return (false, Vec::new());
         };
@@ -476,7 +523,13 @@ impl<B: Body + Clone> Serve<B> {
             if !delta {
                 record.filled = version;
             }
-            out.extend(frames(&rows, self.part, End::Fill { seq: head, whole: !delta }));
+            rows.extend(refusals(peer, db));
+            let end = End::Fill {
+                seq: head,
+                whole: !delta,
+                judged,
+            };
+            out.extend(frames(&rows, self.part, end));
             for (query, args) in &peer.said {
                 let got = End::Got {
                     query: *query,
@@ -509,9 +562,13 @@ impl<B: Body + Clone> Serve<B> {
             }
             match entry {
                 Some(l) => {
-                    let facts = if peer.record.held.is_none() { l.facts.clone() } else { Writes(rows) };
+                    // Every fact, or the rows it holds; and the refusal
+                    // rows it sees.
+                    let mut facts = if peer.record.held.is_none() { l.facts.0.clone() } else { rows };
+                    facts.retain(|w| w.table != REFUSALS);
+                    facts.extend(l.facts.0.iter().filter(|w| w.table == REFUSALS && peer.sees(w)).cloned());
                     let entry = l.entry.clone();
-                    out.push((c, Down::Logged(Logged { entry, facts })));
+                    out.push((c, Down::Logged(Logged { entry, facts: Writes(facts) })));
                 }
                 None => out.extend(frames(&rows, part, End::Moved).into_iter().map(|d| (c, d))),
             }
@@ -527,7 +584,14 @@ impl<B: Body + Clone> Serve<B> {
     /// hello is sent every row it holds and the removals of those it no
     /// longer does, as a fill to `head` that empties nothing; the records
     /// of the rest mark them to send.
-    pub fn refill(&mut self, db: &dyn Read, changes: &Changes, from: Seq, head: Seq) -> Vec<Out<B>> {
+    pub fn refill(
+        &mut self,
+        db: &dyn Read,
+        changes: &Changes,
+        from: Seq,
+        head: Seq,
+        judged: &dyn Fn(Option<Origin>) -> Vec<(Origin, u64)>,
+    ) -> Vec<Out<B>> {
         let version = if from < head { logged(head) } else { moved(head) };
         let mut out = Vec::new();
         let part = self.part;
@@ -537,8 +601,13 @@ impl<B: Body + Clone> Serve<B> {
             if !peer.hello {
                 continue;
             }
-            let rows = peer.record.unsent(db, version);
-            let end = End::Fill { seq: head, whole: false };
+            let mut rows = peer.record.unsent(db, version);
+            rows.extend(refusals(peer, db));
+            let end = End::Fill {
+                seq: head,
+                whole: false,
+                judged: judged(peer.client),
+            };
             out.extend(frames(&rows, part, end).into_iter().map(|d| (c, d)));
         }
         for (record, _) in self.kept.values_mut() {

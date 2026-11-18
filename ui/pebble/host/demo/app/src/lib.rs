@@ -453,15 +453,17 @@ mod tests {
         for u in up {
             server.receive(ark_kernel::Conn(0), u, 40);
         }
-        server.open(ark_kernel::Conn(1), Actor(1), None);
+        server.open(ark_kernel::Conn(1), Actor(1), Some(Origin(2)));
+        let hello = ark_kernel::Up::Hello {
+            cursor: server.head(),
+            time: 50,
+        };
+        server.receive(ark_kernel::Conn(1), hello, 50);
+        // Its refusal is logged, a row of the refusals for its node.
         let out = server.receive(ark_kernel::Conn(1), ark_kernel::Up::Push(again.clone()), 50);
-        assert!(out.iter().any(|(_, d)| matches!(
-            d,
-            ark_kernel::Down::Verdict {
-                verdict: ark_kernel::Verdict::Refused(GONE),
-                ..
-            }
-        )));
+        assert!(out.iter().any(|(c, d)| *c == ark_kernel::Conn(1)
+            && matches!(d, ark_kernel::Down::Logged(l) if l.entry.id == again.id && l.facts.0.iter().any(|w| w.table == ark_kernel::REFUSALS))));
+        assert_eq!(server.refused().get(&again.id), Some(&GONE));
         assert_eq!(server.store().len(QUEUE), 2);
     }
 }

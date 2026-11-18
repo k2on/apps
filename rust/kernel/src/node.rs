@@ -33,13 +33,13 @@
 //!   until the last, which (a whole fill) empties the shared rows, takes the rows
 //!   at once; then the pending entries are rebased. One interrupted is let
 //!   go, the rows as they were, and started again at the next connection.
-//! - An entry the server refuses is dropped, and its refusal kept in the
-//!   node's journal of refusals for the host to show. It never blocks the
-//!   entries after it: each is judged on its own.
-//! - An entry is let go once it is confirmed: logged here, or answered by
-//!   an `At` verdict (it, or one after it) whose `seq` this node has
-//!   applied. The link is ordered, so each entry's own answer comes before
-//!   those of the entries pushed after it.
+//! - An entry is let go once it is judged, which the log says: it comes
+//!   back logged, kept (its facts) or refused (its one fact the refusal's
+//!   row, [`crate::sync::REFUSALS`]), or a fill says this node's origin is
+//!   judged up to it, its rows the kept ones' and the refused ones'
+//!   refusal rows. A refused entry is dropped and its refusal kept in the
+//!   node's journal of refusals for the host to show; its row is not kept.
+//!   It never blocks the entries after it: each is judged on its own.
 //!
 //! The entries a shared handler emits are taken from its first run here
 //! only, never from a rebase.
@@ -112,11 +112,12 @@
 use alloc::vec::Vec;
 
 use crate::cell::{hit, key, Cell, Reader, Scope, Sink, Sources, Watch};
+use crate::codec::Decode;
 use crate::entry::{Actor, Entry, EntryId, Hlc, Origin, Seq, Space, Version};
 use crate::plan::{Changes, Diff, Live, Plan, Recorder};
 use crate::slot::Boxed;
-use crate::store::{Layer, Nothing, Overlay, Read, Store, TableId, View, Writes, EMPTY};
-use crate::sync::{Down, End, Logged, Pending, QueryId, Up, Verdict};
+use crate::store::{Layer, Nothing, Overlay, Read, Store, TableId, View, Write, Writes, EMPTY};
+use crate::sync::{Down, End, Logged, Pending, QueryId, Refused, Up, REFUSALS};
 
 /// A handler, by the number its build gives it.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -326,6 +327,10 @@ pub struct Node<B: 'static, S> {
     /// origins of the downstream nodes whose rows it answers for.
     rows: Vec<Kept<B>>,
     below: Vec<Origin>,
+    /// The last count judged of each origin it answers for below it, as
+    /// the log and its fills said: what it fills its downstream with.
+    #[cfg(feature = "upstream")]
+    judged: Vec<(Origin, u64)>,
     /// Whether its link upstream is up, and whether the answer to its
     /// hello is still coming.
     linked: bool,
@@ -367,6 +372,8 @@ impl<B: Body + Clone + 'static, S: Store> Node<B, S> {
             subs: Vec::new(),
             rows: Vec::new(),
             below: Vec::new(),
+            #[cfg(feature = "upstream")]
+            judged: Vec::new(),
             linked: false,
             greeting: false,
             samples: [(u64::MAX, 0); SAMPLES],
@@ -765,11 +772,7 @@ impl<B: Body + Clone + 'static, S: Store> Node<B, S> {
         note(&mut self.touched[Space::Shared as usize], &view, &mut rows_of(&writes));
         self.layer.apply(&writes);
         let made = self.made_all(&e, made);
-        self.pending.push(Pending {
-            entry: e,
-            writes,
-            judged: None,
-        });
+        self.pending.push(Pending { entry: e, writes });
         made
     }
 
@@ -974,7 +977,6 @@ impl<B: Body + Clone + 'static, S: Store> Node<B, S> {
     pub fn receive(&mut self, down: Down<B>, link: &mut dyn Link<B>, now: u64) {
         match down {
             Down::Logged(l) => self.confirm(l),
-            Down::Verdict { id, verdict } => self.judge(id, verdict),
             Down::Live(e) => {
                 self.take_live(e, true, link);
             }
@@ -984,7 +986,7 @@ impl<B: Body + Clone + 'static, S: Store> Node<B, S> {
                 match end {
                     End::More => {}
                     End::Moved => self.flush(),
-                    End::Fill { seq, whole } => self.filled(seq, whole),
+                    End::Fill { seq, whole, judged } => self.filled(seq, whole, &judged),
                     End::Got { query, args } => {
                         for s in &mut self.subs {
                             s.2 |= s.0 == query && s.1 == args;
@@ -1021,15 +1023,119 @@ impl<B: Body + Clone + 'static, S: Store> Node<B, S> {
 
     /// Ends a fill whose every part has come: its rows taken at once (in
     /// place of every row, when whole), the node is at its `seq`.
-    fn filled(&mut self, seq: Seq, whole: bool) {
+    /// Its pending entries up to the count it says for this node's origin
+    /// are judged: those refused are journaled by their rows, the rest are
+    /// in these rows.
+    fn filled(&mut self, seq: Seq, whole: bool, judged: &[(Origin, u64)]) {
         if whole {
+            // The refusal rows it keeps for the nodes below it are theirs
+            // until they have seen them, whatever its upstream let go (a
+            // node that serves none keeps none).
+            #[cfg(feature = "upstream")]
+            let mut kept = Vec::new();
+            #[cfg(feature = "upstream")]
+            self.stores.shared.scan(REFUSALS, crate::store::Range::all(), &mut |k, v| {
+                kept.push(Write {
+                    table: REFUSALS,
+                    key: k.to_vec(),
+                    value: Some(v.to_vec()),
+                });
+                true
+            });
             self.stores.shared.clear();
+            #[cfg(feature = "upstream")]
+            self.stores.shared.apply(&Writes(kept));
         }
-        self.stores.shared.apply(&core::mem::take(&mut self.incoming).into_writes());
+        let mut rows = core::mem::take(&mut self.incoming).into_writes();
+        self.take_refusals(&mut rows.0);
+        self.stores.shared.apply(&rows);
         self.reset = true;
         self.cursor = seq;
-        self.pending.retain(|p| p.judged.is_none_or(|j| j > seq));
+        let origin = self.origin;
+        for &(o, n) in judged {
+            if o == origin {
+                self.pending.retain(|p| p.entry.id.n > n);
+            }
+            #[cfg(feature = "upstream")]
+            self.judge(o, n);
+        }
         self.rebase();
+    }
+
+    /// The refusal rows among `rows`, as this node keeps them: its own
+    /// taken, each of a pending entry let go and journaled, and never kept;
+    /// those of a node it answers for kept, for that node; any other's let
+    /// go.
+    fn take_refusals(&mut self, rows: &mut Vec<Write>) {
+        let (origin, below, mut refused) = (self.origin, &self.below, Vec::new());
+        rows.retain(|w| {
+            let Some(id) = (w.table == REFUSALS).then(|| Refused::id(&w.key)) else {
+                return true;
+            };
+            match id {
+                Some(id) if id.origin == origin => {
+                    // Its first field is why: all this node reads of it.
+                    let why = w.value.as_deref().and_then(|v| Refusal::decode(&mut crate::codec::Reader::new(v)).ok());
+                    refused.extend(why.map(|why| (id, why)));
+                    false
+                }
+                Some(id) => below.contains(&id.origin),
+                None => false,
+            }
+        });
+        for (id, why) in refused {
+            if let Some(i) = self.pending.iter().position(|p| p.entry.id == id) {
+                self.pending.remove(i);
+                self.refused.push((id, why));
+            }
+        }
+    }
+
+    /// Notes that `origin`, below it, is judged up to `n`.
+    #[cfg(feature = "upstream")]
+    fn judge(&mut self, origin: Origin, n: u64) {
+        if origin == self.origin || !self.below.contains(&origin) {
+            return;
+        }
+        match self.judged.iter_mut().find(|j| j.0 == origin) {
+            Some(j) => j.1 = j.1.max(n),
+            None => self.judged.push((origin, n)),
+        }
+    }
+
+    /// The last count judged of `origin`'s, one below it, as the log and its
+    /// fills said.
+    #[cfg(feature = "upstream")]
+    pub fn judged(&self, origin: Origin) -> u64 {
+        self.judged.iter().find(|j| j.0 == origin).map_or(0, |j| j.1)
+    }
+
+    /// Lets go of the refusal rows it keeps for `origin`, below it, that
+    /// were logged at or before `seq`: its hello says it has applied them.
+    #[cfg(feature = "upstream")]
+    pub fn forget(&mut self, origin: Origin, seq: Seq) {
+        let mut gone = Vec::new();
+        self.stores.shared.scan(REFUSALS, crate::store::Range::all(), &mut |k, v| {
+            let mine = Refused::id(k).is_some_and(|id| id.origin == origin);
+            if mine && crate::codec::from_slice::<Refused>(v).is_ok_and(|r| r.seq <= seq) {
+                gone.push(Write {
+                    table: REFUSALS,
+                    key: k.to_vec(),
+                    value: None,
+                });
+            }
+            true
+        });
+        if gone.is_empty() {
+            return;
+        }
+        let gone = Writes(gone);
+        let view = View {
+            base: &self.stores.shared,
+            layer: &self.layer,
+        };
+        note(&mut self.touched[Space::Shared as usize], &view, &mut rows_of(&gone));
+        self.stores.shared.apply(&gone);
     }
 
     /// Applies the log's next entry by its facts, lets go of what it
@@ -1040,8 +1146,12 @@ impl<B: Body + Clone + 'static, S: Store> Node<B, S> {
             return;
         };
         self.clock = self.clock.witness(l.entry.at, l.entry.at.wall);
-        // A fact for a row held apart is made there, to be taken with it.
+        // A refusal's row is taken, and a fact for a row held apart is
+        // made there, to be taken with it.
         let mut facts = l.facts;
+        self.take_refusals(&mut facts.0);
+        #[cfg(feature = "upstream")]
+        self.judge(l.entry.id.origin, l.entry.id.n);
         let incoming = &mut self.incoming;
         facts.0.retain(|w| !incoming.update(w));
         let view = View {
@@ -1054,7 +1164,7 @@ impl<B: Body + Clone + 'static, S: Store> Node<B, S> {
         let id = l.entry.id;
         let previewed = self.pending.first().is_some_and(|p| p.entry.id == id && p.writes == facts);
         let before = self.pending.len();
-        self.pending.retain(|p| p.entry.id != id && p.judged.is_none_or(|j| j > seq));
+        self.pending.retain(|p| p.entry.id != id);
         if previewed && self.pending.len() + 1 == before {
             // The server wrote what this node's run did, so the confirmed
             // rows are what the entries after it ran over: their writes
@@ -1071,36 +1181,6 @@ impl<B: Body + Clone + 'static, S: Store> Node<B, S> {
         } else {
             self.rebase();
         }
-    }
-
-    /// Takes the authority's answer to one of this node's pushes.
-    fn judge(&mut self, id: EntryId, verdict: Verdict) {
-        match verdict {
-            Verdict::Refused(why) => {
-                let Some(i) = self.pending.iter().position(|p| p.entry.id == id) else {
-                    return;
-                };
-                self.pending.remove(i);
-                self.refused.push((id, why));
-            }
-            // Covering the entries up to the one it answers: their own
-            // answers came before it, and a refusal of one after it, under
-            // `last`, is still to come.
-            Verdict::At(seq) => {
-                for p in &mut self.pending {
-                    if p.entry.id.origin == id.origin && p.entry.id.n <= id.n && p.judged.is_none() {
-                        p.judged = Some(seq);
-                    }
-                }
-                let cursor = self.cursor;
-                let before = self.pending.len();
-                self.pending.retain(|p| p.judged.is_none_or(|j| j > cursor));
-                if self.pending.len() == before {
-                    return;
-                }
-            }
-        }
-        self.rebase();
     }
 
     /// Runs every pending entry again, in order, over the confirmed rows.
@@ -1396,8 +1476,25 @@ pub(crate) mod tests {
         assert_eq!(rows(&a.view(Space::Shared)), rows(a.store(Space::Shared).unwrap()));
     }
 
-    /// A refused entry is dropped and journaled; the one after it stays,
-    /// rebased without it.
+    /// A refusal's row of a refused entry's: logged at its place, its one
+    /// fact, as the upstream sends it.
+    pub(crate) fn refusal(e: &Entry<Msg>, seq: u64, why: Refusal) -> Down<Msg> {
+        let row = Refused {
+            why,
+            actor: e.actor,
+            via: e.id.origin,
+            seq: Seq(seq),
+        };
+        let facts = Writes(alloc::vec![Write {
+            table: REFUSALS,
+            key: Refused::key(e.id).to_vec(),
+            value: Some(crate::codec::to_vec(&row)),
+        }]);
+        logged(e, seq, facts)
+    }
+
+    /// A refused entry is dropped and journaled, by its row, which is not
+    /// kept; the one after it stays, rebased without it.
     #[cfg_attr(test, test)]
     fn a_refusal_drops_one_entry_only() {
         let mut n = node(1);
@@ -1407,27 +1504,15 @@ pub(crate) mod tests {
         n.route(first.clone(), &mut up);
         n.route(second, &mut up);
         assert_eq!(count(&n.view(Space::Shared), 2), 11);
-        n.receive(
-            Down::Verdict {
-                id: first.id,
-                verdict: Verdict::Refused(Refusal(300)),
-            },
-            &mut up,
-            0,
-        );
+        n.receive(refusal(&first, 1, Refusal(300)), &mut up, 0);
         assert_eq!(n.take_refused(), [(first.id, Refusal(300))]);
-        assert_eq!(n.pending().len(), 1);
+        assert_eq!((n.pending().len(), n.cursor()), (1, Seq(1)));
         assert_eq!(count(&n.view(Space::Shared), 2), 10);
-        // A refusal said again is not journaled twice.
-        n.receive(
-            Down::Verdict {
-                id: first.id,
-                verdict: Verdict::Refused(Refusal(300)),
-            },
-            &mut up,
-            0,
-        );
-        assert_eq!(n.take_refused(), []);
+        assert_eq!(n.store(Space::Shared).unwrap().len(REFUSALS), 0);
+        // Another node's refusal is not its own, and not kept.
+        let theirs = node(2).make(Space::Shared, Msg::Take { key: 1 }, 10);
+        n.receive(refusal(&theirs, 2, Refusal(301)), &mut up, 0);
+        assert_eq!((n.take_refused(), n.store(Space::Shared).unwrap().len(REFUSALS)), (vec![], 0));
     }
 
     /// A local refusal of a shared entry keeps it pending, unwritten, for
@@ -1462,32 +1547,34 @@ pub(crate) mod tests {
         );
     }
 
-    /// An `At` verdict lets go of what it covers once the log is applied
-    /// that far: a push judged before a connection was lost.
+    /// A fill says how far its upstream judged this node's entries: those
+    /// pending up to it are let go, kept (in its rows) or refused (by their
+    /// rows among them, journaled), and the rest stay.
     #[cfg_attr(test, test)]
-    fn an_at_verdict_lets_go_once_applied() {
+    fn a_fill_lets_go_what_it_judged() {
         let mut n = node(1);
         let mut up = Vec::new();
-        let e = n.make(Space::Shared, Msg::Add { key: 4, by: 1 }, 10);
-        n.route(e.clone(), &mut up);
-        n.receive(
-            Down::Verdict {
-                id: e.id,
-                verdict: Verdict::At(Seq(1)),
-            },
-            &mut up,
-            0,
-        );
-        assert_eq!(n.pending()[0].judged, Some(Seq(1)));
-        // It is let go once the log is applied to 1, by facts that need
-        // not carry it by name (as a fill's will not).
-        let other = Entry {
-            id: EntryId { origin: Origin(5), n: 1 },
-            ..e.clone()
+        let kept = n.make(Space::Shared, Msg::Add { key: 4, by: 1 }, 10);
+        let refused = n.make(Space::Shared, Msg::Take { key: 5 }, 10);
+        let late = n.make(Space::Shared, Msg::Add { key: 4, by: 2 }, 10);
+        for e in [&kept, &refused, &late] {
+            n.route(e.clone(), &mut up);
+        }
+        let Down::Logged(row) = refusal(&refused, 2, NONE_LEFT) else {
+            unreachable!()
         };
-        n.receive(logged(&other, 1, count_is(4, 1)), &mut up, 0);
-        assert_eq!(n.pending(), []);
-        assert_eq!(count(&n.view(Space::Shared), 4), 1);
+        let mut rows = count_is(4, 1);
+        rows.0.extend(row.facts.0);
+        let fill = End::Fill {
+            seq: Seq(3),
+            whole: true,
+            judged: alloc::vec![(Origin(1), 2), (Origin(7), 9)],
+        };
+        n.receive(part(rows, fill), &mut up, 0);
+        assert_eq!(n.take_refused(), [(refused.id, NONE_LEFT)]);
+        assert_eq!(n.pending().iter().map(|p| p.entry.id).collect::<Vec<_>>(), [late.id]);
+        assert_eq!(count(&n.view(Space::Shared), 4), 3);
+        assert_eq!(n.store(Space::Shared).unwrap().len(REFUSALS), 0);
     }
 
     /// Pending records survive a restart and are put back with their
@@ -1556,15 +1643,8 @@ pub(crate) mod tests {
         let late = n.make(Space::Shared, Msg::Add { key: 2, by: 10 }, 10);
         n.route(mine.clone(), &mut up);
         n.route(late.clone(), &mut up);
-        // Judged at 5, in the part of the log the upstream let go.
-        n.receive(
-            Down::Verdict {
-                id: mine.id,
-                verdict: Verdict::At(Seq(5)),
-            },
-            &mut up,
-            0,
-        );
+        // Judged at 5, in the part of the log the upstream let go: the
+        // fill says so.
         n.connect(&mut up, 0);
         n.take_changes(Space::Shared);
         assert_eq!((count(n.store(Space::Shared).unwrap(), 1), n.cursor()), (3, Seq(1)));
@@ -1576,7 +1656,12 @@ pub(crate) mod tests {
             (3, 0)
         );
         assert_eq!(n.take_changes(Space::Shared), Changes::default());
-        n.receive(part(count_is(3, 4), End::Fill { seq: Seq(5), whole: true }), &mut up, 0);
+        let fill = End::Fill {
+            seq: Seq(5),
+            whole: true,
+            judged: alloc::vec![(Origin(1), mine.id.n)],
+        };
+        n.receive(part(count_is(3, 4), fill), &mut up, 0);
         assert_eq!(n.cursor(), Seq(5));
         assert!(n.take_changes(Space::Shared).reset);
         assert_eq!(
@@ -1605,7 +1690,12 @@ pub(crate) mod tests {
         );
         assert_eq!(count(n.store(Space::Shared).unwrap(), 2), 11);
         // An empty fill ends at once.
-        n.receive(part(Writes::default(), End::Fill { seq: Seq(9), whole: true }), &mut up, 0);
+        let fill = End::Fill {
+            seq: Seq(9),
+            whole: true,
+            judged: alloc::vec![],
+        };
+        n.receive(part(Writes::default(), fill), &mut up, 0);
         assert_eq!((rows(n.store(Space::Shared).unwrap()), n.cursor()), (vec![], Seq(9)));
     }
 
@@ -1889,7 +1979,7 @@ pub(crate) mod tests {
         pending_entries_rebase_over_facts,
         a_refusal_drops_one_entry_only,
         local_refusals,
-        an_at_verdict_lets_go_once_applied,
+        a_fill_lets_go_what_it_judged,
         pending_records_are_put_back,
         a_confirmed_preview_is_not_run_again,
         a_fill_replaces_the_confirmed_rows,

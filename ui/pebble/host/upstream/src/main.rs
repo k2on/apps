@@ -26,7 +26,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use ark_kernel::codec::{from_slice, put_frame};
 use ark_kernel::serve::Out;
-use ark_kernel::{Actor, Anchor, Authority, Conn, Down, End, Entry, Frames, Memory, Node, Origin, Read, Space, Spaces, Up, Verdict};
+use ark_kernel::{Actor, Anchor, Authority, Conn, Down, End, Entry, Frames, Memory, Node, Origin, Read, Refused, Space, Spaces, Up, REFUSALS};
 use now_playing::{playing, Msg, Playing, Track, HANDLERS, QUERIES, QUEUE, VERSION};
 use tungstenite::handshake::server::{Request, Response};
 use tungstenite::{Message, WebSocket};
@@ -100,16 +100,21 @@ fn up(u: &Up<Msg>) -> String {
 
 fn down(d: &Down<Msg>) -> String {
     match d {
-        Down::Logged(l) => format!(
-            "Logged seq {} {} ({} facts)",
-            l.entry.seq.map_or(0, |s| s.0),
-            entry(&l.entry),
-            l.facts.0.len()
-        ),
-        Down::Verdict { id, verdict } => match verdict {
-            Verdict::At(seq) => format!("Verdict {:x}/{} at seq {}", id.origin.0, id.n, seq.0),
-            Verdict::Refused(r) => format!("Verdict {:x}/{} refused {}", id.origin.0, id.n, r.0),
-        },
+        Down::Logged(l) => {
+            let refused = l.facts.0.iter().find(|w| w.table == REFUSALS);
+            let why = refused
+                .and_then(|w| w.value.as_deref())
+                .and_then(|v| ark_kernel::codec::from_slice::<Refused>(v).ok());
+            match why {
+                Some(r) => format!("Logged seq {} {} refused {}", l.entry.seq.map_or(0, |s| s.0), entry(&l.entry), r.why.0),
+                None => format!(
+                    "Logged seq {} {} ({} facts)",
+                    l.entry.seq.map_or(0, |s| s.0),
+                    entry(&l.entry),
+                    l.facts.0.len()
+                ),
+            }
+        }
         Down::Live(e) => format!("Live {}", entry(e)),
         Down::Rows { rows, end } => format!(
             "Rows {}{}",
@@ -117,7 +122,7 @@ fn down(d: &Down<Msg>) -> String {
             match end {
                 End::More => String::from(", more to come"),
                 End::Moved => String::from(", moved"),
-                End::Fill { seq, whole } => format!(", a fill to seq {}{}", seq.0, if *whole { " replacing every row" } else { "" }),
+                End::Fill { seq, whole, .. } => format!(", a fill to seq {}{}", seq.0, if *whole { " replacing every row" } else { "" }),
                 End::Got { query, .. } => format!(", query {} got", query.0),
             }
         ),
