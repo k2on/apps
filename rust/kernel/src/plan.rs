@@ -495,67 +495,60 @@ impl Each {
         agg.map(|a| to_vec(&a))
     }
 
-    /// Takes its input's diffs: for a filter or a map, each made over the
-    /// rows before or after; for a sort or a group, its held rows changed
-    /// and its own rows that changed answered.
-    fn take(&mut self, mut d: Vec<Diff>, s: &Settle<'_>) -> Vec<Diff> {
-        let Some(by) = &self.by else {
-            let each = &self.f;
-            for d in &mut d {
-                d.old = d.old.take().and_then(|v| each(s.was, &d.key, &v));
-                d.new = match d.new.take() {
-                    Some(v) => Reads::run(&mut self.reads, s.db, &d.key, |db| each(db, &d.key, &v)),
-                    None => {
-                        Reads::drop(&mut self.reads, &d.key);
-                        None
+    /// Takes its input's diffs, each side made over the rows before or
+    /// after: a filter's or a map's rows answered as they are; a sort's or a
+    /// group's held, and its own rows that changed answered.
+    fn take(&mut self, d: Vec<Diff>, s: &Settle<'_>) -> Vec<Diff> {
+        let held = self.by.is_some();
+        let (f, by) = (&self.f, &self.by);
+        let mut out: Vec<Diff> = Vec::new();
+        for d in d {
+            let old = d.old.as_ref().and_then(|v| placed(f, by, s.was, &d.key, v));
+            let new = match &d.new {
+                Some(v) => Reads::run(&mut self.reads, s.db, &d.key, |db| placed(f, by, db, &d.key, v)),
+                None => {
+                    Reads::drop(&mut self.reads, &d.key);
+                    None
+                }
+            };
+            for (side, came) in [(old, false), (new, true)] {
+                let Some((at, v)) = side else { continue };
+                let key = if self.fold {
+                    unescaped(&at).map(|p| p.0).unwrap_or_default()
+                } else {
+                    at.clone()
+                };
+                let i = match out.binary_search_by(|x| x.key.cmp(&key)) {
+                    Ok(i) => i,
+                    Err(i) => {
+                        let old = if held { self.value(&key) } else { None };
+                        out.insert(i, Diff { key, old, new: None });
+                        i
                     }
                 };
-            }
-            d.retain(|d| d.old != d.new);
-            return d;
-        };
-        // Its own rows touched, in order, each with its value before.
-        let mut out: Vec<Diff> = Vec::new();
-        let mut held = Vec::new();
-        for d in d {
-            if let Some(old) = &d.old {
-                if (self.f)(s.was, &d.key, old).is_some() {
-                    held.push((sorted(by, s.was, &d.key, old), None));
+                match (held, came) {
+                    (true, true) => self.rows.put(at, v),
+                    (true, false) => self.rows.take(&at),
+                    (false, true) => out[i].new = Some(v),
+                    (false, false) => out[i].old = Some(v),
                 }
             }
-            match &d.new {
-                Some(new) => {
-                    let (f, at) = Reads::run(&mut self.reads, s.db, &d.key, |db| {
-                        ((self.f)(db, &d.key, new), sorted(by, db, &d.key, new))
-                    });
-                    if f.is_some() {
-                        held.push((at, f));
-                    }
-                }
-                None => Reads::drop(&mut self.reads, &d.key),
-            }
         }
-        for (at, v) in held {
-            let key = if self.fold {
-                unescaped(&at).map(|p| p.0).unwrap_or_default()
-            } else {
-                at.clone()
-            };
-            if let Err(i) = out.binary_search_by(|d| d.key.cmp(&key)) {
-                let old = self.value(&key);
-                out.insert(i, Diff { key, old, new: None });
+        if held {
+            for x in &mut out {
+                x.new = self.value(&x.key);
             }
-            match v {
-                Some(v) => self.rows.put(at, v),
-                None => self.rows.take(&at),
-            }
-        }
-        for d in &mut out {
-            d.new = self.value(&d.key);
         }
         out.retain(|d| d.old != d.new);
         out
     }
+}
+
+/// A row through `f`, at its place: its own, or, held by `by`, its key's
+/// first.
+fn placed(f: &Fun<Option<Vec<u8>>>, by: &Option<Fun<Vec<u8>>>, db: &dyn Read, k: &[u8], v: &[u8]) -> Option<(Vec<u8>, Vec<u8>)> {
+    let out = f(db, k, v)?;
+    Some((by.as_ref().map_or_else(|| k.to_vec(), |by| sorted(by, db, k, v)), out))
 }
 
 impl Op for Each {
@@ -600,6 +593,18 @@ impl Op for Each {
         self.input.hydrate(db);
         self.rows = Sparse::default();
         self.reads = self.reads.take().map(|_| Reads::default());
+        // A filter or a map holds nothing but what its rows read: it runs
+        // over them, rather than taking them all at once.
+        if self.by.is_none() {
+            if self.reads.is_some() {
+                let (f, reads) = (&self.f, &mut self.reads);
+                self.input.fetch(db, Bound::Unbounded, false, &mut |k, v| {
+                    Reads::run(reads, db, &k.to_vec(), |db| f(db, k, v));
+                    true
+                });
+            }
+            return;
+        }
         let rows = children(&*self.input, db, false);
         self.take(
             rows,
