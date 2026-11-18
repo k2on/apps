@@ -29,7 +29,7 @@ use alloc::vec::Vec;
 use core::hint::black_box;
 use core::ops::Bound;
 
-use ark_kernel::codec::{from_slice, put_frame, to_vec, Error, Reader};
+use ark_kernel::codec::{from_slice, put_frame, to_vec, Error};
 use ark_kernel::plan::Agg;
 use ark_kernel::store::Range;
 use ark_kernel::*;
@@ -76,7 +76,7 @@ impl Encode for Msg {
 }
 
 impl Decode for Msg {
-    fn decode(r: &mut Reader<'_>) -> Result<Self, Error> {
+    fn decode(r: &mut ark_kernel::codec::Reader<'_>) -> Result<Self, Error> {
         match u32::decode(r)? {
             0 => Ok(Msg::Put {
                 table: u32::decode(r)?,
@@ -116,17 +116,39 @@ static HANDLERS: [Handler<Msg>; 2] = [
                 value: [1].into(),
             },
         );
-        cx.emit(
-            Space::Local,
-            Msg::Put {
-                table: 2,
-                key: [key].into(),
-                value: [2].into(),
-            },
-        );
+        // The screen's state: how many taps, a cell.
+        let taps = cx.get(TAPS).copied().unwrap_or(0);
+        cx.set(TAPS, taps + 1);
         Ok(())
     },
 ];
+
+/// The phone's playback, decoded from its session row when read: a plain
+/// function, its reads recorded against whatever reader calls it.
+fn playing(db: &dyn Read) -> Option<Anchor> {
+    db.get(TableId(3), &[0]).and_then(|v| from_slice::<Anchor>(&v).ok())
+}
+
+/// The screen's one cell, the node's first source.
+const TAPS: Cell<u8> = Cell::at(0);
+
+/// What the screen's sink is told: its readers to redraw, and how many
+/// patches its lists took.
+#[derive(Default)]
+struct Screen {
+    dirty: Vec<Reader>,
+    shown: usize,
+}
+
+impl Sink for Screen {
+    fn dirty(&mut self, r: Reader) {
+        self.dirty.push(r);
+    }
+
+    fn patches(&mut self, _: Watch, p: &[Patch]) {
+        self.shown += p.len();
+    }
+}
 
 /// A row of the watch's slice: a queue's track, its title padded as a
 /// real one would be.
@@ -192,12 +214,12 @@ fn logged(wire: &mut Vec<u8>, e: Entry<Msg>, seq: u64, facts: Writes) {
 
 fn main() -> ! {
     let stores = Spaces {
-        local: Memory::new(),
         device: Memory::new(),
         session: Memory::new(),
         shared: Memory::new(),
     };
     let mut node = Node::new(Origin(black_box(7)), black_box(0), Version(1), &HANDLERS, stores);
+    node.cell(0u8);
     node.set_actor(Actor(black_box(3)));
     let mut up: Vec<Up<Msg>> = Vec::new();
     let mut wire = Vec::new();
@@ -209,7 +231,6 @@ fn main() -> ! {
         Version(1),
         &HANDLERS,
         Spaces {
-            local: Memory::new(),
             device: Memory::new(),
             session: Memory::new(),
             shared: Memory::new(),
@@ -280,24 +301,29 @@ fn main() -> ! {
     };
     // The playlists, each with its first two tracks.
     let lists = || scan(PLAYLISTS, Bound::Unbounded, Bound::Unbounded).related(|k, _| prefix(TableId(1), k).take(2, false));
-    let mut queries = [
-        next().live(&node.view(Space::Shared)),
-        lists().live(&node.view(Space::Shared)),
-        all()
-            .group(|_, _| Vec::new(), |_, v| v.len() as i64, black_box(false), true)
-            .live(&node.view(Space::Shared)),
+    let watches = [
+        node.watch(0, &[], next),
+        node.watch(1, &[], lists),
+        node.watch(2, &[], || all().group(|_, _| Vec::new(), |_, v| v.len() as i64, black_box(false), true)),
     ];
-    let mut shown = 0;
-    let mut playing = Anchor::default();
-    let mut watch = |node: &mut Node<Msg, Memory>| {
-        let changes = node.take_changes(Space::Shared);
-        for q in &mut queries {
-            shown += q.push(&node.view(Space::Shared), &changes).len();
-        }
-        for (_, d) in node.take_changes(Space::Session).rows {
-            if let Some(Ok(a)) = d.new.as_deref().map(from_slice::<Anchor>) {
-                playing = a;
+    // The screen's leaves: the track's position, and the list.
+    let (at, list) = (node.reader(), node.reader());
+    // What a leaf shows, pulled as it draws.
+    let draw = move |node: &mut Node<Msg, Memory>, r: Reader| {
+        node.read(r, |db| {
+            if r == at {
+                playing(db).map_or(0, |a| a.at as usize) + usize::from(TAPS.get(db).copied().unwrap_or(0))
+            } else {
+                watches[0].get(db).map_or(0, |l| l.rows().len())
             }
+        })
+    };
+    let mut drawn = draw(&mut node, at) + draw(&mut node, list);
+    let mut screen = Screen::default();
+    let mut watch = |node: &mut Node<Msg, Memory>| {
+        node.settle(&mut screen);
+        for r in core::mem::take(&mut screen.dirty) {
+            drawn += draw(node, r);
         }
     };
     let mut frames = Frames::new(black_box(512));
@@ -410,17 +436,23 @@ fn main() -> ! {
     // The queries kept live are what a fresh run over the view answers.
     let view = node.view(Space::Shared);
     let next = next().live(&view);
-    let total = from_slice::<Agg>(&queries[2].rows()[0].1).map_or(0, |a| a.count);
-    let right = queries[0].rows() == next.rows()
-        && queries[1].rows() == lists().live(&view).rows()
-        && queries[1].rows().len() == 3
-        && queries[0].rows().iter().any(|(k, v)| k[..] == [0, 2] && v.last() == Some(&b'b'))
-        && total == node.store(Space::Shared).len(TableId(1)) as u64
-        && node.store(Space::Shared).get(TableId(1), &[0, 20]).is_some();
+    let [Some(next_), Some(lists_), Some(group)] = watches.map(|w| node.answer(w)) else {
+        rt::exit(false)
+    };
+    let total = from_slice::<Agg>(&group.rows()[0].1).map_or(0, |a| a.count);
+    let right = next_.rows() == next.rows()
+        && lists_.rows() == lists().live(&view).rows()
+        && lists_.rows().len() == 3
+        && next_.rows().iter().any(|(k, v)| k[..] == [0, 2] && v.last() == Some(&b'b'))
+        && total == node.store(Space::Shared).unwrap().len(TableId(1)) as u64
+        && node.store(Space::Shared).unwrap().get(TableId(1), &[0, 20]).is_some();
     // Its position two and a half seconds on in the server's time, its
     // own clock 1000 behind, and when the screen's seconds next change.
     let now = node.time(black_box(2_500));
-    let right = right && playing.position(now) == 32_500 && playing.next(now, 1000) == Some(4_000);
+    let Some(playing) = playing(&node.view(Space::Session)) else {
+        rt::exit(false)
+    };
+    let right = right && playing.position(now) == 32_500 && playing.next(now, 1000) == Some(4_000) && node.get(TAPS) == Some(&8) && drawn > 0;
     // Linked, a session entry is sent; the one made offline was refused.
     let control = node.make(Space::Session, pause, black_box(3_000));
     up.clear();
@@ -428,12 +460,12 @@ fn main() -> ! {
     let right = right && up.len() == 1 && node.refusals().len() == 1;
 
     black_box((
-        shown,
+        screen.shown,
         node.take_refused(),
         node.made(),
         node.clock(),
         node.pending().len(),
-        node.store(Space::Shared).len(TableId(1)),
+        node.store(Space::Shared).unwrap().len(TableId(1)),
     ));
     // The heap at most, against the kernel's budget of 24 KB.
     let peak = HEAP.peak();

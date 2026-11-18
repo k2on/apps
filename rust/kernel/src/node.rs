@@ -98,12 +98,24 @@
 //! since the host last asked, for the queries over its view
 //! ([`crate::plan`]). The host takes them after each step or receive;
 //! until then they gather.
+//!
+//! **Cells and the settle.** A handler of a local, device or session entry
+//! reads and writes the node's cells ([`Cx::get`], [`Cx::set`]); its writes
+//! are journaled beside its rows', kept with them or dropped with them. A
+//! shared run sees none, as it must give the same rows on every node.
+//! [`Node::settle`] ends a step or a receive: it takes each space's changes
+//! (and tells the sink, which keeps what a disk keeps), pushes them through
+//! the watched plans, and tells the sink each reader whose reads changed,
+//! once. Nothing is worked out when it is written: a reader pulls when it
+//! draws, and its sink cuts it off there by equality.
 
 use alloc::vec::Vec;
 
+use crate::cell::{hit, key, Cell, Reader, Scope, Sink, Sources, Watch};
 use crate::entry::{Actor, Entry, EntryId, Hlc, Origin, Seq, Space, Version};
-use crate::plan::{Changes, Diff};
-use crate::store::{Layer, Overlay, Range, Read, Store, TableId, View, Writes, EMPTY};
+use crate::plan::{Changes, Diff, Live, Plan, Recorder};
+use crate::slot::Boxed;
+use crate::store::{Layer, Nothing, Overlay, Range, Read, Store, TableId, View, Writes, EMPTY};
 use crate::sync::{Down, Logged, Pending, QueryId, Up, Verdict};
 
 /// A handler, by the number its build gives it.
@@ -144,12 +156,16 @@ impl Refusal {
     pub const OFFLINE: Refusal = Refusal(5);
 }
 
-/// What a handler runs with: the entry, its space's rows, and the entries
-/// it makes.
+/// What a handler runs with: the entry, its space's rows, the node's cells
+/// (but in a shared run, which a server makes too), and the entries it
+/// makes.
 pub struct Cx<'a, B> {
     pub entry: &'a Entry<B>,
     /// The entry's space's rows, as this run has written them.
     pub db: &'a mut dyn Store,
+    src: Option<&'a Sources>,
+    /// The cells this run wrote, kept with its rows or dropped with them.
+    journal: Vec<(u32, Boxed)>,
     made: Vec<(Space, B)>,
 }
 
@@ -159,31 +175,52 @@ impl<B> Cx<'_, B> {
     pub fn emit(&mut self, space: Space, body: B) {
         self.made.push((space, body));
     }
+
+    /// A cell's value, as this run has written it: none in a shared run,
+    /// which must give the same rows on every node.
+    pub fn get<T: 'static>(&self, c: Cell<T>) -> Option<&T> {
+        match self.journal.iter().rev().find(|j| j.0 == c.0) {
+            Some((_, v)) => v.get(),
+            None => self.src?.slots.get(c.0, false),
+        }
+    }
+
+    /// Writes a cell, kept if this run is: an equal value changes nothing.
+    /// A shared run writes none.
+    pub fn set<T: PartialEq + 'static>(&mut self, c: Cell<T>, v: T) {
+        if self.src.is_some() {
+            self.journal.push((c.0, Boxed::new(v)));
+        }
+    }
 }
 
 /// A handler: reads and writes `cx.db`, emits entries, or refuses.
 pub type Handler<B> = fn(&mut Cx<'_, B>) -> Result<(), Refusal>;
 
-/// What a handler's run made: its writes and the entries it emitted.
-pub(crate) type Ran<B> = (Writes, Vec<(Space, B)>);
+/// What a handler's run made: its writes, the entries it emitted and the
+/// cells it wrote.
+pub(crate) type Ran<B> = (Writes, Vec<(Space, B)>, Vec<(u32, Boxed)>);
 
-/// Runs `e`'s handler over `base`, writing nothing to it.
-pub(crate) fn run<B: Body>(handlers: &[Handler<B>], base: &dyn Read, e: &Entry<B>) -> Result<Ran<B>, Refusal> {
+/// Runs `e`'s handler over `base`, writing nothing to it, with the node's
+/// cells in `src` (none in a shared run).
+pub(crate) fn run<B: Body>(handlers: &[Handler<B>], base: &dyn Read, e: &Entry<B>, src: Option<&Sources>) -> Result<Ran<B>, Refusal> {
     let handler = handlers.get(e.body.handler().0 as usize).ok_or(Refusal::NO_HANDLER)?;
     let mut db = Overlay::new(base);
     let mut cx = Cx {
         entry: e,
         db: &mut db,
+        src,
+        journal: Vec::new(),
         made: Vec::new(),
     };
     handler(&mut cx)?;
-    let made = cx.made;
-    Ok((db.into_writes(), made))
+    let (made, journal) = (cx.made, cx.journal);
+    Ok((db.into_writes(), made, journal))
 }
 
-/// One store for each space.
+/// One store for each space that keeps rows: every space but `local`,
+/// whose state is cells.
 pub struct Spaces<S> {
-    pub local: S,
     pub device: S,
     pub session: S,
     /// The shared space's confirmed rows.
@@ -191,21 +228,21 @@ pub struct Spaces<S> {
 }
 
 impl<S> Spaces<S> {
-    pub fn get(&self, space: Space) -> &S {
+    pub fn get(&self, space: Space) -> Option<&S> {
         match space {
-            Space::Local => &self.local,
-            Space::Device => &self.device,
-            Space::Session => &self.session,
-            Space::Shared => &self.shared,
+            Space::Local => None,
+            Space::Device => Some(&self.device),
+            Space::Session => Some(&self.session),
+            Space::Shared => Some(&self.shared),
         }
     }
 
-    pub fn get_mut(&mut self, space: Space) -> &mut S {
+    pub fn get_mut(&mut self, space: Space) -> Option<&mut S> {
         match space {
-            Space::Local => &mut self.local,
-            Space::Device => &mut self.device,
-            Space::Session => &mut self.session,
-            Space::Shared => &mut self.shared,
+            Space::Local => None,
+            Space::Device => Some(&mut self.device),
+            Space::Session => Some(&mut self.session),
+            Space::Shared => Some(&mut self.shared),
         }
     }
 }
@@ -301,6 +338,8 @@ pub struct Node<B: 'static, S> {
     samples: [(u64, i64); SAMPLES],
     sample: usize,
     offset: i64,
+    /// Its cells, watches and readers.
+    sources: Sources,
     /// How many confirmations ran nothing again: what the tests see of a
     /// skipped replay.
     #[cfg(any(test, ark_selftest))]
@@ -337,6 +376,7 @@ impl<B: Body + Clone + 'static, S: Store> Node<B, S> {
             samples: [(u64::MAX, 0); SAMPLES],
             sample: 0,
             offset: 0,
+            sources: Sources::default(),
             #[cfg(any(test, ark_selftest))]
             skipped: 0,
         }
@@ -358,6 +398,7 @@ impl<B: Body + Clone + 'static, S: Store> Node<B, S> {
 
     /// What changed in a space as this node reads it ([`Node::view`])
     /// since this was last called for it, its rows as they read now.
+    #[inline(never)]
     pub fn take_changes(&mut self, space: Space) -> Changes {
         let touched = core::mem::take(&mut self.touched[space as usize]);
         let reset = space == Space::Shared && core::mem::take(&mut self.reset);
@@ -412,19 +453,153 @@ impl<B: Body + Clone + 'static, S: Store> Node<B, S> {
         &self.pending
     }
 
-    /// A space's store: for `shared`, its confirmed rows alone.
-    pub fn store(&self, space: Space) -> &S {
+    /// A space's store: for `shared`, its confirmed rows alone; none for
+    /// `local`, whose state is cells.
+    pub fn store(&self, space: Space) -> Option<&S> {
         self.stores.get(space)
     }
 
     /// A space as this node reads it: for `shared`, the confirmed rows
     /// with the pending entries' writes over them.
+    #[inline(never)]
     pub fn view(&self, space: Space) -> View<'_> {
         let layer = if space == Space::Shared { &self.layer } else { &EMPTY };
         View {
-            base: self.stores.get(space),
+            base: self.rows(space),
             layer,
         }
+    }
+
+    /// A space's rows: none for `local`.
+    fn rows(&self, space: Space) -> &dyn Read {
+        match self.stores.get(space) {
+            Some(s) => s,
+            None => &Nothing,
+        }
+    }
+
+    /// What its plans and readers read: every space's rows as it
+    /// reads them, the shared through `shared` (its view), and its sources.
+    #[inline(never)]
+    fn scope<'a>(&'a self, shared: &'a View<'a>, was: bool) -> Scope<'a> {
+        Scope {
+            rows: [&self.stores.device, &self.stores.session, shared],
+            src: &self.sources,
+            was,
+        }
+    }
+
+    /// A new cell holding `v`.
+    pub fn cell<T: PartialEq + 'static>(&mut self, v: T) -> Cell<T> {
+        self.sources.cell(v)
+    }
+
+    /// Keeps a plan's answer live, over every space's rows and the node's
+    /// cells, pushed at every settle in the order watched: the plan
+    /// `query` makes with `args`, made once. Asked again for the same pair,
+    /// as a view asks each time it is built, it answers the same watch: a
+    /// function that returns a plan is a node of the graph, kept by its
+    /// query and its arguments.
+    pub fn watch(&mut self, query: u32, args: &[u8], plan: impl FnOnce() -> Plan) -> Watch {
+        if let Some(l) = self.sources.lives.iter().find(|l| l.1 .0 == query && l.1 .1 == args) {
+            return Watch(l.0);
+        }
+        let live = {
+            let shared = self.view(Space::Shared);
+            plan().live(&self.scope(&shared, false))
+        };
+        let id = self.sources.slots.add(None);
+        self.sources.lives.push((id, (query, args.to_vec()), live));
+        Watch(id)
+    }
+
+    /// A watch's answer, as it stands, unrecorded.
+    pub fn answer(&self, w: Watch) -> Option<&Live> {
+        self.sources.live(w)
+    }
+
+    /// A new reader, for a sink's leaf: it has read nothing yet.
+    pub fn reader(&mut self) -> Reader {
+        self.sources.readers.push(Vec::new());
+        Reader(self.sources.readers.len() as u32 - 1)
+    }
+
+    /// Runs `f` as `reader` pulls: what it reads of rows, cells and
+    /// watches, through whatever functions it calls, is recorded in place of what it read last, and the settle
+    /// tells its sink when any of it changes.
+    pub fn read<R>(&mut self, reader: Reader, f: impl FnOnce(&dyn Read) -> R) -> R {
+        let (out, read) = {
+            let shared = self.view(Space::Shared);
+            let scope = self.scope(&shared, false);
+            let r = Recorder::new(&scope, true);
+            let out = f(&r);
+            (out, r.spans.map(core::cell::RefCell::into_inner).unwrap_or_default())
+        };
+        if let Some(r) = self.sources.readers.get_mut(reader.0 as usize) {
+            *r = read;
+        }
+        out
+    }
+
+    /// A cell's value now, unrecorded.
+    pub fn get<T: 'static>(&self, c: Cell<T>) -> Option<&T> {
+        self.sources.slots.get(c.0, false)
+    }
+
+    /// How many times a cell's value has changed: what a bridge to a
+    /// toolkit's own observation compares.
+    pub fn version<T>(&self, c: Cell<T>) -> u32 {
+        self.sources.slots.version(c.0)
+    }
+
+    /// Writes a cell from outside a step (the host's link, the time): the
+    /// next settle tells its readers, unless the value is equal.
+    pub fn set<T: PartialEq + 'static>(&mut self, c: Cell<T>, v: T) {
+        self.sources.write(c.0, Boxed::new(v));
+    }
+
+    /// Ends a step or a receive: each space's changes go to the sink (what a
+    /// disk keeps), then through every watch, in the order watched, each
+    /// patch said; then each reader whose reads changed (a row, a cell, a
+    /// watch's answer) is told, once. Nothing is worked out but the plans:
+    /// a reader pulls when it next draws.
+    // Not inlined: the watch links one copy (checks.kernel-size).
+    #[inline(never)]
+    pub fn settle(&mut self, sink: &mut dyn Sink) {
+        let mut rows = Changes::default();
+        for space in [Space::Device, Space::Session, Space::Shared] {
+            let c = self.take_changes(space);
+            sink.changes(space, &c);
+            rows.reset |= c.reset;
+            rows.rows.extend(c.rows);
+        }
+        self.sources.begin();
+        let keys = &mut self.sources.keys;
+        keys.extend(rows.rows.iter().map(|(t, d)| (*t, d.key.clone())));
+        if keys.is_empty() && !rows.reset {
+            return self.sources.end();
+        }
+        let mut lives = core::mem::take(&mut self.sources.lives);
+        let mut changed = Vec::new();
+        {
+            let shared = self.view(Space::Shared);
+            let (now, was) = (self.scope(&shared, false), self.scope(&shared, true));
+            for (id, _, live) in &mut lives {
+                let patches = live.push_over(&now, &was, &rows);
+                if !patches.is_empty() {
+                    changed.push(key(*id));
+                    sink.patches(Watch(*id), &patches);
+                }
+            }
+        }
+        self.sources.lives = lives;
+        self.sources.keys.append(&mut changed);
+        for (i, read) in self.sources.readers.iter().enumerate() {
+            if rows.reset || hit(read, &self.sources.keys) {
+                sink.dirty(Reader(i as u32));
+            }
+        }
+        self.sources.end();
     }
 
     /// The entries refused since the last call, oldest first.
@@ -532,11 +707,16 @@ impl<B: Body + Clone + 'static, S: Store> Node<B, S> {
         if e.space == Space::Shared {
             return self.propose(e);
         }
-        match run(self.handlers, self.stores.get(e.space), &e) {
-            Ok((writes, made)) => {
+        match run(self.handlers, self.rows(e.space), &e, Some(&self.sources)) {
+            Ok((writes, made, journal)) => {
                 let space = e.space as usize;
-                note(&mut self.touched[space], self.stores.get(e.space), &mut rows_of(&writes));
-                self.stores.get_mut(e.space).apply(&writes);
+                if let Some(s) = self.stores.get_mut(e.space) {
+                    note(&mut self.touched[space], s, &mut rows_of(&writes));
+                    s.apply(&writes);
+                }
+                for (id, v) in journal {
+                    self.sources.write(id, v);
+                }
                 self.made_all(&e, made)
             }
             Err(why) => {
@@ -557,7 +737,7 @@ impl<B: Body + Clone + 'static, S: Store> Node<B, S> {
             base: &self.stores.shared,
             layer: &self.layer,
         };
-        let (writes, made) = run(self.handlers, &view, &e).unwrap_or_default();
+        let (writes, made, _) = run(self.handlers, &view, &e, None).unwrap_or_default();
         note(&mut self.touched[Space::Shared as usize], &view, &mut rows_of(&writes));
         self.layer.apply(&writes);
         let made = self.made_all(&e, made);
@@ -929,7 +1109,7 @@ impl<B: Body + Clone + 'static, S: Store> Node<B, S> {
                 base: &self.stores.shared,
                 layer: &layer,
             };
-            p.writes = run(self.handlers, &view, &p.entry).map(|(writes, _)| writes).unwrap_or_default();
+            p.writes = run(self.handlers, &view, &p.entry, None).map(|(writes, ..)| writes).unwrap_or_default();
             layer.apply(&p.writes);
         }
         // A row only the new layer writes was read from the confirmed rows
@@ -990,6 +1170,15 @@ pub(crate) mod app {
         Unknown,
     }
 
+    /// How many taps were seen: the app's one cell, the first its node
+    /// makes.
+    pub(crate) const SEEN: Cell<u64> = Cell::at(0);
+
+    fn seen(cx: &mut Cx<'_, Msg>, n: u64) {
+        let seen = cx.get(SEEN).copied().unwrap_or_default();
+        cx.set(SEEN, seen + n);
+    }
+
     /// What `Take` refuses with.
     pub(crate) const NONE_LEFT: Refusal = Refusal(301);
 
@@ -1037,11 +1226,12 @@ pub(crate) mod app {
             Ok(())
         },
         |cx| {
-            add(cx, 0, 1);
+            seen(cx, 1);
             Ok(())
         },
         |cx| {
             add(cx, 0, 100);
+            seen(cx, 100);
             cx.emit(Space::Shared, Msg::Seen);
             Err(Refusal(300))
         },
@@ -1075,12 +1265,13 @@ pub(crate) mod app {
 
     pub(crate) fn node(origin: u64) -> Node<Msg, Memory> {
         let stores = Spaces {
-            local: Memory::new(),
             device: Memory::new(),
             session: Memory::new(),
             shared: Memory::new(),
         };
-        Node::new(Origin(origin), 0, Version(1), &HANDLERS, stores)
+        let mut n = Node::new(Origin(origin), 0, Version(1), &HANDLERS, stores);
+        n.cell(0u64);
+        n
     }
 
     /// Every row of the shared tables a store or view holds, by its table.
@@ -1139,8 +1330,7 @@ pub(crate) mod tests {
         assert_eq!(e.id, EntryId { origin: Origin(1), n: 1 });
         assert_eq!(n.step(e.clone()), []);
         assert_eq!(n.step(e), []);
-        assert_eq!(count(n.store(Space::Device), 4), 4);
-        assert_eq!(count(n.store(Space::Local), 4), 0);
+        assert_eq!(count(n.store(Space::Device).unwrap(), 4), 4);
         assert_eq!(n.made(), 1);
     }
 
@@ -1153,9 +1343,9 @@ pub(crate) mod tests {
         n.route(tap.clone(), &mut up);
         // The local `Seen` was stepped; the shared `Add` is pending, seen
         // over the confirmed rows at once, and pushed.
-        assert_eq!(count(n.store(Space::Local), 0), 1);
+        assert_eq!(n.get(SEEN), Some(&1));
         assert_eq!(count(&n.view(Space::Shared), 7), 1);
-        assert_eq!(count(n.store(Space::Shared), 7), 0);
+        assert_eq!(count(n.store(Space::Shared).unwrap(), 7), 0);
         let [Up::Push(add)] = &up[..] else { panic!("one push: {up:?}") };
         let add = add.clone();
         assert_eq!(add.body, Msg::Add { key: 7, by: 1 });
@@ -1165,14 +1355,14 @@ pub(crate) mod tests {
 
         // Confirmed, it is the confirmed rows' and no longer pending.
         n.receive(logged(&add, 1, count_is(7, 1)), &mut up, 0);
-        assert_eq!(count(n.store(Space::Shared), 7), 1);
+        assert_eq!(count(n.store(Space::Shared).unwrap(), 7), 1);
         assert_eq!(count(&n.view(Space::Shared), 7), 1);
         assert_eq!(n.pending(), []);
         assert_eq!(n.cursor(), Seq(1));
         // Again, or past a gap, it is passed over.
         n.receive(logged(&add, 1, count_is(7, 9)), &mut up, 0);
         n.receive(logged(&add, 3, count_is(7, 9)), &mut up, 0);
-        assert_eq!(count(n.store(Space::Shared), 7), 1);
+        assert_eq!(count(n.store(Space::Shared).unwrap(), 7), 1);
     }
 
     /// Another node's facts arrive under a pending entry: they are applied,
@@ -1187,12 +1377,12 @@ pub(crate) mod tests {
         let theirs = b.make(Space::Shared, Msg::Add { key: 1, by: 5 }, 10);
         // Facts that say 5, whatever running it here would say.
         a.receive(logged(&theirs, 1, count_is(1, 5)), &mut up, 0);
-        assert_eq!(count(a.store(Space::Shared), 1), 5);
+        assert_eq!(count(a.store(Space::Shared).unwrap(), 1), 5);
         assert_eq!(count(&a.view(Space::Shared), 1), 7);
         assert_eq!(a.pending()[0].writes, count_is(1, 7));
         a.receive(logged(&mine, 2, count_is(1, 7)), &mut up, 0);
         assert_eq!(a.pending(), []);
-        assert_eq!(rows(&a.view(Space::Shared)), rows(a.store(Space::Shared)));
+        assert_eq!(rows(&a.view(Space::Shared)), rows(a.store(Space::Shared).unwrap()));
     }
 
     /// A refused entry is dropped and journaled; the one after it stays,
@@ -1242,7 +1432,8 @@ pub(crate) mod tests {
         let unknown = n.make(Space::Local, Msg::Unknown, 10);
         assert_eq!(n.step(refuse.clone()), []);
         assert_eq!(n.step(unknown.clone()), []);
-        assert_eq!(rows(n.store(Space::Device)), []);
+        assert_eq!(rows(n.store(Space::Device).unwrap()), []);
+        assert_eq!(n.get(SEEN), Some(&0));
         // Another node's shared entry is taken as facts, never run.
         let foreign = Entry {
             id: EntryId { origin: Origin(9), n: 1 },
@@ -1374,19 +1565,22 @@ pub(crate) mod tests {
             0,
         );
         n.take_changes(Space::Shared);
-        assert_eq!((count(n.store(Space::Shared), 1), n.cursor()), (3, Seq(1)));
+        assert_eq!((count(n.store(Space::Shared).unwrap(), 1), n.cursor()), (3, Seq(1)));
         // The log is not taken during a fill, and its parts are not read
         // until the last.
         n.receive(logged(&theirs, 2, count_is(1, 50)), &mut up, 0);
         n.receive(Down::Moved(count_is(2, 1)), &mut up, 0);
         assert_eq!(n.cursor(), Seq(1));
-        assert_eq!((count(n.store(Space::Shared), 1), count(n.store(Space::Shared), 2)), (3, 0));
+        assert_eq!(
+            (count(n.store(Space::Shared).unwrap(), 1), count(n.store(Space::Shared).unwrap(), 2)),
+            (3, 0)
+        );
         assert_eq!(n.take_changes(Space::Shared), Changes::default());
         n.receive(Down::Moved(count_is(3, 4)), &mut up, 0);
         assert_eq!(n.cursor(), Seq(5));
         assert!(n.take_changes(Space::Shared).reset);
         assert_eq!(
-            rows(n.store(Space::Shared)),
+            rows(n.store(Space::Shared).unwrap()),
             [(vec![2], 1u64.to_le_bytes().to_vec()), (vec![3], 4u64.to_le_bytes().to_vec())]
         );
         assert_eq!(n.pending().len(), 1);
@@ -1411,10 +1605,14 @@ pub(crate) mod tests {
         assert_eq!(up, [Up::Hello { cursor: Seq(6), time: 0 }]);
         n.receive(Down::Moved(count_is(8, 1)), &mut up, 0);
         assert_eq!(
-            (count(n.store(Space::Shared), 7), count(n.store(Space::Shared), 8), n.cursor()),
+            (
+                count(n.store(Space::Shared).unwrap(), 7),
+                count(n.store(Space::Shared).unwrap(), 8),
+                n.cursor()
+            ),
             (0, 1, Seq(6))
         );
-        assert_eq!(count(n.store(Space::Shared), 2), 11);
+        assert_eq!(count(n.store(Space::Shared).unwrap(), 2), 11);
         // An empty fill ends at once.
         n.receive(
             Down::Fill {
@@ -1425,7 +1623,7 @@ pub(crate) mod tests {
             &mut up,
             0,
         );
-        assert_eq!((rows(n.store(Space::Shared)), n.cursor()), (vec![], Seq(9)));
+        assert_eq!((rows(n.store(Space::Shared).unwrap()), n.cursor()), (vec![], Seq(9)));
     }
 
     /// A subscription's rows are held apart until every query the node
@@ -1445,7 +1643,7 @@ pub(crate) mod tests {
         // A fact for a row held, and one for another.
         let facts = Writes(vec![count_is(2, 5).0[0].clone(), count_is(9, 1).0[0].clone()]);
         n.receive(logged(&theirs, 1, facts), &mut up, 0);
-        assert_eq!(rows(n.store(Space::Shared)), [(vec![9], 1u64.to_le_bytes().to_vec())]);
+        assert_eq!(rows(n.store(Space::Shared).unwrap()), [(vec![9], 1u64.to_le_bytes().to_vec())]);
         n.receive(
             Down::Got {
                 query: QueryId(0),
@@ -1455,7 +1653,7 @@ pub(crate) mod tests {
             0,
         );
         // The first is got, the second not: nothing is taken yet.
-        assert_eq!(n.store(Space::Shared).len(COUNTS), 1);
+        assert_eq!(n.store(Space::Shared).unwrap().len(COUNTS), 1);
         assert!(!n.complete(QueryId(0), &[]));
         n.take_changes(Space::Shared);
         n.receive(Down::Moved(count_is(3, 3)), &mut up, 0);
@@ -1468,11 +1666,14 @@ pub(crate) mod tests {
             0,
         );
         assert!(n.complete(QueryId(0), &[]) && n.complete(QueryId(1), &[]));
-        assert_eq!((count(n.store(Space::Shared), 2), n.store(Space::Shared).len(COUNTS)), (5, 4));
+        assert_eq!(
+            (count(n.store(Space::Shared).unwrap(), 2), n.store(Space::Shared).unwrap().len(COUNTS)),
+            (5, 4)
+        );
         assert_eq!(n.take_changes(Space::Shared).rows.len(), 3);
         // Got, a move is taken as it comes.
         n.receive(Down::Moved(count_is(4, 4)), &mut up, 0);
-        assert_eq!(count(n.store(Space::Shared), 4), 4);
+        assert_eq!(count(n.store(Space::Shared).unwrap(), 4), 4);
         // A third, its rows lost with the connection: the hello asks from
         // the cursor they came at, though the log went on.
         n.subscribe(QueryId(2), vec![], &mut up);
@@ -1481,7 +1682,7 @@ pub(crate) mod tests {
         up.clear();
         n.connect(&mut up, 0);
         assert_eq!(up[3], Up::Hello { cursor: Seq(1), time: 0 });
-        assert_eq!((count(n.store(Space::Shared), 5), n.cursor()), (0, Seq(2)));
+        assert_eq!((count(n.store(Space::Shared).unwrap(), 5), n.cursor()), (0, Seq(2)));
         assert!(!n.complete(QueryId(0), &[]));
     }
 
@@ -1497,12 +1698,12 @@ pub(crate) mod tests {
         let e = a.make(Space::Session, Msg::Add { key: 1, by: 3 }, 10);
         a.route(e.clone(), &mut up);
         assert_eq!(up, [Up::Live(e.clone())]);
-        assert_eq!(count(a.store(Space::Session), 1), 3);
+        assert_eq!(count(a.store(Space::Session).unwrap(), 1), 3);
         a.receive(Down::Live(e.clone()), &mut up, 0);
-        assert_eq!(count(a.store(Space::Session), 1), 3);
+        assert_eq!(count(a.store(Space::Session).unwrap(), 1), 3);
         let mut b = node(2);
         b.receive(Down::Live(e), &mut up, 0);
-        assert_eq!(count(b.store(Space::Session), 1), 3);
+        assert_eq!(count(b.store(Space::Session).unwrap(), 1), 3);
     }
 
     /// Each space's changes are taken on their own: a session row set
@@ -1535,7 +1736,8 @@ pub(crate) mod tests {
         };
         assert_eq!(session.rows, [pos(1, value(6)), pos(2, value(9))]);
         assert!(!session.reset);
-        assert_eq!(n.take_changes(Space::Local).rows, [change(COUNTS, 0, None, value(1))]);
+        assert_eq!(n.take_changes(Space::Local), Changes::default());
+        assert_eq!(n.get(SEEN), Some(&1));
         assert_eq!(n.take_changes(Space::Shared).rows, [change(COUNTS, 3, None, value(1))]);
         // Taken, they are gone; a value set back to what it was is no
         // change.
@@ -1566,7 +1768,10 @@ pub(crate) mod tests {
         let mine = watch.make(Space::Session, Msg::Set { key: 15, value: 2 }, 10);
         watch.route(mine.clone(), &mut up);
         assert_eq!(up, [Up::Live(mine)]);
-        assert_eq!(watch.store(Space::Session).get(POSITIONS, &at(15)), Some(2u64.to_le_bytes().to_vec()));
+        assert_eq!(
+            watch.store(Space::Session).unwrap().get(POSITIONS, &at(15)),
+            Some(2u64.to_le_bytes().to_vec())
+        );
         // Linked, a control is applied at once and sent.
         up.clear();
         watch.connect(&mut up, 20);
@@ -1575,14 +1780,20 @@ pub(crate) mod tests {
         let pause = watch.make(Space::Session, Msg::Set { key: 1, value: 6 }, 30);
         watch.route(pause.clone(), &mut up);
         assert_eq!((up, watch.take_refused()), (vec![Up::Live(pause)], vec![]));
-        assert_eq!(watch.store(Space::Session).get(POSITIONS, &at(1)), Some(6u64.to_le_bytes().to_vec()));
+        assert_eq!(
+            watch.store(Space::Session).unwrap().get(POSITIONS, &at(1)),
+            Some(6u64.to_le_bytes().to_vec())
+        );
         // The link down: refused again, the row as it was.
         watch.disconnect();
         let mut up = Vec::new();
         let late = watch.make(Space::Session, Msg::Set { key: 1, value: 7 }, 40);
         watch.route(late.clone(), &mut up);
         assert_eq!((up.len(), watch.take_refused()), (0, vec![(late.id, Refusal::OFFLINE)]));
-        assert_eq!(watch.store(Space::Session).get(POSITIONS, &at(1)), Some(6u64.to_le_bytes().to_vec()));
+        assert_eq!(
+            watch.store(Space::Session).unwrap().get(POSITIONS, &at(1)),
+            Some(6u64.to_le_bytes().to_vec())
+        );
     }
 
     /// The answer to a hello heals the session: a row the node does not
@@ -1634,11 +1845,14 @@ pub(crate) mod tests {
             watch.receive(Down::Live(e), &mut up, 110);
         }
         assert_eq!(
-            (value(watch.store(Space::Session), 1), value(watch.store(Space::Session), 15)),
+            (
+                value(watch.store(Space::Session).unwrap(), 1),
+                value(watch.store(Space::Session).unwrap(), 15)
+            ),
             (Some(3), Some(1))
         );
         watch.receive(Down::Welcome { sent: 100, time: 5110 }, &mut up, 120);
-        let s = watch.store(Space::Session);
+        let s = watch.store(Space::Session).unwrap();
         assert_eq!([1, 2, 3, 15, 16].map(|k| value(s, k)), [Some(3), None, Some(9), Some(1), Some(4)]);
         let session = watch.take_changes(Space::Session);
         assert_eq!(session.rows.iter().map(|(_, d)| d.key.clone()).collect::<Vec<_>>(), [at(1), at(2)]);
@@ -1657,10 +1871,10 @@ pub(crate) mod tests {
         let mut control = phone.make(Space::Session, Msg::Set { key: 15, value: 7 }, 10);
         control.at = Hlc { wall: 1, logical: 0 };
         watch.receive(Down::Live(control.clone()), &mut up, 130);
-        assert_eq!(value(watch.store(Space::Session), 15), Some(1));
+        assert_eq!(value(watch.store(Space::Session).unwrap(), 15), Some(1));
         control.at = Hlc { wall: 200, logical: 0 };
         watch.receive(Down::Live(control), &mut up, 130);
-        assert_eq!(value(watch.store(Space::Session), 15), Some(7));
+        assert_eq!(value(watch.store(Space::Session).unwrap(), 15), Some(7));
         assert_eq!(watch.latest().count(), 4);
     }
 

@@ -249,7 +249,7 @@ impl<B: Body + Clone + 'static, S: Store> Authority<B, S> {
             return (answer(verdict), None);
         }
         self.last.insert(id.origin, id.n);
-        match stamped(actor, e).and_then(|e| run(self.handlers, &self.store, &e).map(|(facts, _)| (e, facts))) {
+        match stamped(actor, e).and_then(|e| run(self.handlers, &self.store, &e, None).map(|(facts, ..)| (e, facts))) {
             Err(why) => {
                 self.refused.insert(id, why);
                 (answer(Verdict::Refused(why)), None)
@@ -480,7 +480,7 @@ pub(crate) mod tests {
         for (_, down) in out {
             d.receive(down, &mut Vec::new(), 0);
         }
-        assert_eq!(d.store(Space::Session).len(POSITIONS), 2);
+        assert_eq!(d.store(Space::Session).unwrap().len(POSITIONS), 2);
     }
 
     /// A hello below what the authority keeps of its log is answered with
@@ -512,7 +512,7 @@ pub(crate) mod tests {
         for down in fill {
             d.receive(down, &mut up, 0);
         }
-        assert_eq!((rows(d.store(Space::Shared)), d.cursor()), (rows(a.store()), Seq(5)));
+        assert_eq!((rows(d.store(Space::Shared).unwrap()), d.cursor()), (rows(a.store()), Seq(5)));
     }
 
     /// The tests' queries: the counts whose value is odd or even as the
@@ -594,7 +594,7 @@ pub(crate) mod tests {
             }
         };
         take(&mut up, &mut a, &mut watch);
-        assert_eq!(rows(watch.store(Space::Shared)), odd(a.store()));
+        assert_eq!(rows(watch.store(Space::Shared).unwrap()), odd(a.store()));
         assert!(watch.complete(QueryId(0), &[1]));
         assert_eq!(watch.cursor(), a.head());
         // A write it holds, one it does not, and one that moves a row out.
@@ -608,7 +608,7 @@ pub(crate) mod tests {
         for (key, by) in [(1, 2), (2, 2), (3, 1), (5, 1)] {
             let out = push(&mut a, key, by);
             deliver(out, &mut watch);
-            assert_eq!(rows(watch.store(Space::Shared)), odd(a.store()));
+            assert_eq!(rows(watch.store(Space::Shared).unwrap()), odd(a.store()));
         }
         // A second query: what it adds comes, what both hold is not sent
         // twice, and letting the first go moves out only what the second
@@ -622,13 +622,16 @@ pub(crate) mod tests {
         let first_two: Vec<_> = rows(a.store()).into_iter().take(2).collect();
         let mut both: BTreeSet<_> = odd(a.store()).into_iter().collect();
         both.extend(first_two.iter().cloned());
-        assert_eq!(rows(watch.store(Space::Shared)), both.into_iter().collect::<Vec<_>>());
+        assert_eq!(rows(watch.store(Space::Shared).unwrap()), both.into_iter().collect::<Vec<_>>());
         watch.unsubscribe(QueryId(0), vec![1], &mut up);
         take(&mut up, &mut a, &mut watch);
-        assert_eq!(rows(watch.store(Space::Shared)), first_two);
+        assert_eq!(rows(watch.store(Space::Shared).unwrap()), first_two);
         // A row that comes before them moves into the take; one moves out.
         deliver(push(&mut a, 0, 4), &mut watch);
-        assert_eq!(rows(watch.store(Space::Shared)), rows(a.store()).into_iter().take(2).collect::<Vec<_>>());
+        assert_eq!(
+            rows(watch.store(Space::Shared).unwrap()),
+            rows(a.store()).into_iter().take(2).collect::<Vec<_>>()
+        );
         assert!(watch.complete(QueryId(1), &[]) && !watch.complete(QueryId(0), &[1]));
         // A query the build does not have is got at once, empty, before
         // the hello and after it.
@@ -645,7 +648,7 @@ pub(crate) mod tests {
             }
         }
         assert!(late.complete(QueryId(7), &[1]));
-        assert_eq!((late.store(Space::Shared).len(COUNTS), late.cursor()), (0, a.head()));
+        assert_eq!((late.store(Space::Shared).unwrap().len(COUNTS), late.cursor()), (0, a.head()));
     }
 
     /// A device in the convergence test: its node, what is in flight on
@@ -996,7 +999,7 @@ pub(crate) mod tests {
                         let key = 10 * owner as u8 + rng.below(2) as u8;
                         let dev = &mut devices[d];
                         if owner != d {
-                            if dev.node.store(Space::Session).get(POSITIONS, &at(key)).is_none() {
+                            if dev.node.store(Space::Session).unwrap().get(POSITIONS, &at(key)).is_none() {
                                 continue;
                             }
                             if d == PHONE && owner == WATCH {
@@ -1008,7 +1011,7 @@ pub(crate) mod tests {
                             }
                         }
                         let e = dev.node.make(Space::Session, Msg::Set { key, value }, now);
-                        let (id, before, sent) = (e.id, position(dev.node.store(Space::Session), key), said.len());
+                        let (id, before, sent) = (e.id, position(dev.node.store(Space::Session).unwrap(), key), said.len());
                         if d == PHONE {
                             let s = relay.route(&mut dev.node, e, &mut said, now);
                             assert!(s.changes.rows.is_empty());
@@ -1025,7 +1028,11 @@ pub(crate) mod tests {
                             assert_eq!(refused, !dev.node.linked() && d != owner, "seed {seed}: refused only offline");
                         }
                         if refused {
-                            assert_eq!(position(dev.node.store(Space::Session), key), before, "seed {seed}: refused, not applied");
+                            assert_eq!(
+                                position(dev.node.store(Space::Session).unwrap(), key),
+                                before,
+                                "seed {seed}: refused, not applied"
+                            );
                             assert_eq!(said.len(), sent, "seed {seed}: refused, not sent");
                         }
                     }
@@ -1125,7 +1132,7 @@ pub(crate) mod tests {
                         read.insert((t, k.clone(), server.store().get(t, &k).unwrap()));
                     }
                     // Run over what it holds, its query answers as the server's.
-                    let here = QUERIES[query.0 as usize](args).live(dev.node.store(Space::Shared));
+                    let here = QUERIES[query.0 as usize](args).live(dev.node.store(Space::Shared).unwrap());
                     assert_eq!(here.rows(), live.rows(), "seed {seed}: device {d}'s {query:?} run where it is");
                     assert!(dev.node.complete(*query, args), "seed {seed}: {query:?} complete");
                 }
@@ -1136,7 +1143,7 @@ pub(crate) mod tests {
                     seen.children += notes;
                 }
             }
-            assert_eq!(shared(dev.node.store(Space::Shared)), held, "seed {seed}: device {d}");
+            assert_eq!(shared(dev.node.store(Space::Shared).unwrap()), held, "seed {seed}: device {d}");
             assert_eq!(shared(&dev.node.view(Space::Shared)), held, "seed {seed}: device {d}");
             assert_eq!(dev.node.pending(), [], "seed {seed}");
             assert_eq!(dev.node.cursor(), server.head(), "seed {seed}: device {d}'s cursor");
@@ -1153,9 +1160,9 @@ pub(crate) mod tests {
             // flight; never another actor's.
             for owner in (0..4).filter(|&o| actors[o] == dev.actor) {
                 for key in [10 * owner as u8, 10 * owner as u8 + 1] {
-                    let theirs = position(devices[owner].node.store(Space::Session), key);
+                    let theirs = position(devices[owner].node.store(Space::Session).unwrap(), key);
                     assert_eq!(
-                        position(dev.node.store(Space::Session), key),
+                        position(dev.node.store(Space::Session).unwrap(), key),
                         theirs,
                         "seed {seed}: device {d}'s {key}, as its owner holds it"
                     );
@@ -1166,10 +1173,13 @@ pub(crate) mod tests {
                     assert_eq!(kept, theirs, "seed {seed}: device {d}'s upstream's {key}");
                 }
             }
-            dev.node.store(Space::Session).scan(POSITIONS, crate::store::Range::all(), &mut |k, _| {
-                assert_eq!(actors[usize::from(k[8] / 10)], dev.actor, "seed {seed}: another actor's session row");
-                true
-            });
+            dev.node
+                .store(Space::Session)
+                .unwrap()
+                .scan(POSITIONS, crate::store::Range::all(), &mut |k, _| {
+                    assert_eq!(actors[usize::from(k[8] / 10)], dev.actor, "seed {seed}: another actor's session row");
+                    true
+                });
         }
         for l in log.values() {
             assert_eq!(

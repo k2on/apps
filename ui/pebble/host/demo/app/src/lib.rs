@@ -229,7 +229,6 @@ mod tests {
 
     fn spaces() -> Spaces<Memory> {
         Spaces {
-            local: Memory::new(),
             device: Memory::new(),
             session: Memory::new(),
             shared: Memory::new(),

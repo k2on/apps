@@ -749,7 +749,7 @@ pub(crate) mod tests {
     #[cfg_attr(test, test)]
     fn a_client_that_connects_again_is_sent_what_changed() {
         let (mut a, mut writer, mut watch) = served(0, 1000);
-        assert_eq!(rows(watch.store(Space::Shared)), odd(a.store()));
+        assert_eq!(rows(watch.store(Space::Shared).unwrap()), odd(a.store()));
         a.close(Conn(2), 100);
         assert_eq!(a.serve().kept(), 1);
         // Held and changed; moved in; moved out; not held.
@@ -765,7 +765,7 @@ pub(crate) mod tests {
         };
         assert_eq!((whole, rows_sent), (false, vec![count_is(1, 3), count_is(2, 3), gone]));
         assert!(matches!(sent[sent.len() - 2..], [Down::Got { .. }, Down::Welcome { .. }]));
-        assert_eq!(rows(watch.store(Space::Shared)), odd(a.store()));
+        assert_eq!(rows(watch.store(Space::Shared).unwrap()), odd(a.store()));
         assert!(watch.complete(QueryId(0), &[1]) && watch.cursor() == a.head());
 
         // A change sent as the connection is lost is sent again.
@@ -774,7 +774,7 @@ pub(crate) mod tests {
         a.close(Conn(3), 300);
         let sent = connect(&mut a, &mut watch, 4, 400);
         assert_eq!(filled(&sent), (false, vec![count_is(1, 5)]));
-        assert_eq!(rows(watch.store(Space::Shared)), odd(a.store()));
+        assert_eq!(rows(watch.store(Space::Shared).unwrap()), odd(a.store()));
         // With nothing new, nothing: the fill that sent it reached its
         // cursor, so it had it.
         a.close(Conn(4), 500);
@@ -790,10 +790,10 @@ pub(crate) mod tests {
         let sent = connect(&mut a, &mut watch, 8, 670);
         let (_, again) = filled(&sent);
         assert_eq!(again.len(), 2);
-        assert_eq!(rows(watch.store(Space::Shared)), rows(a.store()));
+        assert_eq!(rows(watch.store(Space::Shared).unwrap()), rows(a.store()));
         watch.unsubscribe(QueryId(0), vec![0], &mut up);
         deliver(a.receive(Conn(8), up.remove(0), 680), 8, &mut watch);
-        assert_eq!(rows(watch.store(Space::Shared)), odd(a.store()));
+        assert_eq!(rows(watch.store(Space::Shared).unwrap()), odd(a.store()));
         a.close(Conn(8), 690);
         let sent = connect(&mut a, &mut watch, 5, 695);
         assert_eq!(filled(&sent).1.len(), 2, "the move-outs, sent outside the log, again");
@@ -814,7 +814,7 @@ pub(crate) mod tests {
                     .collect()
             )
         );
-        assert_eq!(rows(watch.store(Space::Shared)), odd(a.store()));
+        assert_eq!(rows(watch.store(Space::Shared).unwrap()), odd(a.store()));
         // A client opened again while connected takes its record over.
         a.open(Conn(7), ME, Some(Origin(2)));
         assert!(a.receive(Conn(6), Up::Hello { cursor: Seq(0), time: 0 }, 0).is_empty());
@@ -832,7 +832,7 @@ pub(crate) mod tests {
         for u in core::mem::take(&mut up) {
             deliver(a.receive(Conn(2), u, 0), 2, &mut watch);
         }
-        let both = rows(watch.store(Space::Shared));
+        let both = rows(watch.store(Space::Shared).unwrap());
         watch.unsubscribe(QueryId(0), vec![1], &mut up);
         assert_eq!(a.receive(Conn(2), up.remove(0), 10), []);
         assert_eq!(a.next_tick(), Some(110));
@@ -851,10 +851,10 @@ pub(crate) mod tests {
         watch.unsubscribe(QueryId(0), vec![1], &mut up);
         a.receive(Conn(2), up.remove(0), 60);
         assert_eq!(a.tick(159), []);
-        assert_eq!(rows(watch.store(Space::Shared)), both);
+        assert_eq!(rows(watch.store(Space::Shared).unwrap()), both);
         deliver(a.tick(160), 2, &mut watch);
         let first_two: Vec<_> = rows(a.store()).into_iter().take(2).collect();
-        assert_eq!(rows(watch.store(Space::Shared)), first_two);
+        assert_eq!(rows(watch.store(Space::Shared).unwrap()), first_two);
 
         // Not said again at the next connection: held, then let go.
         a.close(Conn(2), 200);

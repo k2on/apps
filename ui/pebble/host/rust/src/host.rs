@@ -229,7 +229,6 @@ fn open<A: App>(app: A) -> Box<Host<A>> {
     };
     let rows = shared.len();
     let stores = Spaces {
-        local: Rows::new(),
         device,
         session: Rows::new(),
         shared,
@@ -370,7 +369,7 @@ impl<A: App> Host<A> {
         let rows = |f: &mut crate::disk::Visit<'_>| {
             let mut p = Vec::new();
             for space in [Space::Device, Space::Shared] {
-                node.store(space).each(&mut |table, key, value| {
+                node.store(space).unwrap().each(&mut |table, key, value| {
                     path(&mut p, space, table, key);
                     f(&p, value);
                 });

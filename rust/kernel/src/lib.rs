@@ -13,7 +13,13 @@
 //! heals what diverged. A node estimates the tree's clock from its hellos,
 //! and anchors are written and read in it. Queries are
 //! [`plan`]s of incremental operators, pulled from the store in order and
-//! pushed the changes a node's view takes ([`Node::take_changes`]). An
+//! pushed the changes a node's view takes ([`Node::take_changes`]). Beside
+//! its rows a node keeps [`cell`]s, single values never encoded (the
+//! `local` space is cells), and the plans it watches; every step or receive ends in one settle
+//! ([`Node::settle`]), which pushes the rows' changes through the watches,
+//! marks what read anything that changed, and tells a [`Sink`] once per
+//! reader. A database with no views has no sink to tell, and views with no
+//! database link no sync. An
 //! upstream serves its downstream nodes with a [`Serve`], keeping per
 //! client the record of what it holds: the server's authority does, and a
 //! phone's [`Relay`] serves its watch from the phone's own view. Neither is
@@ -35,6 +41,7 @@ extern crate alloc;
 pub mod anchor;
 #[cfg(feature = "upstream")]
 pub mod authority;
+pub mod cell;
 pub mod codec;
 pub mod entry;
 pub mod node;
@@ -43,12 +50,14 @@ pub mod plan;
 pub mod relay;
 #[cfg(feature = "upstream")]
 pub mod serve;
+mod slot;
 pub mod store;
 pub mod sync;
 
 pub use anchor::Anchor;
 #[cfg(feature = "upstream")]
 pub use authority::Authority;
+pub use cell::{Cell, Reader, Sink, Watch};
 pub use codec::{Decode, Encode, Frames};
 pub use entry::{Actor, Entry, EntryId, Hlc, Origin, Seq, Space, Version};
 pub use node::{Body, Cx, Handler, HandlerId, Link, Node, Refusal, Route, Spaces};
@@ -73,6 +82,8 @@ pub mod selftest {
     /// Every module's tests.
     pub const TESTS: &[&[Test]] = &[
         crate::codec::tests::ALL,
+        crate::slot::tests::ALL,
+        crate::cell::tests::ALL,
         crate::anchor::tests::ALL,
         crate::entry::tests::ALL,
         crate::store::tests::ALL,

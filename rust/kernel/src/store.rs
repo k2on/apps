@@ -17,6 +17,7 @@ use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
 use core::ops::Bound;
 
+use crate::cell::Sources;
 use crate::codec::{Decode, Encode, Error, Reader};
 
 /// A table, by the number its build gives it.
@@ -77,6 +78,13 @@ pub trait Read {
     /// Calls `f` with each row in `range`, in its order, until `f` returns
     /// false.
     fn scan(&self, table: TableId, range: Range<'_>, f: &mut dyn FnMut(&[u8], &[u8]) -> bool);
+
+    /// The node's cells and watches, if it reads them, and whether as
+    /// they were before the settle under way: what [`crate::Cell::get`]
+    /// reads `id` from. A store holds none.
+    fn sources(&self, _id: u32) -> Option<(&Sources, bool)> {
+        None
+    }
 }
 
 /// Reading and writing rows.
@@ -356,7 +364,22 @@ pub struct View<'a> {
     pub layer: &'a Layer,
 }
 
+/// No rows: the `local` space's, whose state is cells.
+pub(crate) struct Nothing;
+
+impl Read for Nothing {
+    fn get(&self, _: TableId, _: &[u8]) -> Option<Vec<u8>> {
+        None
+    }
+
+    fn scan(&self, _: TableId, _: Range<'_>, _: &mut dyn FnMut(&[u8], &[u8]) -> bool) {}
+}
+
 impl Read for View<'_> {
+    fn sources(&self, id: u32) -> Option<(&Sources, bool)> {
+        self.base.sources(id)
+    }
+
     fn get(&self, table: TableId, key: &[u8]) -> Option<Vec<u8>> {
         match self.layer.0.get(&path(table, key)) {
             Some(w) => w.clone(),

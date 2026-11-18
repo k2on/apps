@@ -10,7 +10,9 @@
 //! A row of a result is its **place**, bytes whose order is the row's
 //! order in the result, and its value. A scan's places are its table's
 //! keys; `filter`, `map` and `take` keep their input's; a `sort` puts its
-//! sort key before them, and a `group` places a group by its key. An index
+//! sort key before them, escaped and ended as a parent's place is (so the
+//! row's own place can be read back), and a `group` places a group by its
+//! key. An index
 //! is a table like any other, its key the indexed bytes and then the row's
 //! key, its value the row, kept by the handlers that write the row: a scan
 //! of its range reads the rows in the index's order.
@@ -33,7 +35,10 @@
 //! facts did to what it reads, its store already after them) go up through
 //! the operators, each answering the [`Diff`]s of its own rows; a [`Live`]
 //! answer turns them into the positional [`Patch`]es that splice a list a
-//! view holds into the new answer. An operator is given the rows after the
+//! view holds into the new answer: each insert with its depth in a nested
+//! list, and a row that left one place and came to another (its identity,
+//! [`Live::id`], its base row's key under its parents', unchanged) as a
+//! move, for a toolkit to animate. An operator is given the rows after the
 //! settle and as they were before it ([`Settle`]), so a row's old side is
 //! made over the rows it was made over. The contract, held by the tests:
 //! after every push, every operator's rows are a fresh run's, and the
@@ -70,6 +75,7 @@ use alloc::vec::Vec;
 use core::cell::RefCell;
 use core::ops::Bound;
 
+use crate::cell::{hit, Sources, SOURCES};
 use crate::codec::{from_slice, put_bytes, to_vec, Decode, Encode, Error, Reader};
 use crate::store::{walk, Layer, Range, Read, Sparse, TableId, Tree, View};
 
@@ -115,6 +121,13 @@ pub trait Op {
     /// Builds its state over `db`, after its input's.
     fn hydrate(&mut self, db: &dyn Read);
 
+    /// Writes the identity of its row at `place` (its base row's key, as
+    /// placed among its parents': the same whatever its sort says) onto
+    /// `out`, and answers its depth among them, 0 at the top.
+    fn id(&self, place: &[u8], out: &mut Vec<u8>) -> u8 {
+        own(place, out)
+    }
+
     /// Calls `f` with each base row its row at `place` is made of, and each
     /// row its closures read for it, as `db` holds them: what an upstream
     /// sends a node subscribed to it.
@@ -131,8 +144,14 @@ pub trait Op {
 /// verdict or bytes out.
 pub type Fun<T> = Box<dyn Fn(&dyn Read, &[u8], &[u8]) -> T>;
 
+/// A row that is its own identity, at the top: a scan's, a group's.
+fn own(place: &[u8], out: &mut Vec<u8>) -> u8 {
+    out.extend_from_slice(place);
+    0
+}
+
 /// Whether `k` is in the range from `lo` to `hi`.
-fn within(lo: Bound<&[u8]>, hi: Bound<&[u8]>, k: &[u8]) -> bool {
+pub(crate) fn within(lo: Bound<&[u8]>, hi: Bound<&[u8]>, k: &[u8]) -> bool {
     let above = match lo {
         Bound::Included(l) => k >= l,
         Bound::Excluded(l) => k > l,
@@ -209,14 +228,14 @@ fn merge(a: Vec<Diff>, b: Vec<Diff>) -> Vec<Diff> {
 
 /// A store read through, each read noted as the range of keys it covered,
 /// when `on`: what a closure that reads is given.
-struct Recorder<'a> {
+pub(crate) struct Recorder<'a> {
     db: &'a dyn Read,
     /// The ranges read, each its table and its bounds, encoded.
-    spans: Option<RefCell<Vec<u8>>>,
+    pub(crate) spans: Option<RefCell<Vec<u8>>>,
 }
 
 impl<'a> Recorder<'a> {
-    fn new(db: &'a dyn Read, on: bool) -> Recorder<'a> {
+    pub(crate) fn new(db: &'a dyn Read, on: bool) -> Recorder<'a> {
         Recorder {
             db,
             spans: on.then(Default::default),
@@ -263,13 +282,19 @@ impl Read for Recorder<'_> {
         };
         self.note(table, lo, hi);
     }
+
+    fn sources(&self, id: u32) -> Option<(&Sources, bool)> {
+        let k = id.to_be_bytes();
+        self.note(SOURCES, Bound::Included(&k), Bound::Included(&k));
+        self.db.sources(id)
+    }
 }
 
 /// A recorded range: its table and bounds.
 type Span<'a> = (TableId, Bound<&'a [u8]>, Bound<&'a [u8]>);
 
 /// The ranges `spans` records.
-fn spans(spans: &[u8]) -> impl Iterator<Item = Span<'_>> {
+pub(crate) fn spans(spans: &[u8]) -> impl Iterator<Item = Span<'_>> {
     let mut r = Reader::new(spans);
     core::iter::from_fn(move || {
         let table = TableId::decode(&mut r).ok()?;
@@ -324,8 +349,9 @@ impl Reads {
         let changes = &s.changes.rows;
         for (place, read) in &reads.0.tree {
             let Some(read) = read else { continue };
-            let mut read = spans(read);
-            if !read.any(|(t, lo, hi)| changes.iter().any(|(ct, d)| *ct == t && within(lo, hi, &d.key))) {
+            // Rows it read that changed, or a node's cells.
+            let rows = spans(read).any(|(t, lo, hi)| changes.iter().any(|(ct, d)| *ct == t && within(lo, hi, &d.key)));
+            if !rows && !s.db.sources(0).is_some_and(|(src, _)| hit(read, &src.keys)) {
                 continue;
             }
             let Err(i) = out.binary_search_by(|d| d.key.cmp(place)) else { continue };
@@ -454,6 +480,10 @@ impl Op for Each {
         }
     }
 
+    fn id(&self, place: &[u8], out: &mut Vec<u8>) -> u8 {
+        self.input.id(place, out)
+    }
+
     #[cfg(feature = "upstream")]
     fn base(&self, db: &dyn Read, place: &[u8], f: &mut dyn FnMut(TableId, &[u8])) {
         self.input.base(db, place, f);
@@ -476,9 +506,11 @@ struct Sort {
     reads: Option<Reads>,
 }
 
-/// A row's place in a sort: `by`'s bytes, then its place.
+/// A row's place in a sort: `by`'s bytes, escaped and ended as a
+/// parent's are (so that none is a prefix of another, whatever `by`
+/// gives, and the row's own place can be read back), then its place.
 fn sorted(by: &Fun<Vec<u8>>, db: &dyn Read, k: &[u8], v: &[u8]) -> Vec<u8> {
-    let mut at = by(db, k, v);
+    let mut at = escaped(&by(db, k, v));
     at.extend_from_slice(k);
     at
 }
@@ -533,6 +565,13 @@ impl Op for Sort {
             let by = &self.by;
             let at = Reads::run(&mut self.reads, db, &k, |db| sorted(by, db, &k, &v));
             self.rows.put(at, v);
+        }
+    }
+
+    fn id(&self, place: &[u8], out: &mut Vec<u8>) -> u8 {
+        match unescaped(place) {
+            Some((_, k)) => self.input.id(k, out),
+            None => own(place, out),
         }
     }
 
@@ -679,6 +718,10 @@ impl Op for Take {
             });
         }
         (self.size, self.bound) = (size, bound);
+    }
+
+    fn id(&self, place: &[u8], out: &mut Vec<u8>) -> u8 {
+        self.input.id(place, out)
     }
 
     #[cfg(feature = "upstream")]
@@ -889,7 +932,6 @@ fn escaped(place: &[u8]) -> Vec<u8> {
 
 /// A place of a related answer: its parent's place, and the child's within
 /// it (empty for the parent's own row); `None` if it is not one.
-#[cfg(feature = "upstream")]
 fn unescaped(place: &[u8]) -> Option<(Vec<u8>, &[u8])> {
     let mut out = Vec::new();
     let mut i = 0;
@@ -1049,6 +1091,24 @@ impl Op for Related {
         }
     }
 
+    fn id(&self, place: &[u8], out: &mut Vec<u8>) -> u8 {
+        let Some((p, c)) = unescaped(place) else {
+            return own(place, out);
+        };
+        let mut parent = Vec::new();
+        let depth = self.input.id(&p, &mut parent);
+        out.append(&mut escaped(&parent));
+        if c.is_empty() {
+            return depth;
+        }
+        // A join's children are its rows: they stand where parents would.
+        let below = match self.kid(&p) {
+            Some(kid) => kid.id(c, out),
+            None => own(c, out),
+        };
+        depth + below + u8::from(!self.flat)
+    }
+
     #[cfg(feature = "upstream")]
     fn base(&self, db: &dyn Read, place: &[u8], f: &mut dyn FnMut(TableId, &[u8])) {
         let Some((p, c)) = unescaped(place) else { return };
@@ -1078,6 +1138,14 @@ pub struct Plan(Box<dyn Op>);
 /// index.
 pub fn scan(table: TableId, lo: Bound<Vec<u8>>, hi: Bound<Vec<u8>>) -> Plan {
     Plan(Box::new(Scan { table, lo, hi }))
+}
+
+/// One row of a table: a one-row plan, its answer cut off by the row's
+/// bytes and decoded only where it is read.
+impl Plan {
+    pub fn get(table: TableId, key: &[u8]) -> Plan {
+        scan(table, Bound::Included(key.to_vec()), Bound::Included(key.to_vec()))
+    }
 }
 
 /// A table's rows whose keys begin with `prefix`: an index's rows for one
@@ -1129,7 +1197,7 @@ impl Plan {
     }
 
     /// The rows placed by the bytes `by` gives first: bytes whose order is
-    /// the sort's, none a prefix of another. Holds its input: where an
+    /// the sort's. Holds its input: where an
     /// index gives the order, scan the index instead.
     pub fn sort(self, by: impl Fn(&[u8], &[u8]) -> Vec<u8> + 'static) -> Plan {
         self.sorted(Box::new(move |_, k, v| by(k, v)), false)
@@ -1259,10 +1327,13 @@ fn fetch(op: &dyn Op, db: &dyn Read, from: Bound<&[u8]>, reverse: bool, limit: u
 /// before it left it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Patch {
-    /// A row before the one at `at` (`at` the length: at the end).
+    /// A row before the one at `at` (`at` the length: at the end), at
+    /// `depth` in a nested list: 0 at the top, its parent's and one below
+    /// a parent.
     Insert {
         at: usize,
         row: Row,
+        depth: u8,
     },
     Remove {
         at: usize,
@@ -1270,6 +1341,14 @@ pub enum Patch {
     Update {
         at: usize,
         value: Vec<u8>,
+    },
+    /// The same row (its identity, [`Live::id`], unchanged) taken from
+    /// `from` and put before the one at `to`, as it is now: a sort's key
+    /// that changed, for a toolkit to animate.
+    Move {
+        from: usize,
+        to: usize,
+        row: Row,
     },
 }
 
@@ -1295,15 +1374,33 @@ impl Live {
     /// Takes one settle's changes, `db` already after them, and answers the
     /// patches that take the answer to the new one.
     pub fn push(&mut self, db: &dyn Read, changes: &Changes) -> Vec<Patch> {
-        let diffs = self.settle(db, changes);
+        self.push_over(db, db, changes)
+    }
+
+    /// [`Live::push`], the rows before the settle read as `was` with the
+    /// changes' old values over it: a node's sources as they were.
+    #[inline(never)]
+    pub(crate) fn push_over(&mut self, db: &dyn Read, was: &dyn Read, changes: &Changes) -> Vec<Patch> {
+        let diffs = self.settle(db, was, changes);
         self.apply(diffs)
+    }
+
+    /// The identity of the row at `at`: its base row's key, under its
+    /// parents', whatever its place in the answer. A toolkit keys a row's
+    /// view by it.
+    pub fn id(&self, at: usize) -> Vec<u8> {
+        let mut out = Vec::new();
+        if let Some((k, _)) = self.rows.get(at) {
+            self.op.id(k, &mut out);
+        }
+        out
     }
 
     /// [`Live::push`], answering what changed of each row by its place: what
     /// an upstream reads to know which rows came into a query or left it.
     #[cfg(feature = "upstream")]
     pub fn diffs(&mut self, db: &dyn Read, changes: &Changes) -> Vec<Diff> {
-        let diffs = self.settle(db, changes);
+        let diffs = self.settle(db, db, changes);
         self.apply(diffs.clone());
         diffs
     }
@@ -1322,13 +1419,13 @@ impl Live {
         out
     }
 
-    fn settle(&mut self, db: &dyn Read, changes: &Changes) -> Vec<Diff> {
+    fn settle(&mut self, db: &dyn Read, was: &dyn Read, changes: &Changes) -> Vec<Diff> {
         // The rows as they were: what changed, put back over the rows now.
         let mut layer = Layer::new();
         for (t, d) in &changes.rows {
             layer.keep(*t, &d.key, || d.old.clone());
         }
-        let was = View { base: db, layer: &layer };
+        let was = View { base: was, layer: &layer };
         let s = Settle { db, was: &was, changes };
         if changes.reset {
             let mut old = Vec::with_capacity(self.rows.len());
@@ -1346,24 +1443,57 @@ impl Live {
         }
     }
 
-    /// The diffs made to the answer, as patches.
+    /// The diffs made to the answer, as patches: a row that leaves one
+    /// place and comes to another, the same row by its identity, as a move.
     fn apply(&mut self, diffs: Vec<Diff>) -> Vec<Patch> {
+        // Identities only where a move could be: rows both left and came.
+        let both = diffs.iter().any(|d| d.old.is_none()) && diffs.iter().any(|d| d.new.is_none());
+        let id = |d: &Diff| {
+            let mut out = Vec::new();
+            if both {
+                self.op.id(&d.key, &mut out);
+            }
+            out
+        };
+        let ids: Vec<Vec<u8>> = diffs.iter().map(id).collect();
+        // Each row that came, by the row that left with its identity.
+        let gone = |i: usize, came: bool| {
+            if !both || diffs[i].old.is_none() != came {
+                return None;
+            }
+            (0..diffs.len()).find(|&j| j != i && diffs[j].new.is_none() == came && diffs[j].old.is_none() != came && ids[j] == ids[i])
+        };
         let mut out = Vec::new();
-        for d in diffs {
+        for (i, d) in diffs.iter().enumerate() {
             let found = self.rows.binary_search_by(|(k, _)| k.cmp(&d.key));
-            match (found, d.new) {
+            let moved = gone(i, true);
+            match (found, &d.new) {
+                // Moved: taken when it comes.
+                (Ok(_), None) if gone(i, false).is_some() => {}
                 (Ok(at), None) => {
                     self.rows.remove(at);
                     out.push(Patch::Remove { at });
                 }
                 (Ok(at), Some(value)) => {
-                    self.rows[at].1 = value.clone();
-                    out.push(Patch::Update { at, value });
+                    self.rows[at].1.clone_from(value);
+                    out.push(Patch::Update { at, value: value.clone() });
+                }
+                (Err(_), Some(value)) if moved.is_some() => {
+                    let left = &diffs[moved.unwrap_or_default()].key;
+                    let Ok(from) = self.rows.binary_search_by(|(k, _)| k.cmp(left)) else {
+                        continue;
+                    };
+                    self.rows.remove(from);
+                    let to = self.rows.binary_search_by(|(k, _)| k.cmp(&d.key)).unwrap_or_else(|i| i);
+                    let row = (d.key.clone(), value.clone());
+                    self.rows.insert(to, row.clone());
+                    out.push(Patch::Move { from, to, row });
                 }
                 (Err(at), Some(value)) => {
-                    let row = (d.key, value);
+                    let row = (d.key.clone(), value.clone());
                     self.rows.insert(at, row.clone());
-                    out.push(Patch::Insert { at, row });
+                    let depth = self.op.id(&d.key, &mut Vec::new());
+                    out.push(Patch::Insert { at, row, depth });
                 }
                 (Err(_), None) => {}
             }
@@ -1431,9 +1561,13 @@ pub(crate) mod tests {
     pub(crate) fn splice(list: &mut Vec<Row>, patches: &[Patch]) {
         for p in patches {
             match p {
-                Patch::Insert { at, row } => list.insert(*at, row.clone()),
+                Patch::Insert { at, row, .. } => list.insert(*at, row.clone()),
                 Patch::Remove { at } => drop(list.remove(*at)),
                 Patch::Update { at, value } => list[*at].1 = value.clone(),
+                Patch::Move { from, to, row } => {
+                    list.remove(*from);
+                    list.insert(*to, row.clone());
+                }
             }
         }
     }
@@ -1666,12 +1800,57 @@ pub(crate) mod tests {
                 Patch::Remove { at: 1 },
                 Patch::Insert {
                     at: 1,
-                    row: (vec![3], agg(1, 1, 1, 1))
+                    row: (vec![3], agg(1, 1, 1, 1)),
+                    depth: 0
                 }
             ]
         );
         assert_eq!(from_slice::<Agg>(&live.rows()[0].1).map(|a| a.sum), Ok(5));
     }
 
-    crate::listed!(every_answer_is_a_fresh_runs, a_bounded_take_holds_its_limit, a_group_runs_its_totals);
+    /// A patch says a row's depth in a nested list, a row whose sort key
+    /// changed moves (the same row, by its identity), and a row's identity
+    /// is its base key, under its parent's, wherever it is placed.
+    #[cfg_attr(test, test)]
+    fn patches_carry_depth_moves_and_identity() {
+        let mut db = Memory::new();
+        db.put(T, &[1], &[5]);
+        db.put(T, &[2], &[7]);
+        let tree = || scan(T, Bound::Unbounded, Bound::Unbounded).related(|k, _| prefix(U, k));
+        let mut live = tree().live(&db);
+        let before = db.clone();
+        db.put(U, &[2, 9], &[0]);
+        db.put(T, &[3], &[1]);
+        let patches = live.push(&db, &diff(&before, &db, &[T, U]));
+        let depths: Vec<_> = patches
+            .iter()
+            .map(|p| match p {
+                Patch::Insert { depth, .. } => *depth,
+                _ => 9,
+            })
+            .collect();
+        assert_eq!(depths, [1, 0]);
+        let mut parent = escaped(&[2]);
+        parent.extend([2, 9]);
+        assert_eq!(live.id(2), parent);
+        // A sort by value: the row whose value changes moves.
+        let sorted = || scan(T, Bound::Unbounded, Bound::Unbounded).sort(|_, v| vec![v[0]]);
+        let mut live = sorted().live(&db);
+        assert_eq!((live.id(0), live.id(2)), (vec![3], vec![2]));
+        let before = db.clone();
+        db.put(T, &[3], &[9]);
+        let patches = live.push(&db, &diff(&before, &db, &[T]));
+        let [Patch::Move { from: 0, to: 2, .. }] = &patches[..] else {
+            panic!("one move: {patches:?}")
+        };
+        assert_eq!((live.id(0), live.id(2)), (vec![1], vec![3]));
+        assert_eq!(live.rows(), sorted().live(&db).rows());
+    }
+
+    crate::listed!(
+        every_answer_is_a_fresh_runs,
+        a_bounded_take_holds_its_limit,
+        a_group_runs_its_totals,
+        patches_carry_depth_moves_and_identity
+    );
 }

@@ -354,7 +354,7 @@ pub(crate) mod tests {
             deliver(served.out, &mut watch);
         }
         assert!(watch.complete(QueryId(1), &[]));
-        assert_eq!(count(watch.store(Space::Shared), 1), 2);
+        assert_eq!(count(watch.store(Space::Shared).unwrap(), 1), 2);
         // The watch writes; the phone holds its push, unrun.
         let take = watch.make(Space::Shared, Msg::Take { key: 1 }, 20);
         let refused = watch.make(Space::Shared, Msg::Take { key: 2 }, 20);
@@ -387,7 +387,7 @@ pub(crate) mod tests {
         assert_eq!(server.head(), Seq(2));
         assert_eq!((watch.pending(), watch.cursor()), (&[][..], Seq(2)));
         assert_eq!(watch.take_refused(), [(refused.id, NONE_LEFT)]);
-        assert_eq!(count(watch.store(Space::Shared), 1), 1);
+        assert_eq!(count(watch.store(Space::Shared).unwrap(), 1), 1);
         assert_eq!((relay.forwarded(), phone.pending()), (&[][..], &[][..]));
         // Pushed again, the watch's entries are answered by the phone from
         // what the server said: no frame goes up.
@@ -406,7 +406,7 @@ pub(crate) mod tests {
     /// says its own again, and the server and the third device take it.
     #[cfg_attr(test, test)]
     fn the_session_through_a_phone() {
-        let value = |n: &Node<Msg, Memory>, key| n.store(Space::Session).get(POSITIONS, &at(key)).map(|v| v[0]);
+        let value = |n: &Node<Msg, Memory>, key| n.store(Space::Session).unwrap().get(POSITIONS, &at(key)).map(|v| v[0]);
         let mut server = Authority::new(&HANDLERS, Memory::new());
         let mut phone = node(1);
         phone.set_actor(ME);
