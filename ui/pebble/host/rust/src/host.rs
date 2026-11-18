@@ -6,7 +6,7 @@
 //! | a button | the app's entries ([`App::button`]), routed by the node |
 //! | AppMessage in | chunks of the upstream's frames, each `Down` into [`Node::receive`] |
 //! | the phone's script says its connection | [`Node::connect`]: subscriptions, hello, pending |
-//! | `connection_service` | the link up or down |
+//! | the link down, or `connection_service` | [`Node::disconnect`]: session entries for rows it does not own are refused |
 //! | the app's timer | [`App::wake`], at the time the app asked: an [`ark_kernel::Anchor`]'s next step |
 //! | AppMessage sent or failed | the next chunk, or the same again |
 //!
@@ -26,7 +26,7 @@ use core::cell::UnsafeCell;
 
 use ark_kernel::codec::{put_varint, Error, Reader};
 use ark_kernel::{
-    Actor, Body, Changes, Decode, Down, Encode, Frames, Handler, Node, Origin, Pending, QueryId, Seq, Space, Spaces, Store, TableId, Version,
+    Actor, Body, Changes, Decode, Down, Encode, Frames, Handler, Node, Origin, Pending, QueryId, Refusal, Seq, Space, Spaces, Store, TableId, Version,
 };
 
 use crate::disk::{Disk, Meta};
@@ -59,7 +59,8 @@ pub struct Status {
     pub online: bool,
     /// The node's shared entries not yet confirmed.
     pub pending: usize,
-    /// The entries refused since the app started.
+    /// The entries refused since the app started, but those refused
+    /// offline.
     pub refused: u32,
 }
 
@@ -75,10 +76,28 @@ pub struct Ctx<'a, B: 'static> {
 
 impl<B: Body + Clone + Encode + 'static> Ctx<'_, B> {
     /// Makes an entry of the node's now and routes it: stepped here, and
-    /// pushed or sent upstream by its space.
-    pub fn make(&mut self, space: Space, body: B) {
+    /// pushed or sent upstream by its space. Refused here (a session
+    /// entry for a row the watch does not own, with no link: live
+    /// controls don't queue), it says with what.
+    pub fn make(&mut self, space: Space, body: B) -> Result<(), Refusal> {
         let e = self.node.make(space, body, self.now);
+        let id = e.id;
         self.node.route(e, self.link);
+        match self.node.refusals().iter().find(|r| r.0 == id) {
+            Some(&(_, why)) => Err(why),
+            None => Ok(()),
+        }
+    }
+
+    /// The tree's time now (the server's clock, as the watch's hellos
+    /// measured it): what anchors are extrapolated at.
+    pub fn time(&self) -> u64 {
+        self.node.time(self.now)
+    }
+
+    /// The watch's time at the tree's time `t`: for [`Ctx::wake_at`].
+    pub fn local(&self, t: u64) -> u64 {
+        t.wrapping_add_signed(self.node.offset().wrapping_neg())
     }
 
     /// Holds a query's rows, now and at every connection.
@@ -288,7 +307,11 @@ impl<A: App> Host<A> {
     fn settle(&mut self) {
         let changes = Space::ALL.map(|s| self.node.take_changes(s));
         for (id, why) in self.node.take_refused() {
-            self.refused += 1;
+            // Offline refusals are the app's to show, as `Ctx::make` says
+            // them.
+            if why != Refusal::OFFLINE {
+                self.refused += 1;
+            }
             crate::log!("refused entry ", id.n, " with ", why.0);
         }
         let status = Status {
@@ -422,7 +445,7 @@ impl<A: App> Driver for Host<A> {
     fn link(&mut self, epoch: u32) {
         if self.link.epoch_set(epoch) {
             self.frames = Frames::new(FRAME_MOST);
-            self.node.connect(&mut self.link);
+            self.node.connect(&mut self.link, sys::now());
             crate::log!(
                 "link up, epoch ",
                 epoch,
@@ -432,6 +455,7 @@ impl<A: App> Driver for Host<A> {
                 self.node.pending().len()
             );
         } else {
+            self.node.disconnect();
             crate::log!("link down");
         }
         self.settle();
@@ -445,7 +469,13 @@ impl<A: App> Driver for Host<A> {
         self.frames.push(data);
         loop {
             match self.frames.read::<Down<A::Body>>() {
-                Ok(Some(down)) => self.node.receive(down, &mut self.link),
+                Ok(Some(down)) => {
+                    let welcome = matches!(down, Down::Welcome { .. });
+                    self.node.receive(down, &mut self.link, sys::now());
+                    if welcome {
+                        crate::log!("welcome: the server's clock is ", self.node.offset(), " ms ahead");
+                    }
+                }
                 Ok(None) => break,
                 Err(Error::TooLong) => {
                     crate::log!("a frame past ", FRAME_MOST, " bytes: the stream is dropped");
@@ -488,6 +518,7 @@ impl<A: App> Driver for Host<A> {
 
     fn phone(&mut self, connected: bool) {
         if self.link.phone(connected) {
+            self.node.disconnect();
             crate::log!("link down: the phone went");
         }
         self.settle();

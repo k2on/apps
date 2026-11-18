@@ -27,8 +27,8 @@ callbacks, which the shim passes to Rust (`ark_on_*`):
 |---|---|
 | a button | the app's entries (`App::button`), routed by the node: stepped, pushed or sent |
 | AppMessage in | chunks of the upstream's frames, put back together, each `Down` into `Node::receive` |
-| the relay's `LINK` | `Node::connect`: subscriptions, hello, every pending entry again |
-| `connection_service` | the link down while the phone is away; the watch says `READY` again when it returns |
+| the relay's `LINK` | `Node::connect`: subscriptions, hello (with the watch's time), every pending entry again; `LINK 0` is `Node::disconnect` |
+| `connection_service` | the link down while the phone is away (`Node::disconnect`); the watch says `READY` again when it returns |
 | the app's timer | `App::wake` at the time the app asked: for playback, `Anchor::next` (no tick) |
 | AppMessage sent or failed | the next chunk, or the same one again |
 
@@ -91,16 +91,24 @@ Standing in for harken's now playing (`demo/app`):
 
 - **Playback** is a session row (`PLAYBACK`) the player owns and sets whole:
   a track and an `Anchor` the watch extrapolates, redrawn once a second
-  through `Anchor::next`.
+  through `Anchor::next`. Its key is the player's origin, so the kernel
+  knows the row is the player's and the watch's entries for it are
+  controls. The anchor's times are the server's: the player writes them at
+  `Node::time`, and the watch extrapolates them at its clock corrected by
+  the offset each hello measures (`Ctx::time`; about -0.3 s in the
+  emulator).
 - **The queue** is a shared table (`QUEUE`) keyed by place. The watch
   subscribes to its first five rows (`NEXT`) and shows three, a take over
   its own view kept live by its changes.
 - **Select** toggles play: a session entry at the position now. **Down**
   skips: a shared `Pop` of the next track, pending until the server
   confirms it (kept through a restart), and a session entry playing it.
-  Offline only the `Pop` is made: a session entry is neither kept nor sent
-  again, and an upstream's hello does not say a node's own latest back to
-  it, so one made with no link would show what the player never heard.
+- **Live controls don't queue.** With no link the kernel refuses the
+  watch's session entries for the player's row (`Refusal::OFFLINE`, which
+  `Ctx::make` returns): nothing changes on the screen but the status line,
+  "Can't Reach Player", until a hello is answered, and nothing fires
+  later. Each hello's answer carries the player's latest (and the watch's
+  own), so the screen agrees with the player once the link is back.
 - A `Pop` of a track the player already took is refused (`GONE`), and the
   status line counts it.
 
@@ -130,14 +138,17 @@ On the Time 2's emulator (emery, SDK 4.44), a run of subscription, live
 playback, pause and resume either side, skips online and offline, a
 restart with two pending skips, a refusal, a reconnect and confirmations:
 
-- **Image** 51.7 KB (with bss 52.6 KB), of the 128 KB an app gets for code
-  and heap. By symbol: the kernel's own 11.8 KB, and about 4 KB more inlined
-  into the host's callbacks (`Node::receive` in `chunk`, the store's B-tree
-  in `Rows::put`); the host about 13 KB; `core`, `alloc` and the compiler's
-  builtins 13.6 KB; the demo 2.4 KB; the C shim about 2.5 KB.
-- **Heap** at most 10.0 KB in use, by PebbleOS's own count at exit, of
-  78.4 KB: AppMessage's buffers 4.9 KB, and Rust at most 4.9 KB (the node,
-  its stores and pending records, the query, the disk's page table).
+- **Image** 54.7 KB (with bss 55.6 KB), of the 128 KB an app gets for code
+  and heap; 51.7 KB before the session's owners, its hello and the clock.
+  By symbol at 51.7 KB: the kernel's own 11.8 KB, and about 4 KB more
+  inlined into the host's callbacks (`Node::receive` in `chunk`, the
+  store's B-tree in `Rows::put`); the host about 13 KB; `core`, `alloc`
+  and the compiler's builtins 13.6 KB; the demo 2.4 KB; the C shim about
+  2.5 KB.
+- **Heap** at most 10.4 KB in use, by PebbleOS's own count at exit, of
+  75.5 KB: AppMessage's buffers 4.9 KB, and Rust at most 5.8 KB (the node,
+  its stores, session rows and pending records, the query, the disk's page
+  table).
 - **Stack**: a watchapp gets 4 KB. Large values are kept on the heap
   (the disk's key map, log lines); the deepest Rust frames are the host's
   start (1.1 KB, once) and a chunk received (1 KB, `Node::receive` inlined).
@@ -148,8 +159,8 @@ restart with two pending skips, a refusal, a reconnect and confirmations:
 ## Not yet
 
 - Seen only in the emulator, never on a Pebble Time 2 or with a phone.
-- The watch's clock is taken as the player's: an anchor's `wall` is the
-  owner's, and no offset is measured yet.
+- The offset is measured at each hello only, so a watch that stays
+  connected for long drifts with its clock until the next.
 - A row larger than a page (about 250 bytes with its key) is not kept.
 - Keys let go by a flush are left as they are and used again, never deleted.
 - Nothing of the host is in CI yet; the probe's `.pbw` is not either.

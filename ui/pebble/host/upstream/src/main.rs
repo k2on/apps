@@ -74,7 +74,7 @@ fn body(m: &Msg) -> String {
     match m {
         Msg::Add { at, track } => format!("Add {at} {:?}", text(&track.title)),
         Msg::Pop { at } => format!("Pop {at}"),
-        Msg::Play(p) => format!(
+        Msg::Play { playing: p, .. } => format!(
             "Play {:?} at {} ms {}",
             text(&p.track.title),
             p.anchor.at,
@@ -89,7 +89,7 @@ fn entry(e: &Entry<Msg>) -> String {
 
 fn up(u: &Up<Msg>) -> String {
     match u {
-        Up::Hello { cursor } => format!("Hello cursor {}", cursor.0),
+        Up::Hello { cursor, time } => format!("Hello cursor {} at its {time}", cursor.0),
         Up::Push(e) => format!("Push {}", entry(e)),
         Up::Live(e) => format!("Live {}", entry(e)),
         Up::Rate { table, every } => format!("Rate table {} every {every}", table.0),
@@ -115,6 +115,7 @@ fn down(d: &Down<Msg>) -> String {
         Down::Rows(w) => format!("Rows {}", w.0.len()),
         Down::Moved(w) => format!("Moved {} rows", w.0.len()),
         Down::Got { query, .. } => format!("Got query {}", query.0),
+        Down::Welcome { sent, time } => format!("Welcome: its {sent}, our {time} ({} ms ahead)", *time as i64 - *sent as i64),
     }
 }
 
@@ -177,7 +178,7 @@ impl Server {
         };
         s.authority.open(PLAYER, USER, Some(s.player.origin()));
         let mut up = Vec::new();
-        s.player.connect(&mut up);
+        s.player.connect(&mut up, now());
         s.relay_player(up);
         while s.queue().len() < LOW + 2 {
             s.add(None);
@@ -199,7 +200,19 @@ impl Server {
     }
 
     fn playing(&self) -> Option<Playing> {
-        playing(&self.player.view(Space::Session))
+        playing(&self.player.view(Space::Session)).map(|(_, p)| p)
+    }
+
+    /// The tree's time: the server's clock, as the player measured it
+    /// (here, in the same process, its own).
+    fn time(&self) -> u64 {
+        self.player.time(now())
+    }
+
+    /// Sets the player's playback whole.
+    fn play(&mut self, playing: Playing) {
+        let player = self.player.origin();
+        self.make(Space::Session, Msg::Play { player, playing });
     }
 
     fn make(&mut self, space: Space, m: Msg) {
@@ -229,23 +242,23 @@ impl Server {
         self.make(Space::Shared, Msg::Pop { at });
         let anchor = Anchor {
             at: 0,
-            wall: now(),
+            wall: self.time(),
             rate: 1000,
             playing: true,
         };
-        self.make(Space::Session, Msg::Play(Playing { track, anchor }));
+        self.play(Playing { track, anchor });
     }
 
     fn toggle(&mut self) {
         let Some(p) = self.playing() else { return };
-        let t = now();
+        let t = self.time();
         let anchor = Anchor {
             at: p.anchor.position(t).min(u64::from(p.track.ms)),
             wall: t,
             rate: p.anchor.rate,
             playing: !p.anchor.playing,
         };
-        self.make(Space::Session, Msg::Play(Playing { track: p.track, anchor }));
+        self.play(Playing { track: p.track, anchor });
     }
 
     /// Passes what the player said to the authority, and its answers on,
@@ -262,7 +275,7 @@ impl Server {
     fn deliver(&mut self, outs: Vec<Out<Msg>>, up: &mut Vec<Up<Msg>>) {
         for (conn, d) in outs {
             if conn == PLAYER {
-                self.player.receive(d, up);
+                self.player.receive(d, up, now());
             } else if let Some(c) = self.clients.get_mut(&conn.0) {
                 say!("  conn {} <- {}", conn.0, down(&d));
                 put_frame(&mut c.out, &d);
@@ -347,7 +360,7 @@ impl Server {
     }
 
     fn state(&self) {
-        let t = now();
+        let t = self.time();
         match self.playing() {
             Some(p) => say!(
                 "playing {:?} at {} of {} ms ({})",
@@ -375,7 +388,7 @@ impl Server {
         self.deliver(outs, &mut up);
         self.relay_player(up);
         if let Some(p) = self.playing() {
-            if p.anchor.playing && p.anchor.position(t) >= u64::from(p.track.ms) {
+            if p.anchor.playing && p.anchor.position(self.time()) >= u64::from(p.track.ms) {
                 say!("player: {:?} ended", text(&p.track.title));
                 self.advance();
             }

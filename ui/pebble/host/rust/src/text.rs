@@ -120,6 +120,15 @@ macro_rules! number_part {
 
 number_part!(u8, u16, u32, u64, usize);
 
+impl Part for i64 {
+    fn put(&self, line: &mut Line) {
+        if *self < 0 {
+            line.s(b"-");
+        }
+        line.n(self.unsigned_abs());
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

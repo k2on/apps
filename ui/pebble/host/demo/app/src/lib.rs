@@ -9,7 +9,10 @@
 //!   first.
 //! - **Playback**, a session row ([`PLAYBACK`]) the player owns and sets
 //!   whole ([`Msg::Play`]): the track and an [`Anchor`] every view
-//!   extrapolates, so nothing streams while it plays.
+//!   extrapolates, so nothing streams while it plays. Its key is the
+//!   player's origin, so the kernel knows the row is the player's: another
+//!   device's entry for it is a control, refused while that device has no
+//!   link ([`ark_kernel::Refusal::OFFLINE`]).
 //! - **The query** a watch subscribes to ([`NEXT`]): the queue's first
 //!   [`HELD`] rows, of which its screen shows the first few.
 
@@ -21,13 +24,14 @@ use alloc::vec::Vec;
 use core::ops::Bound;
 
 use ark_kernel::codec::{from_slice, to_vec, Error, Reader};
-use ark_kernel::{scan, Anchor, Body, Cx, Decode, Encode, Handler, HandlerId, Plan, Query, QueryId, Refusal, Space, TableId, Version};
+use ark_kernel::{scan, Anchor, Body, Cx, Decode, Encode, Handler, HandlerId, Origin, Plan, Query, QueryId, Read, Refusal, Space, TableId, Version};
 
 /// The build's version.
 pub const VERSION: Version = Version(1);
 /// The queue: a track per place.
 pub const QUEUE: TableId = TableId(1);
-/// The session row of playback: one, at key `[0]`.
+/// The session rows of playback: one per player, keyed by its origin
+/// ([`Origin::key`]).
 pub const PLAYBACK: TableId = TableId(2);
 /// The queue's first rows.
 pub const NEXT: QueryId = QueryId(0);
@@ -58,8 +62,8 @@ pub enum Msg {
     Add { at: u32, track: Track },
     /// Takes the track at a place off the queue.
     Pop { at: u32 },
-    /// Sets playback whole.
-    Play(Playing),
+    /// Sets a player's playback whole: its own, or a control of it.
+    Play { player: Origin, playing: Playing },
 }
 
 impl Body for Msg {
@@ -67,13 +71,13 @@ impl Body for Msg {
         HandlerId(match self {
             Msg::Add { .. } => 0,
             Msg::Pop { .. } => 1,
-            Msg::Play(_) => 2,
+            Msg::Play { .. } => 2,
         })
     }
 
     fn row(&self) -> Option<(TableId, Vec<u8>)> {
         match self {
-            Msg::Play(_) => Some((PLAYBACK, alloc::vec![0])),
+            Msg::Play { player, .. } => Some((PLAYBACK, player.key().to_vec())),
             _ => None,
         }
     }
@@ -103,11 +107,13 @@ fn pop(cx: &mut Cx<'_, Msg>) -> Result<(), Refusal> {
 }
 
 fn play(cx: &mut Cx<'_, Msg>) -> Result<(), Refusal> {
-    let Msg::Play(p) = &cx.entry.body else { return Err(Refusal::NO_HANDLER) };
+    let Msg::Play { player, playing } = &cx.entry.body else {
+        return Err(Refusal::NO_HANDLER);
+    };
     if cx.entry.space != Space::Session {
         return Err(Refusal::NO_HANDLER);
     }
-    cx.db.put(PLAYBACK, &[0], &to_vec(p));
+    cx.db.put(PLAYBACK, &player.key(), &to_vec(playing));
     Ok(())
 }
 
@@ -129,9 +135,16 @@ pub fn place(key: &[u8]) -> Option<u32> {
     Some(u32::from_be_bytes(key.try_into().ok()?))
 }
 
-/// What is playing, from a session space.
-pub fn playing(db: &dyn ark_kernel::Read) -> Option<Playing> {
-    from_slice(&db.get(PLAYBACK, &[0])?).ok()
+/// What is playing, from a session space: the first player's, with whose
+/// it is.
+pub fn playing(db: &dyn Read) -> Option<(Origin, Playing)> {
+    let mut first = None;
+    db.scan(PLAYBACK, ark_kernel::store::Range::all(), &mut |k, v| {
+        let player = k.try_into().ok().map(|k| Origin(u64::from_be_bytes(k)));
+        first = player.zip(from_slice(v).ok());
+        false
+    });
+    first
 }
 
 impl Encode for Track {
@@ -180,9 +193,10 @@ impl Encode for Msg {
                 1u32.encode(out);
                 at.encode(out);
             }
-            Msg::Play(p) => {
+            Msg::Play { player, playing } => {
                 2u32.encode(out);
-                p.encode(out);
+                player.encode(out);
+                playing.encode(out);
             }
         }
     }
@@ -196,7 +210,10 @@ impl Decode for Msg {
                 track: Track::decode(r)?,
             }),
             1 => Ok(Msg::Pop { at: u32::decode(r)? }),
-            2 => Ok(Msg::Play(Playing::decode(r)?)),
+            2 => Ok(Msg::Play {
+                player: Origin::decode(r)?,
+                playing: Playing::decode(r)?,
+            }),
             _ => Err(Error::Tag),
         }
     }
@@ -229,18 +246,56 @@ mod tests {
         for m in [
             Msg::Add { at: 7, track: track("a") },
             Msg::Pop { at: 9 },
-            Msg::Play(Playing {
-                track: track("b"),
-                anchor: Anchor {
-                    at: 1,
-                    wall: 2,
-                    rate: 1000,
-                    playing: true,
+            Msg::Play {
+                player: Origin(0x9a7e),
+                playing: Playing {
+                    track: track("b"),
+                    anchor: Anchor {
+                        at: 1,
+                        wall: 2,
+                        rate: 1000,
+                        playing: true,
+                    },
                 },
-            }),
+            },
         ] {
             assert_eq!(from_slice::<Msg>(&to_vec(&m)), Ok(m));
         }
+    }
+
+    /// The player's row is its own: set offline it is applied; a watch's
+    /// pause of it is refused offline and applied linked; the watch reads
+    /// whose playback it is.
+    #[test]
+    fn playback_is_the_players() {
+        let mut player = Node::new(Origin(0x9a7e), 0, VERSION, &HANDLERS, spaces());
+        let mut watch = Node::new(Origin(0x3a7c), 0, VERSION, &HANDLERS, spaces());
+        let playing = Playing {
+            track: track("a"),
+            anchor: Anchor::default(),
+        };
+        let play = |n: &mut Node<Msg, Memory>, playing: &Playing, at| {
+            let e = n.make(
+                Space::Session,
+                Msg::Play {
+                    player: Origin(0x9a7e),
+                    playing: playing.clone(),
+                },
+                at,
+            );
+            let mut up = alloc::vec::Vec::new();
+            n.route(e.clone(), &mut up);
+            (e, up)
+        };
+        let (e, up) = play(&mut player, &playing, 10);
+        assert_eq!((up.len(), player.take_refused()), (1, alloc::vec![]));
+        let (pause, up) = play(&mut watch, &playing, 20);
+        assert_eq!((up.len(), watch.take_refused()), (0, alloc::vec![(pause.id, Refusal::OFFLINE)]));
+        watch.connect(&mut alloc::vec::Vec::new(), 30);
+        watch.receive(ark_kernel::Down::Live(e), &mut alloc::vec::Vec::new(), 30);
+        assert_eq!(super::playing(&watch.view(Space::Session)), Some((Origin(0x9a7e), playing.clone())));
+        let (_, up) = play(&mut watch, &playing, 40);
+        assert_eq!(up.len(), 1);
     }
 
     /// Two devices pop the same track: the second is refused, and the
@@ -258,7 +313,7 @@ mod tests {
         }
         server.open(ark_kernel::Conn(0), Actor(1), None);
         let mut up = alloc::vec::Vec::new();
-        a.connect(&mut up);
+        a.connect(&mut up, 15);
         let pop = a.make(Space::Shared, Msg::Pop { at: 0 }, 20);
         a.route(pop.clone(), &mut up);
         let again = Node::<Msg, Memory>::new(Origin(2), 0, VERSION, &HANDLERS, spaces()).make(Space::Shared, Msg::Pop { at: 0 }, 30);

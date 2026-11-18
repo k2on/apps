@@ -13,10 +13,15 @@
 //!   position now. Down skips: a shared `Pop` of the next track, pending
 //!   until the server confirms it (kept through a restart), and a session
 //!   entry playing it from the start.
-//! - Offline, only the `Pop` is made. Playback is the player's, and a
-//!   session entry is never kept or sent again: one made with no link
-//!   would show here what the player never heard, and an upstream's hello
-//!   does not say a node's own latest back to it.
+//! - Playback is the player's row, so with no link the kernel refuses the
+//!   watch's toggle (live controls don't queue): nothing changes on the
+//!   screen but the status line, which says it can't reach the player,
+//!   and nothing fires later. A skip offline still takes the track off the
+//!   queue, pending. Each hello's answer brings the player's latest, so
+//!   the screen agrees with the player once the link is back.
+//! - Times are the server's: the screen extrapolates the anchor at the
+//!   tree's time ([`Ctx::time`]), the watch's clock corrected by the offset
+//!   its hellos measured.
 
 #![no_std]
 
@@ -25,7 +30,7 @@ extern crate alloc;
 use alloc::vec::Vec;
 
 use ark_kernel::codec::from_slice;
-use ark_kernel::{Actor, Anchor, Changes, Handler, Live, Space, Version};
+use ark_kernel::{Actor, Anchor, Changes, Handler, Live, Origin, Refusal, Space, Version};
 use ark_pebble::text::Line;
 use ark_pebble::{App, Button, Ctx, Glyph, Screen, Slot};
 use now_playing::{place, playing, upcoming, Msg, Playing, Track, HANDLERS, NEXT, PLAYBACK, VERSION};
@@ -36,18 +41,23 @@ const SHOWN: usize = 3;
 struct NowPlaying {
     screen: Screen,
     next: Option<Live>,
-    playing: Option<Playing>,
+    /// The player's playback, and whose.
+    playing: Option<(Origin, Playing)>,
+    /// A control was refused for want of a link, until a hello is
+    /// answered.
+    unreachable: bool,
 }
 
 ark_pebble::app!(NowPlaying {
     screen: Screen::new(),
     next: None,
     playing: None,
+    unreachable: false,
 });
 
 impl NowPlaying {
     fn draw_track(&mut self, cx: &mut Ctx<'_, Msg>) {
-        match &self.playing {
+        match self.playing.as_ref().map(|p| &p.1) {
             Some(p) => {
                 self.screen.text(Slot::Title, &p.track.title);
                 self.screen.text(Slot::Subtitle, &p.track.artist);
@@ -65,20 +75,23 @@ impl NowPlaying {
 
     /// Where playback is, and when that next changes on the screen.
     fn draw_time(&mut self, cx: &mut Ctx<'_, Msg>) {
-        let Some(p) = &self.playing else {
+        let Some((_, p)) = &self.playing else {
             self.screen.text(Slot::Time, b"");
             self.screen.progress(0);
             cx.wake_at(None);
             return;
         };
         let ms = u64::from(p.track.ms);
-        let at = p.anchor.position(cx.now).min(ms);
+        let now = cx.time();
+        let at = p.anchor.position(now).min(ms);
         let mut l = Line::new();
         l.clock(at).s(b" / ").clock(ms);
         self.screen.text(Slot::Time, l.bytes());
         let secs = (ms / 1000).max(1) as u32;
         self.screen.progress(((at / 1000) as u32 * 1000 / secs) as u16);
-        cx.wake_at(if at < ms { p.anchor.next(cx.now, 1000) } else { None });
+        let next = p.anchor.next(now, 1000).filter(|_| at < ms);
+        let wake = next.map(|t| cx.local(t));
+        cx.wake_at(wake);
     }
 
     fn draw_rows(&mut self) {
@@ -102,6 +115,7 @@ impl NowPlaying {
         let s = cx.status;
         let mut l = Line::new();
         l.s(match (s.online, cx.node.complete(NEXT, &[])) {
+            _ if self.unreachable => b"Can't Reach Player",
             (false, _) => b"Offline",
             (true, false) => b"Syncing",
             (true, true) => b"Online",
@@ -143,19 +157,18 @@ impl App for NowPlaying {
     }
 
     fn button(&mut self, cx: &mut Ctx<'_, Msg>, button: Button) {
-        let now = cx.now;
-        let online = cx.status.online;
-        match button {
+        let now = cx.time();
+        let played = match button {
             Button::Select => {
-                let Some(p) = self.playing.as_ref().filter(|_| online) else { return };
+                let Some((player, p)) = self.playing.clone() else { return };
                 let anchor = Anchor {
                     at: p.anchor.position(now).min(u64::from(p.track.ms)),
                     wall: now,
                     rate: p.anchor.rate,
                     playing: !p.anchor.playing,
                 };
-                let track = p.track.clone();
-                cx.make(Space::Session, Msg::Play(Playing { track, anchor }));
+                let playing = Playing { track: p.track, anchor };
+                cx.make(Space::Session, Msg::Play { player, playing })
             }
             Button::Down => {
                 let Some(next) = &self.next else { return };
@@ -163,19 +176,28 @@ impl App for NowPlaying {
                 let (Some(at), Ok(track)) = (place(key), from_slice::<Track>(value)) else {
                     return;
                 };
-                cx.make(Space::Shared, Msg::Pop { at });
-                if !online {
-                    return;
-                }
+                // Pending until the server confirms it, offline or not.
+                let _ = cx.make(Space::Shared, Msg::Pop { at });
+                let Some((player, _)) = self.playing else { return };
                 let anchor = Anchor {
                     at: 0,
                     wall: now,
                     rate: 1000,
                     playing: true,
                 };
-                cx.make(Space::Session, Msg::Play(Playing { track, anchor }));
+                cx.make(
+                    Space::Session,
+                    Msg::Play {
+                        player,
+                        playing: Playing { track, anchor },
+                    },
+                )
             }
-            _ => {}
+            _ => return,
+        };
+        if played == Err(Refusal::OFFLINE) {
+            self.unreachable = true;
+            self.draw_status(cx);
         }
     }
 
@@ -185,6 +207,11 @@ impl App for NowPlaying {
             if !next.push(&cx.node.view(Space::Shared), shared).is_empty() {
                 self.draw_rows();
             }
+        }
+        // Reached again once a hello is answered, not at a link that
+        // closes before it is.
+        if cx.status.online && cx.node.complete(NEXT, &[]) {
+            self.unreachable = false;
         }
         if changes[Space::Session as usize].rows.iter().any(|(t, _)| *t == PLAYBACK) {
             self.playing = playing(&cx.node.view(Space::Session));

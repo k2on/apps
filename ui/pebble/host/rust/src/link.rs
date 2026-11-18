@@ -201,7 +201,13 @@ mod tests {
     use ark_kernel::{Frames, Seq};
 
     fn hello(link: &mut AmLink, cursor: u64) {
-        Link::<u8>::send(link, Up::Hello { cursor: Seq(cursor) });
+        Link::<u8>::send(
+            link,
+            Up::Hello {
+                cursor: Seq(cursor),
+                time: 0,
+            },
+        );
     }
 
     /// Frames go up in chunks, each let go when acknowledged, a refused one
@@ -238,15 +244,22 @@ mod tests {
         let mut frames = Frames::new(64);
         frames.push(&wire);
         for c in 0..20 {
-            assert_eq!(frames.read::<Up<u8>>(), Ok(Some(Up::Hello { cursor: Seq(1 << (c * 3)) })));
+            assert_eq!(
+                frames.read::<Up<u8>>(),
+                Ok(Some(Up::Hello {
+                    cursor: Seq(1 << (c * 3)),
+                    time: 0
+                }))
+            );
         }
         hello(&mut link, 5);
         link.sending();
         assert!(link.epoch_set(10));
         hello(&mut link, 6);
         link.sent();
-        // The new connection's hello whole: its length, tag and cursor.
-        assert_eq!(link.queued(), 3);
+        // The new connection's hello whole: its length, tag, cursor and
+        // time.
+        assert_eq!(link.queued(), 4);
         link.phone(false);
         assert!(!link.online() && link.queued() == 0);
     }
