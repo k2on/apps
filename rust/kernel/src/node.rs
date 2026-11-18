@@ -322,6 +322,11 @@ impl<B: Body + Clone + 'static, S: Store> Node<B, S> {
         self.actor = actor;
     }
 
+    /// Where this node's entries are made.
+    pub fn origin(&self) -> Origin {
+        self.origin
+    }
+
     /// How many entries this node's origin has made: for the host to keep.
     pub fn made(&self) -> u64 {
         self.made

@@ -10,7 +10,11 @@
 //! live state, a playback position an [`Anchor`] each view extrapolates,
 //! is stepped on every node and never logged. Queries are
 //! [`plan`]s of incremental operators, pulled from the store in order and
-//! pushed the changes a node's view takes ([`Node::take_changes`]).
+//! pushed the changes a node's view takes ([`Node::take_changes`]). An
+//! upstream serves its downstream nodes with a [`Serve`], keeping per
+//! client the record of what it holds: the server's authority does, and a
+//! phone's [`Relay`] serves its watch from the phone's own view. Neither is
+//! linked on a watch.
 //!
 //! It is `no_std` with `alloc`: no I/O, no threads, no clock and no random
 //! numbers. Time comes in on the entries and ids are counted, so the same
@@ -30,6 +34,7 @@ pub mod codec;
 pub mod entry;
 pub mod node;
 pub mod plan;
+pub mod relay;
 pub mod serve;
 pub mod store;
 pub mod sync;
@@ -40,6 +45,7 @@ pub use codec::{Decode, Encode, Frames};
 pub use entry::{Actor, Entry, EntryId, Hlc, Origin, Seq, Space, Version};
 pub use node::{Body, Cx, Handler, HandlerId, Link, Machine, Node, Refusal, Route, Spaces};
 pub use plan::{scan, Changes, Diff, Live, Patch, Plan};
+pub use relay::{Relay, Served};
 pub use serve::{Conn, Query, Serve};
 pub use store::{Layer, Memory, Overlay, Read, Store, TableId, View, Write, Writes};
 pub use sync::{Down, Feed, Logged, Pending, QueryId, Up, Verdict};
@@ -63,6 +69,7 @@ pub mod selftest {
         crate::sync::tests::ALL,
         crate::authority::tests::ALL,
         crate::serve::tests::ALL,
+        crate::relay::tests::ALL,
     ];
 }
 

@@ -468,7 +468,11 @@ A node that serves another answers it exactly as the server answers it:
 
 Serving a downstream node (running its subscriptions, keeping its sync
 record) is host code that phones, desktops and the server run and a watch
-never does, so it doesn't count against the kernel's budget.
+never does, so it doesn't count against the kernel's budget. In the new
+kernel it is `Serve` (the server's authority runs it) and a phone's
+`Relay`, which answers its watch from the phone's view, holds the watch's
+pushes until the server judges them, and passes the verdicts back to the
+connection that pushed each.
 
 On an Android phone, the app itself is the watch's upstream, talking to
 the watch through PebbleKit 2; iOS has no such path (see "Open

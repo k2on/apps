@@ -59,7 +59,7 @@ use alloc::vec::Vec;
 use crate::entry::{Actor, Entry, EntryId, Origin, Seq, Space};
 use crate::node::{run, Body, Handler, Refusal};
 use crate::plan::{Changes, Diff};
-use crate::serve::Serve;
+use crate::serve::{stamped, Serve};
 pub use crate::serve::{Conn, Out, Query};
 use crate::store::{Range, Store, TableId, Write, Writes};
 use crate::sync::{Down, Logged, Up, Verdict};
@@ -281,19 +281,6 @@ impl<B: Body + Clone + 'static, S: Store> Authority<B, S> {
                 (answer(Verdict::At { seq, last: id.n }), Some((logged, changes)))
             }
         }
-    }
-}
-
-/// `e` as from `actor`, its connection's: stamped if it names no one,
-/// refused if it names another.
-fn stamped<B>(actor: Actor, mut e: Entry<B>) -> Result<Entry<B>, Refusal> {
-    if e.actor == Actor::NONE {
-        e.actor = actor;
-    }
-    if e.actor == actor {
-        Ok(e)
-    } else {
-        Err(Refusal::NOT_YOURS)
     }
 }
 
@@ -658,10 +645,11 @@ pub(crate) mod tests {
             }
         }
 
-        /// Takes the node's changes: they are what its shared view did, and
-        /// pushed through the queries, each answer is a fresh run's and its
+        /// Takes the node's changes (the shared view's as given, when a
+        /// relay took them): they are what its spaces did, and pushed
+        /// through the queries, each answer is a fresh run's and its
         /// patches splice the list.
-        fn watch(&mut self, seed: u64) {
+        fn watch(&mut self, seed: u64, shared: Option<Changes>) {
             let live = self.node.take_changes(Space::Session);
             let session = self.node.view(Space::Session);
             assert_eq!(
@@ -674,7 +662,7 @@ pub(crate) mod tests {
                 self.seen_live.put(POSITIONS, k, v);
                 true
             });
-            let changes = self.node.take_changes(Space::Shared);
+            let changes = shared.unwrap_or_else(|| self.node.take_changes(Space::Shared));
             let view = self.node.view(Space::Shared);
             if !changes.reset {
                 assert_eq!(
@@ -710,21 +698,37 @@ pub(crate) mod tests {
         forged: u32,
         held: u32,
         deltas: u32,
+        /// A watch's entries confirmed, through its phone.
+        relayed: u32,
+        /// A watch's pushes its phone took while the phone was offline.
+        queued: u32,
+        /// Fills of the phone's own passed down to its watch.
+        refills: u32,
     }
 
-    /// Three devices (two of one actor, and a third of another, which holds
-    /// only what its queries read and subscribes and lets go at random)
-    /// and a server, each
-    /// device writing offline and online, disconnected and reconnected at
-    /// random with what was in flight lost, and messages delivered in
-    /// random interleavings; the server lets go of its log's start at
-    /// random, so a device behind is filled, and its session entries go
-    /// to its actor's other devices at the rate each asked. Once all are
-    /// connected and quiet, every device's rows are the server's (for the
-    /// third, those its queries read, each complete), nothing
-    /// is pending, every entry made is logged once or refused, each device
-    /// was told of its every refusal, and each holds the latest session
-    /// values of its actor's other devices, never another actor's.
+    /// The phone, which serves the watch through its relay.
+    const PHONE: usize = 1;
+    const WATCH: usize = 3;
+
+    /// Four devices and a server, as a tree: two devices of one actor and
+    /// a third of another on the server, the third holding only what its
+    /// queries read and subscribing and letting go at random; and a watch
+    /// of the first actor whose upstream is the second device, its phone,
+    /// which serves it from its own view through a [`crate::Relay`]. Each
+    /// device writes offline and online, and is disconnected and
+    /// reconnected at random (the phone from the server and the watch from
+    /// the phone, apart) with what was in flight lost, and messages are
+    /// delivered in random interleavings; the server lets go of its log's
+    /// start at random, so a device behind is filled, and session entries
+    /// go to their actor's other devices at the rate each asked. A watch's
+    /// entry is only ever let go once the server has logged or refused it.
+    /// Once all are connected and quiet, every device's rows are the
+    /// server's (for the third and the watch, those their queries read,
+    /// each complete), nothing is pending or held by the phone, every
+    /// entry made is logged once or refused, each device was told of its
+    /// every refusal, and each holds the latest session values of its
+    /// actor's other devices that reached its upstream, never another
+    /// actor's.
     fn converge(seed: u64, steps: usize, seen: &mut Seen) {
         let mut rng = Rng::new(seed);
         let mut server = authority();
@@ -734,8 +738,13 @@ pub(crate) mod tests {
         // connections or not, or briefly.
         let (ttl, keep) = [(0, 0), (30, 1000), (0, 60)][(seed % 3) as usize];
         server.set_ttl(ttl, keep);
-        let actors = [ME, ME, Actor(6)];
-        let mut devices: Vec<Device> = (0..3)
+        let mut relay: crate::Relay<Msg> = crate::Relay::default();
+        relay.serve().set_part(1 + rng.below(3) as usize);
+        relay.serve().set_queries(&QUERIES);
+        relay.serve().set_ttl(keep / 2, ttl);
+        let actors = [ME, ME, Actor(6), ME];
+        let origin = |d: usize| Origin(d as u64 + 1);
+        let mut devices: Vec<Device> = (0..4)
             .map(|d| Device {
                 node: node(d as u64 + 1),
                 actor: actors[d],
@@ -750,30 +759,20 @@ pub(crate) mod tests {
                 subs: Vec::new(),
             })
             .collect();
-        for (query, args) in [(QueryId(1), vec![]), (QueryId(0), vec![1])] {
-            devices[2].node.subscribe(query, args.clone(), &mut Vec::new());
-            devices[2].subs.push((query, args));
+        for d in [2, WATCH] {
+            for (query, args) in [(QueryId(1), vec![]), (QueryId(0), vec![1])] {
+                devices[d].node.subscribe(query, args.clone(), &mut Vec::new());
+                devices[d].subs.push((query, args));
+            }
         }
         // The second device knows who it is from the start; the others
         // learn it at their first connection, their writes before it
         // stamped by the server.
-        devices[1].node.set_actor(ME);
+        devices[PHONE].node.set_actor(ME);
         let mut log: BTreeMap<Seq, Logged<Msg>> = BTreeMap::new();
         let mut now = 0u64;
         let mut value = 0u64;
-        let connect = |rng: &mut Rng, server: &mut Authority<Msg, Memory>, dev: &mut Device, d: usize| {
-            dev.online = true;
-            server.open(Conn(d as u32), dev.actor, Some(Origin(d as u64 + 1)));
-            dev.node.set_actor(dev.actor);
-            let mut said = Vec::new();
-            dev.node.connect(&mut said);
-            dev.watch(seed);
-            said.push(Up::Rate {
-                table: POSITIONS,
-                every: [0, 15, 40][rng.below(3) as usize],
-            });
-            dev.send(said);
-        };
+        type Relay = crate::Relay<Msg>;
         let deliver = |out: Vec<Out<Msg>>, devices: &mut Vec<Device>| {
             for (c, down) in out {
                 let dev = &mut devices[c.0 as usize];
@@ -781,13 +780,47 @@ pub(crate) mod tests {
                 dev.down.push_back(down);
             }
         };
+        // What the phone's relay answered: to the watch, and the phone's
+        // changes to its queries.
+        let served = |s: crate::Served<Msg>, said: Vec<Up<Msg>>, devices: &mut Vec<Device>| {
+            deliver(s.out, devices);
+            devices[PHONE].send(said);
+            devices[PHONE].watch(seed, Some(s.changes));
+        };
+        let connect = |rng: &mut Rng, server: &mut Authority<Msg, Memory>, relay: &mut Relay, devices: &mut Vec<Device>, d: usize| {
+            let dev = &mut devices[d];
+            dev.online = true;
+            if d == WATCH {
+                relay.serve().open(Conn(d as u32), dev.actor, Some(origin(d)));
+            } else {
+                server.open(Conn(d as u32), dev.actor, Some(origin(d)));
+            }
+            dev.node.set_actor(dev.actor);
+            let mut said = Vec::new();
+            dev.node.connect(&mut said);
+            if d == PHONE {
+                relay.connect(&mut said);
+            }
+            said.push(Up::Rate {
+                table: POSITIONS,
+                every: [0, 15, 40][rng.below(3) as usize],
+            });
+            dev.send(said);
+            if d == PHONE {
+                let s = relay.changed(&mut devices[d].node);
+                served(s, Vec::new(), devices);
+            } else {
+                devices[d].watch(seed, None);
+            }
+        };
         let mut step = |rng: &mut Rng,
                         server: &mut Authority<Msg, Memory>,
+                        relay: &mut Relay,
                         devices: &mut Vec<Device>,
                         log: &mut BTreeMap<Seq, Logged<Msg>>,
                         seen: &mut Seen,
                         settle: bool| {
-            let d = rng.below(3) as usize;
+            let d = rng.below(4) as usize;
             now += rng.below(6);
             let op = if settle { 1 + rng.below(2) } else { rng.below(15) };
             match op {
@@ -808,9 +841,25 @@ pub(crate) mod tests {
                     }
                     dev.made.insert(e.id);
                     let mut said = Vec::new();
-                    dev.node.route(e, &mut said);
-                    dev.watch(seed);
-                    dev.send(said);
+                    if d == PHONE {
+                        let s = relay.route(&mut dev.node, e, &mut said, now);
+                        served(s, said, devices);
+                    } else {
+                        dev.node.route(e, &mut said);
+                        dev.watch(seed, None);
+                        dev.send(said);
+                    }
+                }
+                // The watch's phone takes what the watch sent: it answers
+                // from its view, and passes on what goes upstream.
+                1 | 5 | 6 if d == WATCH => {
+                    let Some(up) = devices[d].up.pop_front() else { return };
+                    if matches!(up, Up::Push(_)) && !devices[PHONE].online {
+                        seen.queued += 1;
+                    }
+                    let mut said = Vec::new();
+                    let s = relay.up(&mut devices[PHONE].node, Conn(WATCH as u32), up, &mut said, now);
+                    served(s, said, devices);
                 }
                 // The server takes what the device sent.
                 1 | 5 | 6 => {
@@ -821,7 +870,7 @@ pub(crate) mod tests {
                         owners = devices
                             .iter()
                             .enumerate()
-                            .filter(|(o, dev)| *o != d && dev.online && dev.actor == actor)
+                            .filter(|(o, dev)| *o != d && *o != WATCH && dev.online && dev.actor == actor)
                             .count();
                     }
                     let out = server.receive(Conn(d as u32), up, now);
@@ -840,58 +889,90 @@ pub(crate) mod tests {
                         .count() as u32;
                     deliver(out, devices);
                 }
-                // The device takes what the server sent.
+                // The device takes what its upstream sent.
                 2 | 7 | 8 => {
                     let dev = &mut devices[d];
                     let Some(down) = dev.down.pop_front() else { return };
                     let live = match &down {
                         Down::Live(e) => {
-                            let Msg::Set { key, value } = e.body else { unreachable!() };
-                            Some((key, value, position(dev.node.store(Space::Session), key)))
+                            let Msg::Set { key, .. } = e.body else { unreachable!() };
+                            Some((key, position(dev.node.store(Space::Session), key)))
                         }
                         _ => None,
                     };
-                    let mut said = Vec::new();
+                    let pending: BTreeSet<EntryId> = dev.node.pending().iter().map(|p| p.entry.id).collect();
                     let skipped = dev.node.skipped;
-                    dev.node.receive(down, &mut said);
-                    dev.watch(seed);
+                    let mut said = Vec::new();
+                    if d == PHONE {
+                        if matches!(down, Down::Fill { .. } | Down::Rows(_)) {
+                            seen.refills += 1;
+                        }
+                        let s = relay.down(&mut dev.node, down, &mut said, now);
+                        served(s, said, devices);
+                    } else {
+                        dev.node.receive(down, &mut said);
+                        dev.watch(seed, None);
+                        dev.send(said);
+                    }
+                    let dev = &mut devices[d];
                     seen.skipped += dev.node.skipped - skipped;
-                    if let Some((key, value, before)) = live {
+                    if let Some((key, before)) = live {
                         let writer = actors[usize::from(key / 10)];
                         assert!(
                             writer == dev.actor && usize::from(key / 10) != d,
                             "seed {seed}: a session entry to its owner's other devices only"
                         );
-                        assert!(value >= before, "seed {seed}: the latest per row, in order");
+                        let after = position(dev.node.store(Space::Session), key);
+                        assert!(after >= before, "seed {seed}: the latest per row, never back");
                     }
-                    dev.send(said);
+                    // What the watch lets go of the server has judged.
+                    if d == WATCH {
+                        for p in &pending {
+                            if !dev.node.pending().iter().any(|q| q.entry.id == *p) {
+                                let logged = log.values().any(|l| l.entry.id == *p);
+                                assert!(logged || server.refused().contains_key(p), "seed {seed}: {p:?} confirmed by the server");
+                                seen.relayed += 1;
+                            }
+                        }
+                    }
                     dev.refused.extend(dev.node.take_refused().into_iter().map(|(id, _)| id));
                 }
                 // Session values, a few at once as a position streams: each
                 // device sets its own keys.
                 9 | 10 => {
-                    let dev = &mut devices[d];
                     let mut said = Vec::new();
+                    let mut out = Vec::new();
                     for _ in 0..1 + rng.below(3) {
                         value += 1;
                         let key = 10 * d as u8 + rng.below(2) as u8;
+                        let dev = &mut devices[d];
                         let e = dev.node.make(Space::Session, Msg::Set { key, value }, now);
-                        dev.node.route(e, &mut said);
+                        if d == PHONE {
+                            let s = relay.route(&mut dev.node, e, &mut said, now);
+                            assert!(s.changes.rows.is_empty());
+                            out.extend(s.out);
+                        } else {
+                            dev.node.route(e, &mut said);
+                        }
                     }
-                    dev.watch(seed);
-                    dev.send(said);
+                    deliver(out, devices);
+                    devices[d].watch(seed, (d == PHONE).then(Changes::default));
+                    devices[d].send(said);
                 }
-                // The server's timer, or its log let go of.
+                // The timers, or the server's log let go of.
                 11 => {
                     let out = server.tick(now);
+                    deliver(out, devices);
+                    let out = relay.tick(&devices[PHONE].node, now);
                     deliver(out, devices);
                     if rng.below(3) == 0 {
                         let head = server.head().0;
                         server.trim(Seq(rng.below(head + 1)));
                     }
                 }
-                // The third device lets go of a query, or takes one.
-                12 if d == 2 => {
+                // The third device or the watch lets go of a query, or
+                // takes one.
+                12 if d == 2 || d == WATCH => {
                     let dev = &mut devices[d];
                     let mut said = Vec::new();
                     match dev.subs.iter().position(|s| s.0 == QueryId(0)) {
@@ -907,39 +988,56 @@ pub(crate) mod tests {
                     }
                     dev.send(said);
                 }
-                // Disconnected, or connected again.
+                // Disconnected, or connected again: the watch from its
+                // phone, the others from the server.
                 _ => {
-                    let dev = &mut devices[d];
-                    if dev.online {
+                    if devices[d].online {
+                        let dev = &mut devices[d];
                         dev.online = false;
-                        server.close(Conn(d as u32), now);
+                        if d == WATCH {
+                            relay.close(Conn(d as u32), now);
+                        } else {
+                            server.close(Conn(d as u32), now);
+                        }
                         dev.up.clear();
                         dev.down.clear();
                     } else {
-                        connect(rng, server, dev, d);
+                        connect(rng, server, relay, devices, d);
                     }
                 }
             }
         };
         for _ in 0..steps {
-            step(&mut rng, &mut server, &mut devices, &mut log, seen, false);
+            step(&mut rng, &mut server, &mut relay, &mut devices, &mut log, seen, false);
         }
-        // Everyone connected, then quiet, the server's timer run out.
-        for (d, dev) in devices.iter_mut().enumerate().filter(|(_, dev)| !dev.online) {
-            connect(&mut rng, &mut server, dev, d);
+        // Everyone connected, then quiet, the timers run out.
+        for d in 0..4 {
+            if !devices[d].online {
+                connect(&mut rng, &mut server, &mut relay, &mut devices, d);
+            }
         }
         loop {
             while devices.iter().any(|dev| !dev.up.is_empty() || !dev.down.is_empty()) {
-                step(&mut rng, &mut server, &mut devices, &mut log, seen, true);
+                step(&mut rng, &mut server, &mut relay, &mut devices, &mut log, seen, true);
             }
-            let Some(at) = server.next_tick() else { break };
-            deliver(server.tick(at), &mut devices);
+            match (server.next_tick(), relay.next_tick()) {
+                (None, None) => break,
+                (a, b) => {
+                    let at = a.into_iter().chain(b).min().unwrap();
+                    deliver(server.tick(at), &mut devices);
+                    let out = relay.tick(&devices[PHONE].node, at);
+                    deliver(out, &mut devices);
+                }
+            }
         }
 
         let logged: Vec<EntryId> = log.values().map(|l| l.entry.id).collect();
         let once: BTreeSet<EntryId> = logged.iter().copied().collect();
         assert_eq!(once.len(), logged.len(), "an entry logged twice");
         assert_eq!(log.len() as u64, server.head().0, "every seq logged");
+        assert_eq!(relay.forwarded(), [], "seed {seed}: the phone holds no push of its watch's");
+        let server_latest: Vec<Entry<Msg>> = server.latest().cloned().collect();
+        let relay_latest: Vec<Entry<Msg>> = relay.serve().latest().cloned().collect();
         for (d, dev) in devices.iter().enumerate() {
             // What it holds: every row, or the rows its queries read now.
             let mut held = rows(server.store());
@@ -955,7 +1053,7 @@ pub(crate) mod tests {
             assert_eq!(rows(dev.node.store(Space::Shared)), held, "seed {seed}: device {d}");
             assert_eq!(rows(&dev.node.view(Space::Shared)), held, "seed {seed}: device {d}");
             assert_eq!(dev.node.pending(), [], "seed {seed}");
-            assert_eq!(dev.node.cursor(), server.head());
+            assert_eq!(dev.node.cursor(), server.head(), "seed {seed}: device {d}'s cursor");
             for id in &dev.made {
                 assert!(
                     once.contains(id) != server.refused().contains_key(id),
@@ -964,12 +1062,13 @@ pub(crate) mod tests {
             }
             let theirs: BTreeSet<EntryId> = server.refused().keys().filter(|id| dev.made.contains(id)).copied().collect();
             assert_eq!(dev.refused, theirs, "seed {seed}: told of every refusal; made {:?}", dev.made);
-            // Its session space: its own rows, and the latest the server
+            // Its session space: its own rows, and the latest its upstream
             // took of its actor's other devices' rows; never another
             // actor's.
-            for e in server.latest() {
+            let latest = if d == PHONE || d == WATCH { &relay_latest } else { &server_latest };
+            for e in latest {
                 let Msg::Set { key, value } = e.body else { unreachable!() };
-                if e.actor == dev.actor && e.id.origin != Origin(d as u64 + 1) {
+                if e.actor == dev.actor && e.id.origin != origin(d) {
                     assert_eq!(
                         position(dev.node.store(Space::Session), key),
                         value,
@@ -981,6 +1080,13 @@ pub(crate) mod tests {
                 assert_eq!(actors[usize::from(k[0] / 10)], dev.actor, "seed {seed}: another actor's session row");
                 true
             });
+        }
+        // The phone has at least what the server has of every row.
+        for e in &server_latest {
+            if e.actor == ME {
+                let mine = relay_latest.iter().find(|r| r.body.row() == e.body.row()).expect("the phone has the row");
+                assert!(mine.at >= e.at, "seed {seed}: the phone's latest no older than the server's");
+            }
         }
         for l in log.values() {
             assert_eq!(
@@ -1005,6 +1111,7 @@ pub(crate) mod tests {
             converge(seed, 160, &mut seen);
         }
         assert!(seen.skipped > 0 && seen.fills > 0 && seen.forged > 0 && seen.held > 0 && seen.deltas > 0);
+        assert!(seen.relayed > 0 && seen.queued > 0 && seen.refills > 0);
     }
 
     crate::listed!(

@@ -1,6 +1,6 @@
 //! Serving downstream nodes: what any upstream keeps of the nodes that
 //! connect to it and answers them with. The server's [`crate::Authority`]
-//! serves its devices with it, and a phone will serve its watch with it,
+//! serves its devices with it, and a phone's [`crate::Relay`] its watch,
 //! over the phone's own view. A watch never links it.
 //!
 //! **Connections and records.** The host opens a connection as the actor
@@ -50,7 +50,7 @@ use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
 
 use crate::entry::{Actor, Entry, Origin, Seq};
-use crate::node::Body;
+use crate::node::{Body, Refusal};
 use crate::plan::{Changes, Diff, Live, Plan};
 use crate::store::{Read, TableId, Write, Writes};
 use crate::sync::{Down, Feed, Logged, QueryId};
@@ -153,6 +153,34 @@ impl Record {
                         value: None,
                     });
                 }
+            }
+        }
+        out
+    }
+
+    /// Marks every row it holds to send: what it holds may all have
+    /// changed.
+    fn unsend(&mut self) {
+        for h in self.held.iter_mut().flat_map(|h| h.values_mut()) {
+            if h.count > 0 {
+                h.sent = UNSENT;
+            }
+        }
+    }
+
+    /// The rows still to send, each whole or a removal, sent now at
+    /// `version`.
+    fn unsent(&mut self, db: &dyn Read, version: u64) -> Vec<Write> {
+        let mut out = Vec::new();
+        for ((table, key), h) in self.held.iter_mut().flat_map(|h| h.iter_mut()) {
+            if h.sent == UNSENT {
+                h.sent = version;
+                let value = if h.count > 0 { db.get(*table, key) } else { None };
+                out.push(Write {
+                    table: *table,
+                    key: key.clone(),
+                    value,
+                });
             }
         }
         out
@@ -507,6 +535,40 @@ impl<B: Body + Clone> Serve<B> {
         out
     }
 
+    /// The upstream's rows changed whole (`changes` is a reset: a fill of
+    /// its own), from `from` to `head`: each connection that has said
+    /// hello is sent every row it holds and the removals of those it no
+    /// longer does, as a fill to `head` that empties nothing; the records
+    /// of the rest mark them to send.
+    pub fn refill(&mut self, db: &dyn Read, changes: &Changes, from: Seq, head: Seq) -> Vec<Out<B>> {
+        let version = if from < head { logged(head) } else { moved(head) };
+        let mut out = Vec::new();
+        let part = self.part;
+        for (&c, peer) in &mut self.conns {
+            peer.record.settle(db, changes, None);
+            peer.record.unsend();
+            if !peer.hello {
+                continue;
+            }
+            let rows = peer.record.unsent(db, version);
+            let parts: Vec<Writes> = rows.chunks(part).map(|r| Writes(r.to_vec())).collect();
+            out.push((
+                c,
+                Down::Fill {
+                    seq: head,
+                    tables: Vec::new(),
+                    parts: parts.len() as u32,
+                },
+            ));
+            out.extend(parts.into_iter().map(|r| (c, Down::Rows(r))));
+        }
+        for (record, _) in self.kept.values_mut() {
+            record.settle(db, changes, None);
+            record.unsend();
+        }
+        out
+    }
+
     /// A session entry `actor` sent from `from` (or the upstream's own,
     /// or its upstream's: `None`) at `now`: what goes to the actor's other
     /// connections, or `None` if it is older than the latest kept for its
@@ -562,6 +624,19 @@ impl<B: Body + Clone> Serve<B> {
     /// How many records of clients away are kept: for the host to see.
     pub fn kept(&self) -> usize {
         self.kept.len()
+    }
+}
+
+/// `e` as from `actor`, its connection's: stamped if it names no one,
+/// refused if it names another.
+pub(crate) fn stamped<B>(actor: Actor, mut e: Entry<B>) -> Result<Entry<B>, Refusal> {
+    if e.actor == Actor::NONE {
+        e.actor = actor;
+    }
+    if e.actor == actor {
+        Ok(e)
+    } else {
+        Err(Refusal::NOT_YOURS)
     }
 }
 
