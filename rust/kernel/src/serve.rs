@@ -31,7 +31,7 @@
 //! fill of every row the record sent it (its cursor says so, as for any
 //! row) and is not past the head, is sent the rows still to send and those
 //! sent at a version above twice its cursor, each whole or as a removal,
-//! as a fill that empties nothing ([`Down::Fill`], not whole); any other
+//! as a fill that empties nothing ([`crate::sync::End::Fill`], not whole); any other
 //! is sent every row it holds, as a whole fill, which replaces every row
 //! the node holds. Then `Got` for each subscription it said.
 //!
@@ -59,7 +59,7 @@ use crate::entry::{Actor, Entry, Origin, Seq};
 use crate::node::{Body, Refusal};
 use crate::plan::{Changes, Live};
 use crate::store::{Read, TableId, Write, Writes};
-use crate::sync::{Down, Feed, Logged, Query, QueryId};
+use crate::sync::{Down, End, Feed, Logged, Query, QueryId};
 
 /// A connection, by the host's number for it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -373,11 +373,6 @@ impl<B: Body + Clone> Serve<B> {
         self.conns.iter().find(|(_, p)| p.client == Some(client)).map(|(&c, _)| c)
     }
 
-    /// Rows, in `Moved` parts.
-    fn parts(&self, rows: Vec<Write>) -> Vec<Down<B>> {
-        parts(&rows, self.part).collect()
-    }
-
     /// `conn` subscribes to a query over `db`, the upstream's rows at
     /// `head`: after its hello, it is sent the rows it did not hold, then
     /// `Got`. One the build does not have, or one it let go and still
@@ -390,12 +385,10 @@ impl<B: Body + Clone> Serve<B> {
         if !hello && !peer.said.iter().any(|s| s.0 == query && s.1 == args) {
             peer.said.push((query, args.clone()));
         }
-        let got = |rows: Vec<Down<B>>| {
-            let mut out = rows;
-            if hello {
-                out.push(Down::Got { query, args: args.clone() });
-            }
-            out
+        let part = self.part;
+        let got = |rows: Vec<Write>| {
+            let end = if hello { End::Got { query, args: args.clone() } } else { End::Moved };
+            frames(&rows, part, end)
         };
         if let Some(sub) = peer.record.subs.iter_mut().find(|s| s.query == query && s.args == args) {
             sub.until = None;
@@ -414,8 +407,7 @@ impl<B: Body + Clone> Serve<B> {
             base,
             until: None,
         });
-        let rows = self.parts(came);
-        got(rows)
+        got(came)
     }
 
     /// `conn` lets go of a subscription at `now`: held for the query TTL,
@@ -430,7 +422,7 @@ impl<B: Body + Clone> Serve<B> {
         };
         sub.until = Some(now.saturating_add(self.ttl));
         let gone = peer.record.expire(now, peer.hello.then(|| moved(head)));
-        self.parts(gone)
+        frames(&gone, self.part, End::Moved)
     }
 
     /// `conn` states a session table's rate.
@@ -484,11 +476,14 @@ impl<B: Body + Clone> Serve<B> {
             if !delta {
                 record.filled = version;
             }
-            out.extend(fill(head, !delta, &rows, self.part));
-            out.extend(peer.said.iter().map(|(query, args)| Down::Got {
-                query: *query,
-                args: args.clone(),
-            }));
+            out.extend(frames(&rows, self.part, End::Fill { seq: head, whole: !delta }));
+            for (query, args) in &peer.said {
+                let got = End::Got {
+                    query: *query,
+                    args: args.clone(),
+                };
+                out.extend(frames(&[], self.part, got));
+            }
         }
         let actor = peer.actor;
         let live = self.latest.iter().filter(|((a, _), _)| *a == actor);
@@ -500,7 +495,7 @@ impl<B: Body + Clone> Serve<B> {
     /// the logged entry it was, if one: to each connection that has said
     /// hello, that entry with the facts of the rows it holds and the rows
     /// that moved into or out of its queries (every fact, to one that
-    /// holds every row); with no entry, those rows as `Moved`. The records
+    /// holds every row); with no entry, those rows, ending `Moved`. The records
     /// of clients away, and of connections yet to say hello (which their
     /// hello answers), mark them to send.
     pub fn feed(&mut self, db: &dyn Read, changes: &Changes, entry: Option<&Logged<B>>, head: Seq) -> Vec<Out<B>> {
@@ -518,7 +513,7 @@ impl<B: Body + Clone> Serve<B> {
                     let entry = l.entry.clone();
                     out.push((c, Down::Logged(Logged { entry, facts })));
                 }
-                None => out.extend(parts(&rows, part).map(|d| (c, d))),
+                None => out.extend(frames(&rows, part, End::Moved).into_iter().map(|d| (c, d))),
             }
         }
         for (record, _) in self.kept.values_mut() {
@@ -543,7 +538,8 @@ impl<B: Body + Clone> Serve<B> {
                 continue;
             }
             let rows = peer.record.unsent(db, version);
-            out.extend(fill(head, false, &rows, part).into_iter().map(|d| (c, d)));
+            let end = End::Fill { seq: head, whole: false };
+            out.extend(frames(&rows, part, end).into_iter().map(|d| (c, d)));
         }
         for (record, _) in self.kept.values_mut() {
             record.settle(db, changes, None);
@@ -605,7 +601,7 @@ impl<B: Body + Clone> Serve<B> {
         let part = self.part;
         for (&c, peer) in &mut self.conns {
             let gone = peer.record.expire(now, peer.hello.then(|| moved(head)));
-            out.extend(parts(&gone, part).map(|d| (c, d)));
+            out.extend(frames(&gone, part, End::Moved).into_iter().map(|d| (c, d)));
             out.extend(peer.feed.due(now).into_iter().map(|e| (c, Down::Live(e))));
         }
         self.kept.retain(|_, (record, until)| {
@@ -629,20 +625,25 @@ impl<B: Body + Clone> Serve<B> {
     }
 }
 
-/// Rows as `Moved` frames of at most `part` rows each.
-fn parts<B>(rows: &[Write], part: usize) -> impl Iterator<Item = Down<B>> + '_ {
-    rows.chunks(part).map(|c| Down::Moved(Writes(c.to_vec())))
-}
-
-/// A fill to `seq` of `rows`, replacing every row the node holds when
-/// `whole`: its frame, then its parts.
-pub(crate) fn fill<B>(seq: Seq, whole: bool, rows: &[Write], part: usize) -> Vec<Down<B>> {
-    let mut out = Vec::from([Down::Fill {
-        seq,
-        whole,
-        parts: rows.len().div_ceil(part) as u32,
-    }]);
-    out.extend(parts(rows, part));
+/// Rows as `Rows` frames of at most `part` rows each, the last saying
+/// `end`: one frame if there are none, but no frame for no rows that only
+/// moved.
+pub(crate) fn frames<B>(rows: &[Write], part: usize, end: End) -> Vec<Down<B>> {
+    let mut out: Vec<Down<B>> = rows
+        .chunks(part)
+        .map(|c| Down::Rows {
+            rows: Writes(c.to_vec()),
+            end: End::More,
+        })
+        .collect();
+    match out.last_mut() {
+        Some(Down::Rows { end: last, .. }) => *last = end,
+        _ if end != End::Moved => out.push(Down::Rows {
+            rows: Writes::default(),
+            end,
+        }),
+        _ => {}
+    }
     out
 }
 
@@ -735,11 +736,19 @@ pub(crate) mod tests {
 
     /// Whether a fill replaces every row, and the rows it carries.
     fn filled(sent: &[Down<Msg>]) -> (bool, Vec<Write>) {
-        let Some(&Down::Fill { whole, .. }) = sent.first() else {
-            panic!("a fill: {sent:?}")
-        };
-        let rows = sent.iter().filter_map(|d| if let Down::Moved(w) = d { Some(w.0.clone()) } else { None });
-        (whole, rows.flatten().collect())
+        let mut whole = None;
+        let mut rows = Vec::new();
+        for d in sent {
+            if let Down::Rows { rows: w, end } = d {
+                if whole.is_none() {
+                    rows.extend(w.0.iter().cloned());
+                }
+                if let End::Fill { whole: w, .. } = end {
+                    whole = Some(*w);
+                }
+            }
+        }
+        (whole.expect("a fill"), rows)
     }
 
     /// A client that connects again while its record is kept is sent only
@@ -764,7 +773,10 @@ pub(crate) mod tests {
             value: None,
         };
         assert_eq!((whole, rows_sent), (false, vec![count_is(1, 3), count_is(2, 3), gone]));
-        assert!(matches!(sent[sent.len() - 2..], [Down::Got { .. }, Down::Welcome { .. }]));
+        assert!(matches!(
+            sent[sent.len() - 2..],
+            [Down::Rows { end: End::Got { .. }, .. }, Down::Welcome { .. }]
+        ));
         assert_eq!(rows(watch.store(Space::Shared).unwrap()), odd(a.store()));
         assert!(watch.complete(QueryId(0), &[1]) && watch.cursor() == a.head());
 
@@ -785,7 +797,7 @@ pub(crate) mod tests {
         let mut up = Vec::new();
         watch.subscribe(QueryId(0), vec![0], &mut up);
         let out = a.receive(Conn(5), up.remove(0), 650);
-        assert!(matches!(out[0].1, Down::Moved(_)));
+        assert!(matches!(&out[0].1, Down::Rows { rows, end: End::Got { .. } } if !rows.0.is_empty()));
         a.close(Conn(5), 660);
         let sent = connect(&mut a, &mut watch, 8, 670);
         let (_, again) = filled(&sent);
@@ -841,9 +853,12 @@ pub(crate) mod tests {
             a.receive(Conn(2), up.remove(0), 50),
             [(
                 Conn(2),
-                Down::Got {
-                    query: QueryId(0),
-                    args: vec![1]
+                Down::Rows {
+                    rows: Writes::default(),
+                    end: End::Got {
+                        query: QueryId(0),
+                        args: vec![1]
+                    }
                 }
             )]
         );
@@ -863,7 +878,7 @@ pub(crate) mod tests {
         // A node with none of the rows the record sent is filled whole.
         assert!(filled(&sent).0);
         assert_eq!(a.next_tick(), Some(400));
-        assert!(a.tick(400).iter().any(|(_, d)| matches!(d, Down::Moved(_))));
+        assert!(a.tick(400).iter().any(|(_, d)| matches!(d, Down::Rows { end: End::Moved, .. })));
     }
 
     crate::listed!(a_client_that_connects_again_is_sent_what_changed, a_query_let_go_stays_held_for_its_ttl);

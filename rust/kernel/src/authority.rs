@@ -64,11 +64,11 @@ use alloc::vec::Vec;
 use crate::entry::{Actor, Entry, EntryId, Origin, Seq, Space};
 use crate::node::{run, Body, Handler, Refusal};
 use crate::plan::{Changes, Diff};
-use crate::serve::{fill, stamped, Serve};
+use crate::serve::{frames, stamped, Serve};
 pub use crate::serve::{Conn, Out};
 use crate::store::{Range, Store, Write};
 pub use crate::sync::Query;
-use crate::sync::{Down, Logged, Up, Verdict};
+use crate::sync::{Down, End, Logged, Up, Verdict};
 
 pub struct Authority<B: 'static, S> {
     handlers: &'static [Handler<B>],
@@ -229,7 +229,14 @@ impl<B: Body + Clone + 'static, S: Store> Authority<B, S> {
                 true
             });
         }
-        fill(self.head(), true, &rows, self.serve.part())
+        frames(
+            &rows,
+            self.serve.part(),
+            End::Fill {
+                seq: self.head(),
+                whole: true,
+            },
+        )
     }
 
     /// Judges an entry `actor`'s connection pushed: the verdict for its
@@ -499,14 +506,15 @@ pub(crate) mod tests {
         assert_eq!((a.log().len(), a.head()), (2, Seq(5)));
         assert_eq!(a.receive(Conn(1), Up::Hello { cursor: Seq(3), time: 0 }, 0).len(), 3);
         let fill = to(1, &a.receive(Conn(1), Up::Hello { cursor: Seq(2), time: 0 }, 0));
-        assert_eq!(
-            fill[0],
-            Down::Fill {
-                seq: Seq(5),
-                whole: true,
-                parts: 3
+        // Three parts, the last saying the fill, then the welcome.
+        assert_eq!(fill.len(), 4);
+        assert!(matches!(
+            &fill[2],
+            Down::Rows {
+                end: End::Fill { seq: Seq(5), whole: true },
+                ..
             }
-        );
+        ));
         let mut d = node(2);
         let mut up = Vec::new();
         for down in fill {
@@ -617,7 +625,7 @@ pub(crate) mod tests {
         let sent: Vec<Up<Msg>> = up.clone();
         let out = a.receive(Conn(2), sent[0].clone(), 0);
         up.clear();
-        assert!(matches!(out.last(), Some((_, Down::Got { .. }))));
+        assert!(matches!(out.last(), Some((_, Down::Rows { end: End::Got { .. }, .. }))));
         deliver(out, &mut watch);
         let first_two: Vec<_> = rows(a.store()).into_iter().take(2).collect();
         let mut both: BTreeSet<_> = odd(a.store()).into_iter().collect();
@@ -942,8 +950,22 @@ pub(crate) mod tests {
                     if let Some(l) = server.log().last() {
                         log.entry(l.entry.seq.unwrap()).or_insert_with(|| l.clone());
                     }
-                    seen.fills += out.iter().filter(|(_, down)| matches!(down, Down::Fill { .. })).count() as u32;
-                    seen.deltas += out.iter().filter(|(_, down)| matches!(down, Down::Fill { whole: false, .. })).count() as u32;
+                    seen.fills += out
+                        .iter()
+                        .filter(|(_, down)| matches!(down, Down::Rows { end: End::Fill { .. }, .. }))
+                        .count() as u32;
+                    seen.deltas += out
+                        .iter()
+                        .filter(|(_, down)| {
+                            matches!(
+                                down,
+                                Down::Rows {
+                                    end: End::Fill { whole: false, .. },
+                                    ..
+                                }
+                            )
+                        })
+                        .count() as u32;
                     deliver(out, devices);
                 }
                 // The device takes what its upstream sent.
@@ -961,7 +983,7 @@ pub(crate) mod tests {
                     let skipped = dev.node.skipped;
                     let mut said = Vec::new();
                     if d == PHONE {
-                        if matches!(down, Down::Fill { .. }) {
+                        if matches!(down, Down::Rows { end: End::Fill { .. }, .. }) {
                             seen.refills += 1;
                         }
                         let s = relay.down(&mut dev.node, down, &mut said, now);

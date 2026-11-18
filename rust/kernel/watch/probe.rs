@@ -399,20 +399,19 @@ fn main() -> ! {
             logged(&mut wire, e, seq, facts);
         }
     }
-    // A row that came into its query, held until the query is got.
+    // A row that came into its query, and the query got.
     put_frame(
         &mut wire,
-        &Down::<Msg>::Moved(Writes(alloc::vec![Write {
-            table: TableId(1),
-            key: [0, black_box(20)].into(),
-            value: Some([b'Z'; 32].into()),
-        }])),
-    );
-    put_frame(
-        &mut wire,
-        &Down::<Msg>::Got {
-            query: QueryId(0),
-            args: Vec::new(),
+        &Down::<Msg>::Rows {
+            rows: Writes(alloc::vec![Write {
+                table: TableId(1),
+                key: [0, black_box(20)].into(),
+                value: Some([b'Z'; 32].into()),
+            }]),
+            end: End::Got {
+                query: QueryId(0),
+                args: Vec::new(),
+            },
         },
     );
     take(&mut node, &mut wire, &mut up);

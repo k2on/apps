@@ -69,7 +69,7 @@ pub use serve::{Conn, Serve};
 pub use store::{Layer, Memory, Overlay, Read, Store, TableId, View, Write, Writes};
 #[cfg(feature = "upstream")]
 pub use sync::Feed;
-pub use sync::{Down, Logged, Pending, Query, QueryId, Up, Verdict};
+pub use sync::{Down, End, Logged, Pending, Query, QueryId, Up, Verdict};
 
 /// The tests, as a list a runner with no test harness calls one by one:
 /// the watch's under QEMU (`rust/kernel/watch/selftest.rs`). Each module's

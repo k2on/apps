@@ -5,8 +5,8 @@
 //! Up     Hello { cursor, time } | Push(Entry) | Live(Entry) | Rate { table, every }
 //!        | Subscribe { query, args } | Unsubscribe { query, args }
 //! Down   Logged { entry, facts } | Verdict { id, verdict } | Live(Entry)
-//!        | Fill { seq, whole, parts } | Moved(writes) | Got { query, args }
-//!        | Welcome { sent, time }
+//!        | Rows { rows, end } | Welcome { sent, time }
+//! End    More | Moved | Fill { seq, whole } | Got { query, args }
 //! Verdict  At(seq) | Refused(code)
 //! Pending  { entry, writes, judged }
 //! ```
@@ -20,12 +20,18 @@
 //! or below `seq`, or was refused (whose verdict came first). So a push
 //! that arrives twice is judged once.
 //!
+//! **Rows.** Every change that is rows and not a logged entry's facts (a
+//! fill, a subscription's rows, rows that moved) is one frame, `Rows`, cut
+//! into parts so each frame stays within what a watch reads at once. Each
+//! part but the last says `More`; the last says what they were, and until
+//! it comes the node holds them apart.
+//!
 //! **A fill.** An upstream keeps only the end of the log. A node whose
-//! cursor is below what it keeps is answered with a `Fill`: the confirmed
-//! rows at `seq`, in `parts` frames of `Moved` after it (so each frame stays
-//! within what a watch reads at once), and then the log after `seq` as
-//! usual. At its last part a whole fill replaces every row the node holds,
-//! and the node takes `seq` as its cursor.
+//! cursor is below what it keeps is answered with a fill: the confirmed
+//! rows at `seq`, ending `Fill { seq, whole }`, and then the log after
+//! `seq` as usual. At it a whole fill replaces every row the node holds,
+//! and the node takes `seq` as its cursor. An upstream sends a fill's
+//! parts together, nothing between them.
 //!
 //! **Subscriptions.** A node that holds only what its queries read (a
 //! watch) subscribes to each by its number and arguments, never by sending
@@ -35,8 +41,8 @@
 //! upstream kept its record of what the node holds, with a fill that
 //! empties nothing and carries only what changed since its cursor
 //! ([`crate::Serve`]); a subscription after
-//! it with the rows the node did not hold, in `Moved` parts, then `Got`,
-//! which says the query's rows are all there. After that each logged entry
+//! it with the rows the node did not hold, ending `Got`, which says the
+//! query's rows are all there. After that each logged entry
 //! comes with the facts of the rows the node holds, and the rows that
 //! moved into or out of its queries (a move-out is a removal), so a batch
 //! lands at its one `seq`. An unsubscription is answered with the
@@ -46,9 +52,7 @@
 //!
 //! **Atomic.** A node holds what moves, and a fill's parts, apart until
 //! every query it wants is got (a fill: until its last part), then takes
-//! them at once, so a view never shows half a subscription. An upstream
-//! sends a subscription's `Moved` parts and its `Got` together, nothing
-//! between them.
+//! them at once, so a view never shows half a subscription.
 //!
 //! **Session entries.** `Live` carries a session entry, which is forwarded
 //! to its actor's nodes (the one that sent it too) and never logged, and
@@ -159,20 +163,31 @@ pub enum Down<B> {
     Verdict { id: EntryId, verdict: Verdict },
     /// A session entry from another of the user's nodes.
     Live(Entry<B>),
-    /// The confirmed rows at `seq` follow, in the next `parts` frames,
-    /// each `Moved`, in place of the log up to it: the node's cursor is
-    /// below what its upstream keeps. When `whole`, they replace every row
-    /// the node holds.
-    Fill { seq: Seq, whole: bool, parts: u32 },
-    /// A fill's part; else rows that came into the node's queries, or moved
-    /// out of them (a removal), at its cursor.
-    Moved(Writes),
-    /// A subscription's rows are all sent.
-    Got { query: QueryId, args: Vec<u8> },
+    /// Rows, held by the node until `end` says what they were: one
+    /// frame's worth of every change that is rows and not a logged entry's
+    /// facts (a fill, a subscription's rows, rows that moved).
+    Rows { rows: Writes, end: End },
     /// The end of the answer to a hello: the time the hello said, and the
     /// tree's time at the upstream when it answered (the root's clock, as
     /// the upstream estimates it), for the node to measure its offset.
     Welcome { sent: u64, time: u64 },
+}
+
+/// What a run of [`Down::Rows`] frames was, said by its last: until then
+/// each says `More`, and its rows are held.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum End {
+    /// More of the same follow.
+    More,
+    /// Rows that came into the node's queries, or moved out of them (a
+    /// removal), at its cursor.
+    Moved,
+    /// The confirmed rows at `seq`, in place of the log up to it: the
+    /// node's cursor was below what its upstream keeps. When `whole`, they
+    /// replace every row the node holds.
+    Fill { seq: Seq, whole: bool },
+    /// A subscription's rows, all sent.
+    Got { query: QueryId, args: Vec<u8> },
 }
 
 #[cfg(feature = "upstream")]
@@ -402,23 +417,26 @@ impl<B: Encode> Encode for Down<B> {
                 2u32.encode(out);
                 e.encode(out);
             }
-            Down::Fill { seq, whole, parts } => {
+            Down::Rows { rows, end } => {
                 3u32.encode(out);
-                seq.encode(out);
-                whole.encode(out);
-                parts.encode(out);
-            }
-            Down::Moved(rows) => {
-                4u32.encode(out);
                 rows.encode(out);
-            }
-            Down::Got { query, args } => {
-                5u32.encode(out);
-                query.0.encode(out);
-                args.encode(out);
+                match end {
+                    End::More => 0u32.encode(out),
+                    End::Moved => 1u32.encode(out),
+                    End::Fill { seq, whole } => {
+                        2u32.encode(out);
+                        seq.encode(out);
+                        whole.encode(out);
+                    }
+                    End::Got { query, args } => {
+                        3u32.encode(out);
+                        query.0.encode(out);
+                        args.encode(out);
+                    }
+                }
             }
             Down::Welcome { sent, time } => {
-                6u32.encode(out);
+                4u32.encode(out);
                 sent.encode(out);
                 time.encode(out);
             }
@@ -435,17 +453,23 @@ impl<B: Decode> Decode for Down<B> {
                 verdict: Verdict::decode(r)?,
             }),
             2 => Ok(Down::Live(Entry::decode(r)?)),
-            3 => Ok(Down::Fill {
-                seq: Seq::decode(r)?,
-                whole: bool::decode(r)?,
-                parts: u32::decode(r)?,
+            3 => Ok(Down::Rows {
+                rows: Writes::decode(r)?,
+                end: match u32::decode(r)? {
+                    0 => End::More,
+                    1 => End::Moved,
+                    2 => End::Fill {
+                        seq: Seq::decode(r)?,
+                        whole: bool::decode(r)?,
+                    },
+                    3 => End::Got {
+                        query: QueryId(u32::decode(r)?),
+                        args: Vec::decode(r)?,
+                    },
+                    _ => return Err(Error::Tag),
+                },
             }),
-            4 => Ok(Down::Moved(Writes::decode(r)?)),
-            5 => Ok(Down::Got {
-                query: QueryId(u32::decode(r)?),
-                args: Vec::decode(r)?,
-            }),
-            6 => Ok(Down::Welcome {
+            4 => Ok(Down::Welcome {
                 sent: u64::decode(r)?,
                 time: u64::decode(r)?,
             }),
@@ -526,15 +550,24 @@ pub(crate) mod tests {
                 verdict: Verdict::Refused(Refusal(300)),
             },
             Down::Live(entry(3, None)),
-            Down::Fill {
-                seq: Seq(9),
-                whole: true,
-                parts: 2,
+            Down::Rows {
+                rows: facts.clone(),
+                end: End::More,
             },
-            Down::Moved(facts.clone()),
-            Down::Got {
-                query: QueryId(7),
-                args: vec![9],
+            Down::Rows {
+                rows: facts.clone(),
+                end: End::Moved,
+            },
+            Down::Rows {
+                rows: Writes::default(),
+                end: End::Fill { seq: Seq(9), whole: true },
+            },
+            Down::Rows {
+                rows: facts.clone(),
+                end: End::Got {
+                    query: QueryId(7),
+                    args: vec![9],
+                },
             },
             Down::Welcome {
                 sent: 5,

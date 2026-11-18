@@ -26,7 +26,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use ark_kernel::codec::{from_slice, put_frame};
 use ark_kernel::serve::Out;
-use ark_kernel::{Actor, Anchor, Authority, Conn, Down, Entry, Frames, Memory, Node, Origin, Read, Space, Spaces, Up, Verdict};
+use ark_kernel::{Actor, Anchor, Authority, Conn, Down, End, Entry, Frames, Memory, Node, Origin, Read, Space, Spaces, Up, Verdict};
 use now_playing::{playing, Msg, Playing, Track, HANDLERS, QUERIES, QUEUE, VERSION};
 use tungstenite::handshake::server::{Request, Response};
 use tungstenite::{Message, WebSocket};
@@ -111,9 +111,16 @@ fn down(d: &Down<Msg>) -> String {
             Verdict::Refused(r) => format!("Verdict {:x}/{} refused {}", id.origin.0, id.n, r.0),
         },
         Down::Live(e) => format!("Live {}", entry(e)),
-        Down::Fill { seq, whole, parts } => format!("Fill to seq {}{}, {parts} parts", seq.0, if *whole { " replacing every row" } else { "" }),
-        Down::Moved(w) => format!("Moved {} rows", w.0.len()),
-        Down::Got { query, .. } => format!("Got query {}", query.0),
+        Down::Rows { rows, end } => format!(
+            "Rows {}{}",
+            rows.0.len(),
+            match end {
+                End::More => String::from(", more to come"),
+                End::Moved => String::from(", moved"),
+                End::Fill { seq, whole } => format!(", a fill to seq {}{}", seq.0, if *whole { " replacing every row" } else { "" }),
+                End::Got { query, .. } => format!(", query {} got", query.0),
+            }
+        ),
         Down::Welcome { sent, time } => format!("Welcome: its {sent}, our {time} ({} ms ahead)", *time as i64 - *sent as i64),
     }
 }
