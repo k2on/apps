@@ -1,0 +1,26 @@
+# The Pebble host's crates, a workspace of their own apart from the
+# repository's `rust/` one: the host (`rust/`, for the watch), the demo's
+# domain (`demo/app`), the demo's watch library (`demo/watch`, a staticlib
+# for thumbv7m-none-eabi) and the test upstream (`upstream/`, a binary for
+# the dev machine).
+[workspace]
+resolver = "2"
+members = ["rust", "demo/app", "demo/watch", "upstream"]
+
+[workspace.package]
+edition = "2021"
+license = "MIT OR Apache-2.0"
+publish = false
+
+# The kernel's budget settings (docs/north-star.md, The Kernel's Budget):
+# what `checks.kernel-size` measures it at is what the watch links.
+[profile.release]
+panic = "abort"
+opt-level = "z"
+lto = true
+codegen-units = 1
+debug = false
+
+[profile.dev]
+panic = "abort"
+opt-level = "z"

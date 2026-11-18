@@ -1,0 +1,66 @@
+#
+# The demo watchapp's build: the SDK's rules, the host's C shim
+# (../c/ark_pebble.c) as the app's C, and the demo's Rust (watch/, a static
+# library linking ark-pebble and the kernel), built by cargo for
+# thumbv7m-none-eabi and linked ahead of the SDK's libpebble.
+#
+import os
+import subprocess
+
+top = '.'
+out = 'build'
+
+# The SDK compiles apps for -mcpu=cortex-m3 with the soft-float ABI; the
+# Rust target that links with it is thumbv7m-none-eabi (see ui/pebble/probe).
+RUST_TARGET = 'thumbv7m-none-eabi'
+
+
+def options(ctx):
+    ctx.load('pebble_sdk')
+
+
+def configure(ctx):
+    ctx.load('pebble_sdk')
+
+
+def build_rust(ctx):
+    """Builds watch/ with cargo, or takes NOW_PLAYING_RUST_LIB (a built .a)."""
+    given = os.environ.get('NOW_PLAYING_RUST_LIB')
+    if given:
+        return ctx.root.find_node(os.path.abspath(given))
+    target_dir = ctx.path.get_bld().make_node('rust')
+    subprocess.check_call([
+        'cargo', 'build', '--release', '--offline',
+        '--target', RUST_TARGET,
+        '--manifest-path', ctx.path.find_node('../Cargo.toml').abspath(),
+        '-p', 'now-playing-watch',
+        '--target-dir', target_dir.abspath(),
+    ])
+    return target_dir.find_node('{}/release/libnow_playing_watch.a'.format(RUST_TARGET))
+
+
+def build(ctx):
+    ctx.load('pebble_sdk')
+    rust_lib = build_rust(ctx)
+    if rust_lib is None:
+        ctx.fatal('libnow_playing_watch.a was not built')
+
+    shim = ctx.path.find_node('../c/ark_pebble.c')
+    binaries = []
+    cached_env = ctx.env
+    for platform in ctx.env.TARGET_PLATFORMS:
+        ctx.env = ctx.all_envs[platform]
+        ctx.set_group(ctx.env.PLATFORM_NAME)
+        app_elf = '{}/pebble-app.elf'.format(ctx.env.BUILD_DIR)
+        app = ctx.pbl_build(source=[shim], target=app_elf, bin_type='app',
+                            stlib=['now_playing_watch'], stlibpath=[rust_lib.parent.abspath()])
+        # Relink when the Rust library changes.
+        app.post()
+        app.link_task.dep_nodes.append(rust_lib)
+        binaries.append({'platform': platform, 'app_elf': app_elf})
+    ctx.env = cached_env
+
+    ctx.set_group('bundle')
+    ctx.pbl_bundle(binaries=binaries,
+                   js=ctx.path.ant_glob(['src/pkjs/**/*.js']),
+                   js_entry_file='src/pkjs/index.js')

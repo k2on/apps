@@ -1,0 +1,12 @@
+[package]
+name = "now-playing-upstream"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "A test upstream for the Pebble host: the kernel's Authority over a WebSocket, with a player node beside it standing in for harken's phone."
+
+[dependencies]
+ark-kernel = { path = "../../../../rust/kernel" }
+now-playing = { path = "../demo/app" }
+tungstenite = { version = "0.24", default-features = false, features = ["handshake"] }

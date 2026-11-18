@@ -1,0 +1,10 @@
+[package]
+name = "now-playing"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "The Pebble host's demo, standing in for harken's now playing: its entries, handlers and query, linked by the watch and by the test upstream alike."
+
+[dependencies]
+ark-kernel = { path = "../../../../../rust/kernel" }

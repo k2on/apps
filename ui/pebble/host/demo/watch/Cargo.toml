@@ -1,0 +1,18 @@
+[package]
+name = "now-playing-watch"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "The demo watchapp's Rust: now playing on the Pebble host, a staticlib for thumbv7m-none-eabi."
+
+[lib]
+name = "now_playing_watch"
+crate-type = ["staticlib"]
+test = false
+bench = false
+
+[dependencies]
+ark-kernel = { path = "../../../../../rust/kernel" }
+ark-pebble = { path = "../../rust" }
+now-playing = { path = "../app" }

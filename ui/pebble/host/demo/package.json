@@ -1,0 +1,29 @@
+{
+  "name": "ark-now-playing",
+  "author": "ark",
+  "version": "1.0.0",
+  "keywords": ["pebble-app"],
+  "private": true,
+  "dependencies": {},
+  "pebble": {
+    "displayName": "Now Playing",
+    "uuid": "57c83a76-dd7f-4241-a198-5b0d85d028ea",
+    "sdkVersion": "3",
+    "enableMultiJS": true,
+    "targetPlatforms": ["emery"],
+    "watchapp": {
+      "watchface": false
+    },
+    "messageKeys": ["READY", "INBOX", "ORIGIN", "EPOCH", "DATA", "HELLO", "LINK"],
+    "usesPermissions": [{ "name": "LocalNetwork" }],
+    "companionApp": {
+      "android": {
+        "apps": [{ "package": "us.koon.harken" }],
+        "required": false
+      }
+    },
+    "resources": {
+      "media": []
+    }
+  }
+}
