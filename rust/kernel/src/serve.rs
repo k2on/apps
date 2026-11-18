@@ -56,9 +56,9 @@ use alloc::vec::Vec;
 
 use crate::entry::{Actor, Entry, Origin, Seq};
 use crate::node::{Body, Refusal};
-use crate::plan::{Changes, Diff, Live, Plan};
+use crate::plan::{Changes, Diff, Live};
 use crate::store::{Read, TableId, Write, Writes};
-use crate::sync::{Down, Feed, Logged, QueryId};
+use crate::sync::{Down, Feed, Logged, Query, QueryId};
 
 /// A connection, by the host's number for it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -66,11 +66,6 @@ pub struct Conn(pub u32);
 
 /// A frame for a connection.
 pub type Out<B> = (Conn, Down<B>);
-
-/// A query's plan for its arguments, over one table's rows, which it keeps
-/// whole (a scan, its filters and its take): what a node that subscribes
-/// holds. The node runs its own maps, sorts and groups over them.
-pub type Query = fn(args: &[u8]) -> (TableId, Plan);
 
 /// A row of the shared space.
 pub(crate) type At = (TableId, Vec<u8>);
@@ -374,7 +369,7 @@ impl<B: Body + Clone> Serve<B> {
 
     /// Rows, in `Moved` parts.
     fn parts(&self, rows: Vec<Write>) -> Vec<Down<B>> {
-        rows.chunks(self.part).map(|c| Down::Moved(Writes(c.to_vec()))).collect()
+        parts(&rows, self.part).collect()
     }
 
     /// `conn` subscribes to a query over `db`, the upstream's rows at
@@ -492,13 +487,7 @@ impl<B: Body + Clone> Serve<B> {
             };
             tables.sort();
             tables.dedup();
-            let parts: Vec<Down<B>> = rows.chunks(self.part).map(|c| Down::Rows(Writes(c.to_vec()))).collect();
-            out.push(Down::Fill {
-                seq: head,
-                tables,
-                parts: parts.len() as u32,
-            });
-            out.extend(parts);
+            out.extend(fill(head, tables, &rows, self.part));
             out.extend(peer.said.iter().map(|(query, args)| Down::Got {
                 query: *query,
                 args: args.clone(),
@@ -532,7 +521,7 @@ impl<B: Body + Clone> Serve<B> {
                     let entry = l.entry.clone();
                     out.push((c, Down::Logged(Logged { entry, facts })));
                 }
-                None => out.extend(rows.chunks(part).map(|r| (c, Down::Moved(Writes(r.to_vec()))))),
+                None => out.extend(parts(&rows, part).map(|d| (c, d))),
             }
         }
         for (record, _) in self.kept.values_mut() {
@@ -557,16 +546,7 @@ impl<B: Body + Clone> Serve<B> {
                 continue;
             }
             let rows = peer.record.unsent(db, version);
-            let parts: Vec<Writes> = rows.chunks(part).map(|r| Writes(r.to_vec())).collect();
-            out.push((
-                c,
-                Down::Fill {
-                    seq: head,
-                    tables: Vec::new(),
-                    parts: parts.len() as u32,
-                },
-            ));
-            out.extend(parts.into_iter().map(|r| (c, Down::Rows(r))));
+            out.extend(fill(head, Vec::new(), &rows, part).into_iter().map(|d| (c, d)));
         }
         for (record, _) in self.kept.values_mut() {
             record.settle(db, changes, None);
@@ -628,7 +608,7 @@ impl<B: Body + Clone> Serve<B> {
         let part = self.part;
         for (&c, peer) in &mut self.conns {
             let gone = peer.record.expire(now, peer.hello.then(|| moved(head)));
-            out.extend(gone.chunks(part).map(|r| (c, Down::Moved(Writes(r.to_vec())))));
+            out.extend(parts(&gone, part).map(|d| (c, d)));
             out.extend(peer.feed.due(now).into_iter().map(|e| (c, Down::Live(e))));
         }
         self.kept.retain(|_, (record, until)| {
@@ -650,6 +630,23 @@ impl<B: Body + Clone> Serve<B> {
     pub fn kept(&self) -> usize {
         self.kept.len()
     }
+}
+
+/// Rows as `Moved` frames of at most `part` rows each.
+fn parts<B>(rows: &[Write], part: usize) -> impl Iterator<Item = Down<B>> + '_ {
+    rows.chunks(part).map(|c| Down::Moved(Writes(c.to_vec())))
+}
+
+/// A fill to `seq` of `rows`, emptying `tables` first: its frame, then its
+/// parts.
+pub(crate) fn fill<B>(seq: Seq, tables: Vec<TableId>, rows: &[Write], part: usize) -> Vec<Down<B>> {
+    let mut out = Vec::from([Down::Fill {
+        seq,
+        tables,
+        parts: rows.len().div_ceil(part) as u32,
+    }]);
+    out.extend(parts(rows, part));
+    out
 }
 
 /// `e` as from `actor`, its connection's: stamped if it names no one,
@@ -744,7 +741,7 @@ pub(crate) mod tests {
         let Some(Down::Fill { tables, .. }) = sent.first() else {
             panic!("a fill: {sent:?}")
         };
-        let rows = sent.iter().filter_map(|d| if let Down::Rows(w) = d { Some(w.0.clone()) } else { None });
+        let rows = sent.iter().filter_map(|d| if let Down::Moved(w) = d { Some(w.0.clone()) } else { None });
         (tables.clone(), rows.flatten().collect())
     }
 

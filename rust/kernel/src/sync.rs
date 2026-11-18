@@ -5,9 +5,9 @@
 //! Up     Hello { cursor, time } | Push(Entry) | Live(Entry) | Rate { table, every }
 //!        | Subscribe { query, args } | Unsubscribe { query, args }
 //! Down   Logged { entry, facts } | Verdict { id, verdict } | Live(Entry)
-//!        | Fill { seq, tables, parts } | Rows(writes) | Moved(writes)
-//!        | Got { query, args } | Welcome { sent, time }
-//! Verdict  At { seq, last } | Refused(code)
+//!        | Fill { seq, tables, parts } | Moved(writes) | Got { query, args }
+//!        | Welcome { sent, time }
+//! Verdict  At(seq) | Refused(code)
 //! Pending  { entry, writes, judged }
 //! ```
 //!
@@ -15,15 +15,14 @@
 //! pending entries, oldest first, each as it is made and all of them again
 //! at every connection. The upstream answers the hello with the log after
 //! that cursor, an entry and its facts at a time, and each push with a
-//! verdict: refused, or where the entry's origin stands, `At { seq, last }`:
-//! the last count of that origin the authority has judged, and its log's
-//! head when it answered. An entry of that origin at or below `last` is in
-//! the log at or below `seq`, or was refused; one past it was not judged.
-//! So a push that arrives twice is judged once.
+//! verdict: refused, or `At(seq)`, its log's head when it answered: the
+//! entry, and every entry of its origin pushed before it, is in the log at
+//! or below `seq`, or was refused (whose verdict came first). So a push
+//! that arrives twice is judged once.
 //!
 //! **A fill.** An upstream keeps only the end of the log. A node whose
 //! cursor is below what it keeps is answered with a `Fill`: the confirmed
-//! rows at `seq`, in `parts` frames of `Rows` after it (so each frame stays
+//! rows at `seq`, in `parts` frames of `Moved` after it (so each frame stays
 //! within what a watch reads at once), and then the log after `seq` as
 //! usual. The node empties the `tables` it names (every table the log has
 //! written) at the first part and takes `seq` as its cursor at the last.
@@ -73,13 +72,22 @@ use alloc::vec::Vec;
 
 use crate::codec::{Decode, Encode, Error, Reader};
 use crate::entry::{Entry, EntryId, Seq};
-use crate::node::{Body, Refusal};
+#[cfg(feature = "upstream")]
+use crate::node::Body;
+use crate::node::Refusal;
+use crate::plan::Plan;
 use crate::store::{TableId, Writes};
 
 /// A query, by the number its build gives it: what a node subscribes to,
 /// with its arguments.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct QueryId(pub u32);
+
+/// A query's plan for its arguments, over one table's rows, which it keeps
+/// whole (a scan, its filters and its take): what a node that subscribes
+/// holds, and its upstream runs. The node runs its own maps, sorts and
+/// groups over them.
+pub type Query = fn(args: &[u8]) -> (TableId, Plan);
 
 /// An entry as the master log holds it: ordered (`entry.seq` is set) and
 /// with the rows its run wrote, which every other node applies in place of
@@ -93,12 +101,9 @@ pub struct Logged<B> {
 /// The authority's answer to one pushed entry.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Verdict {
-    /// Its origin's entries up to `last` are judged, those not refused in
-    /// the log at or below `seq`.
-    At {
-        seq: Seq,
-        last: u64,
-    },
+    /// It and its origin's entries before it are judged, those not
+    /// refused in the log at or below this `seq`.
+    At(Seq),
     Refused(Refusal),
 }
 
@@ -155,14 +160,12 @@ pub enum Down<B> {
     Verdict { id: EntryId, verdict: Verdict },
     /// A session entry from another of the user's nodes.
     Live(Entry<B>),
-    /// The confirmed rows at `seq` follow, in `parts` frames of `Rows`, in
-    /// place of the log up to it: the node's cursor is below what its
-    /// upstream keeps. `tables` are emptied first.
+    /// The confirmed rows at `seq` follow, in the next `parts` frames,
+    /// each `Moved`, in place of the log up to it: the node's cursor is
+    /// below what its upstream keeps. `tables` are emptied first.
     Fill { seq: Seq, tables: Vec<TableId>, parts: u32 },
-    /// A part of a fill's rows.
-    Rows(Writes),
-    /// Rows that came into the node's queries, or moved out of them (a
-    /// removal), at its cursor.
+    /// A fill's part; else rows that came into the node's queries, or moved
+    /// out of them (a removal), at its cursor.
     Moved(Writes),
     /// A subscription's rows are all sent.
     Got { query: QueryId, args: Vec<u8> },
@@ -172,6 +175,7 @@ pub enum Down<B> {
     Welcome { sent: u64, time: u64 },
 }
 
+#[cfg(feature = "upstream")]
 /// What one node is sent of the session space: every entry at once, but
 /// in a table it asked a rate for, only the latest entry for each row
 /// ([`Body::row`]) is held between the table's turns, which come at most
@@ -183,6 +187,7 @@ pub struct Feed<B> {
     held: Vec<Entry<B>>,
 }
 
+#[cfg(feature = "upstream")]
 impl<B> Default for Feed<B> {
     fn default() -> Feed<B> {
         Feed {
@@ -192,6 +197,7 @@ impl<B> Default for Feed<B> {
     }
 }
 
+#[cfg(feature = "upstream")]
 impl<B: Body> Feed<B> {
     /// Sets `table`'s rate: at most one turn each `every` milliseconds.
     pub fn rate(&mut self, table: TableId, every: u32) {
@@ -279,10 +285,9 @@ impl<B: Decode> Decode for Logged<B> {
 impl Encode for Verdict {
     fn encode(&self, out: &mut Vec<u8>) {
         match self {
-            Verdict::At { seq, last } => {
+            Verdict::At(seq) => {
                 0u32.encode(out);
                 seq.encode(out);
-                last.encode(out);
             }
             Verdict::Refused(why) => {
                 1u32.encode(out);
@@ -295,10 +300,7 @@ impl Encode for Verdict {
 impl Decode for Verdict {
     fn decode(r: &mut Reader<'_>) -> Result<Self, Error> {
         match u32::decode(r)? {
-            0 => Ok(Verdict::At {
-                seq: Seq::decode(r)?,
-                last: u64::decode(r)?,
-            }),
+            0 => Ok(Verdict::At(Seq::decode(r)?)),
             1 => Ok(Verdict::Refused(Refusal::decode(r)?)),
             _ => Err(Error::Tag),
         }
@@ -406,21 +408,17 @@ impl<B: Encode> Encode for Down<B> {
                 tables.encode(out);
                 parts.encode(out);
             }
-            Down::Rows(rows) => {
+            Down::Moved(rows) => {
                 4u32.encode(out);
                 rows.encode(out);
             }
-            Down::Moved(rows) => {
-                5u32.encode(out);
-                rows.encode(out);
-            }
             Down::Got { query, args } => {
-                6u32.encode(out);
+                5u32.encode(out);
                 query.0.encode(out);
                 args.encode(out);
             }
             Down::Welcome { sent, time } => {
-                7u32.encode(out);
+                6u32.encode(out);
                 sent.encode(out);
                 time.encode(out);
             }
@@ -442,13 +440,12 @@ impl<B: Decode> Decode for Down<B> {
                 tables: Vec::decode(r)?,
                 parts: u32::decode(r)?,
             }),
-            4 => Ok(Down::Rows(Writes::decode(r)?)),
-            5 => Ok(Down::Moved(Writes::decode(r)?)),
-            6 => Ok(Down::Got {
+            4 => Ok(Down::Moved(Writes::decode(r)?)),
+            5 => Ok(Down::Got {
                 query: QueryId(u32::decode(r)?),
                 args: Vec::decode(r)?,
             }),
-            7 => Ok(Down::Welcome {
+            6 => Ok(Down::Welcome {
                 sent: u64::decode(r)?,
                 time: u64::decode(r)?,
             }),
@@ -522,7 +519,7 @@ pub(crate) mod tests {
             }),
             Down::Verdict {
                 id: entry(1, None).id,
-                verdict: Verdict::At { seq: Seq(5), last: 1 },
+                verdict: Verdict::At(Seq(5)),
             },
             Down::Verdict {
                 id: entry(2, None).id,
@@ -534,7 +531,6 @@ pub(crate) mod tests {
                 tables: vec![TableId(1), TableId(3)],
                 parts: 2,
             },
-            Down::Rows(facts.clone()),
             Down::Moved(facts.clone()),
             Down::Got {
                 query: QueryId(7),
@@ -557,6 +553,7 @@ pub(crate) mod tests {
         assert_eq!(from_slice::<Verdict>(&[2]), Err(Error::Tag));
     }
 
+    #[cfg(feature = "upstream")]
     /// A session table with a rate is sent at most once a turn, the
     /// latest entry for each row; other tables' entries go at once.
     #[cfg_attr(test, test)]
@@ -588,5 +585,8 @@ pub(crate) mod tests {
         assert_eq!(feed.offer(a5.clone(), 107), [a5]);
     }
 
+    #[cfg(not(feature = "upstream"))]
+    crate::listed!(frames_round_trip);
+    #[cfg(feature = "upstream")]
     crate::listed!(frames_round_trip, a_feed_keeps_the_latest_per_row_between_turns);
 }

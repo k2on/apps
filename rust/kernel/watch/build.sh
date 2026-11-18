@@ -2,9 +2,10 @@
 # Builds the kernel for the watch (thumbv7m-none-eabi: a Cortex-M3 with
 # soft floats, as a Pebble app is), as checks.kernel-size and
 # checks.kernel-qemu do: into OUT, the size probe
-# at the budget's settings (opt-level "z", LTO, panic abort) and the
-# selftest (the same, with the tests built in and overflow checked). Then
-# prints the probe's code, .text and .rodata, in bytes.
+# at the budget's settings (opt-level "z", LTO, panic abort), without the
+# `upstream` feature a watch never links, and the selftest (the same, with
+# the tests built in, the upstream's among them, and overflow checked).
+# Then prints the probe's code, .text and .rodata, in bytes.
 #
 #   rust/kernel/watch/build.sh OUT
 #
@@ -21,7 +22,7 @@ rustc "${target[@]}" -C lto=fat --crate-type bin --crate-name probe "$here/probe
   --extern ark_kernel="$out/libark_kernel.rlib" -C link-arg=-T"$here/link.x" -o "$out/probe"
 
 mkdir -p "$out/selftest-lib"
-rustc "${target[@]}" -C overflow-checks=on --cfg ark_selftest --crate-type rlib --crate-name ark_kernel "$here/../src/lib.rs" \
+rustc "${target[@]}" -C overflow-checks=on --cfg ark_selftest --cfg 'feature="upstream"' --crate-type rlib --crate-name ark_kernel "$here/../src/lib.rs" \
   -o "$out/selftest-lib/libark_kernel.rlib"
 rustc "${target[@]}" -C overflow-checks=on -C lto=fat --crate-type bin --crate-name selftest "$here/selftest.rs" \
   --extern ark_kernel="$out/selftest-lib/libark_kernel.rlib" -C link-arg=-T"$here/link.x" -o "$out/selftest"

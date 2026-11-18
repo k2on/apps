@@ -217,23 +217,16 @@ impl Decode for i64 {
 
 impl<T: Encode> Encode for Option<T> {
     fn encode(&self, out: &mut Vec<u8>) {
-        match self {
-            None => out.push(0),
-            Some(v) => {
-                out.push(1);
-                v.encode(out);
-            }
+        self.is_some().encode(out);
+        if let Some(v) = self {
+            v.encode(out);
         }
     }
 }
 
 impl<T: Decode> Decode for Option<T> {
     fn decode(r: &mut Reader<'_>) -> Result<Self, Error> {
-        match r.byte()? {
-            0 => Ok(None),
-            1 => Ok(Some(T::decode(r)?)),
-            _ => Err(Error::Tag),
-        }
+        Ok(if bool::decode(r)? { Some(T::decode(r)?) } else { None })
     }
 }
 

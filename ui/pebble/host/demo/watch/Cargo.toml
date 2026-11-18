@@ -18,6 +18,6 @@ bench = false
 now-playing-view = { path = "../view" }
 
 [dependencies]
-ark-kernel = { path = "../../../../../rust/kernel" }
+ark-kernel = { path = "../../../../../rust/kernel", default-features = false }
 ark-pebble = { path = "../../rust" }
 now-playing = { path = "../app" }

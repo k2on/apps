@@ -154,7 +154,7 @@ fn logged(wire: &mut Vec<u8>, e: Entry<Msg>, seq: u64, facts: Writes) {
         wire,
         &Down::<Msg>::Verdict {
             id,
-            verdict: Verdict::At { seq: Seq(seq), last: id.n },
+            verdict: Verdict::At(Seq(seq)),
         },
     );
 }

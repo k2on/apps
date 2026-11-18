@@ -107,12 +107,11 @@ fn down(d: &Down<Msg>) -> String {
             l.facts.0.len()
         ),
         Down::Verdict { id, verdict } => match verdict {
-            Verdict::At { seq, last } => format!("Verdict {:x}/{} at seq {} last {last}", id.origin.0, id.n, seq.0),
+            Verdict::At(seq) => format!("Verdict {:x}/{} at seq {}", id.origin.0, id.n, seq.0),
             Verdict::Refused(r) => format!("Verdict {:x}/{} refused {}", id.origin.0, id.n, r.0),
         },
         Down::Live(e) => format!("Live {}", entry(e)),
         Down::Fill { seq, tables, parts } => format!("Fill to seq {} emptying {} tables, {parts} parts", seq.0, tables.len()),
-        Down::Rows(w) => format!("Rows {}", w.0.len()),
         Down::Moved(w) => format!("Moved {} rows", w.0.len()),
         Down::Got { query, .. } => format!("Got query {}", query.0),
         Down::Welcome { sent, time } => format!("Welcome: its {sent}, our {time} ({} ms ahead)", *time as i64 - *sent as i64),

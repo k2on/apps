@@ -17,7 +17,8 @@
 //! upstream serves its downstream nodes with a [`Serve`], keeping per
 //! client the record of what it holds: the server's authority does, and a
 //! phone's [`Relay`] serves its watch from the phone's own view. Neither is
-//! linked on a watch.
+//! linked on a watch: they, and the authority, are the `upstream` feature's,
+//! which a watch's build never enables.
 //!
 //! It is `no_std` with `alloc`: no I/O, no threads, no clock and no random
 //! numbers. Time comes in on the entries and ids are counted, so the same
@@ -32,26 +33,34 @@
 extern crate alloc;
 
 pub mod anchor;
+#[cfg(feature = "upstream")]
 pub mod authority;
 pub mod codec;
 pub mod entry;
 pub mod node;
 pub mod plan;
+#[cfg(feature = "upstream")]
 pub mod relay;
+#[cfg(feature = "upstream")]
 pub mod serve;
 pub mod store;
 pub mod sync;
 
 pub use anchor::Anchor;
+#[cfg(feature = "upstream")]
 pub use authority::Authority;
 pub use codec::{Decode, Encode, Frames};
 pub use entry::{Actor, Entry, EntryId, Hlc, Origin, Seq, Space, Version};
-pub use node::{Body, Cx, Handler, HandlerId, Link, Machine, Node, Refusal, Route, Spaces};
+pub use node::{Body, Cx, Handler, HandlerId, Link, Node, Refusal, Route, Spaces};
 pub use plan::{scan, Changes, Diff, Live, Patch, Plan};
+#[cfg(feature = "upstream")]
 pub use relay::{Relay, Served};
-pub use serve::{Conn, Query, Serve};
+#[cfg(feature = "upstream")]
+pub use serve::{Conn, Serve};
 pub use store::{Layer, Memory, Overlay, Read, Store, TableId, View, Write, Writes};
-pub use sync::{Down, Feed, Logged, Pending, QueryId, Up, Verdict};
+#[cfg(feature = "upstream")]
+pub use sync::Feed;
+pub use sync::{Down, Logged, Pending, Query, QueryId, Up, Verdict};
 
 /// The tests, as a list a runner with no test harness calls one by one:
 /// the watch's under QEMU (`rust/kernel/watch/selftest.rs`). Each module's
@@ -70,8 +79,11 @@ pub mod selftest {
         crate::node::tests::ALL,
         crate::plan::tests::ALL,
         crate::sync::tests::ALL,
+        #[cfg(feature = "upstream")]
         crate::authority::tests::ALL,
+        #[cfg(feature = "upstream")]
         crate::serve::tests::ALL,
+        #[cfg(feature = "upstream")]
         crate::relay::tests::ALL,
     ];
 }

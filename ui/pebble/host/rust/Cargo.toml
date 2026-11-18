@@ -7,7 +7,7 @@ publish.workspace = true
 description = "The Pebble host for the new kernel: one Node on the watch, its store paged over persistent storage, its link over AppMessage, PebbleOS's callbacks driving Node::step, and a first-cut renderer through a thin C shim."
 
 [dependencies]
-ark-kernel = { path = "../../../../rust/kernel" }
+ark-kernel = { path = "../../../../rust/kernel", default-features = false }
 
 [lib]
 test = true

@@ -1,4 +1,4 @@
-//! The loop: a [`Node`] takes one entry at a time ([`Machine::step`]),
+//! The loop: a [`Node`] takes one entry at a time ([`Node::step`]),
 //! runs its handler in a transaction on its space's rows, and returns the
 //! entries the handler made, which the host routes by their space
 //! ([`Route`]).
@@ -28,7 +28,7 @@
 //!   oldest pending entry's and say what its run here wrote, the entries
 //!   after it ran over those very rows, so nothing is run again.
 //! - A node too far behind for its upstream's log is sent a fill: the
-//!   confirmed rows at a `seq` ([`Down::Fill`], then [`Down::Rows`]), in
+//!   confirmed rows at a `seq` ([`Down::Fill`], then its parts), in
 //!   place of the log up to it, then the log after it. Its parts are held
 //!   until the last, which empties the tables it names and takes the rows
 //!   at once; then the pending entries are rebased. One interrupted is let
@@ -99,19 +99,12 @@
 //! ([`crate::plan`]). The host takes them after each step or receive;
 //! until then they gather.
 
-use alloc::collections::VecDeque;
 use alloc::vec::Vec;
 
 use crate::entry::{Actor, Entry, EntryId, Hlc, Origin, Seq, Space, Version};
 use crate::plan::{Changes, Diff};
 use crate::store::{Layer, Overlay, Range, Read, Store, TableId, View, Writes, EMPTY};
 use crate::sync::{Down, Logged, Pending, QueryId, Up, Verdict};
-
-/// The machine every node is: one entry in, the entries it made out.
-pub trait Machine {
-    type Body;
-    fn step(&mut self, e: Entry<Self::Body>) -> Vec<Entry<Self::Body>>;
-}
 
 /// A handler, by the number its build gives it.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -449,6 +442,7 @@ impl<B: Body + Clone + 'static, S: Store> Node<B, S> {
     /// Answers for the session rows `origin` owns as for its own: a
     /// downstream node's it serves, which its upstream reaches only
     /// through it ([`crate::Relay`] says so at the node's hello).
+    #[cfg(feature = "upstream")]
     pub fn answer_for(&mut self, origin: Origin) {
         if !self.below.contains(&origin) {
             self.below.push(origin);
@@ -483,39 +477,34 @@ impl<B: Body + Clone + 'static, S: Store> Node<B, S> {
     // Not inlined: the watch links one copy (checks.kernel-size).
     #[inline(never)]
     pub fn make(&mut self, space: Space, body: B, now: u64) -> Entry<B> {
+        self.entry(space, body, self.actor, None, now)
+    }
+
+    /// An entry `cause`'s handler emitted, made this node's.
+    fn made_by(&mut self, cause: &Entry<B>, (space, body): (Space, B)) -> Entry<B> {
+        self.entry(space, body, cause.actor, Some(cause.id), self.clock.wall)
+    }
+
+    /// The next entry of this node's origin, at wall time `now`.
+    fn entry(&mut self, space: Space, body: B, actor: Actor, cause: Option<EntryId>, now: u64) -> Entry<B> {
         self.clock = self.clock.tick(now);
         self.made += 1;
         Entry {
-            id: EntryId {
-                origin: self.origin,
-                n: self.made,
-            },
+            id: self.next_id(),
             space,
-            actor: self.actor,
+            actor,
             at: self.clock,
-            cause: None,
+            cause,
             version: self.version,
             seq: None,
             body,
         }
     }
 
-    /// An entry `cause`'s handler emitted, made this node's.
-    fn made_by(&mut self, cause: &Entry<B>, (space, body): (Space, B)) -> Entry<B> {
-        self.clock = self.clock.tick(self.clock.wall);
-        self.made += 1;
-        Entry {
-            id: EntryId {
-                origin: self.origin,
-                n: self.made,
-            },
-            space,
-            actor: cause.actor,
-            at: self.clock,
-            cause: Some(cause.id),
-            version: self.version,
-            seq: None,
-            body,
+    fn next_id(&self) -> EntryId {
+        EntryId {
+            origin: self.origin,
+            n: self.made,
         }
     }
 
@@ -532,11 +521,7 @@ impl<B: Body + Clone + 'static, S: Store> Node<B, S> {
         match run(self.handlers, self.stores.get(e.space), &e) {
             Ok((writes, made)) => {
                 let space = e.space as usize;
-                note(
-                    &mut self.touched[space],
-                    self.stores.get(e.space),
-                    writes.0.iter().map(|w| (w.table, &w.key[..])),
-                );
+                note(&mut self.touched[space], self.stores.get(e.space), &mut rows_of(&writes));
                 self.stores.get_mut(e.space).apply(&writes);
                 made.into_iter().map(|m| self.made_by(&e, m)).collect()
             }
@@ -559,11 +544,7 @@ impl<B: Body + Clone + 'static, S: Store> Node<B, S> {
             layer: &self.layer,
         };
         let (writes, made) = run(self.handlers, &view, &e).unwrap_or_default();
-        note(
-            &mut self.touched[Space::Shared as usize],
-            &view,
-            writes.0.iter().map(|w| (w.table, &w.key[..])),
-        );
+        note(&mut self.touched[Space::Shared as usize], &view, &mut rows_of(&writes));
         self.layer.apply(&writes);
         let made = made.into_iter().map(|m| self.made_by(&e, m)).collect();
         self.pending.push(Pending {
@@ -581,11 +562,14 @@ impl<B: Body + Clone + 'static, S: Store> Node<B, S> {
     // Not inlined: the watch links one copy (checks.kernel-size).
     #[inline(never)]
     pub fn route(&mut self, e: Entry<B>, link: &mut dyn Link<B>) {
-        self.run(VecDeque::from([e]), link);
+        self.run(Vec::from([e]), link);
     }
 
-    fn run(&mut self, mut queue: VecDeque<Entry<B>>, link: &mut dyn Link<B>) {
-        while let Some(e) = queue.pop_front() {
+    fn run(&mut self, mut queue: Vec<Entry<B>>, link: &mut dyn Link<B>) {
+        // First in, first out: a queue is a few entries, which a `Vec`
+        // shifts with code the kernel links anyway.
+        while !queue.is_empty() {
+            let e = queue.remove(0);
             match Route::of(e.space) {
                 Route::Step => queue.extend(self.step(e)),
                 Route::Pending => {
@@ -641,7 +625,7 @@ impl<B: Body + Clone + 'static, S: Store> Node<B, S> {
                 return false;
             }
             let made = self.step(e);
-            self.run(made.into(), link);
+            self.run(made, link);
             return true;
         };
         if self.owns(&key) {
@@ -658,7 +642,7 @@ impl<B: Body + Clone + 'static, S: Store> Node<B, S> {
         }
         self.keep(&e, true);
         let made = self.step(e);
-        self.run(made.into(), link);
+        self.run(made, link);
         true
     }
 
@@ -688,12 +672,10 @@ impl<B: Body + Clone + 'static, S: Store> Node<B, S> {
             } else if own {
                 self.clock = self.clock.tick(self.clock.wall);
                 self.made += 1;
+                let id = self.next_id();
                 let k = &mut self.rows[i];
                 k.entry.cause = Some(k.entry.id);
-                k.entry.id = EntryId {
-                    origin: self.origin,
-                    n: self.made,
-                };
+                k.entry.id = id;
                 k.entry.at = self.clock;
                 k.said = true;
                 link.send(Up::Live(k.entry.clone()));
@@ -784,16 +766,15 @@ impl<B: Body + Clone + 'static, S: Store> Node<B, S> {
                 self.filling = Some((seq, parts, tables));
                 self.filled();
             }
-            Down::Rows(rows) => {
-                if let Some((_, parts, _)) = &mut self.filling {
-                    *parts = parts.saturating_sub(1);
-                    self.hold(&rows);
-                    self.filled();
-                }
-            }
+            // A fill's part, while one is under way; else rows that moved.
             Down::Moved(rows) => {
                 self.hold(&rows);
-                self.flush();
+                if let Some((_, parts, _)) = &mut self.filling {
+                    *parts = parts.saturating_sub(1);
+                    self.filled();
+                } else {
+                    self.flush();
+                }
             }
             Down::Got { query, args } => {
                 for s in &mut self.subs {
@@ -822,11 +803,7 @@ impl<B: Body + Clone + 'static, S: Store> Node<B, S> {
             base: &self.stores.shared,
             layer: &self.layer,
         };
-        note(
-            &mut self.touched[Space::Shared as usize],
-            &view,
-            rows.0.iter().map(|w| (w.table, &w.key[..])),
-        );
+        note(&mut self.touched[Space::Shared as usize], &view, &mut rows_of(&rows));
         self.stores.shared.apply(&rows);
         self.rebase();
     }
@@ -869,11 +846,7 @@ impl<B: Body + Clone + 'static, S: Store> Node<B, S> {
             base: &self.stores.shared,
             layer: &self.layer,
         };
-        note(
-            &mut self.touched[Space::Shared as usize],
-            &view,
-            facts.0.iter().map(|w| (w.table, &w.key[..])),
-        );
+        note(&mut self.touched[Space::Shared as usize], &view, &mut rows_of(&facts));
         self.stores.shared.apply(&facts);
         self.cursor = seq;
         let id = l.entry.id;
@@ -911,7 +884,7 @@ impl<B: Body + Clone + 'static, S: Store> Node<B, S> {
             // Covering the entries up to the one it answers: their own
             // answers came before it, and a refusal of one after it, under
             // `last`, is still to come.
-            Verdict::At { seq, .. } => {
+            Verdict::At(seq) => {
                 for p in &mut self.pending {
                     if p.entry.id.origin == id.origin && p.entry.id.n <= id.n && p.judged.is_none() {
                         p.judged = Some(seq);
@@ -934,7 +907,7 @@ impl<B: Body + Clone + 'static, S: Store> Node<B, S> {
             base: &self.stores.shared,
             layer: &self.layer,
         };
-        note(&mut self.touched[Space::Shared as usize], &view, self.layer.keys());
+        note(&mut self.touched[Space::Shared as usize], &view, &mut self.layer.keys());
         let mut layer = Layer::new();
         for p in &mut self.pending {
             let view = View {
@@ -946,24 +919,21 @@ impl<B: Body + Clone + 'static, S: Store> Node<B, S> {
         }
         // A row only the new layer writes was read from the confirmed rows
         // before, which the facts did not touch, or it would be noted.
-        note(&mut self.touched[Space::Shared as usize], &self.stores.shared, layer.keys());
+        note(&mut self.touched[Space::Shared as usize], &self.stores.shared, &mut layer.keys());
         self.layer = layer;
     }
 }
 
 /// Notes what each of `keys` reads in `view` now, unless it is noted.
-fn note<'k>(touched: &mut Layer, view: &dyn Read, keys: impl Iterator<Item = (TableId, &'k [u8])>) {
+fn note(touched: &mut Layer, view: &dyn Read, keys: &mut dyn Iterator<Item = (TableId, &[u8])>) {
     for (table, key) in keys {
         touched.keep(table, key, || view.get(table, key));
     }
 }
 
-impl<B: Body + Clone + 'static, S: Store> Machine for Node<B, S> {
-    type Body = B;
-
-    fn step(&mut self, e: Entry<B>) -> Vec<Entry<B>> {
-        Node::step(self, e)
-    }
+/// The rows `writes` writes, as [`note`] takes them.
+fn rows_of(writes: &Writes) -> impl Iterator<Item = (TableId, &[u8])> {
+    writes.0.iter().map(|w| (w.table, &w.key[..]))
 }
 
 /// The tests' app, shared by the node's, the authority's and the
@@ -1258,7 +1228,7 @@ pub(crate) mod tests {
         n.receive(
             Down::Verdict {
                 id: e.id,
-                verdict: Verdict::At { seq: Seq(1), last: e.id.n },
+                verdict: Verdict::At(Seq(1)),
             },
             &mut up,
             0,
@@ -1345,10 +1315,7 @@ pub(crate) mod tests {
         n.receive(
             Down::Verdict {
                 id: mine.id,
-                verdict: Verdict::At {
-                    seq: Seq(5),
-                    last: mine.id.n,
-                },
+                verdict: Verdict::At(Seq(5)),
             },
             &mut up,
             0,
@@ -1368,11 +1335,11 @@ pub(crate) mod tests {
         // The log is not taken during a fill, and its parts are not read
         // until the last.
         n.receive(logged(&theirs, 2, count_is(1, 50)), &mut up, 0);
-        n.receive(Down::Rows(count_is(2, 1)), &mut up, 0);
+        n.receive(Down::Moved(count_is(2, 1)), &mut up, 0);
         assert_eq!(n.cursor(), Seq(1));
         assert_eq!((count(n.store(Space::Shared), 1), count(n.store(Space::Shared), 2)), (3, 0));
         assert_eq!(n.take_changes(Space::Shared), Changes::default());
-        n.receive(Down::Rows(count_is(3, 4)), &mut up, 0);
+        n.receive(Down::Moved(count_is(3, 4)), &mut up, 0);
         assert_eq!(n.cursor(), Seq(5));
         assert!(n.take_changes(Space::Shared).reset);
         assert_eq!(
@@ -1385,7 +1352,7 @@ pub(crate) mod tests {
         assert_eq!((n.pending(), n.cursor()), (&[][..], Seq(6)));
 
         // Interrupted: the rest of its parts are not taken after a new
-        // connection, and a part with no fill is passed over.
+        // connection, whose rows are moves, taken as they come.
         n.receive(
             Down::Fill {
                 seq: Seq(9),
@@ -1395,12 +1362,15 @@ pub(crate) mod tests {
             &mut up,
             0,
         );
-        n.receive(Down::Rows(count_is(7, 1)), &mut up, 0);
+        n.receive(Down::Moved(count_is(7, 1)), &mut up, 0);
         up.clear();
         n.connect(&mut up, 0);
         assert_eq!(up, [Up::Hello { cursor: Seq(6), time: 0 }]);
-        n.receive(Down::Rows(count_is(8, 1)), &mut up, 0);
-        assert_eq!((count(n.store(Space::Shared), 8), n.cursor()), (0, Seq(6)));
+        n.receive(Down::Moved(count_is(8, 1)), &mut up, 0);
+        assert_eq!(
+            (count(n.store(Space::Shared), 7), count(n.store(Space::Shared), 8), n.cursor()),
+            (0, 1, Seq(6))
+        );
         assert_eq!(count(n.store(Space::Shared), 2), 11);
         // An empty fill ends at once.
         n.receive(

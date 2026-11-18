@@ -11,6 +11,15 @@ description = "The new kernel (docs/north-star.md): the one entry, its spaces, a
 
 [dependencies]
 
+# What only an upstream links: the authority, serving downstream nodes
+# (`Serve`, `Relay`) and their frames' server halves. A watch never enables
+# it (watch/build.sh builds with rustc alone, and the Pebble host's watch
+# crates take the kernel without its default features), so
+# `checks.kernel-size` measures exactly what a watch can link.
+[features]
+default = ["upstream"]
+upstream = []
+
 [lints.rust]
 # `ark_selftest` builds the tests into the crate as a list, for a runner
 # with no test harness: the watch's tests under QEMU (watch/selftest.rs).

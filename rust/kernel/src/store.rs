@@ -143,25 +143,41 @@ fn paths(table: TableId, range: Range<'_>) -> Option<Paths> {
     Some((lo, hi))
 }
 
-/// Calls `f` with each of `rows` in a table's `range`, its key without the
-/// table, in the range's order, until `f` returns false.
-fn each<'r, V>(rows: &'r BTreeMap<Vec<u8>, V>, table: TableId, range: Range<'_>, f: &mut dyn FnMut(&'r [u8], &'r V) -> bool) {
-    let Some(bounds) = paths(table, range) else {
-        return;
-    };
-    let mut it = rows.range(bounds);
-    let mut g = |(k, v): (&'r Vec<u8>, &'r V)| f(&k[4..], v);
-    if range.reverse {
+/// Rows by their bytes, each a value or `None` for a removal: the one
+/// B-tree the kernel links, which holds a store's rows, a layer's writes
+/// and an operator's state alike, so that its code is linked once.
+pub(crate) type Tree = BTreeMap<Vec<u8>, Option<Vec<u8>>>;
+
+/// Calls `f` with each of `rows` from `lo` to `hi`, in order or reversed,
+/// until `f` returns false.
+pub(crate) fn walk<'r>(rows: &'r Tree, lo: Bound<&[u8]>, hi: Bound<&[u8]>, reverse: bool, f: &mut dyn FnMut(&'r [u8], &'r Option<Vec<u8>>) -> bool) {
+    let mut it = rows.range::<[u8], _>((lo, hi));
+    let mut g = |(k, v): (&'r Vec<u8>, &'r Option<Vec<u8>>)| f(k, v);
+    if reverse {
         it.rev().all(&mut g);
     } else {
         it.all(&mut g);
     }
 }
 
+/// Calls `f` with each of `rows` in a table's `range`, its key without the
+/// table, in the range's order, until `f` returns false.
+fn each<'r>(rows: &'r Tree, table: TableId, range: Range<'_>, f: &mut dyn FnMut(&'r [u8], &'r Option<Vec<u8>>) -> bool) {
+    if let Some((lo, hi)) = paths(table, range) {
+        walk(
+            rows,
+            lo.as_ref().map(Vec::as_slice),
+            hi.as_ref().map(Vec::as_slice),
+            range.reverse,
+            &mut |k, v| f(&k[4..], v),
+        );
+    }
+}
+
 /// Rows in memory: one B-tree, every table's rows in it by `path`.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Memory {
-    rows: BTreeMap<Vec<u8>, Vec<u8>>,
+    rows: Tree,
 }
 
 impl Memory {
@@ -182,17 +198,17 @@ impl Memory {
 
 impl Read for Memory {
     fn get(&self, table: TableId, key: &[u8]) -> Option<Vec<u8>> {
-        self.rows.get(&path(table, key)).cloned()
+        self.rows.get(&path(table, key)).cloned().flatten()
     }
 
     fn scan(&self, table: TableId, range: Range<'_>, f: &mut dyn FnMut(&[u8], &[u8]) -> bool) {
-        each(&self.rows, table, range, &mut |k, v| f(k, v));
+        each(&self.rows, table, range, &mut |k, v| v.as_deref().is_none_or(|v| f(k, v)));
     }
 }
 
 impl Store for Memory {
     fn put(&mut self, table: TableId, key: &[u8], value: &[u8]) {
-        self.rows.insert(path(table, key), value.to_vec());
+        self.rows.insert(path(table, key), Some(value.to_vec()));
     }
 
     fn delete(&mut self, table: TableId, key: &[u8]) {
@@ -204,7 +220,7 @@ impl Store for Memory {
 /// removal. What an [`Overlay`] holds, and what a node's pending entries
 /// have written over its confirmed rows.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct Layer(BTreeMap<Vec<u8>, Option<Vec<u8>>>);
+pub struct Layer(Tree);
 
 /// A layer with no writes, to view a store as it is.
 pub(crate) static EMPTY: Layer = Layer(BTreeMap::new());

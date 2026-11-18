@@ -7,6 +7,6 @@ publish.workspace = true
 description = "A test upstream for the Pebble host: the kernel's Authority over a WebSocket, with a player node beside it standing in for harken's phone."
 
 [dependencies]
-ark-kernel = { path = "../../../../rust/kernel" }
+ark-kernel = { path = "../../../../rust/kernel", features = ["upstream"] }
 now-playing = { path = "../demo/app" }
 tungstenite = { version = "0.24", default-features = false, features = ["handshake"] }

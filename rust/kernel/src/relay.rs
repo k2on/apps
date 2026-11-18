@@ -144,7 +144,7 @@ impl<B: Body + Clone + 'static> Relay<B> {
                     Verdict::Refused(why) => {
                         self.refused.insert(id, why);
                     }
-                    Verdict::At { seq, .. } => {
+                    Verdict::At(seq) => {
                         let judged = self.judged.entry(id.origin).or_insert((seq, id.n));
                         *judged = (seq.max(judged.0), id.n.max(judged.1));
                     }
@@ -227,8 +227,8 @@ impl<B: Body + Clone + 'static> Relay<B> {
                 let answer = |verdict| Vec::from([(conn, Down::Verdict { id, verdict })]);
                 if let Some(&why) = self.refused.get(&id) {
                     served.out = answer(Verdict::Refused(why));
-                } else if let Some(&(seq, last)) = self.judged.get(&id.origin).filter(|j| id.n <= j.1) {
-                    served.out = answer(Verdict::At { seq, last });
+                } else if let Some(&(seq, _)) = self.judged.get(&id.origin).filter(|j| id.n <= j.1) {
+                    served.out = answer(Verdict::At(seq));
                 } else {
                     if !self.forwarded.iter().any(|f| f.id == id) {
                         self.forwarded.push(e.clone());

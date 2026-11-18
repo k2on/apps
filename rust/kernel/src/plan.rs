@@ -44,7 +44,7 @@ use alloc::vec::Vec;
 use core::ops::Bound;
 
 use crate::codec::{from_slice, to_vec, Decode, Encode, Error, Reader};
-use crate::store::{Range, Read, TableId};
+use crate::store::{walk, Range, Read, TableId, Tree};
 
 /// A row of an answer: its place and its value.
 pub type Row = (Vec<u8>, Vec<u8>);
@@ -87,7 +87,7 @@ pub trait Op {
 }
 
 /// A row-wise closure: its place and value in, a verdict or bytes out.
-pub type Each<T> = Box<dyn Fn(&[u8], &[u8]) -> T>;
+pub type Fun<T> = Box<dyn Fn(&[u8], &[u8]) -> T>;
 
 /// Whether `k` is in the range from `lo` to `hi`.
 fn within(lo: Bound<&[u8]>, hi: Bound<&[u8]>, k: &[u8]) -> bool {
@@ -139,34 +139,28 @@ fn span<'a>(lo: Bound<&'a [u8]>, hi: Bound<&'a [u8]>, from: Bound<&'a [u8]>, rev
 }
 
 /// Calls `f` with each of `rows` a fetch from `from` reads, in its order.
-fn fetch_map<V>(rows: &BTreeMap<Vec<u8>, V>, from: Bound<&[u8]>, reverse: bool, f: &mut dyn FnMut(&[u8], &V) -> bool) {
+fn fetch_map(rows: &Tree, from: Bound<&[u8]>, reverse: bool, f: &mut dyn FnMut(&[u8], &[u8]) -> bool) {
     // One end is open, so the range is never one a `BTreeMap` refuses.
     let r = span(Bound::Unbounded, Bound::Unbounded, from, reverse);
-    let mut it = rows.range::<[u8], _>((r.lo, r.hi));
-    let mut g = |(k, v): (&Vec<u8>, &V)| f(k, v);
-    if reverse {
-        it.rev().all(&mut g);
-    } else {
-        it.all(&mut g);
-    }
+    walk(rows, r.lo, r.hi, reverse, &mut |k, v| f(k, v.as_deref().unwrap_or_default()));
 }
 
 /// Two lists of diffs in place order as one, a place in both taking its
 /// old from `a` and its new from `b`, with any whose old and new are the
 /// same left out.
 fn merge(a: Vec<Diff>, b: Vec<Diff>) -> Vec<Diff> {
-    let mut out = Vec::with_capacity(a.len() + b.len());
-    let mut b = b.into_iter().peekable();
-    for x in a {
-        while let Some(y) = b.next_if(|y| y.key < x.key) {
-            out.push(y);
+    let mut out = a;
+    // From the end, so each insert past the last moves nothing.
+    let mut i = out.len();
+    for y in b.into_iter().rev() {
+        while i > 0 && out[i - 1].key > y.key {
+            i -= 1;
         }
-        match b.next_if(|y| y.key == x.key) {
-            Some(y) => out.push(Diff { new: y.new, ..x }),
-            None => out.push(x),
+        match i.checked_sub(1).filter(|&j| out[j].key == y.key) {
+            Some(j) => out[j].new = y.new,
+            None => out.insert(i, y),
         }
     }
-    out.extend(b);
     out.retain(|d| d.old != d.new);
     out
 }
@@ -201,55 +195,24 @@ impl Op for Scan {
     }
 }
 
-/// Its input's rows `keep` keeps.
-struct Filter {
+/// Its input's rows, each made another by `f` or left out: a filter, or a
+/// map.
+struct Each {
     input: Box<dyn Op>,
-    keep: Each<bool>,
+    f: Fun<Option<Vec<u8>>>,
 }
 
-impl Op for Filter {
+impl Op for Each {
     fn fetch(&self, db: &dyn Read, from: Bound<&[u8]>, reverse: bool, f: &mut dyn FnMut(&[u8], &[u8]) -> bool) {
-        self.input.fetch(db, from, reverse, &mut |k, v| !(self.keep)(k, v) || f(k, v));
+        self.input.fetch(db, from, reverse, &mut |k, v| (self.f)(k, v).is_none_or(|u| f(k, &u)));
     }
 
     fn push(&mut self, db: &dyn Read, changes: &Changes) -> Vec<Diff> {
-        let keep = &self.keep;
+        let each = &self.f;
         let mut out = self.input.push(db, changes);
         for d in &mut out {
-            d.old = d.old.take().filter(|v| keep(&d.key, v));
-            d.new = d.new.take().filter(|v| keep(&d.key, v));
-        }
-        out.retain(|d| d.old != d.new);
-        out
-    }
-
-    fn hydrate(&mut self, db: &dyn Read) {
-        self.input.hydrate(db);
-    }
-
-    #[cfg(any(test, ark_selftest))]
-    fn held(&self) -> usize {
-        self.input.held()
-    }
-}
-
-/// Its input's rows, each value made another by `make`.
-struct Map {
-    input: Box<dyn Op>,
-    make: Each<Vec<u8>>,
-}
-
-impl Op for Map {
-    fn fetch(&self, db: &dyn Read, from: Bound<&[u8]>, reverse: bool, f: &mut dyn FnMut(&[u8], &[u8]) -> bool) {
-        self.input.fetch(db, from, reverse, &mut |k, v| f(k, &(self.make)(k, v)));
-    }
-
-    fn push(&mut self, db: &dyn Read, changes: &Changes) -> Vec<Diff> {
-        let make = &self.make;
-        let mut out = self.input.push(db, changes);
-        for d in &mut out {
-            d.old = d.old.take().map(|v| make(&d.key, &v));
-            d.new = d.new.take().map(|v| make(&d.key, &v));
+            d.old = d.old.take().and_then(|v| each(&d.key, &v));
+            d.new = d.new.take().and_then(|v| each(&d.key, &v));
         }
         out.retain(|d| d.old != d.new);
         out
@@ -270,8 +233,8 @@ impl Op for Map {
 /// order. The expensive case; a sort an index provides is a scan of it.
 struct Sort {
     input: Box<dyn Op>,
-    by: Each<Vec<u8>>,
-    rows: BTreeMap<Vec<u8>, Vec<u8>>,
+    by: Fun<Vec<u8>>,
+    rows: Tree,
 }
 
 impl Sort {
@@ -308,7 +271,7 @@ impl Op for Sort {
             }
             if let Some(new) = d.new {
                 let at = self.place(&d.key, &new);
-                self.rows.insert(at.clone(), new.clone());
+                self.rows.insert(at.clone(), Some(new.clone()));
                 out.entry(at.clone())
                     .or_insert(Diff {
                         key: at,
@@ -323,9 +286,9 @@ impl Op for Sort {
 
     fn hydrate(&mut self, db: &dyn Read) {
         self.input.hydrate(db);
-        let mut rows = BTreeMap::new();
+        let mut rows = Tree::new();
         self.input.fetch(db, Bound::Unbounded, false, &mut |k, v| {
-            rows.insert(self.place(k, v), v.to_vec());
+            rows.insert(self.place(k, v), Some(v.to_vec()));
             true
         });
         self.rows = rows;
@@ -333,7 +296,7 @@ impl Op for Sort {
 
     #[cfg(any(test, ark_selftest))]
     fn held(&self) -> usize {
-        self.input.held() + self.rows.iter().map(|(k, v)| k.len() + v.len()).sum::<usize>()
+        self.input.held() + held(&self.rows)
     }
 }
 
@@ -526,11 +489,11 @@ impl Decode for Agg {
 /// its rows' places, else the whole input.
 struct Group {
     input: Box<dyn Op>,
-    by: Each<Vec<u8>>,
-    of: Each<i64>,
+    by: Fun<Vec<u8>>,
+    of: Fun<i64>,
     extremes: bool,
     prefix: bool,
-    groups: BTreeMap<Vec<u8>, Vec<u8>>,
+    groups: Tree,
 }
 
 impl Group {
@@ -555,7 +518,13 @@ impl Group {
     fn count(&mut self, k: &[u8], v: &[u8], add: bool) -> bool {
         let g = (self.by)(k, v);
         let n = (self.of)(k, v);
-        let mut agg: Agg = self.groups.get(&g).and_then(|b| from_slice(b).ok()).unwrap_or_default();
+        let mut agg: Agg = self
+            .groups
+            .get(&g)
+            .cloned()
+            .flatten()
+            .and_then(|b| from_slice(&b).ok())
+            .unwrap_or_default();
         let mut lost = false;
         if add {
             agg.add(n, self.extremes);
@@ -567,7 +536,7 @@ impl Group {
         if agg.count == 0 {
             self.groups.remove(&g);
         } else {
-            self.groups.insert(g, to_vec(&agg));
+            self.groups.insert(g, Some(to_vec(&agg)));
         }
         lost
     }
@@ -592,7 +561,7 @@ impl Op for Group {
                 let Some(v) = v else { continue };
                 let g = (self.by)(&d.key, v);
                 if let Err(i) = before.binary_search_by(|x| x.key.cmp(&g)) {
-                    let old = self.groups.get(&g).cloned();
+                    let old = self.groups.get(&g).cloned().flatten();
                     before.insert(
                         i,
                         Diff {
@@ -611,11 +580,11 @@ impl Op for Group {
         for g in stale {
             if self.groups.contains_key(&g) {
                 let agg = to_vec(&self.refetch(db, &g));
-                self.groups.insert(g, agg);
+                self.groups.insert(g, Some(agg));
             }
         }
         for d in &mut before {
-            d.new = self.groups.get(&d.key).cloned();
+            d.new = self.groups.get(&d.key).cloned().flatten();
         }
         merge(before, Vec::new())
     }
@@ -635,8 +604,14 @@ impl Op for Group {
 
     #[cfg(any(test, ark_selftest))]
     fn held(&self) -> usize {
-        self.input.held() + self.groups.iter().map(|(k, v)| k.len() + v.len()).sum::<usize>()
+        self.input.held() + held(&self.groups)
     }
+}
+
+/// The bytes a tree holds: what the tests hold an operator's state to.
+#[cfg(any(test, ark_selftest))]
+fn held(rows: &Tree) -> usize {
+    rows.iter().map(|(k, v)| k.len() + v.as_ref().map_or(0, Vec::len)).sum()
 }
 
 /// A query being built: an operator over the ones before it.
@@ -651,18 +626,16 @@ pub fn scan(table: TableId, lo: Bound<Vec<u8>>, hi: Bound<Vec<u8>>) -> Plan {
 impl Plan {
     /// The rows `keep` keeps.
     pub fn filter(self, keep: impl Fn(&[u8], &[u8]) -> bool + 'static) -> Plan {
-        Plan(Box::new(Filter {
-            input: self.0,
-            keep: Box::new(keep),
-        }))
+        self.each(Box::new(move |k, v| keep(k, v).then(|| v.to_vec())))
     }
 
     /// Each row's value made another by `make`.
     pub fn map(self, make: impl Fn(&[u8], &[u8]) -> Vec<u8> + 'static) -> Plan {
-        Plan(Box::new(Map {
-            input: self.0,
-            make: Box::new(make),
-        }))
+        self.each(Box::new(move |k, v| Some(make(k, v))))
+    }
+
+    fn each(self, f: Fun<Option<Vec<u8>>>) -> Plan {
+        Plan(Box::new(Each { input: self.0, f }))
     }
 
     /// The rows placed by the bytes `by` gives first: bytes whose order is
@@ -672,7 +645,7 @@ impl Plan {
         Plan(Box::new(Sort {
             input: self.0,
             by: Box::new(by),
-            rows: BTreeMap::new(),
+            rows: Tree::new(),
         }))
     }
 
@@ -704,7 +677,7 @@ impl Plan {
             of: Box::new(of),
             extremes,
             prefix,
-            groups: BTreeMap::new(),
+            groups: Tree::new(),
         }))
     }
 
@@ -775,6 +748,7 @@ impl Live {
 
     /// [`Live::push`], answering what changed of each row by its place: what
     /// an upstream reads to know which rows came into a query or left it.
+    #[cfg(feature = "upstream")]
     pub fn diffs(&mut self, db: &dyn Read, changes: &Changes) -> Vec<Diff> {
         let diffs = self.settle(db, changes);
         self.apply(diffs.clone());

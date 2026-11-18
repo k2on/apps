@@ -64,9 +64,10 @@ use alloc::vec::Vec;
 use crate::entry::{Actor, Entry, EntryId, Origin, Seq, Space};
 use crate::node::{run, Body, Handler, Refusal};
 use crate::plan::{Changes, Diff};
-use crate::serve::{stamped, Serve};
-pub use crate::serve::{Conn, Out, Query};
-use crate::store::{Range, Store, TableId, Write, Writes};
+use crate::serve::{fill, stamped, Serve};
+pub use crate::serve::{Conn, Out};
+use crate::store::{Range, Store, TableId, Write};
+pub use crate::sync::Query;
 use crate::sync::{Down, Logged, Up, Verdict};
 
 pub struct Authority<B: 'static, S> {
@@ -231,14 +232,7 @@ impl<B: Body + Clone + 'static, S: Store> Authority<B, S> {
                 true
             });
         }
-        let parts: Vec<Down<B>> = rows.chunks(self.serve.part()).map(|c| Down::Rows(Writes(c.to_vec()))).collect();
-        let mut out = Vec::from([Down::Fill {
-            seq: self.head(),
-            tables: self.tables.iter().copied().collect(),
-            parts: parts.len() as u32,
-        }]);
-        out.extend(parts);
-        out
+        fill(self.head(), self.tables.iter().copied().collect(), &rows, self.serve.part())
     }
 
     /// Judges an entry `actor`'s connection pushed: the verdict for its
@@ -253,7 +247,7 @@ impl<B: Body + Clone + 'static, S: Store> Authority<B, S> {
         if id.n <= last {
             let verdict = match self.refused.get(&id) {
                 Some(&why) => Verdict::Refused(why),
-                None => Verdict::At { seq: self.head(), last },
+                None => Verdict::At(self.head()),
             };
             return (answer(verdict), None);
         }
@@ -285,7 +279,7 @@ impl<B: Body + Clone + 'static, S: Store> Authority<B, S> {
                     facts,
                 };
                 self.log.push(logged.clone());
-                (answer(Verdict::At { seq, last: id.n }), Some((logged, changes)))
+                (answer(Verdict::At(seq)), Some((logged, changes)))
             }
         }
     }
@@ -329,7 +323,7 @@ pub(crate) mod tests {
         let out = a.receive(Conn(1), Up::Push(e.clone()), 0);
         let verdict = Down::Verdict {
             id: e.id,
-            verdict: Verdict::At { seq: Seq(1), last: 1 },
+            verdict: Verdict::At(Seq(1)),
         };
         let logged = Down::Logged(a.log()[0].clone());
         assert_eq!(to(1, &out), [verdict, logged.clone()]);
@@ -346,7 +340,7 @@ pub(crate) mod tests {
                 Conn(1),
                 Down::Verdict {
                     id: e.id,
-                    verdict: Verdict::At { seq: Seq(2), last: 1 }
+                    verdict: Verdict::At(Seq(2))
                 }
             )]
         );
@@ -929,7 +923,7 @@ pub(crate) mod tests {
                     let skipped = dev.node.skipped;
                     let mut said = Vec::new();
                     if d == PHONE {
-                        if matches!(down, Down::Fill { .. } | Down::Rows(_)) {
+                        if matches!(down, Down::Fill { .. }) {
                             seen.refills += 1;
                         }
                         let s = relay.down(&mut dev.node, down, &mut said, now);
@@ -1150,8 +1144,11 @@ pub(crate) mod tests {
     #[cfg_attr(test, test)]
     fn devices_and_a_server_converge() {
         let mut seen = Seen::default();
-        for seed in 0..60 {
-            converge(seed, 160, &mut seen);
+        // Deeper at build time: `ARK_SEEDS=3000 ARK_STEPS=400 cargo test`.
+        let depth = |name: Option<&str>, or: u64| name.and_then(|n| n.parse().ok()).unwrap_or(or);
+        let steps = depth(option_env!("ARK_STEPS"), 160) as usize;
+        for seed in 0..depth(option_env!("ARK_SEEDS"), 60) {
+            converge(seed, steps, &mut seen);
         }
         assert!(seen.skipped > 0 && seen.fills > 0 && seen.forged > 0 && seen.held > 0 && seen.deltas > 0);
         assert!(seen.relayed > 0 && seen.queued > 0 && seen.refills > 0);

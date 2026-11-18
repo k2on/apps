@@ -7,4 +7,8 @@ publish.workspace = true
 description = "The Pebble host's demo, standing in for harken's now playing: its entries, handlers and query, linked by the watch and by the test upstream alike."
 
 [dependencies]
-ark-kernel = { path = "../../../../../rust/kernel" }
+ark-kernel = { path = "../../../../../rust/kernel", default-features = false }
+
+# Its tests run the authority beside a watch.
+[dev-dependencies]
+ark-kernel = { path = "../../../../../rust/kernel", features = ["upstream"] }
