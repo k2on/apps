@@ -114,12 +114,30 @@ Standing in for harken's now playing (`demo/app`):
 
 ## Building and running
 
-With the Pebble SDK (4.44, `pebble-tool`), Rust and
-`rustup target add thumbv7m-none-eabi`:
+In nix (`nix/pebble.nix`), from the repository's root, on Linux (x86_64 or
+aarch64):
+
+    nix build .#pebble-now-playing          # result/demo.pbw
+    nix run .#pebble -- install --phone 192.168.1.42 result/demo.pbw
+    nix run .#pebble -- logs --phone 192.168.1.42
+
+The SDK's waf builds it with nixpkgs' arm-none-eabi GCC, and `watch/` is
+built by cargo with the repository's watch toolchain (`watchRust`, for
+thumbv7m-none-eabi). `result/` also has the app's ELF (`emery.elf`), its
+binary and the link's map. The phone's address is the Pebble app's LAN
+developer connection (`ui/pebble/probe/README.md`, Install). CI builds it
+and the probe, runs the tests below and fails the app past 96 KB with its
+bss (`checks.pebble-size`, of the 128 KB an app gets):
+
+    nix build .#checks.x86_64-linux.pebble-host .#checks.x86_64-linux.pebble-size
+
+The nix pebble-tool has no emulator (that is the SDK's prebuilt
+qemu-pebble). For the emulator, with the Pebble SDK (4.44, `pebble-tool`)
+installed by hand, Rust and `rustup target add thumbv7m-none-eabi`:
 
     cd demo && pebble build                 # cargo builds watch/ first
     cargo run --release -p now-playing-upstream    # from host/: ws://127.0.0.1:9010/
-    pebble install --emulator emery --logs
+    pebble install --emulator emery --logs  # or the nix build's result/demo.pbw
 
 The server takes lines on standard input: `toggle`, `skip`, `add TITLE`,
 `offline` (closes every connection and refuses new ones, a phone that lost
@@ -163,4 +181,4 @@ restart with two pending skips, a refusal, a reconnect and confirmations:
   connected for long drifts with its clock until the next.
 - A row larger than a page (about 250 bytes with its key) is not kept.
 - Keys let go by a flush are left as they are and used again, never deleted.
-- Nothing of the host is in CI yet; the probe's `.pbw` is not either.
+- The emulator is not in nix or CI: no screenshot walk of the watch yet.

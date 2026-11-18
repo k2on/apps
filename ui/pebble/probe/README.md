@@ -15,17 +15,28 @@ logs every one, so `pebble logs` has them too.
 
 ## Build
 
-With `uv`, Rust and `rustup target add thumbv7m-none-eabi`:
+In nix (`nix/pebble.nix`), from the repository's root, on Linux (x86_64 or
+aarch64):
+
+    nix build .#pebble-probe         # result/probe.pbw
+
+The SDK (4.44) builds it with nixpkgs' arm-none-eabi GCC, and `rust/` is
+built by cargo with the repository's watch toolchain (`watchRust`). CI
+builds it too (`checks.pebble-probe`).
+
+For the emulator, which the nix pebble-tool does not have, with `uv`, Rust
+and `rustup target add thumbv7m-none-eabi`:
 
     uv tool install pebble-tool --python 3.13
     pebble sdk install latest        # 4.44 when this was written
     pebble build                     # cargo builds rust/ first
 
-The app is `build/probe.pbw`.
+The app is then `build/probe.pbw`.
 
 ## Install
 
-On a computer, in the emulator (`emery` is the Time 2):
+On a computer, in the emulator (`emery` is the Time 2), with the SDK
+installed by hand:
 
     pebble install --emulator emery --logs
 
@@ -42,6 +53,11 @@ Connectivity, Use LAN developer connection, toggle Dev Connection off and
 on, and use the IPv4 address shown under it:
 
     pebble install --phone 192.168.1.42 --logs
+
+or with nothing installed but nix, from the repository's root:
+
+    nix build .#pebble-probe
+    nix run .#pebble -- install --phone 192.168.1.42 --logs result/probe.pbw
 
 On Android over USB, with the LAN connection on:
 `adb forward tcp:9000 tcp:9000`, then `pebble install --phone 127.0.0.1`.

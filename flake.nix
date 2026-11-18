@@ -1808,6 +1808,9 @@
           # probe at the budget's settings (opt-level "z", LTO, panic abort),
           # the selftest beside it, and the probe's code in bytes.
           watchRust = rust.override { targets = [ "thumbv7m-none-eabi" ]; };
+          # The Pebble watchapps (ui/pebble), their SDK and pebble-tool
+          # (nix/pebble.nix), packages on Linux, x86_64 and aarch64.
+          pebbleNix = import ./nix/pebble.nix { inherit pkgs lib only watchRust; };
           kernel-watch = pkgs.runCommand "ark-kernel-watch" { nativeBuildInputs = [ watchRust pkgs.binutils-unwrapped ]; } ''
             bash ${only [ "rust/kernel" ]}/rust/kernel/watch/build.sh $out
           '';
@@ -2126,6 +2129,10 @@
               # and the mixed machines and subtests are left out.
               old = if versions == [ ] then null else (lib.last versions).server;
             };
+            # `nix run .#pebble -- install --phone <ip> <pbw>`: pebble-tool,
+            # to put an app on a watch through its phone; and the two
+            # watchapps' `.pbw`s (ui/pebble/probe, ui/pebble/host/demo).
+            inherit (pebbleNix) pebble pebble-probe pebble-now-playing;
           };
 
           checks = {
@@ -2314,6 +2321,11 @@
               cat log
               cp log $out
             '';
+            # The Pebble watchapps (nix/pebble.nix): each `.pbw` built by
+            # the SDK's waf with nixpkgs' arm-none-eabi GCC and its Rust by
+            # the watch toolchain, the host's tests, and the now-playing
+            # app's image held to 96 KB of the 128 KB an app gets.
+            inherit (pebbleNix) pebble-probe pebble-now-playing pebble-host pebble-size;
             # harken's domain crate builds, and its schema's hash is the one
             # pinned (harken/src/core/tests/port.rs).
             inherit harken-domain;
