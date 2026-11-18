@@ -55,7 +55,7 @@ impl NowPlaying {
                 self.screen.action(Button::Select, glyph);
             }
             None => {
-                self.screen.text(Slot::Title, b"Nothing playing");
+                self.screen.text(Slot::Title, b"Nothing Playing");
                 self.screen.text(Slot::Subtitle, b"");
                 self.screen.action(Button::Select, Glyph::Play);
             }
@@ -94,7 +94,7 @@ impl NowPlaying {
             })
             .collect();
         self.screen
-            .text(Slot::Header, if rows.is_empty() { b"Queue is empty" } else { b"Up next" });
+            .text(Slot::Header, if rows.is_empty() { b"Queue Is Empty" } else { b"Up Next" });
         self.screen.rows(rows);
     }
 
@@ -102,15 +102,15 @@ impl NowPlaying {
         let s = cx.status;
         let mut l = Line::new();
         l.s(match (s.online, cx.node.complete(NEXT, &[])) {
-            (false, _) => b"offline",
-            (true, false) => b"syncing",
-            (true, true) => b"online",
+            (false, _) => b"Offline",
+            (true, false) => b"Syncing",
+            (true, true) => b"Online",
         });
         if s.pending > 0 {
-            l.s(b", ").n(s.pending as u64).s(b" pending");
+            l.s(b", ").n(s.pending as u64).s(b" Pending");
         }
         if s.refused > 0 {
-            l.s(b", ").n(u64::from(s.refused)).s(b" refused");
+            l.s(b", ").n(u64::from(s.refused)).s(b" Refused");
         }
         self.screen.text(Slot::Status, l.bytes());
     }
