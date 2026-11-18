@@ -244,7 +244,7 @@ fn main() -> ! {
         for part in wire.chunks(black_box(7)) {
             frames.push(part);
             while let Ok(Some(down)) = frames.read::<Down<Msg>>() {
-                node.receive(down, up);
+                node.receive(down, up, black_box(3_000));
                 watch(node);
             }
         }
@@ -267,8 +267,16 @@ fn main() -> ! {
     // device's write first, so the rest rebase, then confirms them.
     up.clear();
     node.subscribe(QueryId(black_box(0)), Vec::new(), &mut up);
+    // A pause while offline: the phone's row, refused, never sent.
+    let pause = Msg::Put {
+        table: 3,
+        key: [0].into(),
+        value: to_vec(&Anchor::default()),
+    };
+    let refused = node.make(Space::Session, pause.clone(), black_box(2_500));
+    node.route(refused, &mut up);
     up.clear();
-    node.connect(&mut up);
+    node.connect(&mut up, black_box(3_000));
     let pushed = to_vec(&up);
     let Ok(pushed) = from_slice::<Vec<Up<Msg>>>(&pushed) else {
         rt::exit(false)
@@ -285,6 +293,8 @@ fn main() -> ! {
             value: None
         }]),
     );
+    // The hello's answer ends with the server's clock, 1000 ahead.
+    put_frame(&mut wire, &Down::<Msg>::Welcome { sent: 3_000, time: 4_000 });
     take(&mut node, &mut wire, &mut up);
     for p in pushed {
         if let Up::Push(e) = p {
@@ -339,10 +349,15 @@ fn main() -> ! {
     let right = queries[0].rows() == next.rows()
         && total == node.store(Space::Shared).len(TableId(1)) as u64
         && node.store(Space::Shared).get(TableId(1), &[0, 20]).is_some();
-    // Its position two and a half seconds on, and when the screen's
-    // seconds next change.
-    let now = black_box(3_500);
+    // Its position two and a half seconds on in the server's time, its
+    // own clock 1000 behind, and when the screen's seconds next change.
+    let now = node.time(black_box(2_500));
     let right = right && playing.position(now) == 32_500 && playing.next(now, 1000) == Some(4_000);
+    // Linked, a session entry is sent; the one made offline was refused.
+    let control = node.make(Space::Session, pause, black_box(3_000));
+    up.clear();
+    node.route(control, &mut up);
+    let right = right && up.len() == 1 && node.refusals().len() == 1;
 
     black_box((
         shown,

@@ -12,8 +12,10 @@
 //! its other nodes take it as a session entry, and a node's views read it
 //! from its session space ([`crate::Node::take_changes`]).
 //!
-//! Times are the owner's clock: a host whose clock may differ from its
-//! owner's corrects `now` by the offset it measures before asking.
+//! Times are the tree's clock, its root's (the server's, or a phone's with
+//! none), which every node estimates from its hellos: an owner writes
+//! `wall` at [`crate::Node::time`] and a view asks for the position at
+//! its own, so both read the owner's time whatever their clocks say.
 
 use alloc::vec::Vec;
 
@@ -24,7 +26,7 @@ use crate::codec::{Decode, Encode, Error, Reader};
 pub struct Anchor {
     /// The position at `wall`, in milliseconds.
     pub at: u64,
-    /// The owner's wall time of `at`, in milliseconds.
+    /// The tree's wall time of `at`, in milliseconds.
     pub wall: u64,
     /// How fast it moves while playing, in thousandths of real time.
     pub rate: u16,

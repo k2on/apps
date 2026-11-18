@@ -2,11 +2,11 @@
 //! and the records each keeps of it.
 //!
 //! ```text
-//! Up     Hello { cursor } | Push(Entry) | Live(Entry) | Rate { table, every }
+//! Up     Hello { cursor, time } | Push(Entry) | Live(Entry) | Rate { table, every }
 //!        | Subscribe { query, args } | Unsubscribe { query, args }
 //! Down   Logged { entry, facts } | Verdict { id, verdict } | Live(Entry)
 //!        | Fill { seq, tables, parts } | Rows(writes) | Moved(writes)
-//!        | Got { query, args }
+//!        | Got { query, args } | Welcome { sent, time }
 //! Verdict  At { seq, last } | Refused(code)
 //! Pending  { entry, writes, judged }
 //! ```
@@ -52,10 +52,18 @@
 //! between them.
 //!
 //! **Session entries.** `Live` carries a session entry, which is forwarded
-//! to its actor's other nodes and never logged. A node states with `Rate`
-//! how often it wants a session table's rows: between its sends, only the
-//! latest entry for each row is held ([`Feed`]). A table it names no rate
-//! for is sent every entry at once.
+//! to its actor's nodes (the one that sent it too) and never logged, and
+//! only while the link is up: live controls don't queue. A node states
+//! with `Rate` how often it wants a session table's rows: between its
+//! sends, only the latest entry for each row is held ([`Feed`]). A table
+//! it names no rate for is sent every entry at once. A hello is answered
+//! with the latest entry of every session row the node may see, its own
+//! included, and the answer ends with `Welcome`.
+//!
+//! **Time.** A hello says the node's clock (`time`); `Welcome` says it
+//! back (`sent`) with the tree's time at the upstream when it answered
+//! (the root's clock, as the upstream estimates it), from which the node
+//! takes its offset ([`crate::Node::offset`]).
 //!
 //! Ported from `rust/ark`'s `frames.rs` and `peer.rs` as far as pending
 //! entries, facts and the rebase need: schemas, calls and files are for
@@ -111,9 +119,11 @@ pub struct Pending<B> {
 /// From a node to its upstream.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Up<B> {
-    /// At each connection: the last `seq` this node has applied.
+    /// At each connection: the last `seq` this node has applied, and its
+    /// clock's time, for the answer's [`Down::Welcome`] to say back.
     Hello {
         cursor: Seq,
+        time: u64,
     },
     /// A pending entry, for the authority to judge.
     Push(Entry<B>),
@@ -156,6 +166,10 @@ pub enum Down<B> {
     Moved(Writes),
     /// A subscription's rows are all sent.
     Got { query: QueryId, args: Vec<u8> },
+    /// The end of the answer to a hello: the time the hello said, and the
+    /// tree's time at the upstream when it answered (the root's clock, as
+    /// the upstream estimates it), for the node to measure its offset.
+    Welcome { sent: u64, time: u64 },
 }
 
 /// What one node is sent of the session space: every entry at once, but
@@ -312,9 +326,10 @@ impl<B: Decode> Decode for Pending<B> {
 impl<B: Encode> Encode for Up<B> {
     fn encode(&self, out: &mut Vec<u8>) {
         match self {
-            Up::Hello { cursor } => {
+            Up::Hello { cursor, time } => {
                 0u32.encode(out);
                 cursor.encode(out);
+                time.encode(out);
             }
             Up::Push(e) => {
                 1u32.encode(out);
@@ -346,7 +361,10 @@ impl<B: Encode> Encode for Up<B> {
 impl<B: Decode> Decode for Up<B> {
     fn decode(r: &mut Reader<'_>) -> Result<Self, Error> {
         match u32::decode(r)? {
-            0 => Ok(Up::Hello { cursor: Seq::decode(r)? }),
+            0 => Ok(Up::Hello {
+                cursor: Seq::decode(r)?,
+                time: u64::decode(r)?,
+            }),
             1 => Ok(Up::Push(Entry::decode(r)?)),
             2 => Ok(Up::Live(Entry::decode(r)?)),
             3 => Ok(Up::Rate {
@@ -401,6 +419,11 @@ impl<B: Encode> Encode for Down<B> {
                 query.0.encode(out);
                 args.encode(out);
             }
+            Down::Welcome { sent, time } => {
+                7u32.encode(out);
+                sent.encode(out);
+                time.encode(out);
+            }
         }
     }
 }
@@ -424,6 +447,10 @@ impl<B: Decode> Decode for Down<B> {
             6 => Ok(Down::Got {
                 query: QueryId(u32::decode(r)?),
                 args: Vec::decode(r)?,
+            }),
+            7 => Ok(Down::Welcome {
+                sent: u64::decode(r)?,
+                time: u64::decode(r)?,
             }),
             _ => Err(Error::Tag),
         }
@@ -466,7 +493,10 @@ pub(crate) mod tests {
             },
         ]);
         let ups = [
-            Up::Hello { cursor: Seq(4) },
+            Up::Hello {
+                cursor: Seq(4),
+                time: 1_700_000_000_123,
+            },
             Up::Push(entry(1, None)),
             Up::Live(entry(2, None)),
             Up::Rate {
@@ -509,6 +539,10 @@ pub(crate) mod tests {
             Down::Got {
                 query: QueryId(7),
                 args: vec![9],
+            },
+            Down::Welcome {
+                sent: 5,
+                time: 1_700_000_000_456,
             },
         ];
         for down in downs {

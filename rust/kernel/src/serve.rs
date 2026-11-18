@@ -42,9 +42,14 @@
 //!
 //! **Session entries.** Of an entry that sets a row whole
 //! ([`crate::Body::row`]) the latest is kept per actor, by its time: one
-//! older than it is dropped, and a hello is answered with its actor's
-//! latest (not those of the client's own origin). Each goes to its actor's
-//! other connections through each one's [`Feed`], at the rate it asked.
+//! older than it is dropped ([`Serve::live`]; a relay keeps what its node
+//! took, [`Serve::pass`]). Each goes to its actor's connections through
+//! each one's [`Feed`], at the rate it asked, the one it came from too:
+//! a node that set a row it does not own takes its upstream's latest of
+//! it, so it ends where its upstream does. A hello is answered with every
+//! latest entry of its actor's, the client's own included, so any
+//! divergence heals when it connects; nothing else is held for a node
+//! away. An upstream never queues a session entry.
 
 use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
@@ -440,7 +445,8 @@ impl<B: Body + Clone> Serve<B> {
     /// `head`: whether it holds every row (and the upstream answers it
     /// from its log), and the frames that answer it besides: a fill of the
     /// rows it holds and `Got` for each subscription it said, unless it
-    /// holds every row; then its actor's latest session entries.
+    /// holds every row; then its actor's latest session entries, its own
+    /// included. The caller ends the answer with [`Down::Welcome`].
     pub fn hello(&mut self, conn: Conn, cursor: Seq, db: &dyn Read, head: Seq, now: u64) -> (bool, Vec<Down<B>>) {
         let Some(peer) = self.conns.get_mut(&conn) else {
             return (false, Vec::new());
@@ -498,8 +504,8 @@ impl<B: Body + Clone> Serve<B> {
                 args: args.clone(),
             }));
         }
-        let (actor, client) = (peer.actor, peer.client);
-        let live = self.latest.iter().filter(|((a, _), e)| *a == actor && Some(e.id.origin) != client);
+        let actor = peer.actor;
+        let live = self.latest.iter().filter(|((a, _), _)| *a == actor);
         out.extend(live.map(|(_, e)| Down::Live(e.clone())));
         (all, out)
     }
@@ -569,25 +575,44 @@ impl<B: Body + Clone> Serve<B> {
         out
     }
 
-    /// A session entry `actor` sent from `from` (or the upstream's own,
-    /// or its upstream's: `None`) at `now`: what goes to the actor's other
-    /// connections, or `None` if it is older than the latest kept for its
-    /// row, and dropped.
-    pub fn live(&mut self, from: Option<Conn>, actor: Actor, e: Entry<B>, now: u64) -> Option<Vec<Out<B>>> {
+    /// A session entry of `actor`'s at `now`, from one of its connections,
+    /// the upstream's own or its upstream's: what goes to the actor's
+    /// connections, the one it came from too (whose node takes it as the
+    /// row's latest, over any it took meanwhile), or `None` if it is older
+    /// than the latest kept for its row, and dropped.
+    pub fn live(&mut self, actor: Actor, e: Entry<B>, now: u64) -> Option<Vec<Out<B>>> {
         if let Some(row) = e.body.row() {
-            let key = (actor, row);
-            if self.latest.get(&key).is_some_and(|l| (l.at, l.id) >= (e.at, e.id)) {
+            if self.latest.get(&(actor, row)).is_some_and(|l| (l.at, l.id) >= (e.at, e.id)) {
                 return None;
             }
-            self.latest.insert(key, e.clone());
+        }
+        Some(self.pass(actor, e, now))
+    }
+
+    /// A session entry the upstream's node took, kept as its row's latest
+    /// whatever its time and sent to the actor's connections: a relay's,
+    /// whose view is its node's.
+    pub fn pass(&mut self, actor: Actor, e: Entry<B>, now: u64) -> Vec<Out<B>> {
+        if let Some(row) = e.body.row() {
+            self.latest.insert((actor, row), e.clone());
         }
         let mut out = Vec::new();
         for (&c, peer) in &mut self.conns {
-            if Some(c) != from && peer.actor == actor {
+            if peer.actor == actor {
                 out.extend(peer.feed.offer(e.clone(), now).into_iter().map(|e| (c, Down::Live(e))));
             }
         }
-        Some(out)
+        out
+    }
+
+    /// Keeps only the latest entries `keep` says.
+    pub fn retain_latest(&mut self, mut keep: impl FnMut(&Entry<B>) -> bool) {
+        self.latest.retain(|_, e| keep(e));
+    }
+
+    /// The client of a connection open, if the host named it.
+    pub fn client(&self, conn: Conn) -> Option<Origin> {
+        self.conns.get(&conn).and_then(|p| p.client)
     }
 
     /// The latest session entry of each row, as kept.
@@ -661,7 +686,7 @@ pub(crate) mod tests {
         a.set_queries(&QUERIES);
         a.set_ttl(ttl, keep);
         a.open(Conn(1), ME, Some(Origin(1)));
-        a.receive(Conn(1), Up::Hello { cursor: Seq(0) }, 0);
+        a.receive(Conn(1), Up::Hello { cursor: Seq(0), time: 0 }, 0);
         let mut writer = node(1);
         for (key, by) in [(1, 1), (2, 2), (3, 3), (4, 5)] {
             push(&mut a, &mut writer, key, by);
@@ -682,13 +707,13 @@ pub(crate) mod tests {
     fn connect(a: &mut Server, watch: &mut Node<Msg, Memory>, conn: u32, now: u64) -> Vec<Down<Msg>> {
         a.open(Conn(conn), ME, Some(Origin(2)));
         let mut up = Vec::new();
-        watch.connect(&mut up);
+        watch.connect(&mut up, 0);
         let mut sent = Vec::new();
         for u in up {
             for (c, down) in a.receive(Conn(conn), u, now) {
                 assert_eq!(c, Conn(conn));
                 sent.push(down.clone());
-                watch.receive(down, &mut Vec::new());
+                watch.receive(down, &mut Vec::new(), 0);
             }
         }
         sent
@@ -697,7 +722,7 @@ pub(crate) mod tests {
     fn deliver(out: Vec<Out<Msg>>, conn: u32, watch: &mut Node<Msg, Memory>) {
         for (c, down) in out {
             if c == Conn(conn) {
-                watch.receive(down, &mut Vec::new());
+                watch.receive(down, &mut Vec::new(), 0);
             }
         }
     }
@@ -745,7 +770,7 @@ pub(crate) mod tests {
             value: None,
         };
         assert_eq!((tables, rows_sent), (vec![], vec![count_is(1, 3), count_is(2, 3), gone]));
-        assert!(matches!(sent.last(), Some(Down::Got { .. })));
+        assert!(matches!(sent[sent.len() - 2..], [Down::Got { .. }, Down::Welcome { .. }]));
         assert_eq!(rows(watch.store(Space::Shared)), odd(a.store()));
         assert!(watch.complete(QueryId(0), &[1]) && watch.cursor() == a.head());
 
@@ -798,7 +823,7 @@ pub(crate) mod tests {
         assert_eq!(rows(watch.store(Space::Shared)), odd(a.store()));
         // A client opened again while connected takes its record over.
         a.open(Conn(7), ME, Some(Origin(2)));
-        assert!(a.receive(Conn(6), Up::Hello { cursor: Seq(0) }, 0).is_empty());
+        assert!(a.receive(Conn(6), Up::Hello { cursor: Seq(0), time: 0 }, 0).is_empty());
     }
 
     /// A query let go stays held for its TTL: nothing moves out, and

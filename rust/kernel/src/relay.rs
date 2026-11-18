@@ -28,11 +28,16 @@
 //!   a push again from them at once; any other awaits the upstream's
 //!   verdict, which, the upstream's link being ordered and the held pushes
 //!   sent again oldest first, comes after those before it.
-//! - **Session entries** pass between every side: the phone steps a
-//!   watch's (its player is the owner of its playback), and passes it up
-//!   and to its other downstream nodes; its own and its upstream's go
-//!   down. Of each row only the newest by its time passes, so one the
-//!   server says back late never undoes a newer one.
+//! - **Session entries** pass between every side, as the phone's node
+//!   takes them ([`Node`]'s rules: a row it owns takes only a newer entry,
+//!   any other is its upstream's): a watch's, which the phone takes (its
+//!   player is the owner of its playback) and passes up and to every
+//!   downstream connection, the watch's own too; its own and its
+//!   upstream's go down. What the relay greets a watch with is the phone's
+//!   session rows. The phone answers for the rows its downstream nodes own
+//!   ([`Node::answer_for`]), as for its own: so what a watch set while the
+//!   phone was away from the server reaches it when the phone connects,
+//!   and what the server kept for them meanwhile is not taken.
 //!
 //! The host routes the phone's own entries through [`Relay::route`], what
 //! its upstream sends through [`Relay::down`], and what a downstream sends
@@ -158,18 +163,14 @@ impl<B: Body + Clone + 'static> Relay<B> {
                 };
             }
             Down::Live(e) => {
-                let Some(passed) = self.serve.live(None, e.actor, e.clone(), now) else {
-                    return Served {
-                        out,
-                        changes: Changes::default(),
-                    };
-                };
-                out = passed;
                 let mut said = Vec::new();
-                node.receive(Down::Live(e), &mut said);
+                if node.take_live(e.clone(), true, &mut said) {
+                    out = self.serve.pass(e.actor, e, now);
+                }
                 out.extend(self.pass(said, link, now));
             }
             down => {
+                let welcome = matches!(down, Down::Welcome { .. });
                 if let Down::Logged(l) = &down {
                     logged = Some(Logged {
                         entry: l.entry.clone(),
@@ -177,7 +178,11 @@ impl<B: Body + Clone + 'static> Relay<B> {
                     });
                 }
                 let mut said = Vec::new();
-                node.receive(down, &mut said);
+                node.receive(down, &mut said, now);
+                // The rows the node let go at its hello's end go here too.
+                if welcome {
+                    self.serve.retain_latest(|l| node.latest().any(|k| k.id == l.id));
+                }
                 out.extend(self.pass(said, link, now));
             }
         }
@@ -196,11 +201,24 @@ impl<B: Body + Clone + 'static> Relay<B> {
             changes: Changes::default(),
         };
         let Some(actor) = self.serve.actor(conn) else { return served };
+        // The phone answers for the rows its downstream node owns.
+        if let (Up::Hello { .. }, Some(client)) = (&up, self.serve.client(conn)) {
+            node.answer_for(client);
+        }
         let head = node.cursor();
         let view = node.view(Space::Shared);
         let to = |frames: Vec<Down<B>>| frames.into_iter().map(|d| (conn, d)).collect();
         match up {
-            Up::Hello { cursor } => served.out = to(self.serve.hello(conn, cursor, &view, head, now).1),
+            Up::Hello { cursor, time } => {
+                served.out = to(self.serve.hello(conn, cursor, &view, head, now).1);
+                served.out.push((
+                    conn,
+                    Down::Welcome {
+                        sent: time,
+                        time: node.time(now),
+                    },
+                ));
+            }
             Up::Subscribe { query, args } => served.out = to(self.serve.subscribe(conn, query, args, &view, head)),
             Up::Unsubscribe { query, args } => served.out = to(self.serve.unsubscribe(conn, query, args, head, now)),
             Up::Rate { table, every } => self.serve.rate(conn, table, every),
@@ -225,14 +243,13 @@ impl<B: Body + Clone + 'static> Relay<B> {
                 let Some(e) = stamped(actor, e).ok().filter(|e| e.space == Space::Session) else {
                     return served;
                 };
-                let Some(passed) = self.serve.live(Some(conn), actor, e.clone(), now) else {
-                    return served;
-                };
                 let before = node.cursor();
                 let mut said = Vec::new();
-                node.receive(Down::Live(e.clone()), &mut said);
+                if !node.take_live(e.clone(), false, &mut said) {
+                    return served;
+                }
+                served.out = self.serve.pass(actor, e.clone(), now);
                 link.send(Up::Live(e));
-                served.out = passed;
                 served.out.extend(self.pass(said, link, now));
                 let settled = self.settle(node, None, before);
                 served.out.extend(settled.out);
@@ -266,7 +283,7 @@ impl<B: Body + Clone + 'static> Relay<B> {
         let mut out = Vec::new();
         for up in said {
             if let Up::Live(e) = &up {
-                out.extend(self.serve.live(None, e.actor, e.clone(), now).unwrap_or_default());
+                out.extend(self.serve.pass(e.actor, e.clone(), now));
             }
             link.send(up);
         }
@@ -297,7 +314,8 @@ pub(crate) mod tests {
     use crate::authority::Authority;
     use crate::entry::Origin;
     use crate::node::app::*;
-    use crate::store::Memory;
+    use crate::node::Refusal;
+    use crate::store::{Memory, Read};
     use crate::sync::QueryId;
     use alloc::vec;
 
@@ -324,11 +342,11 @@ pub(crate) mod tests {
         let tap = phone.make(Space::Shared, Msg::Add { key: 1, by: 2 }, 10);
         relay.route(&mut phone, tap, &mut to_server, 10);
         let mut up = Vec::new();
-        watch.connect(&mut up);
+        watch.connect(&mut up, 0);
         let deliver = |out: Vec<Out<Msg>>, watch: &mut Node<Msg, Memory>| {
             for (c, down) in out {
                 assert_eq!(c, Conn(9));
-                watch.receive(down, &mut Vec::new());
+                watch.receive(down, &mut Vec::new(), 0);
             }
         };
         for u in core::mem::take(&mut up) {
@@ -351,7 +369,7 @@ pub(crate) mod tests {
         // The phone connects: its own push, then the watch's, go up with
         // their origins.
         to_server.clear();
-        phone.connect(&mut to_server);
+        phone.connect(&mut to_server, 0);
         relay.connect(&mut to_server);
         let pushed: Vec<_> = to_server
             .iter()
@@ -380,5 +398,113 @@ pub(crate) mod tests {
         assert_eq!(to_server, []);
     }
 
-    crate::listed!(a_phone_serves_its_watch);
+    /// The session through a phone: the watch's clock composes the
+    /// phone's offset to the server with its own to the phone; the watch's
+    /// pause reaches the phone's player with the server away, and is
+    /// refused with the watch away; and when the phone connects, the
+    /// server's stale entry for the phone's row is not taken: the phone
+    /// says its own again, and the server and the third device take it.
+    #[cfg_attr(test, test)]
+    fn the_session_through_a_phone() {
+        let value = |n: &Node<Msg, Memory>, key| n.store(Space::Session).get(POSITIONS, &at(key)).map(|v| v[0]);
+        let mut server = Authority::new(&HANDLERS, Memory::new());
+        let mut phone = node(1);
+        phone.set_actor(ME);
+        let mut laptop = node(3);
+        laptop.set_actor(ME);
+        let mut relay: Relay<Msg> = Relay::default();
+        let mut watch = node(2);
+        watch.set_actor(ME);
+        // Each frame delivered at once: to the server at `now` on its
+        // clock, a watch's to the relay at the phone's.
+        let mut to_server = Vec::new();
+        let up = |server: &mut Authority<Msg, Memory>, conn, said: &mut Vec<Up<Msg>>, now| {
+            let mut out = Vec::new();
+            for u in core::mem::take(said) {
+                out.extend(server.receive(Conn(conn), u, now));
+            }
+            out
+        };
+        // The laptop on the server, its clock 1000 behind: offset 1000.
+        server.open(Conn(3), ME, Some(Origin(3)));
+        let mut said = Vec::new();
+        laptop.connect(&mut said, 0);
+        for (_, d) in up(&mut server, 3, &mut said, 1000) {
+            laptop.receive(d, &mut said, 0);
+        }
+        assert_eq!(laptop.offset(), 1000);
+        // The phone, 500 behind the server, with a 20 ms round trip.
+        server.open(Conn(1), ME, Some(Origin(1)));
+        phone.connect(&mut to_server, 100);
+        for (_, d) in up(&mut server, 1, &mut to_server, 610) {
+            relay.down(&mut phone, d, &mut to_server, 120);
+        }
+        assert_eq!(phone.offset(), 500);
+        // Its player plays: row 1 is its own, and goes up and down.
+        let play = phone.make(Space::Session, Msg::Set { key: 1, value: 1 }, 130);
+        relay.route(&mut phone, play, &mut to_server, 130);
+        for (_, d) in up(&mut server, 1, &mut to_server, 630) {
+            relay.down(&mut phone, d, &mut to_server, 130);
+        }
+        // The watch, 200 ahead of the phone: answered with the phone's
+        // estimate of the server's time, so 300 behind the server.
+        relay.serve().open(Conn(9), ME, Some(Origin(2)));
+        let mut from_watch = Vec::new();
+        watch.connect(&mut from_watch, 340);
+        let mut to_watch = Vec::new();
+        for u in core::mem::take(&mut from_watch) {
+            to_watch.extend(relay.up(&mut phone, Conn(9), u, &mut to_server, 140).out);
+        }
+        for (_, d) in core::mem::take(&mut to_watch) {
+            watch.receive(d, &mut from_watch, 340);
+        }
+        assert_eq!((watch.offset(), watch.time(340), value(&watch, 1)), (300, 640, Some(1)));
+        // The phone loses the server; the watch pauses, which reaches the
+        // player at once.
+        phone.disconnect();
+        server.close(Conn(1), 700);
+        to_server.clear();
+        let pause = watch.make(Space::Session, Msg::Set { key: 1, value: 2 }, 400);
+        watch.route(pause, &mut from_watch);
+        for u in core::mem::take(&mut from_watch) {
+            to_watch.extend(relay.up(&mut phone, Conn(9), u, &mut to_server, 200).out);
+        }
+        assert_eq!((value(&phone, 1), value(&watch, 1)), (Some(2), Some(2)));
+        // Meanwhile the laptop, linked, plays on the server: kept there.
+        let stale = laptop.make(Space::Session, Msg::Set { key: 1, value: 3 }, 900);
+        laptop.route(stale, &mut said);
+        up(&mut server, 3, &mut said, 900);
+        // The watch away: its pause is refused, the row as it was.
+        watch.disconnect();
+        let late = watch.make(Space::Session, Msg::Set { key: 1, value: 4 }, 500);
+        watch.route(late.clone(), &mut from_watch);
+        assert_eq!((from_watch.len(), value(&watch, 1)), (0, Some(2)));
+        assert_eq!(watch.take_refused(), [(late.id, Refusal::OFFLINE)]);
+        // The phone connects: the laptop's entry is not taken, and the
+        // phone says its pause again, which the server and the laptop take.
+        server.open(Conn(1), ME, Some(Origin(1)));
+        phone.connect(&mut to_server, 300);
+        relay.connect(&mut to_server);
+        let mut to_laptop = Vec::new();
+        while !to_server.is_empty() {
+            for (c, d) in up(&mut server, 1, &mut to_server, 810) {
+                if c == Conn(3) {
+                    to_laptop.push(d);
+                } else {
+                    relay.down(&mut phone, d, &mut to_server, 310);
+                }
+            }
+        }
+        for d in to_laptop {
+            laptop.receive(d, &mut said, 1000);
+        }
+        assert_eq!((value(&phone, 1), value(&laptop, 1)), (Some(2), Some(2)));
+        let kept = server.latest().find(|e| e.body.row() == Some((POSITIONS, at(1))));
+        assert_eq!(
+            kept.map(|e| (e.id.origin, e.body.clone())),
+            Some((Origin(1), Msg::Set { key: 1, value: 2 }))
+        );
+    }
+
+    crate::listed!(a_phone_serves_its_watch, the_session_through_a_phone);
 }

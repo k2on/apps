@@ -22,6 +22,20 @@ use crate::codec::{Decode, Encode, Error, Reader};
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Origin(pub u64);
 
+impl Origin {
+    /// What the key of a session row this origin owns begins with: its
+    /// eight bytes, big-endian. The node of that origin is the row's
+    /// authority, as a phone's player is for its playback.
+    pub fn key(self) -> [u8; 8] {
+        self.0.to_be_bytes()
+    }
+
+    /// Whether this origin owns a session row with this key.
+    pub fn owns(self, key: &[u8]) -> bool {
+        key.starts_with(&self.key())
+    }
+}
+
 /// An entry's id: its origin and its count there, from 1.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct EntryId {

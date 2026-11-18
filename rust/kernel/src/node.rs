@@ -63,6 +63,35 @@
 //! A playback position is an [`crate::Anchor`] its owner sets whole: a
 //! view extrapolates it, with no stream of updates.
 //!
+//! - **Owners.** A row whose key begins with a node's origin
+//!   ([`Origin::owns`]) is that node's: it is the row's authority, as a
+//!   phone's player is for its playback, and a phone answers for its
+//!   watch's rows as for its own ([`Node::answer_for`]). Others set it as
+//!   controls, which the owner takes when they are newer than what it has.
+//! - **Live controls don't queue.** With no link upstream (before
+//!   [`Node::connect`], after [`Node::disconnect`]) a session entry for a
+//!   row the node does not own is refused ([`Refusal::OFFLINE`]): not
+//!   applied, not kept, never sent later, so the host shows that the owner
+//!   can't be reached. One for its own row is applied.
+//! - **Rows it does not own are its upstream's**: it takes what comes,
+//!   its own entries said back too, so it ends where its upstream does;
+//!   its own control shows at once, until the upstream says otherwise.
+//! - **Every hello heals.** Its upstream answers a hello with the latest
+//!   of every row the node may see, its own included, and ends the answer
+//!   with [`Down::Welcome`]. A row it does not own takes the answer's
+//!   (one the answer leaves out goes), unless the node set it since it
+//!   connected; a row it owns takes nothing from it, and is said again, as
+//!   a new entry caused by its last, when the answer did not say that
+//!   entry: newer than anything its upstream kept while it was away, so
+//!   no control made then fires later.
+//! - **The tree's clock.** A hello says the node's time and the welcome
+//!   says it back with the upstream's estimate of the tree's time (its
+//!   root's clock), so a node measures its offset NTP's way, from the
+//!   shortest round trip of its last four hellos ([`Node::offset`]); an
+//!   upstream's own offset is in what it says, so the offsets compose down
+//!   the tree. An owner writes its anchors in the tree's time
+//!   ([`Node::time`]), and a view extrapolates them in it.
+//!
 //! **What changed.** The node notes each row of each space that its own
 //! writes, facts, fills, rebases and session entries touch, with what it
 //! read before; [`Node::take_changes`] answers what changed in a space
@@ -116,6 +145,10 @@ impl Refusal {
     pub const NOT_OWN: Refusal = Refusal(3);
     /// An entry that says it is from an actor other than its connection's.
     pub const NOT_YOURS: Refusal = Refusal(4);
+    /// A session entry made with no link upstream, for a row this node does
+    /// not own: live controls don't queue, so it is neither applied nor
+    /// kept, and the host shows that the row's owner can't be reached.
+    pub const OFFLINE: Refusal = Refusal(5);
 }
 
 /// What a handler runs with: the entry, its space's rows, and the entries
@@ -218,6 +251,19 @@ impl<B> Link<B> for Vec<Up<B>> {
     }
 }
 
+/// A session row a node took: the entry it took last for it, and whether
+/// its upstream has said it since the node last connected.
+struct Kept<B> {
+    table: TableId,
+    key: Vec<u8>,
+    entry: Entry<B>,
+    said: bool,
+}
+
+/// How many hellos' round trips a node keeps, to take its clock's offset
+/// from the shortest.
+const SAMPLES: usize = 4;
+
 /// One process running the loop.
 pub struct Node<B: 'static, S> {
     origin: Origin,
@@ -249,6 +295,19 @@ pub struct Node<B: 'static, S> {
     reset: bool,
     /// Its subscriptions, each with whether its rows are all here.
     subs: Vec<(QueryId, Vec<u8>, bool)>,
+    /// The session rows it took, each by its latest entry, and the
+    /// origins of the downstream nodes whose rows it answers for.
+    rows: Vec<Kept<B>>,
+    below: Vec<Origin>,
+    /// Whether its link upstream is up, and whether the answer to its
+    /// hello is still coming.
+    linked: bool,
+    greeting: bool,
+    /// The round trip and the offset of each of the last hellos answered,
+    /// the next to replace, and the offset of the shortest.
+    samples: [(u64, i64); SAMPLES],
+    sample: usize,
+    offset: i64,
     /// How many confirmations ran nothing again: what the tests see of a
     /// skipped replay.
     #[cfg(any(test, ark_selftest))]
@@ -278,6 +337,13 @@ impl<B: Body + Clone + 'static, S: Store> Node<B, S> {
             touched: Default::default(),
             reset: false,
             subs: Vec::new(),
+            rows: Vec::new(),
+            below: Vec::new(),
+            linked: false,
+            greeting: false,
+            samples: [(u64::MAX, 0); SAMPLES],
+            sample: 0,
+            offset: 0,
             #[cfg(any(test, ark_selftest))]
             skipped: 0,
         }
@@ -368,7 +434,54 @@ impl<B: Body + Clone + 'static, S: Store> Node<B, S> {
         core::mem::take(&mut self.refused)
     }
 
+    /// The entries refused and not yet taken, oldest first: for a host to
+    /// see whether the entry it just routed was.
+    pub fn refusals(&self) -> &[(EntryId, Refusal)] {
+        &self.refused
+    }
+
+    /// Whether its link upstream is up: from [`Node::connect`] to
+    /// [`Node::disconnect`].
+    pub fn linked(&self) -> bool {
+        self.linked
+    }
+
+    /// Answers for the session rows `origin` owns as for its own: a
+    /// downstream node's it serves, which its upstream reaches only
+    /// through it ([`crate::Relay`] says so at the node's hello).
+    pub fn answer_for(&mut self, origin: Origin) {
+        if !self.below.contains(&origin) {
+            self.below.push(origin);
+        }
+    }
+
+    /// Whether it answers for a session row: one it or a node below it
+    /// owns.
+    fn owns(&self, key: &[u8]) -> bool {
+        self.origin.owns(key) || self.below.iter().any(|o| o.owns(key))
+    }
+
+    /// The latest session entry it took for each row.
+    pub fn latest(&self) -> impl Iterator<Item = &Entry<B>> {
+        self.rows.iter().map(|k| &k.entry)
+    }
+
+    /// How far the tree's clock (its root's: the server's, or a phone's
+    /// with none) is ahead of this node's, in milliseconds, as its hellos
+    /// measured it: 0 until one is answered.
+    pub fn offset(&self) -> i64 {
+        self.offset
+    }
+
+    /// The tree's time at this node's time `now`: what an anchor's owner
+    /// writes and a view extrapolates it at.
+    pub fn time(&self, now: u64) -> u64 {
+        now.wrapping_add_signed(self.offset)
+    }
+
     /// A new entry of this node's, at wall time `now`: a tap, a timer.
+    // Not inlined: the watch links one copy (checks.kernel-size).
+    #[inline(never)]
     pub fn make(&mut self, space: Space, body: B, now: u64) -> Entry<B> {
         self.clock = self.clock.tick(now);
         self.made += 1;
@@ -465,6 +578,8 @@ impl<B: Body + Clone + 'static, S: Store> Node<B, S> {
     /// nothing is left to step: in order, each `local` and `device` entry
     /// stepped here, each `shared` one stepped and pushed, each `session`
     /// one stepped and sent.
+    // Not inlined: the watch links one copy (checks.kernel-size).
+    #[inline(never)]
     pub fn route(&mut self, e: Entry<B>, link: &mut dyn Link<B>) {
         self.run(VecDeque::from([e]), link);
     }
@@ -473,11 +588,121 @@ impl<B: Body + Clone + 'static, S: Store> Node<B, S> {
         while let Some(e) = queue.pop_front() {
             match Route::of(e.space) {
                 Route::Step => queue.extend(self.step(e)),
-                route => {
+                Route::Pending => {
                     let made = self.step(e.clone());
-                    link.send(if route == Route::Pending { Up::Push(e) } else { Up::Live(e) });
+                    link.send(Up::Push(e));
                     queue.extend(made);
                 }
+                Route::Send => {
+                    let own = e.body.row().is_some_and(|(_, key)| self.owns(&key));
+                    if !self.linked && !own {
+                        self.refused.push((e.id, Refusal::OFFLINE));
+                        continue;
+                    }
+                    let made = self.step(e.clone());
+                    // Its own row set while its hello is answered is said
+                    // again after: its upstream may keep a newer one.
+                    self.keep(&e, !(own && self.greeting));
+                    link.send(Up::Live(e));
+                    queue.extend(made);
+                }
+            }
+        }
+    }
+
+    /// Notes the entry a session row was last set by.
+    fn keep(&mut self, e: &Entry<B>, said: bool) {
+        let Some((table, key)) = e.body.row() else { return };
+        match self.rows.iter_mut().find(|k| k.table == table && k.key == key) {
+            Some(k) => {
+                k.entry = e.clone();
+                k.said = said;
+            }
+            None => self.rows.push(Kept {
+                table,
+                key,
+                entry: e.clone(),
+                said,
+            }),
+        }
+    }
+
+    /// Takes another node's session entry, from its upstream (`upstream`)
+    /// or a downstream node it serves, and routes what it makes: whether it
+    /// took it. A row it does not own is its upstream's: it takes what
+    /// comes, its own said back too. A row it owns takes only a newer entry,
+    /// and none from its hello's answer, which says it only to show what
+    /// its upstream has.
+    pub(crate) fn take_live(&mut self, e: Entry<B>, upstream: bool, link: &mut dyn Link<B>) -> bool {
+        self.clock = self.clock.witness(e.at, e.at.wall);
+        let Some((table, key)) = e.body.row() else {
+            // Its own, said back to it, was stepped when it was made.
+            if e.id.origin == self.origin {
+                return false;
+            }
+            let made = self.step(e);
+            self.run(made.into(), link);
+            return true;
+        };
+        if self.owns(&key) {
+            let kept = self.rows.iter_mut().find(|k| k.table == table && k.key == key);
+            if upstream && self.greeting {
+                if let Some(k) = kept.filter(|k| k.entry.id == e.id) {
+                    k.said = true;
+                }
+                return false;
+            }
+            if kept.is_some_and(|k| (k.entry.at, k.entry.id) >= (e.at, e.id)) {
+                return false;
+            }
+        }
+        self.keep(&e, true);
+        let made = self.step(e);
+        self.run(made.into(), link);
+        true
+    }
+
+    /// The end of the answer to its hello: its upstream's clock, sent at
+    /// the tree's time `time` in answer to a hello said at this node's
+    /// `sent`, taken at `now`. Of its session rows, one it does not own
+    /// that the answer did not say is gone upstream, and goes; one it owns
+    /// that its upstream does not have as it is is said again, newer than
+    /// anything its upstream kept while it was away.
+    fn welcome(&mut self, sent: u64, time: u64, now: u64, link: &mut dyn Link<B>) {
+        if !core::mem::take(&mut self.greeting) {
+            return;
+        }
+        if let Some(trip) = now.checked_sub(sent) {
+            // NTP's estimate, the answer taken as made halfway: the offset
+            // of the shortest round trip of the last few is the least wrong.
+            let offset = (time as i64).wrapping_add((trip / 2) as i64).wrapping_sub(now as i64);
+            self.samples[self.sample] = (trip, offset);
+            self.sample = (self.sample + 1) % SAMPLES;
+            self.offset = self.samples.iter().min_by_key(|s| s.0).map_or(0, |s| s.1);
+        }
+        let mut i = 0;
+        while let Some(k) = self.rows.get(i) {
+            let (said, own) = (k.said, self.owns(&k.key));
+            if said {
+                i += 1;
+            } else if own {
+                self.clock = self.clock.tick(self.clock.wall);
+                self.made += 1;
+                let k = &mut self.rows[i];
+                k.entry.cause = Some(k.entry.id);
+                k.entry.id = EntryId {
+                    origin: self.origin,
+                    n: self.made,
+                };
+                k.entry.at = self.clock;
+                k.said = true;
+                link.send(Up::Live(k.entry.clone()));
+                i += 1;
+            } else {
+                let k = self.rows.swap_remove(i);
+                let session = &self.stores.session;
+                self.touched[Space::Session as usize].keep(k.table, &k.key, || session.get(k.table, &k.key));
+                self.stores.session.delete(k.table, &k.key);
             }
         }
     }
@@ -506,12 +731,20 @@ impl<B: Body + Clone + 'static, S: Store> Node<B, S> {
         self.incoming.is_empty() && self.subs.iter().any(|s| s.0 == query && s.1 == args && s.2)
     }
 
-    /// What this node says at each connection: its subscriptions, its
-    /// cursor, then every pending entry again, oldest first. The upstream
+    /// Its link upstream is up, at this node's time `now`: what it says at
+    /// each connection is its subscriptions, its hello (its cursor and
+    /// `now`), then every pending entry again, oldest first. The upstream
     /// judges each once. A fill the last connection left unfinished, and
     /// rows held for queries not got, are let go: the hello says the cursor
-    /// from before they came.
-    pub fn connect(&mut self, link: &mut dyn Link<B>) {
+    /// from before they came. Session entries for any row are sent from now.
+    // Not inlined: the watch links one copy (checks.kernel-size).
+    #[inline(never)]
+    pub fn connect(&mut self, link: &mut dyn Link<B>, now: u64) {
+        self.linked = true;
+        self.greeting = true;
+        for k in &mut self.rows {
+            k.said = false;
+        }
         self.filling = None;
         let cursor = if self.incoming.is_empty() { self.cursor } else { self.since };
         self.incoming = Layer::new();
@@ -522,22 +755,31 @@ impl<B: Body + Clone + 'static, S: Store> Node<B, S> {
                 args: args.clone(),
             });
         }
-        link.send(Up::Hello { cursor });
+        link.send(Up::Hello { cursor, time: now });
         for p in &self.pending {
             link.send(Up::Push(p.entry.clone()));
         }
     }
 
-    /// Takes in what the upstream sent, and routes what it makes.
-    pub fn receive(&mut self, down: Down<B>, link: &mut dyn Link<B>) {
+    /// Its link upstream went down: what it says is lost until it connects
+    /// again, so session entries for rows it does not own are refused.
+    pub fn disconnect(&mut self) {
+        self.linked = false;
+        self.greeting = false;
+    }
+
+    /// Takes in what the upstream sent at this node's time `now`, and
+    /// routes what it makes.
+    // Not inlined: the watch links one copy (checks.kernel-size).
+    #[inline(never)]
+    pub fn receive(&mut self, down: Down<B>, link: &mut dyn Link<B>, now: u64) {
         match down {
             Down::Logged(l) => self.confirm(l),
             Down::Verdict { id, verdict } => self.judge(id, verdict),
-            // Its own, said back to it, was stepped when it was made.
-            Down::Live(e) if e.id.origin != self.origin => {
-                let made = self.step(e);
-                self.run(made.into(), link);
+            Down::Live(e) => {
+                self.take_live(e, true, link);
             }
+            Down::Welcome { sent, time } => self.welcome(sent, time, now, link),
             Down::Fill { seq, tables, parts } => {
                 self.filling = Some((seq, parts, tables));
                 self.filled();
@@ -549,7 +791,6 @@ impl<B: Body + Clone + 'static, S: Store> Node<B, S> {
                     self.filled();
                 }
             }
-            Down::Live(_) => {}
             Down::Moved(rows) => {
                 self.hold(&rows);
                 self.flush();
@@ -736,6 +977,14 @@ pub(crate) mod app {
     /// A session table: a position per key, set whole.
     pub(crate) const POSITIONS: TableId = TableId(2);
 
+    /// A position's row: its key after its owner's origin, which is the
+    /// node of origin 1 for keys 0 to 9, 2 for 10 to 19, and so on.
+    pub(crate) fn at(key: u8) -> Vec<u8> {
+        let mut row = Origin(u64::from(key / 10) + 1).key().to_vec();
+        row.push(key);
+        row
+    }
+
     /// A counter app: `Add` adds to a count, `Take` takes one and refuses
     /// at none, `Tap` asks for a shared `Add` and a local `Seen`, `Seen`
     /// counts taps, `Refuse` writes and refuses.
@@ -768,7 +1017,7 @@ pub(crate) mod app {
 
         fn row(&self) -> Option<(TableId, Vec<u8>)> {
             match self {
-                Msg::Set { key, .. } => Some((POSITIONS, alloc::vec![*key])),
+                Msg::Set { key, .. } => Some((POSITIONS, at(*key))),
                 _ => None,
             }
         }
@@ -819,7 +1068,7 @@ pub(crate) mod app {
         },
         |cx| {
             let Msg::Set { key, value } = cx.entry.body else { unreachable!() };
-            cx.db.put(POSITIONS, &[key], &value.to_le_bytes());
+            cx.db.put(POSITIONS, &at(key), &value.to_le_bytes());
             Ok(())
         },
     ];
@@ -902,14 +1151,14 @@ pub(crate) mod tests {
         assert_eq!(n.pending().len(), 1);
 
         // Confirmed, it is the confirmed rows' and no longer pending.
-        n.receive(logged(&add, 1, count_is(7, 1)), &mut up);
+        n.receive(logged(&add, 1, count_is(7, 1)), &mut up, 0);
         assert_eq!(count(n.store(Space::Shared), 7), 1);
         assert_eq!(count(&n.view(Space::Shared), 7), 1);
         assert_eq!(n.pending(), []);
         assert_eq!(n.cursor(), Seq(1));
         // Again, or past a gap, it is passed over.
-        n.receive(logged(&add, 1, count_is(7, 9)), &mut up);
-        n.receive(logged(&add, 3, count_is(7, 9)), &mut up);
+        n.receive(logged(&add, 1, count_is(7, 9)), &mut up, 0);
+        n.receive(logged(&add, 3, count_is(7, 9)), &mut up, 0);
         assert_eq!(count(n.store(Space::Shared), 7), 1);
     }
 
@@ -924,11 +1173,11 @@ pub(crate) mod tests {
         a.route(mine.clone(), &mut up);
         let theirs = b.make(Space::Shared, Msg::Add { key: 1, by: 5 }, 10);
         // Facts that say 5, whatever running it here would say.
-        a.receive(logged(&theirs, 1, count_is(1, 5)), &mut up);
+        a.receive(logged(&theirs, 1, count_is(1, 5)), &mut up, 0);
         assert_eq!(count(a.store(Space::Shared), 1), 5);
         assert_eq!(count(&a.view(Space::Shared), 1), 7);
         assert_eq!(a.pending()[0].writes, count_is(1, 7));
-        a.receive(logged(&mine, 2, count_is(1, 7)), &mut up);
+        a.receive(logged(&mine, 2, count_is(1, 7)), &mut up, 0);
         assert_eq!(a.pending(), []);
         assert_eq!(rows(&a.view(Space::Shared)), rows(a.store(Space::Shared)));
     }
@@ -950,6 +1199,7 @@ pub(crate) mod tests {
                 verdict: Verdict::Refused(Refusal(300)),
             },
             &mut up,
+            0,
         );
         assert_eq!(n.take_refused(), [(first.id, Refusal(300))]);
         assert_eq!(n.pending().len(), 1);
@@ -961,6 +1211,7 @@ pub(crate) mod tests {
                 verdict: Verdict::Refused(Refusal(300)),
             },
             &mut up,
+            0,
         );
         assert_eq!(n.take_refused(), []);
     }
@@ -1010,6 +1261,7 @@ pub(crate) mod tests {
                 verdict: Verdict::At { seq: Seq(1), last: e.id.n },
             },
             &mut up,
+            0,
         );
         assert_eq!(n.pending()[0].judged, Some(Seq(1)));
         // It is let go once the log is applied to 1, by facts that need
@@ -1018,7 +1270,7 @@ pub(crate) mod tests {
             id: EntryId { origin: Origin(5), n: 1 },
             ..e.clone()
         };
-        n.receive(logged(&other, 1, count_is(4, 1)), &mut up);
+        n.receive(logged(&other, 1, count_is(4, 1)), &mut up, 0);
         assert_eq!(n.pending(), []);
         assert_eq!(count(&n.view(Space::Shared), 4), 1);
     }
@@ -1038,8 +1290,8 @@ pub(crate) mod tests {
         again.resume(Seq(0), kept);
         assert_eq!(count(&again.view(Space::Shared), 6), 40);
         let mut up = Vec::new();
-        again.connect(&mut up);
-        assert_eq!(up, [Up::Hello { cursor: Seq(0) }, Up::Push(e)]);
+        again.connect(&mut up, 0);
+        assert_eq!(up, [Up::Hello { cursor: Seq(0), time: 0 }, Up::Push(e)]);
     }
 
     /// Facts that are what this node's run of its oldest pending entry
@@ -1056,13 +1308,13 @@ pub(crate) mod tests {
         // Writes no run makes show which are run again.
         kept[1].writes = count_is(6, 40);
         n.resume(Seq(0), kept);
-        n.receive(logged(&first, 1, count_is(6, 1)), &mut up);
+        n.receive(logged(&first, 1, count_is(6, 1)), &mut up, 0);
         assert_eq!((n.skipped, n.pending().len()), (1, 1));
         assert_eq!(n.pending()[0].writes, count_is(6, 40));
         assert_eq!(count(&n.view(Space::Shared), 6), 40);
         // Another node's facts: the rest is run again over them.
         let theirs = node(2).make(Space::Shared, Msg::Add { key: 6, by: 4 }, 10);
-        n.receive(logged(&theirs, 2, count_is(6, 5)), &mut up);
+        n.receive(logged(&theirs, 2, count_is(6, 5)), &mut up, 0);
         assert_eq!(n.skipped, 1);
         assert_eq!(n.pending()[0].writes, count_is(6, 7));
         // The node's own facts unlike its preview: run again too.
@@ -1071,7 +1323,7 @@ pub(crate) mod tests {
         let b = m.make(Space::Shared, Msg::Add { key: 1, by: 1 }, 10);
         m.route(a.clone(), &mut up);
         m.route(b, &mut up);
-        m.receive(logged(&a, 1, count_is(1, 9)), &mut up);
+        m.receive(logged(&a, 1, count_is(1, 9)), &mut up, 0);
         assert_eq!((m.skipped, count(&m.view(Space::Shared), 1)), (0, 10));
     }
 
@@ -1084,7 +1336,7 @@ pub(crate) mod tests {
         let mut n = node(1);
         let mut up = Vec::new();
         let theirs = node(2).make(Space::Shared, Msg::Add { key: 1, by: 3 }, 10);
-        n.receive(logged(&theirs, 1, count_is(1, 3)), &mut up);
+        n.receive(logged(&theirs, 1, count_is(1, 3)), &mut up, 0);
         let mine = n.make(Space::Shared, Msg::Add { key: 2, by: 1 }, 10);
         let late = n.make(Space::Shared, Msg::Add { key: 2, by: 10 }, 10);
         n.route(mine.clone(), &mut up);
@@ -1099,8 +1351,9 @@ pub(crate) mod tests {
                 },
             },
             &mut up,
+            0,
         );
-        n.connect(&mut up);
+        n.connect(&mut up, 0);
         n.receive(
             Down::Fill {
                 seq: Seq(5),
@@ -1108,17 +1361,18 @@ pub(crate) mod tests {
                 parts: 2,
             },
             &mut up,
+            0,
         );
         n.take_changes(Space::Shared);
         assert_eq!((count(n.store(Space::Shared), 1), n.cursor()), (3, Seq(1)));
         // The log is not taken during a fill, and its parts are not read
         // until the last.
-        n.receive(logged(&theirs, 2, count_is(1, 50)), &mut up);
-        n.receive(Down::Rows(count_is(2, 1)), &mut up);
+        n.receive(logged(&theirs, 2, count_is(1, 50)), &mut up, 0);
+        n.receive(Down::Rows(count_is(2, 1)), &mut up, 0);
         assert_eq!(n.cursor(), Seq(1));
         assert_eq!((count(n.store(Space::Shared), 1), count(n.store(Space::Shared), 2)), (3, 0));
         assert_eq!(n.take_changes(Space::Shared), Changes::default());
-        n.receive(Down::Rows(count_is(3, 4)), &mut up);
+        n.receive(Down::Rows(count_is(3, 4)), &mut up, 0);
         assert_eq!(n.cursor(), Seq(5));
         assert!(n.take_changes(Space::Shared).reset);
         assert_eq!(
@@ -1127,7 +1381,7 @@ pub(crate) mod tests {
         );
         assert_eq!(n.pending().len(), 1);
         assert_eq!(count(&n.view(Space::Shared), 2), 11);
-        n.receive(logged(&late, 6, count_is(2, 11)), &mut up);
+        n.receive(logged(&late, 6, count_is(2, 11)), &mut up, 0);
         assert_eq!((n.pending(), n.cursor()), (&[][..], Seq(6)));
 
         // Interrupted: the rest of its parts are not taken after a new
@@ -1139,12 +1393,13 @@ pub(crate) mod tests {
                 parts: 2,
             },
             &mut up,
+            0,
         );
-        n.receive(Down::Rows(count_is(7, 1)), &mut up);
+        n.receive(Down::Rows(count_is(7, 1)), &mut up, 0);
         up.clear();
-        n.connect(&mut up);
-        assert_eq!(up, [Up::Hello { cursor: Seq(6) }]);
-        n.receive(Down::Rows(count_is(8, 1)), &mut up);
+        n.connect(&mut up, 0);
+        assert_eq!(up, [Up::Hello { cursor: Seq(6), time: 0 }]);
+        n.receive(Down::Rows(count_is(8, 1)), &mut up, 0);
         assert_eq!((count(n.store(Space::Shared), 8), n.cursor()), (0, Seq(6)));
         assert_eq!(count(n.store(Space::Shared), 2), 11);
         // An empty fill ends at once.
@@ -1155,6 +1410,7 @@ pub(crate) mod tests {
                 parts: 0,
             },
             &mut up,
+            0,
         );
         assert_eq!((rows(n.store(Space::Shared)), n.cursor()), (vec![], Seq(9)));
     }
@@ -1171,11 +1427,11 @@ pub(crate) mod tests {
         let theirs = node(2).make(Space::Shared, Msg::Add { key: 9, by: 1 }, 10);
         n.subscribe(QueryId(0), vec![], &mut up);
         n.subscribe(QueryId(1), vec![], &mut up);
-        n.receive(Down::Moved(count_is(1, 1)), &mut up);
-        n.receive(Down::Moved(count_is(2, 2)), &mut up);
+        n.receive(Down::Moved(count_is(1, 1)), &mut up, 0);
+        n.receive(Down::Moved(count_is(2, 2)), &mut up, 0);
         // A fact for a row held, and one for another.
         let facts = Writes(vec![count_is(2, 5).0[0].clone(), count_is(9, 1).0[0].clone()]);
-        n.receive(logged(&theirs, 1, facts), &mut up);
+        n.receive(logged(&theirs, 1, facts), &mut up, 0);
         assert_eq!(rows(n.store(Space::Shared)), [(vec![9], 1u64.to_le_bytes().to_vec())]);
         n.receive(
             Down::Got {
@@ -1183,33 +1439,35 @@ pub(crate) mod tests {
                 args: vec![],
             },
             &mut up,
+            0,
         );
         // The first is got, the second not: nothing is taken yet.
         assert_eq!(n.store(Space::Shared).len(COUNTS), 1);
         assert!(!n.complete(QueryId(0), &[]));
         n.take_changes(Space::Shared);
-        n.receive(Down::Moved(count_is(3, 3)), &mut up);
+        n.receive(Down::Moved(count_is(3, 3)), &mut up, 0);
         n.receive(
             Down::Got {
                 query: QueryId(1),
                 args: vec![],
             },
             &mut up,
+            0,
         );
         assert!(n.complete(QueryId(0), &[]) && n.complete(QueryId(1), &[]));
         assert_eq!((count(n.store(Space::Shared), 2), n.store(Space::Shared).len(COUNTS)), (5, 4));
         assert_eq!(n.take_changes(Space::Shared).rows.len(), 3);
         // Got, a move is taken as it comes.
-        n.receive(Down::Moved(count_is(4, 4)), &mut up);
+        n.receive(Down::Moved(count_is(4, 4)), &mut up, 0);
         assert_eq!(count(n.store(Space::Shared), 4), 4);
         // A third, its rows lost with the connection: the hello asks from
         // the cursor they came at, though the log went on.
         n.subscribe(QueryId(2), vec![], &mut up);
-        n.receive(Down::Moved(count_is(5, 5)), &mut up);
-        n.receive(logged(&theirs, 2, Writes::default()), &mut up);
+        n.receive(Down::Moved(count_is(5, 5)), &mut up, 0);
+        n.receive(logged(&theirs, 2, Writes::default()), &mut up, 0);
         up.clear();
-        n.connect(&mut up);
-        assert_eq!(up[3], Up::Hello { cursor: Seq(1) });
+        n.connect(&mut up, 0);
+        assert_eq!(up[3], Up::Hello { cursor: Seq(1), time: 0 });
         assert_eq!((count(n.store(Space::Shared), 5), n.cursor()), (0, Seq(2)));
         assert!(!n.complete(QueryId(0), &[]));
     }
@@ -1221,14 +1479,16 @@ pub(crate) mod tests {
     fn session_entries_are_sent_and_taken() {
         let mut a = node(1);
         let mut up = Vec::new();
+        a.connect(&mut up, 0);
+        up.clear();
         let e = a.make(Space::Session, Msg::Add { key: 1, by: 3 }, 10);
         a.route(e.clone(), &mut up);
         assert_eq!(up, [Up::Live(e.clone())]);
         assert_eq!(count(a.store(Space::Session), 1), 3);
-        a.receive(Down::Live(e.clone()), &mut up);
+        a.receive(Down::Live(e.clone()), &mut up, 0);
         assert_eq!(count(a.store(Space::Session), 1), 3);
         let mut b = node(2);
-        b.receive(Down::Live(e), &mut up);
+        b.receive(Down::Live(e), &mut up, 0);
         assert_eq!(count(b.store(Space::Session), 1), 3);
     }
 
@@ -1246,11 +1506,21 @@ pub(crate) mod tests {
         let again = n.make(Space::Session, Msg::Set { key: 1, value: 6 }, 10);
         n.route(again, &mut up);
         let theirs = node(2).make(Space::Session, Msg::Set { key: 2, value: 9 }, 10);
-        n.receive(Down::Live(theirs), &mut up);
+        n.receive(Down::Live(theirs), &mut up, 0);
         let tap = n.make(Space::Local, Msg::Tap { key: 3 }, 10);
         n.route(tap, &mut up);
         let session = n.take_changes(Space::Session);
-        assert_eq!(session.rows, [change(POSITIONS, 1, None, value(6)), change(POSITIONS, 2, None, value(9))]);
+        let pos = |key, new| {
+            (
+                POSITIONS,
+                Diff {
+                    key: at(key),
+                    old: None,
+                    new,
+                },
+            )
+        };
+        assert_eq!(session.rows, [pos(1, value(6)), pos(2, value(9))]);
         assert!(!session.reset);
         assert_eq!(n.take_changes(Space::Local).rows, [change(COUNTS, 0, None, value(1))]);
         assert_eq!(n.take_changes(Space::Shared).rows, [change(COUNTS, 3, None, value(1))]);
@@ -1263,6 +1533,145 @@ pub(crate) mod tests {
         n.route(back, &mut up);
         assert_eq!(n.take_changes(Space::Session), Changes::default());
         assert_eq!(n.take_changes(Space::Device), Changes::default());
+    }
+
+    /// Live controls don't queue: with no link upstream, a session entry
+    /// for a row the node does not own is refused, neither applied nor
+    /// sent; one for its own row is. Linked, both are.
+    #[cfg_attr(test, test)]
+    fn live_controls_dont_queue() {
+        // The watch, origin 2: rows 10 to 19 are its own; the phone's,
+        // origin 1, are 0 to 9.
+        let mut watch = node(2);
+        let mut up = Vec::new();
+        let pause = watch.make(Space::Session, Msg::Set { key: 1, value: 5 }, 10);
+        watch.route(pause.clone(), &mut up);
+        let tap = watch.make(Space::Session, Msg::Add { key: 1, by: 1 }, 10);
+        watch.route(tap.clone(), &mut up);
+        assert_eq!(watch.take_refused(), [(pause.id, Refusal::OFFLINE), (tap.id, Refusal::OFFLINE)]);
+        assert_eq!((up.len(), watch.take_changes(Space::Session)), (0, Changes::default()));
+        let mine = watch.make(Space::Session, Msg::Set { key: 15, value: 2 }, 10);
+        watch.route(mine.clone(), &mut up);
+        assert_eq!(up, [Up::Live(mine)]);
+        assert_eq!(watch.store(Space::Session).get(POSITIONS, &at(15)), Some(2u64.to_le_bytes().to_vec()));
+        // Linked, a control is applied at once and sent.
+        up.clear();
+        watch.connect(&mut up, 20);
+        assert!(watch.linked());
+        up.clear();
+        let pause = watch.make(Space::Session, Msg::Set { key: 1, value: 6 }, 30);
+        watch.route(pause.clone(), &mut up);
+        assert_eq!((up, watch.take_refused()), (vec![Up::Live(pause)], vec![]));
+        assert_eq!(watch.store(Space::Session).get(POSITIONS, &at(1)), Some(6u64.to_le_bytes().to_vec()));
+        // The link down: refused again, the row as it was.
+        watch.disconnect();
+        let mut up = Vec::new();
+        let late = watch.make(Space::Session, Msg::Set { key: 1, value: 7 }, 40);
+        watch.route(late.clone(), &mut up);
+        assert_eq!((up.len(), watch.take_refused()), (0, vec![(late.id, Refusal::OFFLINE)]));
+        assert_eq!(watch.store(Space::Session).get(POSITIONS, &at(1)), Some(6u64.to_le_bytes().to_vec()));
+    }
+
+    /// The answer to a hello heals the session: a row the node does not
+    /// own takes its upstream's latest (a control lost in flight is
+    /// undone) and one its upstream did not say goes, unless the node set
+    /// it since it connected; a row it owns takes nothing from the answer,
+    /// and is said again, as a new entry, when its upstream's is not its
+    /// own latest. After the answer, a row it owns takes only newer
+    /// entries.
+    #[cfg_attr(test, test)]
+    fn a_hello_heals_the_session() {
+        let value = |db: &dyn Read, key| db.get(POSITIONS, &at(key)).map(|v| u64::from_le_bytes(v.try_into().unwrap()));
+        let mut phone = node(1);
+        let mut watch = node(2);
+        let mut up = Vec::new();
+        watch.connect(&mut up, 0);
+        let playing = phone.make(Space::Session, Msg::Set { key: 1, value: 3 }, 10);
+        watch.receive(Down::Live(playing.clone()), &mut up, 10);
+        // Lost with the link: a pause, a row of another's, and its own
+        // two rows.
+        let mut lost = Vec::new();
+        for (key, value) in [(1, 5), (2, 8), (15, 1), (16, 4)] {
+            let e = watch.make(Space::Session, Msg::Set { key, value }, 20);
+            watch.route(e.clone(), &mut lost);
+        }
+        let (Up::Live(fifteen), Up::Live(sixteen)) = (lost[2].clone(), lost[3].clone()) else {
+            panic!()
+        };
+        watch.disconnect();
+        up.clear();
+        watch.connect(&mut up, 100);
+        assert_eq!(up.last(), Some(&Up::Hello { cursor: Seq(0), time: 100 }));
+        // Set since it connected: kept whatever the answer says.
+        let since = watch.make(Space::Session, Msg::Set { key: 3, value: 9 }, 101);
+        watch.route(since, &mut up);
+        watch.take_changes(Space::Session);
+        up.clear();
+        // The answer: the phone's playing, an old entry of its row 15 and
+        // its own latest of 16.
+        let old = Entry {
+            id: EntryId { origin: Origin(3), n: 1 },
+            ..sixteen.clone()
+        };
+        let old = Entry {
+            body: Msg::Set { key: 15, value: 0 },
+            ..old
+        };
+        for e in [playing.clone(), old, sixteen.clone()] {
+            watch.receive(Down::Live(e), &mut up, 110);
+        }
+        assert_eq!(
+            (value(watch.store(Space::Session), 1), value(watch.store(Space::Session), 15)),
+            (Some(3), Some(1))
+        );
+        watch.receive(Down::Welcome { sent: 100, time: 5110 }, &mut up, 120);
+        let s = watch.store(Space::Session);
+        assert_eq!([1, 2, 3, 15, 16].map(|k| value(s, k)), [Some(3), None, Some(9), Some(1), Some(4)]);
+        let session = watch.take_changes(Space::Session);
+        assert_eq!(session.rows.iter().map(|(_, d)| d.key.clone()).collect::<Vec<_>>(), [at(1), at(2)]);
+        // Row 15 said again, newer than anything the answer held, caused
+        // by the entry it says again.
+        let [Up::Live(again)] = &up[..] else { panic!("{up:?}") };
+        assert_eq!(
+            (again.body.clone(), again.id.origin, again.cause),
+            (Msg::Set { key: 15, value: 1 }, Origin(2), Some(fifteen.id))
+        );
+        assert!(again.at > sixteen.at && again.id.n == watch.made());
+        // The clock: half the 20 ms trip after 5110, against 120.
+        assert_eq!((watch.offset(), watch.time(1000)), (5000, 6000));
+        // After the answer, the phone's control of row 15: newer is taken,
+        // older not.
+        let mut control = phone.make(Space::Session, Msg::Set { key: 15, value: 7 }, 10);
+        control.at = Hlc { wall: 1, logical: 0 };
+        watch.receive(Down::Live(control.clone()), &mut up, 130);
+        assert_eq!(value(watch.store(Space::Session), 15), Some(1));
+        control.at = Hlc { wall: 200, logical: 0 };
+        watch.receive(Down::Live(control), &mut up, 130);
+        assert_eq!(value(watch.store(Space::Session), 15), Some(7));
+        assert_eq!(watch.latest().count(), 4);
+    }
+
+    /// The offset is the one of the shortest round trip of the last few
+    /// hellos: a slow answer does not move it until the fast one is four
+    /// hellos old.
+    #[cfg_attr(test, test)]
+    fn the_clock_takes_the_shortest_trip() {
+        let mut n = node(1);
+        let mut up = Vec::new();
+        let mut hello = |n: &mut Node<Msg, crate::store::Memory>, sent: u64, time: u64, now: u64| {
+            n.connect(&mut up, sent);
+            n.receive(Down::Welcome { sent, time }, &mut up, now);
+            n.offset()
+        };
+        assert_eq!(hello(&mut n, 1000, 900, 1010), -105);
+        // Slow, with an offset its trip makes wrong.
+        assert_eq!(hello(&mut n, 2000, 2500, 2600), -105);
+        assert_eq!(hello(&mut n, 3000, 3500, 3600), -105);
+        assert_eq!(hello(&mut n, 4000, 4500, 4600), -105);
+        assert_eq!(hello(&mut n, 5000, 5500, 5600), 200);
+        // A welcome with no hello waiting is not taken.
+        n.receive(Down::Welcome { sent: 0, time: 0 }, &mut up, 9000);
+        assert_eq!(n.offset(), 200);
     }
 
     #[cfg_attr(test, test)]
@@ -1282,6 +1691,9 @@ pub(crate) mod tests {
         a_fill_replaces_the_confirmed_rows,
         session_entries_are_sent_and_taken,
         each_spaces_changes_are_taken,
+        live_controls_dont_queue,
+        a_hello_heals_the_session,
+        the_clock_takes_the_shortest_trip,
         a_subscriptions_rows_come_at_once,
         routes,
     );

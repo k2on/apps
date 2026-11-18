@@ -461,7 +461,23 @@ A node that serves another answers it exactly as the server answers it:
 - **Session state belongs to the node that owns it.** A phone's player is
   the authority for its own playback, so a pause on its watch reaches it
   over Bluetooth with no server. A laptop controlling the same player goes
-  through the server, which forwards to the phone.
+  through the server, which forwards to the phone. A row's key begins
+  with its owner's origin, so every node knows whose it is, and a phone
+  answers for its watch's rows as for its own.
+- **Live controls don't queue.** A session entry is delivered only while
+  connected: offline, a control of another node's row is refused where it
+  is made, so the control shows that it can't reach the player and
+  nothing fires later. An owner's own rows are always applied. Every
+  hello is answered with the latest of every session row the node may
+  see, its own included: a row it doesn't own takes its upstream's, and
+  one it owns takes nothing from the answer and is said again, newer than
+  anything kept upstream while it was away. Any divergence heals on
+  reconnect.
+- **The tree's clock.** A hello carries the node's time and its answer the
+  upstream's estimate of the root's, so each node measures its offset
+  NTP's way (the shortest round trip of its last few hellos), composed
+  down the tree. Anchors are written and extrapolated in that time, the
+  owner's whatever a watch's clock says.
 - **Versions.** An upstream translates for its downstream through the
   version chain, as the server does, so an upstream must be at least as
   new as what it serves.

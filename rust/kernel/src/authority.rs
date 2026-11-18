@@ -25,13 +25,18 @@
 //! one that names another actor is refused ([`Refusal::NOT_YOURS`]), and a
 //! session entry that does is dropped.
 //!
-//! **Session entries** are forwarded to the actor's other connections and
-//! never logged, at the rate each asked for; [`Authority::tick`] sends what
-//! is due. Of an entry that sets a row whole ([`Body::row`]) only the
-//! latest is kept, by its time, in memory: one older than it is dropped,
-//! and a connection's hello is answered with its actor's latest, so a node
-//! that connects again holds the live state at once (a playback position
-//! it extrapolates, not one it waits for).
+//! **Session entries** are forwarded to the actor's connections (the one
+//! that sent it too) and never logged, at the rate each asked for;
+//! [`Authority::tick`] sends what is due. Of an entry that sets a row
+//! whole ([`Body::row`]) only the latest is kept, by its time, in memory:
+//! one older than it is dropped, and a connection's hello is answered with
+//! its actor's latest, its own included, so a node that connects again
+//! holds the live state at once (a playback position it extrapolates, not
+//! one it waits for) and any divergence heals.
+//!
+//! **The tree's clock** is the authority's: a hello's answer ends with
+//! [`Down::Welcome`], the time the hello said and the authority's `now`,
+//! from which the node measures its offset.
 //!
 //! **Fills.** The host may let go of the log's start ([`Authority::trim`]).
 //! A hello whose cursor is below what is kept is answered with the
@@ -161,10 +166,12 @@ impl<B: Body + Clone + 'static, S: Store> Authority<B, S> {
         };
         let head = self.head();
         let out = match up {
-            Up::Hello { cursor } => {
+            Up::Hello { cursor, time } => {
                 let (all, frames) = self.serve.hello(conn, cursor, &self.store, head, now);
                 let mut out = if all { self.hello(cursor) } else { Vec::new() };
                 out.extend(frames);
+                // The root of the tree: its clock is the tree's.
+                out.push(Down::Welcome { sent: time, time: now });
                 out
             }
             Up::Subscribe { query, args } => self.serve.subscribe(conn, query, args, &self.store, head),
@@ -183,7 +190,7 @@ impl<B: Body + Clone + 'static, S: Store> Authority<B, S> {
             }
             Up::Live(e) => {
                 let e = stamped(actor, e).ok().filter(|e| e.space == Space::Session && actor != Actor::NONE);
-                return e.and_then(|e| self.serve.live(Some(conn), actor, e, now)).unwrap_or_default();
+                return e.and_then(|e| self.serve.live(actor, e, now)).unwrap_or_default();
             }
         };
         out.into_iter().map(|d| (conn, d)).collect()
@@ -314,8 +321,8 @@ pub(crate) mod tests {
         let mut a = authority();
         a.open(Conn(1), ME, None);
         a.open(Conn(2), Actor(6), None);
-        a.receive(Conn(1), Up::Hello { cursor: Seq(0) }, 0);
-        a.receive(Conn(2), Up::Hello { cursor: Seq(0) }, 0);
+        a.receive(Conn(1), Up::Hello { cursor: Seq(0), time: 0 }, 0);
+        a.receive(Conn(2), Up::Hello { cursor: Seq(0), time: 0 }, 0);
         let mut n = node(1);
         n.set_actor(ME);
         let e = n.make(Space::Shared, Msg::Add { key: 1, by: 2 }, 10);
@@ -344,20 +351,25 @@ pub(crate) mod tests {
             )]
         );
         assert_eq!(count(a.store(), 1), 3);
+        // A hello is answered with the log after its cursor, then the
+        // welcome: the time it said, and the authority's.
         assert_eq!(
-            a.receive(Conn(1), Up::Hello { cursor: Seq(1) }, 0),
-            [(Conn(1), Down::Logged(a.log()[1].clone()))]
+            a.receive(Conn(1), Up::Hello { cursor: Seq(1), time: 7 }, 40),
+            [
+                (Conn(1), Down::Logged(a.log()[1].clone())),
+                (Conn(1), Down::Welcome { sent: 7, time: 40 })
+            ]
         );
-        assert_eq!(a.receive(Conn(1), Up::Hello { cursor: Seq(9) }, 0), []);
+        assert_eq!(a.receive(Conn(1), Up::Hello { cursor: Seq(9), time: 0 }, 0).len(), 1);
         // A connection not open is not answered.
-        assert_eq!(a.receive(Conn(3), Up::Hello { cursor: Seq(0) }, 0), []);
+        assert_eq!(a.receive(Conn(3), Up::Hello { cursor: Seq(0), time: 0 }, 0), []);
     }
 
     #[cfg_attr(test, test)]
     fn a_refusal_is_journaled_and_holds_nothing_back() {
         let mut a = authority();
         a.open(Conn(1), Actor::NONE, None);
-        a.receive(Conn(1), Up::Hello { cursor: Seq(0) }, 0);
+        a.receive(Conn(1), Up::Hello { cursor: Seq(0), time: 0 }, 0);
         let mut n = node(1);
         let take = n.make(Space::Shared, Msg::Take { key: 1 }, 10);
         let add = n.make(Space::Shared, Msg::Add { key: 1, by: 1 }, 10);
@@ -415,9 +427,10 @@ pub(crate) mod tests {
         assert_eq!(a.head(), Seq(1));
     }
 
-    /// A session entry goes to its actor's other connections only, never
-    /// back to its own or to another actor's, and is not logged; each is
-    /// sent it at the rate it asked for.
+    /// A session entry goes to its actor's connections, back to its own
+    /// too (whose node takes its upstream's latest of a row it does not
+    /// own), never to another actor's, and is not logged; each is sent it
+    /// at the rate it asked for.
     #[cfg_attr(test, test)]
     fn session_entries_go_to_the_owners_other_connections() {
         let mut a = authority();
@@ -431,9 +444,10 @@ pub(crate) mod tests {
         let mut set = |value| n.make(Space::Session, Msg::Set { key: 1, value }, 0);
         let (first, second, third) = (set(1), set(2), set(3));
         let out = a.receive(Conn(1), Up::Live(first.clone()), 0);
-        assert_eq!(out, [(Conn(2), Down::Live(first.clone())), (Conn(3), Down::Live(first.clone()))]);
-        assert_eq!(a.receive(Conn(1), Up::Live(second.clone()), 10), [(Conn(2), Down::Live(second))]);
-        assert_eq!(a.receive(Conn(1), Up::Live(third.clone()), 20), [(Conn(2), Down::Live(third.clone()))]);
+        let to = |e: &Entry<Msg>, conns: &[u32]| conns.iter().map(|&c| (Conn(c), Down::Live(e.clone()))).collect::<Vec<_>>();
+        assert_eq!(out, to(&first, &[1, 2, 3]));
+        assert_eq!(a.receive(Conn(1), Up::Live(second.clone()), 10), to(&second, &[1, 2]));
+        assert_eq!(a.receive(Conn(1), Up::Live(third.clone()), 20), to(&third, &[1, 2]));
         assert_eq!(a.next_tick(), Some(50));
         assert_eq!(a.tick(49), []);
         assert_eq!(a.tick(50), [(Conn(3), Down::Live(third))]);
@@ -446,7 +460,8 @@ pub(crate) mod tests {
     }
 
     /// The latest session entry of each row is kept, by its time: an older
-    /// one is dropped, and a hello is answered with its actor's latest.
+    /// one is dropped, and a hello is answered with its actor's latest,
+    /// those of the node's own origin too.
     #[cfg_attr(test, test)]
     fn a_hello_is_told_the_latest_session_rows() {
         let mut a = authority();
@@ -458,18 +473,22 @@ pub(crate) mod tests {
         let early = n.make(Space::Session, Msg::Set { key: 1, value: 1 }, 10);
         let late = n.make(Space::Session, Msg::Set { key: 1, value: 2 }, 20);
         let other = n.make(Space::Session, Msg::Set { key: 2, value: 3 }, 30);
-        assert_eq!(a.receive(Conn(1), Up::Live(late.clone()), 0).len(), 1);
+        assert_eq!(a.receive(Conn(1), Up::Live(late.clone()), 0).len(), 2);
         assert_eq!(a.receive(Conn(1), Up::Live(early), 0), []);
         assert_eq!(a.receive(Conn(1), Up::Live(late.clone()), 0), []);
         a.receive(Conn(1), Up::Live(other.clone()), 0);
-        let out = a.receive(Conn(2), Up::Hello { cursor: Seq(0) }, 0);
-        assert_eq!(out, [(Conn(2), Down::Live(late)), (Conn(2), Down::Live(other))]);
-        assert_eq!(a.receive(Conn(3), Up::Hello { cursor: Seq(0) }, 0), []);
-        // A node that hears its own takes nothing again, and one that
-        // has not heard them holds them now.
+        a.open(Conn(4), ME, Some(n.origin()));
+        let welcome = (Conn(2), Down::Welcome { sent: 0, time: 0 });
+        let out = a.receive(Conn(2), Up::Hello { cursor: Seq(0), time: 0 }, 0);
+        assert_eq!(out, [(Conn(2), Down::Live(late.clone())), (Conn(2), Down::Live(other.clone())), welcome]);
+        assert_eq!(a.receive(Conn(3), Up::Hello { cursor: Seq(0), time: 0 }, 0).len(), 1);
+        let out = a.receive(Conn(4), Up::Hello { cursor: Seq(0), time: 0 }, 0);
+        assert_eq!(out[..2], [(Conn(4), Down::Live(late)), (Conn(4), Down::Live(other))]);
+        // A node that has not heard them holds them now.
         let mut d = node(2);
+        d.connect(&mut Vec::new(), 0);
         for (_, down) in out {
-            d.receive(down, &mut Vec::new());
+            d.receive(down, &mut Vec::new(), 0);
         }
         assert_eq!(d.store(Space::Session).len(POSITIONS), 2);
     }
@@ -488,8 +507,8 @@ pub(crate) mod tests {
         }
         a.trim(Seq(3));
         assert_eq!((a.log().len(), a.head()), (2, Seq(5)));
-        assert_eq!(a.receive(Conn(1), Up::Hello { cursor: Seq(3) }, 0).len(), 2);
-        let fill = to(1, &a.receive(Conn(1), Up::Hello { cursor: Seq(2) }, 0));
+        assert_eq!(a.receive(Conn(1), Up::Hello { cursor: Seq(3), time: 0 }, 0).len(), 3);
+        let fill = to(1, &a.receive(Conn(1), Up::Hello { cursor: Seq(2), time: 0 }, 0));
         assert_eq!(
             fill[0],
             Down::Fill {
@@ -501,7 +520,7 @@ pub(crate) mod tests {
         let mut d = node(2);
         let mut up = Vec::new();
         for down in fill {
-            d.receive(down, &mut up);
+            d.receive(down, &mut up, 0);
         }
         assert_eq!((rows(d.store(Space::Shared)), d.cursor()), (rows(a.store()), Seq(5)));
     }
@@ -541,13 +560,13 @@ pub(crate) mod tests {
         let mut watch = node(2);
         let mut up = Vec::new();
         watch.subscribe(QueryId(0), vec![1], &mut up);
-        watch.connect(&mut up);
+        watch.connect(&mut up, 0);
         let odd = |db: &dyn Read| rows(db).into_iter().filter(|(_, v)| v[0] % 2 == 1).collect::<Vec<_>>();
         let take = |up: &mut Vec<Up<Msg>>, a: &mut Authority<Msg, Memory>, watch: &mut Node<Msg, Memory>| {
             for u in core::mem::take(up) {
                 for (c, down) in a.receive(Conn(2), u, 0) {
                     assert_eq!(c, Conn(2));
-                    watch.receive(down, &mut Vec::new());
+                    watch.receive(down, &mut Vec::new(), 0);
                 }
             }
         };
@@ -559,7 +578,7 @@ pub(crate) mod tests {
         let deliver = |out: Vec<Out<Msg>>, watch: &mut Node<Msg, Memory>| {
             for (c, down) in out {
                 if c == Conn(2) {
-                    watch.receive(down, &mut Vec::new());
+                    watch.receive(down, &mut Vec::new(), 0);
                 }
             }
         };
@@ -595,11 +614,11 @@ pub(crate) mod tests {
         assert!(watch.complete(QueryId(7), &[]));
         let mut late = node(3);
         late.subscribe(QueryId(7), vec![1], &mut up);
-        late.connect(&mut up);
+        late.connect(&mut up, 0);
         a.open(Conn(3), ME, None);
         for u in core::mem::take(&mut up) {
             for (_, down) in a.receive(Conn(3), u, 0) {
-                late.receive(down, &mut Vec::new());
+                late.receive(down, &mut Vec::new(), 0);
             }
         }
         assert!(late.complete(QueryId(7), &[1]));
@@ -685,8 +704,8 @@ pub(crate) mod tests {
         }
     }
 
-    fn position(db: &dyn Read, key: u8) -> u64 {
-        db.get(POSITIONS, &[key]).map_or(0, |v| u64::from_le_bytes(v.try_into().unwrap()))
+    fn position(db: &dyn Read, key: u8) -> Option<u64> {
+        db.get(POSITIONS, &at(key)).map(|v| u64::from_le_bytes(v.try_into().unwrap()))
     }
 
     /// What the convergence runs saw, summed: so that each path is known
@@ -704,6 +723,10 @@ pub(crate) mod tests {
         queued: u32,
         /// Fills of the phone's own passed down to its watch.
         refills: u32,
+        /// Session entries for another device's row: made linked, and
+        /// refused offline.
+        controls: u32,
+        offline: u32,
     }
 
     /// The phone, which serves the watch through its relay.
@@ -720,15 +743,16 @@ pub(crate) mod tests {
     /// the phone, apart) with what was in flight lost, and messages are
     /// delivered in random interleavings; the server lets go of its log's
     /// start at random, so a device behind is filled, and session entries
-    /// go to their actor's other devices at the rate each asked. A watch's
-    /// entry is only ever let go once the server has logged or refused it.
-    /// Once all are connected and quiet, every device's rows are the
-    /// server's (for the third and the watch, those their queries read,
-    /// each complete), nothing is pending or held by the phone, every
-    /// entry made is logged once or refused, each device was told of its
-    /// every refusal, and each holds the latest session values of its
-    /// actor's other devices that reached its upstream, never another
-    /// actor's.
+    /// go to their actor's devices at the rate each asked: each device
+    /// sets its own rows, and controls its actor's other devices' rows it
+    /// holds, linked or not (refused when not). A watch's entry is only
+    /// ever let go once the server has logged or refused it. Once all are
+    /// connected and quiet, every device's rows are the server's (for the
+    /// third and the watch, those their queries read, each complete),
+    /// nothing is pending or held by the phone, every entry made is logged
+    /// once or refused, each device was told of its every refusal, and
+    /// each holds every session row of its actor's as the device that owns
+    /// it does, and so does its upstream, never another actor's.
     fn converge(seed: u64, steps: usize, seen: &mut Seen) {
         let mut rng = Rng::new(seed);
         let mut server = authority();
@@ -770,7 +794,7 @@ pub(crate) mod tests {
         // stamped by the server.
         devices[PHONE].node.set_actor(ME);
         let mut log: BTreeMap<Seq, Logged<Msg>> = BTreeMap::new();
-        let mut now = 0u64;
+        let clock = core::cell::Cell::new(0u64);
         let mut value = 0u64;
         type Relay = crate::Relay<Msg>;
         let deliver = |out: Vec<Out<Msg>>, devices: &mut Vec<Device>| {
@@ -787,7 +811,7 @@ pub(crate) mod tests {
             devices[PHONE].send(said);
             devices[PHONE].watch(seed, Some(s.changes));
         };
-        let connect = |rng: &mut Rng, server: &mut Authority<Msg, Memory>, relay: &mut Relay, devices: &mut Vec<Device>, d: usize| {
+        let connect = |rng: &mut Rng, server: &mut Authority<Msg, Memory>, relay: &mut Relay, devices: &mut Vec<Device>, d: usize, now: u64| {
             let dev = &mut devices[d];
             dev.online = true;
             if d == WATCH {
@@ -797,7 +821,7 @@ pub(crate) mod tests {
             }
             dev.node.set_actor(dev.actor);
             let mut said = Vec::new();
-            dev.node.connect(&mut said);
+            dev.node.connect(&mut said, now);
             if d == PHONE {
                 relay.connect(&mut said);
             }
@@ -821,7 +845,8 @@ pub(crate) mod tests {
                         seen: &mut Seen,
                         settle: bool| {
             let d = rng.below(4) as usize;
-            now += rng.below(6);
+            clock.set(clock.get() + rng.below(6));
+            let now = clock.get();
             let op = if settle { 1 + rng.below(2) } else { rng.below(15) };
             match op {
                 // A write, connected or not; now and then one that says it
@@ -893,13 +918,13 @@ pub(crate) mod tests {
                 2 | 7 | 8 => {
                     let dev = &mut devices[d];
                     let Some(down) = dev.down.pop_front() else { return };
-                    let live = match &down {
-                        Down::Live(e) => {
-                            let Msg::Set { key, .. } = e.body else { unreachable!() };
-                            Some((key, position(dev.node.store(Space::Session), key)))
-                        }
-                        _ => None,
-                    };
+                    if let Down::Live(e) = &down {
+                        let Msg::Set { key, .. } = e.body else { unreachable!() };
+                        assert!(
+                            actors[usize::from(key / 10)] == dev.actor && e.actor == dev.actor,
+                            "seed {seed}: a session entry to its actor's devices only"
+                        );
+                    }
                     let pending: BTreeSet<EntryId> = dev.node.pending().iter().map(|p| p.entry.id).collect();
                     let skipped = dev.node.skipped;
                     let mut said = Vec::new();
@@ -910,21 +935,12 @@ pub(crate) mod tests {
                         let s = relay.down(&mut dev.node, down, &mut said, now);
                         served(s, said, devices);
                     } else {
-                        dev.node.receive(down, &mut said);
+                        dev.node.receive(down, &mut said, now);
                         dev.watch(seed, None);
                         dev.send(said);
                     }
                     let dev = &mut devices[d];
                     seen.skipped += dev.node.skipped - skipped;
-                    if let Some((key, before)) = live {
-                        let writer = actors[usize::from(key / 10)];
-                        assert!(
-                            writer == dev.actor && usize::from(key / 10) != d,
-                            "seed {seed}: a session entry to its owner's other devices only"
-                        );
-                        let after = position(dev.node.store(Space::Session), key);
-                        assert!(after >= before, "seed {seed}: the latest per row, never back");
-                    }
                     // What the watch lets go of the server has judged.
                     if d == WATCH {
                         for p in &pending {
@@ -935,24 +951,53 @@ pub(crate) mod tests {
                             }
                         }
                     }
-                    dev.refused.extend(dev.node.take_refused().into_iter().map(|(id, _)| id));
+                    let refused = dev.node.take_refused().into_iter();
+                    dev.refused.extend(refused.filter(|r| r.1 != Refusal::OFFLINE).map(|(id, _)| id));
                 }
                 // Session values, a few at once as a position streams: each
-                // device sets its own keys.
+                // device sets its own keys, or, as a control, another of its
+                // actor's devices' that it holds, linked or not.
                 9 | 10 => {
                     let mut said = Vec::new();
                     let mut out = Vec::new();
+                    let o = rng.below(4) as usize;
+                    let owner = if o != d && actors[o] == actors[d] { o } else { d };
                     for _ in 0..1 + rng.below(3) {
                         value += 1;
-                        let key = 10 * d as u8 + rng.below(2) as u8;
+                        let key = 10 * owner as u8 + rng.below(2) as u8;
                         let dev = &mut devices[d];
+                        if owner != d {
+                            if dev.node.store(Space::Session).get(POSITIONS, &at(key)).is_none() {
+                                continue;
+                            }
+                            if d == PHONE && owner == WATCH {
+                                // Its own to answer for, once the watch has said hello.
+                            } else if dev.node.linked() {
+                                seen.controls += 1;
+                            } else {
+                                seen.offline += 1;
+                            }
+                        }
                         let e = dev.node.make(Space::Session, Msg::Set { key, value }, now);
+                        let (id, before, sent) = (e.id, position(dev.node.store(Space::Session), key), said.len());
                         if d == PHONE {
                             let s = relay.route(&mut dev.node, e, &mut said, now);
                             assert!(s.changes.rows.is_empty());
                             out.extend(s.out);
                         } else {
                             dev.node.route(e, &mut said);
+                        }
+                        // Offline, a control is refused: not applied, not
+                        // sent, never to fire later.
+                        let refused = dev.node.refusals().contains(&(id, Refusal::OFFLINE));
+                        // (The phone answers for the watch's rows once the
+                        // watch has said hello to it.)
+                        if !(d == PHONE && owner == WATCH) {
+                            assert_eq!(refused, !dev.node.linked() && d != owner, "seed {seed}: refused only offline");
+                        }
+                        if refused {
+                            assert_eq!(position(dev.node.store(Space::Session), key), before, "seed {seed}: refused, not applied");
+                            assert_eq!(said.len(), sent, "seed {seed}: refused, not sent");
                         }
                     }
                     deliver(out, devices);
@@ -994,6 +1039,7 @@ pub(crate) mod tests {
                     if devices[d].online {
                         let dev = &mut devices[d];
                         dev.online = false;
+                        dev.node.disconnect();
                         if d == WATCH {
                             relay.close(Conn(d as u32), now);
                         } else {
@@ -1002,7 +1048,7 @@ pub(crate) mod tests {
                         dev.up.clear();
                         dev.down.clear();
                     } else {
-                        connect(rng, server, relay, devices, d);
+                        connect(rng, server, relay, devices, d, now);
                     }
                 }
             }
@@ -1013,7 +1059,7 @@ pub(crate) mod tests {
         // Everyone connected, then quiet, the timers run out.
         for d in 0..4 {
             if !devices[d].online {
-                connect(&mut rng, &mut server, &mut relay, &mut devices, d);
+                connect(&mut rng, &mut server, &mut relay, &mut devices, d, clock.get());
             }
         }
         loop {
@@ -1062,31 +1108,28 @@ pub(crate) mod tests {
             }
             let theirs: BTreeSet<EntryId> = server.refused().keys().filter(|id| dev.made.contains(id)).copied().collect();
             assert_eq!(dev.refused, theirs, "seed {seed}: told of every refusal; made {:?}", dev.made);
-            // Its session space: its own rows, and the latest its upstream
-            // took of its actor's other devices' rows; never another
-            // actor's.
-            let latest = if d == PHONE || d == WATCH { &relay_latest } else { &server_latest };
-            for e in latest {
-                let Msg::Set { key, value } = e.body else { unreachable!() };
-                if e.actor == dev.actor && e.id.origin != origin(d) {
+            // Its session space: each row of its actor's as the device
+            // that owns it holds it, whatever was set offline or lost in
+            // flight; never another actor's.
+            for owner in (0..4).filter(|&o| actors[o] == dev.actor) {
+                for key in [10 * owner as u8, 10 * owner as u8 + 1] {
+                    let theirs = position(devices[owner].node.store(Space::Session), key);
                     assert_eq!(
                         position(dev.node.store(Space::Session), key),
-                        value,
-                        "seed {seed}: device {d}'s latest of {key}"
+                        theirs,
+                        "seed {seed}: device {d}'s {key}, as its owner holds it"
                     );
+                    // And its upstream keeps it so, for the next hello.
+                    let latest = if d == WATCH { &relay_latest } else { &server_latest };
+                    let kept = latest.iter().find(|e| e.body.row() == Some((POSITIONS, at(key))));
+                    let kept = kept.map(|e| if let Msg::Set { value, .. } = e.body { value } else { unreachable!() });
+                    assert_eq!(kept, theirs, "seed {seed}: device {d}'s upstream's {key}");
                 }
             }
             dev.node.store(Space::Session).scan(POSITIONS, crate::store::Range::all(), &mut |k, _| {
-                assert_eq!(actors[usize::from(k[0] / 10)], dev.actor, "seed {seed}: another actor's session row");
+                assert_eq!(actors[usize::from(k[8] / 10)], dev.actor, "seed {seed}: another actor's session row");
                 true
             });
-        }
-        // The phone has at least what the server has of every row.
-        for e in &server_latest {
-            if e.actor == ME {
-                let mine = relay_latest.iter().find(|r| r.body.row() == e.body.row()).expect("the phone has the row");
-                assert!(mine.at >= e.at, "seed {seed}: the phone's latest no older than the server's");
-            }
         }
         for l in log.values() {
             assert_eq!(
@@ -1112,6 +1155,7 @@ pub(crate) mod tests {
         }
         assert!(seen.skipped > 0 && seen.fills > 0 && seen.forged > 0 && seen.held > 0 && seen.deltas > 0);
         assert!(seen.relayed > 0 && seen.queued > 0 && seen.refills > 0);
+        assert!(seen.controls > 0 && seen.offline > 0);
     }
 
     crate::listed!(

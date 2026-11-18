@@ -8,7 +8,10 @@
 //! over the confirmed rows and rebases them on the facts the [`Authority`]
 //! logs, speaking to its upstream in [`sync`]'s frames; the session space's
 //! live state, a playback position an [`Anchor`] each view extrapolates,
-//! is stepped on every node and never logged. Queries are
+//! is stepped on every node and never logged: each row has an owner, its
+//! controls are delivered only over a link that is up, and every hello
+//! heals what diverged. A node estimates the tree's clock from its hellos,
+//! and anchors are written and read in it. Queries are
 //! [`plan`]s of incremental operators, pulled from the store in order and
 //! pushed the changes a node's view takes ([`Node::take_changes`]). An
 //! upstream serves its downstream nodes with a [`Serve`], keeping per
