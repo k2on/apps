@@ -229,8 +229,13 @@ jobs:
           - { name: apps, checks: "prebuild money-native harken-native revelation-native money-web-sync money-desktop harken-desktop" }
           # The new kernel on the watch: its size against the budget, and
           # its tests and its heap under QEMU on a Cortex-M3
-          # (docs/north-star.md).
-          - { name: watch, checks: "kernel-size kernel-qemu" }
+          # (docs/north-star.md); the Pebble watchapps' `.pbw`s, the
+          # host's tests, and the now-playing app's image against its
+          # 96 KB (nix/pebble.nix). Nothing in them is signed or anyone's
+          # but open source (the Pebble SDK, nixpkgs' arm-none-eabi GCC),
+          # so all of it goes to Cachix: no push filter, unlike Xcode's,
+          # the macOS SDK's and the Android SDK's jobs.
+          - { name: watch, checks: "kernel-size kernel-qemu pebble-probe pebble-now-playing pebble-host pebble-size" }
     name: checks (${{ matrix.group.name }})
     runs-on: ubuntu-latest
     steps:
