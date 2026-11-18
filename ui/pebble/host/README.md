@@ -83,10 +83,12 @@ the layers made once at frames worked out from the window and
 ui/theme.toml's tokens (`rust/src/tokens.rs`, written by `nix run
 .#update-theme`), what each shows of the record (`now_playing::face::Face`),
 and what each button sends. `ui.rs` is the toolkit it is written over:
-`Ui` keeps what each layer last showed and tells the shim only what
-changed, and paints arkui's glyphs into 1-bit bitmaps, so the app has no
-resources. The shim makes each layer by id (a `TextLayer`, a drawn meter,
-a `BitmapLayer`, a `MenuLayer`, the `ActionBarLayer`) and sets it by id.
+`Ui` paints arkui's glyphs into 1-bit bitmaps, so the app has no
+resources, and hands each value to the shim. The shim makes each layer by
+id (a `TextLayer`, a drawn meter, a `BitmapLayer`, a `MenuLayer`, the
+`ActionBarLayer`) and sets it by id, keeping what each shows once, in the
+buffers PebbleOS draws from: a value the same as the one there marks
+nothing dirty.
 
 ## The demo
 
@@ -181,7 +183,12 @@ restart with two pending skips, a refusal, a reconnect and confirmations:
   its stores, session rows and pending records, the query, the disk's page
   table). With arkui's screen, at most 12.4 KB of 66.6 KB in a run of play,
   pause, an offline skip and a reconnect (the list's rows, the record, the
-  painted glyphs and what each layer last showed).
+  painted glyphs and what each layer last showed). With the shim's
+  buffers the only copy of what each layer shows (no table of it in
+  Rust), in the scratch walk below of play, pause, an offline refusal, an
+  offline skip and a reconnect, the host's peak went from 11,884 to 11,328
+  bytes and the image from 61,468 to 60,348 bytes (a local build; nix's
+  arm GCC differs by about 180 bytes).
 - **Stack**: a watchapp gets 4 KB. Large values are kept on the heap
   (the disk's key map, log lines); the deepest Rust frames are the host's
   start (1.1 KB, once) and a chunk received (1 KB, `Node::receive` inlined).

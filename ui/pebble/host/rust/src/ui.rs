@@ -6,8 +6,9 @@
 //! of a glyph, a `MenuLayer` for a list, the `ActionBarLayer` — at frames
 //! worked out from the window it is given and the theme's tokens
 //! ([`crate::tokens`]), and a `draw` that hands each one its value from
-//! the record. [`Ui`] keeps what each layer last showed and tells the shim
-//! only what changed, so only those layers are marked dirty and redrawn.
+//! the record. The shim keeps what each layer shows, once, in the buffers
+//! PebbleOS draws from, and marks a layer dirty only when its value
+//! differs, so only those layers are redrawn; [`Ui`] keeps nothing of it.
 //!
 //! Glyphs are arkui's (Lucide's drawings), flattened into line segments
 //! by the emitter ([`Glyph`]) and painted here into 1-bit bitmaps at the
@@ -79,17 +80,6 @@ pub struct ListStyle {
     pub inset: i16,
 }
 
-/// What a layer last showed.
-#[derive(Default)]
-enum Held {
-    #[default]
-    Nothing,
-    Text(Vec<u8>),
-    Fraction(u16),
-    Glyph(u8),
-    Rows(Vec<u8>, Vec<(Vec<u8>, Vec<u8>)>),
-}
-
 /// A glyph painted: which, at what side, how, in what colour, and the
 /// shim's bitmap.
 struct Painted {
@@ -106,8 +96,6 @@ const NONE: u8 = u8::MAX;
 /// A screen's layers, by the ids its generated `build` gave them.
 pub struct Ui {
     glyphs: &'static [Glyph],
-    held: Vec<Held>,
-    hidden: Vec<bool>,
     /// Each glyph layer's side, colour and whether it is solid.
     glyph_style: Vec<(i16, u8, bool)>,
     painted: Vec<Painted>,
@@ -124,8 +112,6 @@ impl Ui {
         sys::ui_window(ground);
         Ui {
             glyphs,
-            held: Vec::new(),
-            hidden: Vec::new(),
             glyph_style: Vec::new(),
             painted: Vec::new(),
             actions: [NONE; 4],
@@ -150,28 +136,23 @@ impl Ui {
 
     fn slot(&mut self, id: u8) {
         let n = usize::from(id) + 1;
-        if self.held.len() < n {
-            self.held.resize_with(n, Held::default);
-            self.hidden.resize(n, false);
+        if self.glyph_style.len() < n {
             self.glyph_style.resize(n, (0, 0, false));
         }
     }
 
     /// Words, one line of `font` (or as many as the frame holds).
     pub fn text(&mut self, id: u8, f: Frame, font: Font, ink: u8, align: Align) {
-        self.slot(id);
         sys::ui_text(id, f, font, ink, align as u8);
     }
 
     /// A bar of how far, `fill` over a `track` line.
     pub fn meter(&mut self, id: u8, f: Frame, fill: u8, track: u8) {
-        self.slot(id);
         sys::ui_meter(id, f, fill, track);
     }
 
     /// A filled rectangle behind what follows, its corners `corner`.
     pub fn rect(&mut self, id: u8, f: Frame, color: u8, corner: i16) {
-        self.slot(id);
         sys::ui_rect(id, f, color, corner);
     }
 
@@ -184,37 +165,21 @@ impl Ui {
 
     /// A list: a heading over rows of a title and the line under it.
     pub fn list(&mut self, id: u8, f: Frame, style: ListStyle) {
-        self.slot(id);
         sys::ui_list(id, f, &style, ROW_HEIGHT, HEADER_HEIGHT, TEXT_LIFT);
     }
 
     /// Shows or hides a layer (one branch of an `if`).
     pub fn hide(&mut self, id: u8, hidden: bool) {
-        self.slot(id);
-        if self.hidden[usize::from(id)] != hidden {
-            self.hidden[usize::from(id)] = hidden;
-            sys::ui_hide(id, hidden);
-        }
+        sys::ui_hide(id, hidden);
     }
 
     pub fn set_text(&mut self, id: u8, s: &[u8]) {
-        self.slot(id);
-        let held = &mut self.held[usize::from(id)];
-        if !matches!(held, Held::Text(t) if t.as_slice() == s) {
-            sys::ui_set_text(id, s);
-            *held = Held::Text(s.to_vec());
-        }
+        sys::ui_set_text(id, s);
     }
 
     /// The meter at `fraction` of the way, 0 to 1.
     pub fn set_meter(&mut self, id: u8, fraction: f64) {
-        self.slot(id);
-        let permille = (fraction.clamp(0.0, 1.0) * 1000.0) as u16;
-        let held = &mut self.held[usize::from(id)];
-        if !matches!(held, Held::Fraction(p) if *p == permille) {
-            sys::ui_set_meter(id, permille);
-            *held = Held::Fraction(permille);
-        }
+        sys::ui_set_meter(id, (fraction.clamp(0.0, 1.0) * 1000.0) as u16);
     }
 
     /// The glyph called `name` (none of the screen's: nothing).
@@ -222,35 +187,18 @@ impl Ui {
         self.slot(id);
         let (side, ink, solid) = self.glyph_style[usize::from(id)];
         let bitmap = self.bitmap(name, side, ink, solid);
-        let held = &mut self.held[usize::from(id)];
-        if !matches!(held, Held::Glyph(b) if *b == bitmap) {
-            sys::ui_set_image(id, bitmap);
-            *held = Held::Glyph(bitmap);
-        }
+        sys::ui_set_image(id, bitmap);
     }
 
     /// The list's heading and rows.
     pub fn set_rows<'a>(&mut self, id: u8, header: &[u8], rows: impl Iterator<Item = (&'a [u8], &'a [u8])>) {
-        self.slot(id);
-        let rows: Vec<(Vec<u8>, Vec<u8>)> = rows.map(|(t, s)| (t.to_vec(), s.to_vec())).collect();
-        let held = &mut self.held[usize::from(id)];
-        let (old_header, old) = match held {
-            Held::Rows(h, r) => (Some(h.as_slice()), r.as_slice()),
-            _ => (None, &[][..]),
-        };
-        if old_header == Some(header) && old == rows.as_slice() {
-            return;
+        sys::ui_set_header(id, header);
+        let mut n = 0u8;
+        for (t, s) in rows {
+            sys::ui_set_row(id, n, t, s);
+            n = n.saturating_add(1);
         }
-        if old_header != Some(header) {
-            sys::ui_set_header(id, header);
-        }
-        for (i, (t, s)) in rows.iter().enumerate() {
-            if old.get(i) != Some(&(t.clone(), s.clone())) {
-                sys::ui_set_row(id, i as u8, t, s);
-            }
-        }
-        sys::ui_set_rows(id, rows.len() as u8);
-        *held = Held::Rows(header.to_vec(), rows);
+        sys::ui_set_rows(id, n);
     }
 
     /// The action bar's glyph for `button`, solid as the system's are

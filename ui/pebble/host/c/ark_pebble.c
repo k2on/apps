@@ -80,9 +80,10 @@ uint32_t ark_random(void) {
 //
 // arkui's Pebble toolkit (ui/docs/pebble.md): the layers a screen generated
 // from a `#[view]` is made of, each made by id at the frame Rust worked out
-// and given its value by id after. Rust (ark-pebble's `ui`) keeps what each
-// last showed and calls in only for what changed. Glyphs come painted, as
-// bits, and are made 1-bit bitmaps here in the colour asked.
+// and given its value by id after. What each shows is kept here, once, in
+// the buffers PebbleOS draws from, and a layer is marked dirty only when a
+// value differs from it. Glyphs come painted, as bits, and are made 1-bit
+// bitmaps here in the colour asked.
 
 enum { ARK_LAYERS = 16, TEXT_MAX = 48, ROW_MAX = 6, BITMAP_MAX = 12 };
 enum { KIND_NONE, KIND_TEXT, KIND_METER, KIND_RECT, KIND_IMAGE, KIND_LIST };
@@ -113,6 +114,7 @@ typedef struct {
   char header[TEXT_MAX];
   char rows[ROW_MAX][2][TEXT_MAX];
   uint16_t count;
+  bool changed;
 } List;
 
 static Window *s_window;
@@ -136,10 +138,14 @@ static GRect rect(const ArkFrame *f) {
   return GRect(f->x, f->y, f->w, f->h);
 }
 
-static void copy_text(char *dst, const uint8_t *src, size_t len) {
+// Words into a layer's buffer, cut to fit: whether they differ from what
+// it held.
+static bool copy_text(char *dst, const uint8_t *src, size_t len) {
   if (len >= TEXT_MAX) len = TEXT_MAX - 1;
+  if (dst[len] == 0 && memcmp(dst, src, len) == 0) return false;
   memcpy(dst, src, len);
   dst[len] = 0;
+  return true;
 }
 
 // Gothic at a size the theme's tokens name (ui/theme.toml's pebble-type-*).
@@ -335,24 +341,27 @@ uint8_t ark_ui_bitmap(int16_t side, const uint8_t *bits, size_t len, uint8_t ink
 }
 
 void ark_ui_hide(uint8_t id, bool hidden) {
-  if (id < ARK_LAYERS && s_layer[id]) layer_set_hidden(s_layer[id], hidden);
+  if (id < ARK_LAYERS && s_layer[id] && layer_get_hidden(s_layer[id]) != hidden) layer_set_hidden(s_layer[id], hidden);
 }
 
 void ark_ui_set_text(uint8_t id, const uint8_t *s, size_t len) {
   if (id >= ARK_LAYERS || s_kind[id] != KIND_TEXT) return;
-  copy_text(s_words[id], s, len);
-  text_layer_set_text(s_text[id], s_words[id]);
+  if (copy_text(s_words[id], s, len)) text_layer_set_text(s_text[id], s_words[id]);
 }
 
 void ark_ui_set_meter(uint8_t id, uint16_t permille) {
   if (id >= ARK_LAYERS || s_kind[id] != KIND_METER) return;
-  ((Meter *)layer_get_data(s_layer[id]))->permille = permille > 1000 ? 1000 : permille;
+  Meter *m = layer_get_data(s_layer[id]);
+  if (permille > 1000) permille = 1000;
+  if (m->permille == permille) return;
+  m->permille = permille;
   layer_mark_dirty(s_layer[id]);
 }
 
 void ark_ui_set_image(uint8_t id, uint8_t bitmap) {
   if (id >= ARK_LAYERS || s_kind[id] != KIND_IMAGE) return;
-  bitmap_layer_set_bitmap(s_image[id], bitmap < s_bitmap_count ? s_bitmaps[bitmap] : NULL);
+  GBitmap *b = bitmap < s_bitmap_count ? s_bitmaps[bitmap] : NULL;
+  if (bitmap_layer_get_bitmap(s_image[id]) != b) bitmap_layer_set_bitmap(s_image[id], b);
 }
 
 static List *list_of(uint8_t id) {
@@ -362,20 +371,23 @@ static List *list_of(uint8_t id) {
 
 void ark_ui_set_header(uint8_t id, const uint8_t *s, size_t len) {
   List *l = list_of(id);
-  if (l) copy_text(l->header, s, len);
+  if (l && copy_text(l->header, s, len)) l->changed = true;
 }
 
 void ark_ui_set_row(uint8_t id, uint8_t i, const uint8_t *t, size_t tl, const uint8_t *s, size_t sl) {
   List *l = list_of(id);
   if (!l || i >= ROW_MAX) return;
-  copy_text(l->rows[i][0], t, tl);
-  copy_text(l->rows[i][1], s, sl);
+  if (copy_text(l->rows[i][0], t, tl)) l->changed = true;
+  if (copy_text(l->rows[i][1], s, sl)) l->changed = true;
 }
 
 void ark_ui_set_rows(uint8_t id, uint8_t n) {
   List *l = list_of(id);
   if (!l) return;
-  l->count = n < ROW_MAX ? n : ROW_MAX;
+  if (n > ROW_MAX) n = ROW_MAX;
+  if (l->count == n && !l->changed) return;
+  l->count = n;
+  l->changed = false;
   menu_layer_reload_data(s_menu[id]);
 }
 
@@ -448,7 +460,9 @@ bool ark_send_ready(uint32_t inbox, const uint8_t *origin, size_t len) {
   DictionaryIterator *it;
   if (app_message_outbox_begin(&it) != APP_MSG_OK) return false;
   char hex[24];
-  copy_text(hex, origin, len < sizeof(hex) ? len : sizeof(hex) - 1);
+  if (len >= sizeof(hex)) len = sizeof(hex) - 1;
+  memcpy(hex, origin, len);
+  hex[len] = 0;
   dict_write_int32(it, MESSAGE_KEY_READY, 1);
   dict_write_int32(it, MESSAGE_KEY_INBOX, (int32_t)inbox);
   dict_write_cstring(it, MESSAGE_KEY_ORIGIN, hex);

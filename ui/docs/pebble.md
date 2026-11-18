@@ -46,7 +46,7 @@ The other way, a small no_std renderer walking a view tree on the watch,
 would need a second view model (`View` holds `String`s, `Rc`s and boxed
 closures) and its layout and diffing linked into the app. Written at build
 time there is one view definition, the layout is worked out once, and the
-watch links only the layers it uses and a table of what each last showed.
+watch links only the layers it uses.
 
 What it writes, for a view of a record `Face` sending `Act`:
 
@@ -59,10 +59,12 @@ What it writes, for a view of a record `Face` sending `Act`:
   branches shown and hidden;
 - `press(p, button)`: the message a button sends.
 
-At run time `ark_pebble::ui::Ui` keeps what each layer last showed and
-tells the C shim (`c/ark_pebble.c`) only what changed, so PebbleOS redraws
-only those layers; it paints a glyph into a 1-bit bitmap the first time it
-is drawn at a size and colour. The app has no resources.
+At run time what each layer shows is kept once, by the C shim
+(`c/ark_pebble.c`), in the buffers PebbleOS draws it from: a value the
+same as the one there marks nothing dirty, so PebbleOS redraws only the
+layers that changed, and `ark_pebble::ui::Ui` keeps no copy of its own. It
+paints a glyph into a 1-bit bitmap the first time it is drawn at a size
+and colour. The app has no resources.
 
 ## What It Supports
 
