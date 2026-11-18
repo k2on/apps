@@ -32,10 +32,10 @@
 //! |---|---|---|
 //! | `scan` | nothing | its table's changes in its range |
 //! | `filter`, `map` | nothing (what each row read, when it reads) | the closure again on the old and new row |
-//! | `take` | its size and its last place | fetches the neighbours of its window that come in or go out |
+//! | `take` | its window, at most its limit | fetches its window again |
 //! | `sort` | its input, sorted | the expensive case: a sort no index provides |
 //! | `group` | its input's numbers, by group | the group folded again |
-//! | `related`, `join` | per parent, its children's plan (a take's size and bound), never their rows | a parent's children pushed the settle; a parent that changed, its children made again |
+//! | `related`, `join` | per parent, its children's plan (a take's window), never more | a parent's children pushed the settle; a parent that changed, its children made again |
 //!
 //! **Push.** One settle's [`Changes`] (what a node's overlay or the log's
 //! facts did to what it reads, its store already after them) go up through
@@ -641,138 +641,74 @@ impl Op for Each {
 }
 
 /// The first `limit` of its input's rows, or the last when `last`. It
-/// holds only how many it has and its last place in its own direction,
-/// the window's bound, and fetches from its input the rows that come into
-/// the window or go out of it.
+/// holds its window, at most `limit` rows, and when its input changes
+/// fetches the window again and answers how it changed: a bounded take
+/// over an index never holds more than its limit, however long the index.
 struct Take {
     input: Box<dyn Op>,
     limit: usize,
     last: bool,
-    size: usize,
-    bound: Option<Vec<u8>>,
+    rows: Vec<Row>,
 }
 
 impl Take {
-    /// Where the window ends: its bound, or `None` while it is not full
-    /// and so holds all of its input.
-    fn end(&self) -> Option<&[u8]> {
-        self.bound.as_deref().filter(|_| self.size == self.limit)
+    /// The window over `db`, in place order.
+    fn window(&self, db: &dyn Read) -> Vec<Row> {
+        let mut rows = fetch(&*self.input, db, Bound::Unbounded, self.last, self.limit);
+        if self.last {
+            rows.reverse();
+        }
+        rows
     }
 }
 
-/// Whether `k` is in a window that ends at `end`, read in the take's
-/// direction (`last` for descending).
-fn inside(end: Option<&[u8]>, last: bool, k: &[u8]) -> bool {
-    end.is_none_or(|b| if last { k >= b } else { k <= b })
-}
-
-/// From a window's end back toward its start: at the end, or from the
-/// input's last row when it has none.
-fn back(end: Option<&[u8]>) -> Bound<&[u8]> {
-    end.map_or(Bound::Unbounded, Bound::Included)
+/// Rows as diffs: each a removal (`gone`) or an insert.
+fn diffs(rows: Vec<Row>, gone: bool) -> Vec<Diff> {
+    let mut out = Vec::with_capacity(rows.len());
+    for (key, v) in rows {
+        out.push(if gone {
+            Diff {
+                key,
+                old: Some(v),
+                new: None,
+            }
+        } else {
+            Diff {
+                key,
+                old: None,
+                new: Some(v),
+            }
+        });
+    }
+    out
 }
 
 impl Op for Take {
-    fn fetch(&self, db: &dyn Read, from: Bound<&[u8]>, reverse: bool, f: &mut dyn FnMut(&[u8], &[u8]) -> bool) {
-        if self.size == 0 {
-            return;
-        }
-        let end = self.end();
-        if reverse == self.last {
-            // Toward the window's end: stop past it.
-            self.input.fetch(db, from, reverse, &mut |k, v| inside(end, self.last, k) && f(k, v));
+    fn fetch(&self, _: &dyn Read, from: Bound<&[u8]>, reverse: bool, f: &mut dyn FnMut(&[u8], &[u8]) -> bool) {
+        let mut each = |(k, v): &Row| !reached(from, reverse, k) || f(k, v);
+        if reverse {
+            self.rows.iter().rev().all(&mut each);
         } else {
-            // From the end back: start at it, or before.
-            self.input.fetch(db, tighter(from, back(end), self.last), reverse, f);
+            self.rows.iter().all(&mut each);
         }
     }
 
     fn push(&mut self, s: &Settle<'_>) -> Vec<Diff> {
-        let db = s.db;
         if s.changes.reset {
-            self.hydrate(db);
+            self.hydrate(s.db);
             return Vec::new();
         }
-        let d = self.input.push(s);
-        if d.is_empty() || self.limit == 0 {
+        if self.input.push(s).is_empty() {
             return Vec::new();
         }
-        let (last, limit, old) = (self.last, self.limit, self.end().map(<[u8]>::to_vec));
-        let end = old.as_deref();
-        // The input's changes in the window as it stood, and how many of
-        // the input's rows are there now.
-        let mut kept = d;
-        kept.retain(|x| inside(end, last, &x.key));
-        let mut count = self.size;
-        for x in &kept {
-            count = count + usize::from(x.new.is_some()) - usize::from(x.old.is_some());
-        }
-        let mut out = Vec::new();
-        let mut bound = None;
-        // Whether `out` was fetched descending, to be turned round.
-        let down = (count > limit) != last;
-        if count > limit {
-            // Too many: the last of them leave, back from the end.
-            let mut extra = count - limit;
-            self.input.fetch(db, back(end), !last, &mut |k, v| {
-                if extra == 0 {
-                    bound = Some(k.to_vec());
-                    return false;
-                }
-                extra -= 1;
-                match kept.binary_search_by(|x| x.key[..].cmp(k)) {
-                    Ok(i) => kept[i].new = None,
-                    Err(_) => out.push(Diff {
-                        key: k.to_vec(),
-                        old: Some(v.to_vec()),
-                        new: None,
-                    }),
-                }
-                true
-            });
-            self.size = limit;
-        } else {
-            // Too few: the rows after the end come in, if it had one.
-            let mut need = limit - count;
-            if let (Some(b), true) = (end, need > 0) {
-                self.input.fetch(db, Bound::Excluded(b), last, &mut |k, v| {
-                    bound = Some(k.to_vec());
-                    out.push(Diff {
-                        key: k.to_vec(),
-                        old: None,
-                        new: Some(v.to_vec()),
-                    });
-                    need -= 1;
-                    need > 0
-                });
-            }
-            self.size = limit - need;
-            if bound.is_none() && self.size > 0 {
-                // The window's last row: at or before its old end.
-                self.input.fetch(db, back(end), !last, &mut |k, _| {
-                    bound = Some(k.to_vec());
-                    false
-                });
-            }
-        }
-        self.bound = bound;
-        if down {
-            out.reverse();
-        }
-        merge(kept, out)
+        let new = self.window(s.db);
+        let old = core::mem::replace(&mut self.rows, new.clone());
+        merge(diffs(old, true), diffs(new, false))
     }
 
     fn hydrate(&mut self, db: &dyn Read) {
         self.input.hydrate(db);
-        let (mut size, mut bound) = (0, None);
-        if self.limit > 0 {
-            self.input.fetch(db, Bound::Unbounded, self.last, &mut |k, _| {
-                size += 1;
-                bound = Some(k.to_vec());
-                size < self.limit
-            });
-        }
-        (self.size, self.bound) = (size, bound);
+        self.rows = self.window(db);
     }
 
     fn id(&self, place: &[u8], out: &mut Vec<u8>) -> u8 {
@@ -786,7 +722,7 @@ impl Op for Take {
 
     #[cfg(any(test, ark_selftest))]
     fn held(&self) -> usize {
-        self.input.held() + self.bound.as_ref().map_or(0, Vec::len)
+        self.input.held() + self.rows.iter().map(|(k, v)| k.len() + v.len()).sum::<usize>()
     }
 }
 
@@ -863,7 +799,7 @@ fn unescaped(place: &[u8]) -> Option<(Vec<u8>, &[u8])> {
 /// its children: the rows of the plan `make` makes for it, each placed by
 /// the parent's escaped place and then its own. Holds per parent its
 /// children's operators only (an index of parent place to children: a take
-/// among them holds its size and bound, so per-parent limits are a take),
+/// among them holds its window, so per-parent limits are a take),
 /// never their rows. A parent's children are made again when its row
 /// changes. When `flat`, the parents' own rows are left out: a join.
 struct Related {
@@ -1139,8 +1075,7 @@ impl Plan {
             input: self.0,
             limit,
             last,
-            size: 0,
-            bound: None,
+            rows: Vec::new(),
         }))
     }
 
@@ -1594,8 +1529,8 @@ pub(crate) mod tests {
         (i.to_be_bytes().to_vec(), vec![(i % 7) as u8])
     }
 
-    /// A bounded take over a table, or an index's range, holds its size and
-    /// one place, however many rows are under it and however they change;
+    /// A bounded take over a table, or an index's range, holds its window,
+    /// however many rows are under it and however they change;
     /// a sort no index gives holds its input.
     #[cfg_attr(test, test)]
     fn a_bounded_take_holds_its_limit() {
@@ -1641,7 +1576,7 @@ pub(crate) mod tests {
             ] {
                 let changes = change(&mut db, i, put);
                 assert!(!live.push(&db, &changes).is_empty());
-                assert!(live.held() <= 2);
+                assert!(live.held() <= 30);
             }
             assert_eq!(live.rows(), take(&db).rows());
             let sorted = scan(T, Bound::Unbounded, Bound::Unbounded)
@@ -1650,7 +1585,8 @@ pub(crate) mod tests {
                 .live(&db);
             assert!(sorted.held() > 3 * usize::from(n) - 30);
         }
-        assert_eq!(held, [2, 2]);
+        // Its window, ten rows of three bytes, whatever the table's length.
+        assert_eq!(held, [30, 30]);
     }
 
     /// A group keeps running totals; the least and the most are fetched
