@@ -22,8 +22,13 @@
 //! session entry that does is dropped.
 //!
 //! **Session entries** are forwarded to the actor's other connections and
-//! never stored, each through that connection's [`Feed`], at the rate it
-//! asked for; [`Authority::tick`] sends what is due.
+//! never logged, each through that connection's [`Feed`], at the rate it
+//! asked for; [`Authority::tick`] sends what is due. Of an entry that sets
+//! a row whole ([`Body::row`]) only the latest is kept, by its time, in
+//! memory: one older than it is dropped, and a connection's hello is
+//! answered with its actor's latest, so a node that connects again holds
+//! the live state at once (a playback position it extrapolates, not one
+//! it waits for).
 //!
 //! **Fills.** The host may let go of the log's start ([`Authority::trim`]).
 //! A hello whose cursor is below what is kept is answered with the
@@ -100,6 +105,8 @@ pub struct Authority<B: 'static, S> {
     last: BTreeMap<Origin, u64>,
     refused: BTreeMap<EntryId, Refusal>,
     conns: BTreeMap<Conn, Peer<B>>,
+    /// The latest session entry for each row, by its actor.
+    latest: BTreeMap<(Actor, At), Entry<B>>,
     queries: &'static [Query],
     /// The most rows a fill's part carries.
     part: usize,
@@ -117,6 +124,7 @@ impl<B: Body + Clone + 'static, S: Store> Authority<B, S> {
             last: BTreeMap::new(),
             refused: BTreeMap::new(),
             conns: BTreeMap::new(),
+            latest: BTreeMap::new(),
             queries: &[],
             part: 32,
         }
@@ -187,12 +195,15 @@ impl<B: Body + Clone + 'static, S: Store> Authority<B, S> {
         let out = match up {
             Up::Hello { cursor } => {
                 peer.hello = true;
-                if peer.subs.is_empty() {
+                let mut out = if peer.subs.is_empty() {
                     peer.held = None;
                     self.hello(cursor)
                 } else {
                     self.fill(conn)
-                }
+                };
+                let live = self.latest.iter().filter(|((a, _), _)| *a == actor);
+                out.extend(live.map(|(_, e)| Down::Live(e.clone())));
+                out
             }
             Up::Subscribe { query, args } => self.subscribe(conn, query, args),
             Up::Unsubscribe { query, args } => {
@@ -229,7 +240,7 @@ impl<B: Body + Clone + 'static, S: Store> Authority<B, S> {
             Up::Live(e) => {
                 let mut out = Vec::new();
                 let e = stamped(actor, e).ok().filter(|e| e.space == Space::Session && actor != Actor::NONE);
-                if let Some(e) = e {
+                if let Some(e) = e.filter(|e| self.newest(actor, e)) {
                     for (&c, peer) in &mut self.conns {
                         if c != conn && peer.actor == actor {
                             out.extend(peer.feed.offer(e.clone(), now).into_iter().map(|e| (c, Down::Live(e))));
@@ -383,6 +394,23 @@ impl<B: Body + Clone + 'static, S: Store> Authority<B, S> {
             ));
         }
         out
+    }
+
+    /// Whether `e` is newer than the latest session entry kept for its
+    /// row, keeping it if so; one that names no row always is.
+    fn newest(&mut self, actor: Actor, e: &Entry<B>) -> bool {
+        let Some(row) = e.body.row() else { return true };
+        let key = (actor, row);
+        if self.latest.get(&key).is_some_and(|l| (l.at, l.id) >= (e.at, e.id)) {
+            return false;
+        }
+        self.latest.insert(key, e.clone());
+        true
+    }
+
+    /// The latest session entry of each row, as kept.
+    pub fn latest(&self) -> impl Iterator<Item = &Entry<B>> {
+        self.latest.values()
     }
 
     /// The session entries whose turn has come by `now`.
@@ -659,6 +687,35 @@ pub(crate) mod tests {
         assert_eq!(a.tick(200), []);
     }
 
+    /// The latest session entry of each row is kept, by its time: an older
+    /// one is dropped, and a hello is answered with its actor's latest.
+    #[cfg_attr(test, test)]
+    fn a_hello_is_told_the_latest_session_rows() {
+        let mut a = authority();
+        a.open(Conn(1), ME);
+        a.open(Conn(2), ME);
+        a.open(Conn(3), Actor(6));
+        let mut n = node(1);
+        n.set_actor(ME);
+        let early = n.make(Space::Session, Msg::Set { key: 1, value: 1 }, 10);
+        let late = n.make(Space::Session, Msg::Set { key: 1, value: 2 }, 20);
+        let other = n.make(Space::Session, Msg::Set { key: 2, value: 3 }, 30);
+        assert_eq!(a.receive(Conn(1), Up::Live(late.clone()), 0).len(), 1);
+        assert_eq!(a.receive(Conn(1), Up::Live(early), 0), []);
+        assert_eq!(a.receive(Conn(1), Up::Live(late.clone()), 0), []);
+        a.receive(Conn(1), Up::Live(other.clone()), 0);
+        let out = a.receive(Conn(2), Up::Hello { cursor: Seq(0) }, 0);
+        assert_eq!(out, [(Conn(2), Down::Live(late)), (Conn(2), Down::Live(other))]);
+        assert_eq!(a.receive(Conn(3), Up::Hello { cursor: Seq(0) }, 0), []);
+        // A node that hears its own takes nothing again, and one that
+        // has not heard them holds them now.
+        let mut d = node(2);
+        for (_, down) in out {
+            d.receive(down, &mut Vec::new());
+        }
+        assert_eq!(d.store(Space::Session).len(POSITIONS), 2);
+    }
+
     /// A hello below what the authority keeps of its log is answered with
     /// the rows at the head, in parts; one within it, with the log.
     #[cfg_attr(test, test)]
@@ -786,14 +843,12 @@ pub(crate) mod tests {
         online: bool,
         made: BTreeSet<EntryId>,
         refused: BTreeSet<EntryId>,
-        /// The session values it must hold once quiet: the latest the
-        /// server took from its actor's other devices while it was
-        /// connected.
-        expect: BTreeMap<u8, u64>,
         /// Queries over its shared view, each with the list its patches
         /// splice, and the view's rows when its changes were last taken.
         lives: Vec<(Live, Vec<Row>)>,
         seen: Memory,
+        /// Its session space when its changes were last taken.
+        seen_live: Memory,
         /// Its subscriptions, if it holds only what they read.
         subs: Vec<(QueryId, Vec<u8>)>,
     }
@@ -820,7 +875,19 @@ pub(crate) mod tests {
         /// pushed through the queries, each answer is a fresh run's and its
         /// patches splice the list.
         fn watch(&mut self, seed: u64) {
-            let changes = self.node.take_changes();
+            let live = self.node.take_changes(Space::Session);
+            let session = self.node.view(Space::Session);
+            assert_eq!(
+                live,
+                diff(&self.seen_live, &session, &[COUNTS, POSITIONS]),
+                "seed {seed}: the session's changes"
+            );
+            self.seen_live = Memory::new();
+            session.scan(POSITIONS, crate::store::Range::all(), &mut |k, v| {
+                self.seen_live.put(POSITIONS, k, v);
+                true
+            });
+            let changes = self.node.take_changes(Space::Shared);
             let view = self.node.view(Space::Shared);
             if !changes.reset {
                 assert_eq!(
@@ -885,9 +952,9 @@ pub(crate) mod tests {
                 online: false,
                 made: BTreeSet::new(),
                 refused: BTreeSet::new(),
-                expect: BTreeMap::new(),
                 lives: queries(seed.is_multiple_of(2)).map(|q| (q.live(&Memory::new()), Vec::new())).into(),
                 seen: Memory::new(),
+                seen_live: Memory::new(),
                 subs: Vec::new(),
             })
             .collect();
@@ -957,15 +1024,13 @@ pub(crate) mod tests {
                 1 | 5 | 6 => {
                     let Some(up) = devices[d].up.pop_front() else { return };
                     let mut owners = 0;
-                    if let Up::Live(e) = &up {
-                        let Msg::Set { key, value } = e.body else { unreachable!() };
+                    if let Up::Live(_) = &up {
                         let actor = devices[d].actor;
-                        for (o, dev) in devices.iter_mut().enumerate() {
-                            if o != d && dev.online && dev.actor == actor {
-                                dev.expect.insert(key, value);
-                                owners += 1;
-                            }
-                        }
+                        owners = devices
+                            .iter()
+                            .enumerate()
+                            .filter(|(o, dev)| *o != d && dev.online && dev.actor == actor)
+                            .count();
                     }
                     let out = server.receive(Conn(d as u32), up, now);
                     if out.iter().filter(|(_, down)| matches!(down, Down::Live(_))).count() < owners {
@@ -983,8 +1048,10 @@ pub(crate) mod tests {
                 2 | 7 | 8 => {
                     let dev = &mut devices[d];
                     let Some(down) = dev.down.pop_front() else { return };
+                    // A device's own entry, said back at its hello, is not
+                    // taken again.
                     let live = match &down {
-                        Down::Live(e) => {
+                        Down::Live(e) if e.id.origin != Origin(d as u64 + 1) => {
                             let Msg::Set { key, value } = e.body else { unreachable!() };
                             Some((key, value, position(dev.node.store(Space::Session), key)))
                         }
@@ -1017,6 +1084,7 @@ pub(crate) mod tests {
                         let e = dev.node.make(Space::Session, Msg::Set { key, value }, now);
                         dev.node.route(e, &mut said);
                     }
+                    dev.watch(seed);
                     dev.send(said);
                 }
                 // The server's timer, or its log let go of.
@@ -1053,7 +1121,6 @@ pub(crate) mod tests {
                         server.close(Conn(d as u32));
                         dev.up.clear();
                         dev.down.clear();
-                        dev.expect.clear();
                     } else {
                         connect(rng, server, dev, d);
                     }
@@ -1103,13 +1170,23 @@ pub(crate) mod tests {
             }
             let theirs: BTreeSet<EntryId> = server.refused().keys().filter(|id| dev.made.contains(id)).copied().collect();
             assert_eq!(dev.refused, theirs, "seed {seed}: told of every refusal; made {:?}", dev.made);
-            for (&key, &value) in &dev.expect {
-                assert_eq!(
-                    position(dev.node.store(Space::Session), key),
-                    value,
-                    "seed {seed}: device {d}'s latest of {key}"
-                );
+            // Its session space: its own rows, and the latest the server
+            // took of its actor's other devices' rows; never another
+            // actor's.
+            for e in server.latest() {
+                let Msg::Set { key, value } = e.body else { unreachable!() };
+                if e.actor == dev.actor && e.id.origin != Origin(d as u64 + 1) {
+                    assert_eq!(
+                        position(dev.node.store(Space::Session), key),
+                        value,
+                        "seed {seed}: device {d}'s latest of {key}"
+                    );
+                }
             }
+            dev.node.store(Space::Session).scan(POSITIONS, crate::store::Range::all(), &mut |k, _| {
+                assert_eq!(actors[usize::from(k[0] / 10)], dev.actor, "seed {seed}: another actor's session row");
+                true
+            });
         }
         for l in log.values() {
             assert_eq!(
@@ -1141,6 +1218,7 @@ pub(crate) mod tests {
         a_refusal_is_journaled_and_holds_nothing_back,
         the_actor_is_the_connections,
         session_entries_go_to_the_owners_other_connections,
+        a_hello_is_told_the_latest_session_rows,
         a_cursor_below_the_log_is_filled,
         a_subscriber_holds_its_queries_rows,
         devices_and_a_server_converge

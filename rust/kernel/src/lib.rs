@@ -6,7 +6,9 @@
 //! space's store and returns the entries it made, each routed by its space
 //! ([`Route`]). For the shared space, a node keeps its own entries pending
 //! over the confirmed rows and rebases them on the facts the [`Authority`]
-//! logs, speaking to its upstream in [`sync`]'s frames. Queries are
+//! logs, speaking to its upstream in [`sync`]'s frames; the session space's
+//! live state, a playback position an [`Anchor`] each view extrapolates,
+//! is stepped on every node and never logged. Queries are
 //! [`plan`]s of incremental operators, pulled from the store in order and
 //! pushed the changes a node's view takes ([`Node::take_changes`]).
 //!
@@ -22,6 +24,7 @@
 
 extern crate alloc;
 
+pub mod anchor;
 pub mod authority;
 pub mod codec;
 pub mod entry;
@@ -30,6 +33,7 @@ pub mod plan;
 pub mod store;
 pub mod sync;
 
+pub use anchor::Anchor;
 pub use authority::{Authority, Conn, Query};
 pub use codec::{Decode, Encode, Frames};
 pub use entry::{Actor, Entry, EntryId, Hlc, Origin, Seq, Space, Version};
@@ -49,6 +53,7 @@ pub mod selftest {
     /// Every module's tests.
     pub const TESTS: &[&[Test]] = &[
         crate::codec::tests::ALL,
+        crate::anchor::tests::ALL,
         crate::entry::tests::ALL,
         crate::store::tests::ALL,
         crate::node::tests::ALL,

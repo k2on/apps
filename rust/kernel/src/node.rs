@@ -49,11 +49,18 @@
 //! them ([`Down::Moved`]) into its confirmed rows, as it takes facts. A
 //! query is complete ([`Node::complete`]) once its upstream says so.
 //!
-//! **What changed.** The node notes each row of the shared view that its
-//! own writes, facts, fills and rebases touch, with what it read before;
-//! [`Node::take_changes`] answers what changed since the host last asked,
-//! for the queries over the view ([`crate::plan`]). The host takes them
-//! after each step or receive; until then they gather.
+//! **The session space** is live state each node holds in memory: its own
+//! session entries are stepped here and sent upstream, and another node's
+//! arrive from it ([`Down::Live`]) and are stepped here too, never logged.
+//! A playback position is an [`crate::Anchor`] its owner sets whole: a
+//! view extrapolates it, with no stream of updates.
+//!
+//! **What changed.** The node notes each row of each space that its own
+//! writes, facts, fills, rebases and session entries touch, with what it
+//! read before; [`Node::take_changes`] answers what changed in a space
+//! since the host last asked, for the queries over its view
+//! ([`crate::plan`]). The host takes them after each step or receive;
+//! until then they gather.
 
 use alloc::collections::VecDeque;
 use alloc::vec::Vec;
@@ -176,7 +183,8 @@ pub enum Route {
     Step,
     /// `shared`: stepped here, kept as pending, and pushed upstream.
     Pending,
-    /// `session`: sent upstream, to the user's other nodes; never logged.
+    /// `session`: stepped here and sent upstream, to the user's other
+    /// nodes; never logged.
     Send,
 }
 
@@ -221,10 +229,10 @@ pub struct Node<B: 'static, S> {
     refused: Vec<(EntryId, Refusal)>,
     /// A fill under way: the `seq` it reaches and the parts still to come.
     filling: Option<(Seq, u32)>,
-    /// The shared view's rows touched since the changes were last taken,
-    /// each with what it read before; or everything, after a fill or a
-    /// resume.
-    touched: Layer,
+    /// Each space's rows touched since its changes were last taken, each
+    /// with what it read before; and whether the shared view changed
+    /// whole, after a fill or a resume.
+    touched: [Layer; 4],
     reset: bool,
     /// Its subscriptions, each with whether its rows are all here.
     subs: Vec<(QueryId, Vec<u8>, bool)>,
@@ -252,7 +260,7 @@ impl<B: Body + Clone + 'static, S: Store> Node<B, S> {
             layer: Layer::new(),
             refused: Vec::new(),
             filling: None,
-            touched: Layer::new(),
+            touched: Default::default(),
             reset: false,
             subs: Vec::new(),
             #[cfg(any(test, ark_selftest))]
@@ -274,15 +282,12 @@ impl<B: Body + Clone + 'static, S: Store> Node<B, S> {
         self.reset = true;
     }
 
-    /// What changed in the shared view since this was last called, its
-    /// rows as the view reads them now.
-    pub fn take_changes(&mut self) -> Changes {
-        let touched = core::mem::take(&mut self.touched);
-        let reset = core::mem::take(&mut self.reset);
-        let view = View {
-            base: &self.stores.shared,
-            layer: &self.layer,
-        };
+    /// What changed in a space as this node reads it ([`Node::view`])
+    /// since this was last called for it, its rows as they read now.
+    pub fn take_changes(&mut self, space: Space) -> Changes {
+        let touched = core::mem::take(&mut self.touched[space as usize]);
+        let reset = space == Space::Shared && core::mem::take(&mut self.reset);
+        let view = self.view(space);
         let rows = touched.into_writes().0.into_iter().filter(|_| !reset).filter_map(|w| {
             let new = view.get(w.table, &w.key);
             (w.value != new).then_some((
@@ -393,6 +398,12 @@ impl<B: Body + Clone + 'static, S: Store> Node<B, S> {
         }
         match run(self.handlers, self.stores.get(e.space), &e) {
             Ok((writes, made)) => {
+                let space = e.space as usize;
+                note(
+                    &mut self.touched[space],
+                    self.stores.get(e.space),
+                    writes.0.iter().map(|w| (w.table, &w.key[..])),
+                );
                 self.stores.get_mut(e.space).apply(&writes);
                 made.into_iter().map(|m| self.made_by(&e, m)).collect()
             }
@@ -415,7 +426,11 @@ impl<B: Body + Clone + 'static, S: Store> Node<B, S> {
             layer: &self.layer,
         };
         let (writes, made) = run(self.handlers, &view, &e).unwrap_or_default();
-        note(&mut self.touched, &view, writes.0.iter().map(|w| (w.table, &w.key[..])));
+        note(
+            &mut self.touched[Space::Shared as usize],
+            &view,
+            writes.0.iter().map(|w| (w.table, &w.key[..])),
+        );
         self.layer.apply(&writes);
         let made = made.into_iter().map(|m| self.made_by(&e, m)).collect();
         self.pending.push(Pending {
@@ -429,7 +444,7 @@ impl<B: Body + Clone + 'static, S: Store> Node<B, S> {
     /// Routes an entry this node made, and what stepping it makes, until
     /// nothing is left to step: in order, each `local` and `device` entry
     /// stepped here, each `shared` one stepped and pushed, each `session`
-    /// one sent.
+    /// one stepped and sent.
     pub fn route(&mut self, e: Entry<B>, link: &mut dyn Link<B>) {
         self.run(VecDeque::from([e]), link);
     }
@@ -438,12 +453,11 @@ impl<B: Body + Clone + 'static, S: Store> Node<B, S> {
         while let Some(e) = queue.pop_front() {
             match Route::of(e.space) {
                 Route::Step => queue.extend(self.step(e)),
-                Route::Pending => {
+                route => {
                     let made = self.step(e.clone());
-                    link.send(Up::Push(e));
+                    link.send(if route == Route::Pending { Up::Push(e) } else { Up::Live(e) });
                     queue.extend(made);
                 }
-                Route::Send => link.send(Up::Live(e)),
             }
         }
     }
@@ -496,7 +510,8 @@ impl<B: Body + Clone + 'static, S: Store> Node<B, S> {
         match down {
             Down::Logged(l) => self.confirm(l),
             Down::Verdict { id, verdict } => self.judge(id, verdict),
-            Down::Live(e) => {
+            // Its own, said back to it, was stepped when it was made.
+            Down::Live(e) if e.id.origin != self.origin => {
                 let made = self.step(e);
                 self.run(made.into(), link);
             }
@@ -523,6 +538,7 @@ impl<B: Body + Clone + 'static, S: Store> Node<B, S> {
                     self.filled();
                 }
             }
+            Down::Live(_) => {}
             Down::Moved(rows) => self.moved(rows),
             Down::Got { query, args } => {
                 for s in &mut self.subs {
@@ -538,7 +554,11 @@ impl<B: Body + Clone + 'static, S: Store> Node<B, S> {
             base: &self.stores.shared,
             layer: &self.layer,
         };
-        note(&mut self.touched, &view, rows.0.iter().map(|w| (w.table, &w.key[..])));
+        note(
+            &mut self.touched[Space::Shared as usize],
+            &view,
+            rows.0.iter().map(|w| (w.table, &w.key[..])),
+        );
         self.stores.shared.apply(&rows);
         self.rebase();
     }
@@ -564,7 +584,11 @@ impl<B: Body + Clone + 'static, S: Store> Node<B, S> {
             base: &self.stores.shared,
             layer: &self.layer,
         };
-        note(&mut self.touched, &view, l.facts.0.iter().map(|w| (w.table, &w.key[..])));
+        note(
+            &mut self.touched[Space::Shared as usize],
+            &view,
+            l.facts.0.iter().map(|w| (w.table, &w.key[..])),
+        );
         self.stores.shared.apply(&l.facts);
         self.cursor = seq;
         let id = l.entry.id;
@@ -625,7 +649,7 @@ impl<B: Body + Clone + 'static, S: Store> Node<B, S> {
             base: &self.stores.shared,
             layer: &self.layer,
         };
-        note(&mut self.touched, &view, self.layer.keys());
+        note(&mut self.touched[Space::Shared as usize], &view, self.layer.keys());
         let mut layer = Layer::new();
         for p in &mut self.pending {
             let view = View {
@@ -637,7 +661,7 @@ impl<B: Body + Clone + 'static, S: Store> Node<B, S> {
         }
         // A row only the new layer writes was read from the confirmed rows
         // before, which the facts did not touch, or it would be noted.
-        note(&mut self.touched, &self.stores.shared, layer.keys());
+        note(&mut self.touched[Space::Shared as usize], &self.stores.shared, layer.keys());
         self.layer = layer;
     }
 }
@@ -1083,6 +1107,9 @@ pub(crate) mod tests {
         assert_eq!((rows(n.store(Space::Shared)), n.cursor()), (vec![], Seq(9)));
     }
 
+    /// A session entry is stepped where it is made and sent; another
+    /// node steps it as it arrives, and its own said back is not stepped
+    /// again.
     #[cfg_attr(test, test)]
     fn session_entries_are_sent_and_taken() {
         let mut a = node(1);
@@ -1090,9 +1117,45 @@ pub(crate) mod tests {
         let e = a.make(Space::Session, Msg::Add { key: 1, by: 3 }, 10);
         a.route(e.clone(), &mut up);
         assert_eq!(up, [Up::Live(e.clone())]);
+        assert_eq!(count(a.store(Space::Session), 1), 3);
+        a.receive(Down::Live(e.clone()), &mut up);
+        assert_eq!(count(a.store(Space::Session), 1), 3);
         let mut b = node(2);
         b.receive(Down::Live(e), &mut up);
         assert_eq!(count(b.store(Space::Session), 1), 3);
+    }
+
+    /// Each space's changes are taken on their own: a session row set
+    /// here and one set by another node, each once, with what it read
+    /// before; a local step's; and the shared view's apart from them.
+    #[cfg_attr(test, test)]
+    fn each_spaces_changes_are_taken() {
+        let value = |n: u64| Some(n.to_le_bytes().to_vec());
+        let change = |table, key: u8, old, new| (table, Diff { key: vec![key], old, new });
+        let mut n = node(1);
+        let mut up = Vec::new();
+        let set = n.make(Space::Session, Msg::Set { key: 1, value: 5 }, 10);
+        n.route(set, &mut up);
+        let again = n.make(Space::Session, Msg::Set { key: 1, value: 6 }, 10);
+        n.route(again, &mut up);
+        let theirs = node(2).make(Space::Session, Msg::Set { key: 2, value: 9 }, 10);
+        n.receive(Down::Live(theirs), &mut up);
+        let tap = n.make(Space::Local, Msg::Tap { key: 3 }, 10);
+        n.route(tap, &mut up);
+        let session = n.take_changes(Space::Session);
+        assert_eq!(session.rows, [change(POSITIONS, 1, None, value(6)), change(POSITIONS, 2, None, value(9))]);
+        assert!(!session.reset);
+        assert_eq!(n.take_changes(Space::Local).rows, [change(COUNTS, 0, None, value(1))]);
+        assert_eq!(n.take_changes(Space::Shared).rows, [change(COUNTS, 3, None, value(1))]);
+        // Taken, they are gone; a value set back to what it was is no
+        // change.
+        assert_eq!(n.take_changes(Space::Session), Changes::default());
+        let back = n.make(Space::Session, Msg::Set { key: 1, value: 7 }, 10);
+        n.route(back, &mut up);
+        let back = n.make(Space::Session, Msg::Set { key: 1, value: 6 }, 10);
+        n.route(back, &mut up);
+        assert_eq!(n.take_changes(Space::Session), Changes::default());
+        assert_eq!(n.take_changes(Space::Device), Changes::default());
     }
 
     #[cfg_attr(test, test)]
@@ -1111,6 +1174,7 @@ pub(crate) mod tests {
         a_confirmed_preview_is_not_run_again,
         a_fill_replaces_the_confirmed_rows,
         session_entries_are_sent_and_taken,
+        each_spaces_changes_are_taken,
         routes,
     );
 }

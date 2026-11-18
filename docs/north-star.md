@@ -154,7 +154,7 @@ what must travel. The host routes what comes out:
 | Space or target | The host |
 |---|---|
 | `local` | feeds it back in |
-| `session` | sends it, never stores it |
+| `session` | steps it here and sends it, never logs it |
 | `shared` | keeps it as pending, sends it; it comes back with `seq`, or refused |
 | a port | hands it to the driver; the answer returns as an entry with `cause` set |
 

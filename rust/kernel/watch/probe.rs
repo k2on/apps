@@ -11,7 +11,8 @@
 //! queue subscribed to at the connection; and two queries kept live over
 //! it all, as the watch's screen keeps them:
 //! the next four tracks (a bounded take of a filter) and how many there
-//! are (a group). It prints the most heap it held and exits 1 past the
+//! are (a group); and the phone's playback position, an anchor in the
+//! session space the screen extrapolates. It prints the most heap it held and exits 1 past the
 //! budget's 24 KB.
 
 #![no_std]
@@ -196,6 +197,23 @@ fn main() -> ! {
         seq += 1;
         logged(&mut wire, e, seq, facts);
     }
+    // The phone's player, playing from 30 s: a session row it sets whole.
+    let anchor = Anchor {
+        at: 30_000,
+        wall: black_box(1_000),
+        rate: 1000,
+        playing: true,
+    };
+    let live = phone.make(
+        Space::Session,
+        Msg::Put {
+            table: 3,
+            key: [0].into(),
+            value: to_vec(&anchor),
+        },
+        black_box(1_000),
+    );
+    put_frame(&mut wire, &Down::Live(live));
     // The screen's queries: the next four tracks, and how many there are.
     let all = || scan(TableId(1), Bound::Unbounded, Bound::Unbounded);
     let mut queries = [
@@ -208,10 +226,16 @@ fn main() -> ! {
             .live(&node.view(Space::Shared)),
     ];
     let mut shown = 0;
+    let mut playing = Anchor::default();
     let mut watch = |node: &mut Node<Msg, Memory>| {
-        let changes = node.take_changes();
+        let changes = node.take_changes(Space::Shared);
         for q in &mut queries {
             shown += q.push(&node.view(Space::Shared), &changes).len();
+        }
+        for (_, d) in node.take_changes(Space::Session).rows {
+            if let Some(Ok(a)) = d.new.as_deref().map(from_slice::<Anchor>) {
+                playing = a;
+            }
         }
     };
     let mut frames = Frames::new(black_box(512));
@@ -303,6 +327,10 @@ fn main() -> ! {
     let next = all().filter(|_, v| v[0] != b' ').take(4, false).live(&view);
     let total = from_slice::<Agg>(&queries[1].rows()[0].1).map_or(0, |a| a.count);
     let right = queries[0].rows() == next.rows() && total == node.store(Space::Shared).len(TableId(1)) as u64;
+    // Its position two and a half seconds on, and when the screen's
+    // seconds next change.
+    let now = black_box(3_500);
+    let right = right && playing.position(now) == 32_500 && playing.next(now, 1000) == Some(4_000);
 
     black_box((
         shown,
