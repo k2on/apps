@@ -25,41 +25,82 @@ last section here says how to get from one to the other, step by step.
 
 ## Vocabulary
 
-Everything is built from seven things:
+Everything is built from eleven things:
 
 | Name | What it is |
 |---|---|
 | **Entry** | the one message |
 | **Space** | where an entry and its data live: `local`, `device`, `session`, `shared` |
-| **Node** | one process running the loop: `step(entry) -> entries` |
-| **Handler** | a query, a mutation, a reaction, or a view's `&mut self` method |
-| **Cx\<Role\>** | what a handler runs with: the database as middleware narrowed it, and the role |
+| **Node** | one process running the loop: `step(entry) -> entries`, then a settle |
+| **Handler** | a query, a mutation, a reaction, or a local entry's: a view's `&mut self` method is one like any other |
+| **Cx\<Role\>** | what a handler runs with: the database as middleware narrowed it, the cells, and the role |
+| **Cell** | a single value that never travels: a view's state, a selection, a draft. Typed (`Cell<T>`) at the app's edge; in the kernel a type-erased slot (a pointer, a vtable to compare and drop it, and a version). A write is a pointer swap, cut off when the value is equal; it is never encoded. The `local` space is cells |
+| **Plan** | a query of incremental operators over rows, kept live by the node and pulled by `fetch`; also one row (`Plan::get`) and a **memo**, a pure function of cells and rows, computed when read and cut off when equal |
+| **Sink** | what is told that something it read changed: a view's leaf, the disk's flush, an upstream's record of what a downstream node holds. It pulls what it needs when it next draws or writes |
+| **Binding** | a leaf of a view joined to what it shows: a path from a source (a row, a list, a cell) through memo calls. Written by the build as data, never as code per screen |
 | **Port** | the outside world: disk, network, clock, camera, a bank |
 | **Version** | a frozen schema and API, and the lenses between it and the next |
+
+State is **rows** (collections that sync, so they are encoded) and
+**cells** (single values that don't). Change is one **settle** per step.
+A view is a plan over those whose leaves are sinks that pull.
 
 ## Crates
 
 ```
-ark       the kernel: Entry, Space, Node::step, the store trait, the query
-          engine, the log, rebase, versions, Cx and roles.
-          no_std + alloc. No I/O, no threads. The same build everywhere.
+ark           everything a device runs and must agree on: Entry, Space,
+              Node::step and its settle, the Store trait, sync, plans
+              (memos and one-row plans included), cells, read sets, the
+              Sink trait and the interpreter of binding tables.
+              no_std + alloc. No I/O, no threads. The same build everywhere.
 
-ark-ui    primitives, native containers and controls, and the generators
-          for SwiftUI, Compose, iced, the web and the watch. Knows nothing
-          about data.
+ark-upstream  serving other nodes: the Authority, Serve and Relay, and the
+              per-client records. Linked by a server, a desktop or a phone;
+              never by a watch.
 
-ark-app   the framework that joins them: the one macro that reads src/app/
-          (routes, pages, api, middleware), the hosts for each platform,
-          and ports.
+ark-gen       build time only: the #[view] recorder, the routes macro,
+              schema freezing, and the emitters (SwiftUI, Compose, Pebble's
+              binding tables). Never linked on a device.
+
+ark-host-*    one per platform: its stores, its links, its ports, and each
+              toolkit's sinks (the Swift and Kotlin bridges, iced, the web,
+              Pebble's layers).
 ```
 
-The kernel is everything that must agree across devices. A **host** is
-everything that differs by platform, given to the kernel through traits:
+The line between them is **when and where code runs**, not data versus
+UI. Change tracking, view state and joining a leaf to the value it shows
+are one mechanism, so splitting "the data" from "the UI" puts glue
+between them on every screen: a host rebuilds a record from rows and a
+toolkit diffs it a second time. What every device must agree on is one
+crate, what only an upstream runs is another, what runs only at build
+time is a third, and what differs by platform is a host.
+
+arkui's rule stands inside this: it holds primitives, native containers
+and native controls, nothing else, and every value is a token. Its
+description of a view (primitives, parts, bindings) is what the emitters
+and the sinks agree on; the recorder that makes it is `ark-gen`'s, and
+the toolkits that draw it are the hosts'.
+
+**The database works without the UI, and the UI without the database.**
+
+- A server, a CLI tool, a test or a reaction links `ark` (and
+  `ark-upstream`) and nothing of a view. The Sink trait is the one seam:
+  no layer, toolkit or binding is needed to use it, and a server's sinks
+  are its disk's flush and its records of what each client holds.
+- A program that is only views, as the docs site is, runs on `ark`'s
+  local cells, its constants and the settle alone: no store on disk, no
+  link, no shared space and no upstream, and none of the sync code is
+  linked.
+
+A **host** is everything that differs by platform, given to the kernel
+through traits:
 
 - `Store`: rows and indexes. In memory on a watch, SQLite on phones,
   desktop and the server, OPFS on the web.
 - `Link`: bytes to and from the node's upstream. A socket, Bluetooth to a
   phone, a test harness.
+- `Sink`: what is told after a settle: a toolkit's views, the disk's
+  flush.
 - `Port`s: everything else the app asks for.
 
 Time comes in as an input and ids are drawn deterministically from the
@@ -130,26 +171,25 @@ no single giant message type and no dynamic body.
 
 | Space | Holds | Kept | Travels |
 |---|---|---|---|
-| `local` | a view's state | in memory | never |
+| `local` | cells: a view's state, never encoded | in memory | never |
 | `device` | settings on this device | on its disk | never |
 | `session` | live state: playback position, presence | in memory | to your devices through the server, not stored |
 | `shared` | the app's data | the master log | to the server, then to whoever may see it |
 
-High-rate `local` and `session` entries are coalesced by the kernel, one
-per frame or at the rate a subscriber asked for, never stored in a log.
+Only rows are encoded, because only rows cross the wire, the disk and the
+shared log. A local entry is encoded only if a bug report records it.
 
 ## The Loop
 
 ```rust
-trait Machine {
-    type Body;
-    fn step(&mut self, e: Entry<Self::Body>) -> Vec<Entry<Self::Body>>;
+impl Node {
+    fn step(&mut self, e: Entry<B>) -> Vec<Entry<B>>;
+    fn settle(&mut self, sink: &mut dyn Sink);
 }
 ```
 
 `Node::step` finds the entry's handler, runs it in a transaction on its
-space, wakes the queries and reactions whose reads it touched, and returns
-what must travel. The host routes what comes out:
+space, and returns what must travel. The host routes what comes out:
 
 | Space or target | The host |
 |---|---|
@@ -158,8 +198,38 @@ what must travel. The host routes what comes out:
 | `shared` | keeps it as pending, sends it; it comes back with `seq`, or refused |
 | a port | hands it to the driver; the answer returns as an entry with `cause` set |
 
-This one function replaces the peer's `Input`/`Output` machine, the UI
-runtime's `update` and `Command`s, and the server's handling of calls.
+Every step, and everything received from upstream, ends in one
+**settle**, the node's and not the host's or the app's:
+
+1. **The handler's writes.** Its row writes go to its space's overlay; its
+   cell writes are journaled beside them. A refusal drops both; otherwise
+   both are kept. An equal cell write marks nothing.
+2. **Rows.** Each space's changes go through the node's watched plans, in
+   the order they were watched, each answering its patches.
+3. **Marks.** The readers of every changed cell, row and plan answer are
+   marked, a memo's readers with it. Only marks move: values are worked
+   out when they are read, after the settle, so no reader sees half a
+   step. A memo whose reads changed but whose value did not stops the
+   marks there.
+4. **Sinks.** Each sink is told once: which of its readers are dirty, and
+   the patches of the plans it holds. The disk's sink gets the rows it
+   keeps.
+
+Everything that reads records what it read, in one read set: a plan's
+closures, a memo, a view's leaf as it pulls. Cells by slot, rows by table
+and key range, a plan's answer by its watch. Nothing is computed when it
+is written.
+
+A tap is a local entry whose handler writes cells; a sync is a shared or
+session entry whose handlers write rows. Both end in the same settle, and
+a view finds out the same way. High-rate entries coalesce by
+construction: a sink pulls the latest value once per frame, however many
+writes there were, and an upstream sends session rows at the rate a
+subscriber asked for, never logging them.
+
+This one loop replaces the peer's `Input`/`Output` machine, the UI
+runtime's `update` and `Command`s, the record a host rebuilt for a screen
+from rows, and the server's handling of calls.
 
 ### Authority and Rebase
 
@@ -331,7 +401,8 @@ result equals a fresh run.
 ## Views
 
 A page is a struct in its route file. Its plain fields are its inputs,
-from the address or its parent; its `#[state]` fields are its state:
+from the address or its parent; its `#[state]` fields are its state, each
+a cell:
 
 ```rust
 // src/app/(household)/accounts/[id].rs
@@ -346,11 +417,13 @@ impl Register {
     fn select(&mut self, t: Id<Txn>) { self.selected = Some(t); }
 
     fn body(&self) -> View {
-        let txs = api.txs.list(self.id);                       // live
-        list(txs.iter().map(|t| row(t)
-            .selected(self.selected == Some(t.id))
-            .on_tap(self.select(t.id))                         // a local entry
-            .on_swipe("Approve", api.txs.approve(t.id))))      // a shared entry
+        let txs = api.txs.list(self.id);                       // a List<Txn>
+        list(for t in txs {
+            row(t)
+                .selected(self.selected == Some(t.id))         // a memo
+                .on_tap(self.select(t.id))                     // a local entry
+                .on_swipe("Approve", api.txs.approve(t.id))    // a shared entry
+        })
     }
 }
 ```
@@ -358,7 +431,7 @@ impl Register {
 - `&mut self` methods are the page's messages. Called from `body`, they
   return the message; the runtime runs the method when it arrives. Every
   tap is a recorded `local` entry, as in Elm, with no `Msg` or `update`
-  written.
+  written, and its handler writes the page's cells.
 - `api` is added by `#[view]`, typed `Api<Member>` here, so `api.txs.purge`
   doesn't compile in this page. The page's role is checked against the
   middleware its folder's layouts run.
@@ -366,6 +439,47 @@ impl Register {
 - App-wide state that isn't one page's is a `#[model(device)]` or
   `#[model(session)]` value, read with `Player::get()`.
 - Shared components are `#[view]` structs in `src/components/`.
+
+### Sources, Bindings and Sinks
+
+A view reads **sources**, never a record. What `api` answers is one:
+
+- `api.txs.list(…)` is a `List<T>`, a watched plan's answer;
+- a one-row query is a `Row<T>`, cut off by its bytes and decoded when
+  read;
+- a `#[state]` field, or a value the host keeps (the link, the time), is a
+  `Cell<T>`;
+- a call on the way (`clock(p.at(now))`, `self.selected == Some(t.id)`) is
+  a memo.
+
+No source is passed in as a parameter: a page's inputs are plain values,
+and what it reads it asks `api` for.
+
+The recorder keeps each leaf as a **binding**: a path rooted at a source,
+through the memo calls on the way. A `for` over a list is a list bound to
+a `List`; an `if` is a leaf's visibility bound to a `bool`. The bindings
+are written as tables, data in rodata, not as draw code per screen, so a
+second screen costs its table and not another copy of the code.
+
+Each toolkit draws a binding as a **sink** that pulls:
+
+| Toolkit | A text leaf | A list | Reads known by |
+|---|---|---|---|
+| Pebble | a layer whose `update_proc` pulls its value at draw | a `MenuLayer` of `count` rows, each pulled | reader masks the emitter writes from the view's paths |
+| SwiftUI | an `@Observable` screen whose getters call into Rust; the settle's dirty readers fire its registrar per property | `List`/`ForEach` over `count` and a row pulled through `fetch`, ids from each row's identity, patches as inserts, removes and moves | Observation's own tracking |
+| Compose | a snapshot `State` per source, bumped by the settle, read through a getter | `LazyColumn` over `fetch`, keys from each row's identity | the snapshot system |
+| web | a signal per source, fine-grained DOM updates | keyed by identity, patched | signals |
+| iced | `view()` reads cells and plans through the node | `fetch` of the visible window | the dirty readers decide whether to ask for a new `view()` |
+
+Observation, snapshots and signals are the platform's half of the same
+push and pull. So no record exists between a plan and the screen: there
+is none to build in Rust, none to cross UniFFI on every change, and no
+second diff in SwiftUI or Compose, since each property invalidates only
+its readers. A list is pulled lazily, a window at a time, from `fetch`.
+A patch carries a row's depth in a nested list, a move when the same row
+changes its place (so a toolkit can animate it, as ui/docs/motion.md
+asks), and the row's identity, its base key, so a toolkit keys its cells
+by the row and not its position.
 
 The same view code renders through arkui on every target, the watch
 included.
@@ -489,9 +603,9 @@ A node that serves another answers it exactly as the server answers it:
 
 Serving a downstream node (running its subscriptions, keeping its sync
 record) is host code that phones, desktops and the server run and a watch
-never does, so it doesn't count against the kernel's budget. In the new
-kernel it is behind the `upstream` feature, which a watch's build never
-enables: `Serve` (the server's authority runs it) and a phone's
+never does, so it doesn't count against the kernel's budget. It is
+`ark-upstream`'s (today the kernel's `upstream` feature, which a watch's
+build never enables): `Serve` (the server's authority runs it) and a phone's
 `Relay`, which answers its watch from the phone's view, holds the watch's
 pushes until the server judges them, and passes the verdicts back to the
 connection that pushed each.
@@ -548,6 +662,9 @@ way, with ports answered by the test.
 - **The engine:** every incremental result equals a fresh run, and
   Noria's invariants hold, under the fuzzer's random changes and
   evictions.
+- **The settle:** after any steps, every memo and watched answer equals a
+  fresh run's, every reader whose value changed was told, none twice, and
+  nothing whose reads did not change was run again.
 - **The kernel:** the fuzzer, run at depth nightly (1,000 sessions and
   more), checking convergence.
 - **Permissions:** every table against a row of the reader's and a row of
@@ -573,9 +690,11 @@ because nothing in the loop does I/O.
 | the volatile space | `session` |
 | JSON migrations | rule 0 and lenses |
 | each app's `server/` | `api/`, `on/server/` and the server host |
-| ark, ark-peer, ark-auth | `ark` |
-| arkui, arkui-web, arkui-macros, glyphs, gen | `ark-ui` |
-| ark_app, ark_router, ark-ffi, ark-module | `ark-app` |
+| a screen's record, its `draw`, UniFFI's crossing of it | sources, bindings and sinks |
+| the `local` space's rows, a view's fields | cells |
+| ark, ark-peer, ark-auth, the kernel's `upstream` feature | `ark` and `ark-upstream` |
+| arkui-macros, gen, ark_router's macro | `ark-gen` |
+| arkui, arkui-web, glyphs, ark_app, ark-ffi, ark-module | `ark` (the view's description, the sinks' interpreter) and `ark-host-*` |
 
 Kept as they are: the master log with its facts and hashes, the incremental
 operators, file routing, arkui's primitives and generators.
@@ -587,7 +706,7 @@ from its first line, so it never has to shrink, and the first app on it is
 the smallest screen that needs every part of the design. Each step lands
 on main with the apps working. Nothing is kept for compatibility.
 
-1. **This document.**
+1. **This document.** Done.
 2. **The watch's facts, and the watch in CI.**
    - On a real Pebble Time 2: a Rust watchapp linked against the SDK, with
      an allocator in the app's heap, that measures how much an app can
@@ -599,6 +718,8 @@ on main with the apps working. Nothing is kept for compatibility.
      `opt-level = "z"` and failed past its budget; its tests run under
      QEMU for the Cortex-M3; the `.pbw` built in nix. Later, screenshot
      walks in the Pebble emulator, as app-screens does for phones.
+   - **Done** in the Time 2's emulator and in CI; the real watch's
+     numbers are still to measure (see "Open Questions").
 3. **The new kernel, fresh and within budget.** A new crate, no_std +
    alloc: `Entry`, `Node::step`, its own codec with integer ids, the
    `Store` and `Link` traits, the incremental operators ported from
@@ -607,11 +728,11 @@ on main with the apps working. Nothing is kept for compatibility.
    and join modes, pending entries kept as records, facts not states,
    entry ids never renumbered, a journal of refusals only, `tracing` in
    place of recording. The old kernel runs the apps until each moves,
-   then it is deleted.
+   then it is deleted. **Done.**
 4. **Partial sync, enough for the slice:** pull-based `fetch` with
    index-backed scans and a bounded `take`; subscriptions by query, with
    base rows, per-client sync records, atomic batches and move-outs; the
-   session space with its rate rules.
+   session space with its rate rules. **Done.**
 5. **The watch slice: harken's now playing.** The track, its position,
    play, pause and skip, and the next few in the queue, offline and with
    the phone as its upstream. A Pebble host (its storage, AppMessage, the
@@ -619,24 +740,57 @@ on main with the apps working. Nothing is kept for compatibility.
    (with the relay script as the fallback), an
    arkui renderer for Pebble's layers (text, a stack, a menu, a glyph, the
    action bar), and the `(glance)` route group. When this works offline
-   and reconnecting, the kernel is proven.
-6. **Every other host onto the new kernel:** phones, desktop, web and the
+   and reconnecting, the kernel is proven. **Done**, on the demo
+   watchapp, with `related` and its flat `join` from step 16 and the
+   recorded reads of a plan's closures.
+6. **Cells, the read set, watches, the settle and sinks, in the kernel.**
+   A type-erased slot arena with typed `Cell<T>` handles, `Cx::get` and
+   `Cx::set` journaled with the step's rows so a refusal drops both, and
+   no `local` store; one read set for plan closures, cells, one-row gets
+   and memos; watches the node owns (`Node::watch`); `Node::settle(&mut
+   dyn Sink)`; `Plan::get` and `memo`; patches with a depth, a move and
+   each row's identity. Every incremental answer and derived value equals
+   a fresh run's, no sink is told twice in a settle, and the walk visits
+   nothing whose reads did not change. The unsafe core is one module,
+   run under Miri on the host.
+7. **The watch on bindings.** The emitter writes binding tables and
+   reader masks from the view's paths in place of `draw(record)`; the
+   Pebble host is the sink, its layers pulling at draw; the demo loses its
+   `Face` record. Within a few hundred bytes of the 58.5 KB measured for
+   it, and pixel-identical in the emulator.
+8. **`#[view]` records bindings and sources.** ark_app's recorder keeps
+   paths rooted at sources, and `Real` reads them; the Swift, Kotlin and
+   Pebble emitters and their snapshots, all from the same `#[view]`.
+9. **Every other host onto the new kernel:** phones, desktop, web and the
    server. The old kernel is deleted.
-7. **The rest of partial sync:** the indexed store on disk with partial
-   loading and eviction, `related`, running aggregates synced in parts,
-   completeness known locally, TTLs, preload, checksums.
-8. **The API and middleware.** The routes macro reads `src/app/api/`;
-   mutators move there with `Cx<Role>`; middleware replaces `Scope`;
-   calls go by full path.
-9. **Pages.** `#[view]` structs with `#[state]` in their route files;
-   `App`, `Msg` and `update` go.
-10. **Reactions and the server host.** Jobs become reactions; each app's
+10. **The phones' observable bridges.** Swift Observation and Compose
+    state over per-leaf getters, and lazy lists over `fetch`; screen
+    records and their UniFFI encoding go.
+11. **iced and the web as sinks**, on the same bindings.
+12. **The API and middleware.** The routes macro reads `src/app/api/`;
+    mutators move there with `Cx<Role>`; middleware replaces `Scope`;
+    calls go by full path, and `api.*` answers sources.
+13. **Pages.** `#[view]` structs in their route files, `#[state]` fields
+    as cells and `&mut self` methods as local entries; `App`, `Msg` and
+    `update` go.
+14. **The codec's derive and generated ids.** `#[derive(Encode, Decode)]`
+    in place of hand-written impls; the routes macro numbers tables,
+    queries, handlers, cells, views and layers from the code, one id
+    space, and the kernel takes only their newtypes.
+15. **`ark-format` over a byte sink**, no_std: one function for the watch
+    and the phones, and its FFI crossing a getter like any other.
+16. **The rest of partial sync:** the indexed store on disk with partial
+    loading and eviction, running aggregates synced in parts,
+    completeness known locally, TTLs, preload, checksums (`related` is
+    done).
+17. **Reactions and the server host.** Jobs become reactions; each app's
     `server/` folds into `api/` and `on/server/`; the server host bounds
     its threads.
-11. **Versions.** Frozen schemas and APIs, rule 0, lenses, the connect
+18. **Versions.** Frozen schemas and APIs, rule 0, lenses, the connect
     handshake that says a build is too old.
-12. **Crates.** Merge and rename into `ark`, `ark-ui` and `ark-app`.
-13. **money on the watch.**
+19. **Crates.** Merge and rename into `ark`, `ark-upstream`, `ark-gen` and
+    the `ark-host-*` crates.
+20. **money on the watch.**
 
 An app reaches a watch through a route group for the smallest windows,
 not by naming a platform:
@@ -652,8 +806,8 @@ src/app/
 An app with no `(glance)` group has no watch app.
 
 Three bugs on main today are fixed by these steps rather than separately:
-live rows fanned out to every account (steps 4 and 8, the session space
-through middleware), unbounded call threads (step 10), and calls matched
+live rows fanned out to every account (steps 4 and 12, the session space
+through middleware), unbounded call threads (step 17), and calls matched
 by the last part of their name (step 3, the new kernel's integer ids).
 
 ## Prior Art
