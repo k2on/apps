@@ -13,10 +13,15 @@
 //!   room the window gives and ui/theme.toml's tokens (`ark_pebble::tokens`,
 //!   named, never a number): a text layer, a meter, a glyph's bitmap layer,
 //!   a list (`MenuLayer`), a rectangle behind, and the action bar;
-//! - `draw(ui, p)`: each layer handed its value from the record (the
-//!   toolkit tells PebbleOS only what changed), and each `if`'s branches
-//!   shown or hidden;
-//! - `press(p, button)`: the message the action bar's button sends.
+//! - `BINDINGS`: what each layer shows, as data: for each a source
+//!   function of the screen's (the module [`Screen::sources`] names), by
+//!   the path the view read, `p.title` the source `title`, a `for t in
+//!   p.next`'s `t.title` the source `next_title`; and each `if`'s branches
+//!   shown while its source holds. The toolkit reads them through the
+//!   node, as PebbleOS draws, each layer's reads recorded against it, and
+//!   draws a layer again when what it read changed: no code is written per
+//!   layer, and no record exists between the node and the screen;
+//! - `PRESS`: the message each of the action bar's buttons sends.
 //!
 //! What it lays out: a vertical stack's content one under another, what is
 //! left shared by its spacers and lists; a horizontal one's glyphs at their
@@ -40,12 +45,13 @@ use crate::{Arg, Msg};
 pub struct Screen {
     /// The Rust file it is written from, for the header.
     pub source: &'static str,
-    /// The record's name in the view function (its parameter).
+    /// The sources' name in the view function (its parameter).
     pub root: &'static str,
-    /// The record's type, as the generated code names it.
-    pub record: &'static str,
-    /// What the generated code brings into scope: the record's and the
-    /// messages' paths (`now_playing::face::{Act, Face}`).
+    /// The module of the screen's source functions, as the generated code
+    /// names it (`crate::sources`): one for each path the view reads.
+    pub sources: &'static str,
+    /// What the generated code brings into scope: the messages' path
+    /// (`now_playing::sources::Act`).
     pub uses: &'static [&'static str],
     /// The app's accent (ui/theme.toml's `[accent.<name>]`).
     pub accent: &'static str,
@@ -59,7 +65,8 @@ pub fn emit<M: Debug>(view: &View<M>, s: &Screen) -> String {
     let mut e = Em {
         s,
         build: vec![],
-        draw: vec![],
+        b: Tables::default(),
+        items: vec![],
         press: vec![],
         next: 0,
         fills: 0,
@@ -83,7 +90,10 @@ pub fn emit<M: Debug>(view: &View<M>, s: &Screen) -> String {
                         e.glyphs.insert(g.clone());
                         e.build.push(format!("ui.set_action({button}, {});", bytes_lit(g)));
                     }
-                    Val::At(p) => e.draw.push(format!("ui.set_action({button}, {p}.as_bytes());")),
+                    Val::At(p) => {
+                        let f = e.src(p);
+                        e.b.actions.push(format!("({button}, {f})"));
+                    }
                 }
                 e.press.push((button, e.msg(&i.tap)));
             }
@@ -132,10 +142,24 @@ impl Rect {
     }
 }
 
+/// The binding tables, each entry as the generated code writes it.
+#[derive(Default)]
+struct Tables {
+    words: Vec<String>,
+    meters: Vec<String>,
+    glyphs: Vec<String>,
+    actions: Vec<String>,
+    lists: Vec<String>,
+    shown: Vec<String>,
+}
+
 struct Em<'s> {
     s: &'s Screen,
     build: Vec<String>,
-    draw: Vec<String>,
+    b: Tables,
+    /// The `for`s' and `if let`s' items in scope, each with the source
+    /// name of what it is an item of.
+    items: Vec<(String, String)>,
     press: Vec<(String, String)>,
     next: u8,
     fills: usize,
@@ -150,11 +174,37 @@ impl Em<'_> {
         id
     }
 
-    /// A value read in `draw`, or a literal set once in `build`.
-    fn value(&mut self, id: u8, set: &str, v: &Val<String>) {
+    /// The source a path names: its root's fields (`p.title`, `title`),
+    /// or an item's under the name of what it is an item of (`t.title` in
+    /// `for t in p.next`, `next_title`).
+    fn name(&self, path: &str) -> String {
+        let (root, rest) = path.split_once('.').unwrap_or((path, ""));
+        let base = if root == self.s.root {
+            String::new()
+        } else {
+            match self.items.iter().rev().find(|(i, _)| i == root) {
+                Some((_, of)) => of.clone(),
+                None => panic!("Pebble binds paths from the sources, `{}`, or an item of theirs: {path}", self.s.root),
+            }
+        };
+        let rest = rest.replace('.', "_");
+        match (base.is_empty(), rest.is_empty()) {
+            (true, _) => rest,
+            (false, true) => base,
+            (false, false) => format!("{base}_{rest}"),
+        }
+    }
+
+    /// The source function a path names, as the generated code calls it.
+    fn src(&self, path: &str) -> String {
+        format!("{}::{}", self.s.sources, self.name(path))
+    }
+
+    /// Words: a source's, or a literal's.
+    fn words(&self, v: &Val<String>) -> String {
         match v {
-            Val::Is(t) => self.build.push(format!("ui.{set}({id}, {});", bytes_lit(t))),
-            Val::At(p) => self.draw.push(format!("ui.{set}({id}, {p}.as_bytes());")),
+            Val::Is(t) => format!("|_, out| {{ out.s({}); }}", bytes_lit(t)),
+            Val::At(p) => self.src(p),
         }
     }
 
@@ -164,42 +214,38 @@ impl Em<'_> {
             View::Empty => {}
             View::List(_) => self.stack(&flat(v), Axis::Vertical, None, f, align),
             View::Layout(l) => self.layout(l, f, align),
-            View::When { cond, yes, no } => self.branches(&format!("if {cond}"), yes, no, f, align),
-            View::WhenSome { opt, item, yes, no } => self.branches(&format!("if let Some({item}) = &{opt}"), yes, no, f, align),
+            View::When { cond, yes, no } => self.branches(cond, None, yes, no, f, align),
+            View::WhenSome { opt, item, yes, no } => self.branches(opt, Some(item), yes, no, f, align),
             View::Each { .. } => panic!("Pebble lays out a `for` only as a list's rows (a card_section of list_rows)"),
             View::Part(p) => self.part(p, f),
         }
     }
 
     /// An `if`'s two branches in one frame, each shown while it holds.
-    fn branches<M: Debug>(&mut self, head: &str, yes: &View<M>, no: &View<M>, f: &Rect, align: Align) {
-        let arm = |e: &mut Self, v: &View<M>| {
-            let (from, draw) = (e.next, std::mem::take(&mut e.draw));
+    /// An `if`'s two branches in one frame, each shown while its source
+    /// holds (an `if let`'s: while it is some, its item bound to it).
+    fn branches<M: Debug>(&mut self, cond: &str, item: Option<&str>, yes: &View<M>, no: &View<M>, f: &Rect, align: Align) {
+        let flag = self.src(cond);
+        let of = self.name(cond);
+        let arm = |e: &mut Self, v: &View<M>, item: Option<&str>| {
+            let from = e.next;
+            if let Some(i) = item {
+                e.items.push((i.to_string(), of.clone()));
+            }
             // Each at its own height, at the top of the frame both share.
             let at = Rect {
                 h: height(v).unwrap_or_else(|| f.h.clone()),
                 ..f.clone()
             };
             e.place(v, &at, align);
-            let ids = from..e.next;
-            (ids, std::mem::replace(&mut e.draw, draw))
+            if item.is_some() {
+                e.items.pop();
+            }
+            (from..e.next).map(|i| i.to_string()).collect::<Vec<_>>().join(", ")
         };
-        let (yes_ids, yes_draw) = arm(self, yes);
-        let (no_ids, no_draw) = arm(self, no);
-        let shown = |shown: &std::ops::Range<u8>, hidden: &std::ops::Range<u8>| {
-            let mut lines: Vec<String> = shown.clone().map(|i| format!("ui.hide({i}, false);")).collect();
-            lines.extend(hidden.clone().map(|i| format!("ui.hide({i}, true);")));
-            lines
-        };
-        self.draw.push(format!("{head} {{"));
-        for l in shown(&yes_ids, &no_ids).into_iter().chain(yes_draw) {
-            self.draw.push(format!("    {l}"));
-        }
-        self.draw.push("} else {".into());
-        for l in shown(&no_ids, &yes_ids).into_iter().chain(no_draw) {
-            self.draw.push(format!("    {l}"));
-        }
-        self.draw.push("}".into());
+        let yes = arm(self, yes, item);
+        let no = arm(self, no, None);
+        self.b.shown.push(format!("({flag}, &[{yes}], &[{no}])"));
     }
 
     fn layout<M: Debug>(&mut self, l: &Layout<M>, f: &Rect, align: Align) {
@@ -245,7 +291,8 @@ impl Em<'_> {
                 let ink = self.ink(&w.ink);
                 self.build
                     .push(format!("ui.text({id}, {}, FONT_{}, {ink}, Align::{at:?});", f.frame(), style(w.style)));
-                self.value(id, "set_text", &w.text);
+                let words = self.words(&w.text);
+                self.b.words.push(format!("({id}, {words})"));
             }
             Prim::Glyph { name, style: st, ink } => {
                 let id = self.id();
@@ -264,10 +311,16 @@ impl Em<'_> {
                 };
                 let ink = self.ink(ink);
                 self.build.push(format!("ui.glyph({id}, {}, {side}, {ink});", frame.frame()));
-                if let Val::Is(g) = name {
-                    self.glyphs.insert(g.clone());
+                match name {
+                    Val::Is(g) => {
+                        self.glyphs.insert(g.clone());
+                        self.build.push(format!("ui.set_glyph({id}, {});", bytes_lit(g)));
+                    }
+                    Val::At(p) => {
+                        let f = self.src(p);
+                        self.b.glyphs.push(format!("({id}, {f})"));
+                    }
                 }
-                self.value(id, "set_glyph", name);
             }
             p => panic!("Pebble has no {} yet (ui/docs/pebble.md)", p.kind()),
         }
@@ -352,10 +405,11 @@ impl Em<'_> {
                 let id = self.id();
                 let fill = self.tint(tint, "meter");
                 self.build.push(format!("ui.meter({id}, {}, {fill}, CONTAINER_HIGH);", f.frame()));
-                match fraction {
-                    Val::Is(x) => self.build.push(format!("ui.set_meter({id}, {x:?});")),
-                    Val::At(p) => self.draw.push(format!("ui.set_meter({id}, {p});")),
-                }
+                let f = match fraction {
+                    Val::Is(x) => format!("|_| {}", (x.clamp(0.0, 1.0) * 1000.0) as u16),
+                    Val::At(p) => self.src(p),
+                };
+                self.b.meters.push(format!("({id}, {f})"));
             }
             Part::Section(s) => self.section(s, f),
             Part::ActionBar { .. } => panic!("an action bar is a Pebble screen's whole: its root, not inside it"),
@@ -372,36 +426,28 @@ impl Em<'_> {
             f.frame()
         ));
         let header = match &s.title {
-            None => "b\"\"".to_string(),
-            Some(Val::Is(t)) => bytes_lit(t),
-            Some(Val::At(p)) => format!("{p}.as_bytes()"),
+            None => self.words(&Val::Is(String::new())),
+            Some(t) => self.words(t),
         };
-        let row = |r: &ark_app::view::ListRow<M>| {
-            let words = |v: Option<&Val<String>>| match v {
-                None => "&[][..]".to_string(),
-                Some(Val::Is(t)) => bytes_lit(t),
-                Some(Val::At(p)) => format!("{p}.as_bytes()"),
-            };
-            format!("({}, {})", words(Some(&r.title)), words(r.subtitle.as_ref()))
+        let View::Each { list, item, body } = &*s.rows else {
+            panic!("Pebble binds a list to a `for` over a source, its rows list_rows")
         };
-        let rows = match &*s.rows {
-            View::Each { list, item, body } => match &**body {
-                View::Part(Part::Row(r)) => format!("{list}.iter().map(|{item}| {})", row(r)),
-                _ => panic!("Pebble lists a `for` of list_rows only"),
-            },
-            v => {
-                let rows: Vec<String> = flat(v)
-                    .into_iter()
-                    .map(|v| match v {
-                        View::Part(Part::Row(r)) => row(r),
-                        _ => panic!("Pebble lists list_rows only"),
-                    })
-                    .collect();
-                format!("[{}].into_iter()", rows.join(", "))
-            }
+        let View::Part(Part::Row(r)) = &**body else {
+            panic!("Pebble lists a `for` of list_rows only")
         };
-        // Set at each draw, read or not: the toolkit sends only a change.
-        self.draw.push(format!("ui.set_rows({id}, {header}, {rows});"));
+        let of = self.name(list);
+        let count = self.src(list);
+        self.items.push((item.clone(), of));
+        let row = |e: &Self, v: Option<&Val<String>>| match v {
+            None => "|_, _, _| {}".to_string(),
+            Some(Val::Is(t)) => format!("|_, _, out| {{ out.s({}); }}", bytes_lit(t)),
+            Some(Val::At(p)) => e.src(p),
+        };
+        let (title, line) = (row(self, Some(&r.title)), row(self, r.subtitle.as_ref()));
+        self.items.pop();
+        self.b.lists.push(format!(
+            "({id}, List {{ header: {header}, count: {count}, title: {title}, line: {line} }})"
+        ));
     }
 
     fn ink(&self, i: &Ink) -> String {
@@ -465,7 +511,7 @@ impl Em<'_> {
             "// The layout is said once, in Rust; change it there.".to_string(),
             String::new(),
             "use ark_pebble::tokens::*;".to_string(),
-            "use ark_pebble::ui::{Align, Button, Frame, Glyph, ListStyle, Ui};".to_string(),
+            "use ark_pebble::ui::{Align, Bindings, Button, Frame, Glyph, List, ListStyle, Ui};".to_string(),
         ];
         out.extend(s.uses.iter().map(|u| format!("use {u};")));
         out.push(String::new());
@@ -485,27 +531,34 @@ impl Em<'_> {
         out.push("}".into());
         out.push(String::new());
         out.push(format!(
-            "/// What it shows of `{}`: the toolkit tells PebbleOS only what changed.",
-            s.root
+            "/// What each layer shows: the screen's sources ({}), read as PebbleOS draws.",
+            s.sources
         ));
-        out.push("#[allow(unused_variables)]".into());
-        out.push(format!("pub fn draw(ui: &mut Ui, {}: &{}) {{", s.root, s.record));
-        out.extend(self.draw.iter().map(|l| format!("    {l}")));
-        out.push("}".into());
+        out.push("pub static BINDINGS: Bindings = Bindings {".into());
+        for (name, rows) in [
+            ("words", &self.b.words),
+            ("meters", &self.b.meters),
+            ("glyphs", &self.b.glyphs),
+            ("actions", &self.b.actions),
+            ("lists", &self.b.lists),
+            ("shown", &self.b.shown),
+        ] {
+            if rows.is_empty() {
+                out.push(format!("    {name}: &[],"));
+            } else {
+                out.push(format!("    {name}: &["));
+                out.extend(rows.iter().map(|r| format!("        {r},")));
+                out.push("    ],".into());
+            }
+        }
+        out.push("};".into());
         out.push(String::new());
         out.push("/// What a button sends.".into());
-        out.push("#[allow(unused_variables)]".into());
-        out.push(format!(
-            "pub fn press({}: &{}, button: Button) -> Option<{}> {{",
-            s.root, s.record, self.ty
-        ));
-        out.push("    match button {".into());
+        out.push(format!("pub static PRESS: &[(Button, {})] = &[", self.ty));
         for (b, m) in &self.press {
-            out.push(format!("        {b} => Some({m}),"));
+            out.push(format!("    ({b}, {m}),"));
         }
-        out.push("        _ => None,".into());
-        out.push("    }".into());
-        out.push("}".into());
+        out.push("];".into());
         out.join("\n") + "\n"
     }
 }

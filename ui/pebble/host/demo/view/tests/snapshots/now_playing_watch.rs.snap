@@ -2,8 +2,8 @@
 // The layout is said once, in Rust; change it there.
 
 use ark_pebble::tokens::*;
-use ark_pebble::ui::{Align, Button, Frame, Glyph, ListStyle, Ui};
-use now_playing::face::{Act, Face};
+use ark_pebble::ui::{Align, Bindings, Button, Frame, Glyph, List, ListStyle, Ui};
+use now_playing::Act;
 
 /// The glyphs it draws: Lucide's, flattened (`ark_pebble::ui::Glyph`).
 pub static GLYPHS: &[Glyph] = &[
@@ -34,26 +34,32 @@ pub fn build(ui: &mut Ui) {
     ui.list(7, Frame { x: 0, y: (SIDE_CAPTION).max(LINE_CAPTION) + LINE_TITLE + LINE_SUBHEADLINE + PROGRESS_HEIGHT + LINE_BODY + SPACE_S + SPACE_S + SPACE_S, w: w, h: fill0 }, ListStyle { title: FONT_HEADLINE, title_line: LINE_HEADLINE, subtitle: FONT_FOOTNOTE, header: FONT_HEADER, ink: INK, quiet: QUIET, ground: BACKGROUND, inset: PAGE_MARGIN });
 }
 
-/// What it shows of `p`: the toolkit tells PebbleOS only what changed.
-#[allow(unused_variables)]
-pub fn draw(ui: &mut Ui, p: &Face) {
-    ui.set_action(Button::Select, p.play_glyph.as_bytes());
-    ui.set_glyph(0, p.link.as_bytes());
-    ui.set_text(1, p.status.as_bytes());
-    ui.set_text(2, p.title.as_bytes());
-    ui.set_text(3, p.artist.as_bytes());
-    ui.set_meter(4, p.progress);
-    ui.set_text(5, p.at.as_bytes());
-    ui.set_text(6, p.length.as_bytes());
-    ui.set_rows(7, p.queue.as_bytes(), p.next.iter().map(|t| (t.title.as_bytes(), t.line.as_bytes())));
-}
+/// What each layer shows: the screen's sources (crate::sources), read as PebbleOS draws.
+pub static BINDINGS: Bindings = Bindings {
+    words: &[
+        (1, crate::sources::status),
+        (2, crate::sources::title),
+        (3, crate::sources::artist),
+        (5, crate::sources::at),
+        (6, crate::sources::length),
+    ],
+    meters: &[
+        (4, crate::sources::progress),
+    ],
+    glyphs: &[
+        (0, crate::sources::link),
+    ],
+    actions: &[
+        (Button::Select, crate::sources::play_glyph),
+    ],
+    lists: &[
+        (7, List { header: crate::sources::queue, count: crate::sources::next, title: crate::sources::next_title, line: crate::sources::next_line }),
+    ],
+    shown: &[],
+};
 
 /// What a button sends.
-#[allow(unused_variables)]
-pub fn press(p: &Face, button: Button) -> Option<Act> {
-    match button {
-        Button::Select => Some(Act::Toggle),
-        Button::Down => Some(Act::Skip),
-        _ => None,
-    }
-}
+pub static PRESS: &[(Button, Act)] = &[
+    (Button::Select, Act::Toggle),
+    (Button::Down, Act::Skip),
+];

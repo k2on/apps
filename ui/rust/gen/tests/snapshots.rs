@@ -363,8 +363,8 @@ pub fn glance(p: &GlancePage) -> View<ListMsg> {
 const WATCH: ark_ui_gen::pebble::Screen = ark_ui_gen::pebble::Screen {
     source: "ui/rust/gen/tests/snapshots.rs",
     root: "p",
-    record: "GlancePage",
-    uses: &["things_app::{GlancePage, ListMsg}"],
+    sources: "things_app::glance",
+    uses: &["things_app::ListMsg"],
     accent: "blue",
     glyphs: &["play", "pause"],
 };
@@ -544,17 +544,20 @@ fn the_watch_is_its_layers_laid_out_by_tokens() {
     // The action bar first, its literal glyphs set once, its read one drawn.
     assert!(rs.contains("ui.action_bar(CONTAINER_HIGH, INK, ACTION_GLYPH);"), "{rs}");
     assert!(rs.contains("ui.set_action(Button::Up, \"skip-back\".as_bytes());"), "{rs}");
-    assert!(rs.contains("ui.set_action(Button::Select, p.play_glyph.as_bytes());"), "{rs}");
-    assert!(rs.contains("Button::Down => Some(ListMsg::Forward),"), "{rs}");
+    assert!(rs.contains("(Button::Select, things_app::glance::play_glyph),"), "{rs}");
+    assert!(rs.contains("(Button::Down, ListMsg::Forward),"), "{rs}");
     // Every glyph it can draw is painted from arkui's drawings.
     for g in ["\"music\"", "\"pause\"", "\"play\"", "\"skip-back\"", "\"skip-forward\""] {
         assert!(rs.contains(&format!("Glyph {{ name: {g}.as_bytes()")), "{g}: {rs}");
     }
-    // An `if` is both branches in one frame, each shown while it holds.
-    assert!(rs.contains("if p.playing {") && rs.contains("ui.hide("), "{rs}");
-    assert!(rs.contains("if let Some(q) = &p.next {"), "{rs}");
-    assert!(rs.contains("ui.set_rows("), "{rs}");
-    assert!(rs.contains("q.tracks.iter().map(|t| (t.title.as_bytes(), t.by.as_bytes()))"), "{rs}");
+    // An `if` is both branches in one frame, each shown while its source
+    // holds; an `if let`'s item's paths are its source's.
+    assert!(rs.contains("(things_app::glance::playing, &[3], &[4]),"), "{rs}");
+    assert!(rs.contains("(things_app::glance::next, &[7], &[]),"), "{rs}");
+    assert!(
+        rs.contains("(7, List { header: things_app::glance::next_heading, count: things_app::glance::next_tracks, title: things_app::glance::next_tracks_title, line: things_app::glance::next_tracks_by }),"),
+        "{rs}"
+    );
     // A glyph after a row's spacer at its end; the accent is the screen's.
     assert!(rs.contains("ui.glyph(6, Frame { x: PAGE_MARGIN + fill2 + fill2,"), "{rs}");
     assert!(rs.contains("BLUE_ACCENT"), "{rs}");

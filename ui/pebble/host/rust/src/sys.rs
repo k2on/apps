@@ -95,12 +95,9 @@ mod ffi {
         pub fn ark_ui_list(id: u8, f: *const Frame, style: *const CList);
         pub fn ark_ui_bitmap(side: i16, bits: *const u8, len: usize, ink: u8) -> u8;
         pub fn ark_ui_hide(id: u8, hidden: bool);
-        pub fn ark_ui_set_text(id: u8, s: *const u8, len: usize);
-        pub fn ark_ui_set_meter(id: u8, permille: u16);
         pub fn ark_ui_set_image(id: u8, bitmap: u8);
-        pub fn ark_ui_set_header(id: u8, s: *const u8, len: usize);
-        pub fn ark_ui_set_row(id: u8, i: u8, t: *const u8, tl: usize, s: *const u8, sl: usize);
         pub fn ark_ui_set_rows(id: u8, n: u8);
+        pub fn ark_ui_dirty(id: u8);
         pub fn ark_ui_set_action(button: u8, bitmap: u8);
         pub fn ark_rust_panicked();
     }
@@ -199,24 +196,12 @@ mod watch {
         unsafe { ffi::ark_ui_hide(id, hidden) }
     }
 
-    pub fn ui_set_text(id: u8, s: &[u8]) {
-        unsafe { ffi::ark_ui_set_text(id, s.as_ptr(), s.len()) }
-    }
-
-    pub fn ui_set_meter(id: u8, permille: u16) {
-        unsafe { ffi::ark_ui_set_meter(id, permille) }
+    pub fn ui_dirty(id: u8) {
+        unsafe { ffi::ark_ui_dirty(id) }
     }
 
     pub fn ui_set_image(id: u8, bitmap: u8) {
         unsafe { ffi::ark_ui_set_image(id, bitmap) }
-    }
-
-    pub fn ui_set_header(id: u8, s: &[u8]) {
-        unsafe { ffi::ark_ui_set_header(id, s.as_ptr(), s.len()) }
-    }
-
-    pub fn ui_set_row(id: u8, i: u8, title: &[u8], sub: &[u8]) {
-        unsafe { ffi::ark_ui_set_row(id, i, title.as_ptr(), title.len(), sub.as_ptr(), sub.len()) }
     }
 
     pub fn ui_set_rows(id: u8, n: u8) {
@@ -376,11 +361,8 @@ mod stand_in {
         0
     }
     pub fn ui_hide(_: u8, _: bool) {}
-    pub fn ui_set_text(_: u8, _: &[u8]) {}
-    pub fn ui_set_meter(_: u8, _: u16) {}
+    pub fn ui_dirty(_: u8) {}
     pub fn ui_set_image(_: u8, _: u8) {}
-    pub fn ui_set_header(_: u8, _: &[u8]) {}
-    pub fn ui_set_row(_: u8, _: u8, _: &[u8], _: &[u8]) {}
     pub fn ui_set_rows(_: u8, _: u8) {}
     pub fn ui_set_action(_: u8, _: u8) {}
     pub fn heap() -> (usize, usize) {

@@ -76,6 +76,71 @@ impl From<&'static str> for Val<String> {
     }
 }
 
+/// Words a view shows: a literal, or a template whose holes are read
+/// apart (`text!`), never a `String` worked out elsewhere and handed in.
+/// So what a view shows is what it read, each hole a source an emitter
+/// can bind: the rule for every view, not the watch's alone (logging keeps
+/// `format!`).
+///
+/// A literal converts (`"Up Next".into()`); there is no `From<String>`.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Text {
+    /// Its words, each hole `{}`.
+    pub template: &'static str,
+    /// What fills each hole, in order.
+    pub holes: Vec<String>,
+}
+
+impl Text {
+    /// A template and what fills its holes: what `text!` makes.
+    pub fn template(template: &'static str, holes: Vec<String>) -> Text {
+        Text { template, holes }
+    }
+
+    /// The words, the holes filled.
+    pub fn words(&self) -> String {
+        let mut out = String::new();
+        let mut holes = self.holes.iter();
+        let mut parts = self.template.split("{}");
+        if let Some(first) = parts.next() {
+            out.push_str(first);
+        }
+        for part in parts {
+            out.push_str(holes.next().map_or("", String::as_str));
+            out.push_str(part);
+        }
+        out
+    }
+}
+
+impl From<&'static str> for Text {
+    fn from(s: &'static str) -> Text {
+        Text::template(s, Vec::new())
+    }
+}
+
+/// Text read by a view is words a part takes: the same path, or the words.
+impl From<Val<Text>> for Val<String> {
+    fn from(v: Val<Text>) -> Val<String> {
+        match v {
+            Val::Is(t) => Val::Is(t.words()),
+            Val::At(p) => Val::At(p),
+        }
+    }
+}
+
+/// A [`Text`] template, its holes filled by what follows it:
+/// `text!("{}, {} Pending", status, pending)`. Holes are `{}` alone.
+#[macro_export]
+macro_rules! text {
+    ($t:literal) => {
+        $crate::view::Text::from($t)
+    };
+    ($t:literal, $($hole:expr),+ $(,)?) => {
+        $crate::view::Text::template($t, ::std::vec![$(::std::string::ToString::to_string(&$hole)),+])
+    };
+}
+
 impl<T: Clone> Val<T> {
     /// The value; `or` while it is only a path.
     pub fn or(&self, or: T) -> T {

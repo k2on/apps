@@ -15,13 +15,11 @@
 //!   link ([`ark_kernel::Refusal::OFFLINE`]).
 //! - **The query** a watch subscribes to ([`NEXT`]): the queue's first
 //!   [`HELD`] rows, of which its screen shows the first few.
-//! - **The screen's record** ([`face`]): what the watch's `#[view]` reads.
+//! - **What the screen's buttons send** ([`Act`]).
 
 #![no_std]
 
 extern crate alloc;
-
-pub mod face;
 
 use alloc::vec::Vec;
 use core::ops::Bound;
@@ -42,6 +40,15 @@ pub const NEXT: QueryId = QueryId(0);
 pub const HELD: usize = 5;
 /// What `Pop` refuses with: the track is no longer queued.
 pub const GONE: Refusal = Refusal(256);
+
+/// What the screen's buttons send.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Act {
+    /// Play or pause.
+    Toggle,
+    /// The next in the queue, now.
+    Skip,
+}
 
 /// A track: what a row of the queue holds.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]

@@ -83,6 +83,12 @@ impl<T: 'static> Cell<T> {
 }
 
 impl Watch {
+    /// The `n`th source a node makes, as [`Cell::at`]: a screen's sources
+    /// name its watches so.
+    pub const fn at(n: u32) -> Watch {
+        Watch(n)
+    }
+
     /// The answer, as `db` reads it (recorded, when `db` records).
     pub fn get<'a>(&self, db: &'a dyn Read) -> Option<&'a Live> {
         db.sources(self.0)?.0.live(*self)

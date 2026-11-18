@@ -8,7 +8,7 @@ playing (`ui/pebble/host/demo/view`, step 5 of `docs/north-star.md`).
 
 ```rust
 #[view]
-pub fn screen(p: &Face) -> View<Act> {
+pub fn screen(p: &Sources) -> View<Act> {
     action_bar(
         vstack((
             vstack((
@@ -48,22 +48,42 @@ closures) and its layout and diffing linked into the app. Written at build
 time there is one view definition, the layout is worked out once, and the
 watch links only the layers it uses.
 
-What it writes, for a view of a record `Face` sending `Act`:
+What it writes, for a view of `p: &Sources` sending `Act`, where the
+`pebble::Screen` names the module of source functions (`sources`):
 
 - `GLYPHS`: each glyph the view names, and those its paths may name (the
   `glyphs` of its `pebble::Screen`), arkui's Lucide drawings flattened into
   line segments in eighths of their 24 units;
 - `build(ui)`: each layer made once, at a frame that is an expression of
-  the room the window gives and the tokens, never a number;
-- `draw(ui, p)`: each layer handed its value from the record; an `if`'s
-  branches shown and hidden;
-- `press(p, button)`: the message a button sends.
+  the room the window gives and the tokens, never a number; a literal's
+  glyph or label set here;
+- `BINDINGS`: a table, in rodata, binding each layer the view reads into
+  to a function of the node named by its path (`p.title` is
+  `sources::title`, a `for t in p.next`'s `t.title` is
+  `sources::next_title`, called with the row), and each `if`'s branches to
+  the flag that shows them;
+- `PRESS`: the message a button sends.
 
-At run time what each layer shows is kept once, by the C shim
-(`c/ark_pebble.c`), in the buffers PebbleOS draws it from: a value the
-same as the one there marks nothing dirty, so PebbleOS redraws only the
-layers that changed, and `ark_pebble::ui::Ui` keeps no copy of its own. It
-paints a glyph into a 1-bit bitmap the first time it is drawn at a size
+`Sources` is the view's declaration, not a value the watch makes: the
+recorder walks it for the snapshots and the phones, which keep drawing
+from it until the watch's way reaches them (`docs/north-star.md`, step
+10). On the watch nothing is copied out of the node. `Ui::bind` gives each
+binding a kernel reader; the host's `Node::settle` hands `Ui` (the sink)
+the readers whose recorded reads changed, and their layers are marked
+dirty; as PebbleOS draws one, the shim asks Rust for its words
+(`ark_pull`, `ark_pull_meter`), and the source runs through the node,
+its reads recorded against the layer again. A layer is drawn only when
+what it read changed, and its words live only on the stack while it is
+drawn. Which reads a layer depends on is recorded, not worked out by the
+emitter: a source is a function, and only running it says what it reads.
+
+Text in a view is `Text`, never `String`: a literal converts, and `text!`
+builds a template whose holes are kept apart, so a toolkit that pulls
+(Pebble) or tracks (the phones, later) can tell the words from what fills
+them. There is no `From<String>`; logging keeps `format!`. The rule is
+every view's (`ark_app::view::Text`).
+
+It paints a glyph into a 1-bit bitmap the first time it is drawn at a size
 and colour. The app has no resources.
 
 ## What It Supports
@@ -74,8 +94,8 @@ and colour. The app has no resources.
 | `hstack` | its glyphs at their side, its words and spacers sharing the rest; words before its first spacer at the leading edge, after its last at the trailing edge, between them centred; each thing at the row's `align` across it |
 | `zstack` | its content in one frame |
 | `spacer`, `spacer_min` | what is left along its stack (the least is not kept yet) |
-| `text` | a `TextLayer`: Gothic at its style's size (`FONT_*`), its ink, `lines(n)` lines of it tall (one unless it says), cut short with an ellipsis; `.centred()`; leading or trailing by its stack. An empty one keeps its line |
-| `glyph` | a `BitmapLayer` of the glyph painted at its style's size (`SIDE_*`), stroked, in its ink; a name read from the record must be among the screen's `glyphs` |
+| `text` | a layer drawn with `graphics_draw_text`: Gothic at its style's size (`FONT_*`), its ink, `lines(n)` lines of it tall (one unless it says), cut short with an ellipsis; `.centred()`; leading or trailing by its stack. An empty one keeps its line |
+| `glyph` | a `BitmapLayer` of the glyph painted at its style's size (`SIDE_*`), stroked, in its ink; a name read from a source must be among the screen's `glyphs` |
 | `meter` | a drawn layer: a bar `PROGRESS_HEIGHT` tall over a `TRACK_HEIGHT` track (`CONTAINER_HIGH`), in its tint (`neutral` the positive's) |
 | `card_section` of `list_row`s | a `MenuLayer`: its heading (`FONT_HEADER`, quiet) over rows of a title (`FONT_HEADLINE`) over the line under it (`FONT_FOOTNOTE`, quiet), `ROW_HEIGHT` each, inset by the page margin; a `for` of rows, or fixed rows |
 | `action_bar(content).up/select/down` | the `ActionBarLayer` on `CONTAINER_HIGH`, its glyphs `ACTION_GLYPH` a side, solid (a closed shape filled, as the system's are); the content laid out in what is left. A screen's root only |
@@ -87,7 +107,7 @@ and colour. The app has no resources.
 Not yet, each a panic as the screen is written, so the watch's build fails
 rather than its screen: `scroll`, `image`, `swatch`, `grid`, a `for`
 outside a list, `.width`, `.side`, `.square`, `.max_width`, `.bleed`, a
-tint read from the record, a list row's tap, and every other part (pages,
+tint read from a source, a list row's tap, and every other part (pages,
 sheets, forms, fields, the scrubber, the shell). A `for` of more rows than
 the shim keeps (six) shows the first six.
 

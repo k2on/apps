@@ -5,10 +5,14 @@
 //! shim (`c/ark_pebble.c`): a `TextLayer`, a drawn meter, a `BitmapLayer`
 //! of a glyph, a `MenuLayer` for a list, the `ActionBarLayer` — at frames
 //! worked out from the window it is given and the theme's tokens
-//! ([`crate::tokens`]), and a `draw` that hands each one its value from
-//! the record. The shim keeps what each layer shows, once, in the buffers
-//! PebbleOS draws from, and marks a layer dirty only when its value
-//! differs, so only those layers are redrawn; [`Ui`] keeps nothing of it.
+//! ([`crate::tokens`]), and its [`Bindings`]: a table, data, of what each
+//! layer shows, a source function of the screen's over the node's rows and
+//! cells. [`Ui`] makes a reader of the node's for each binding and is the
+//! sink the node's settle tells ([`ark_kernel::Sink`]): a layer whose
+//! reads changed is marked dirty, and PebbleOS draws it again, asking for
+//! its words as it draws (`ark_pull`), so nothing it shows is held
+//! anywhere but the rows and cells it is read from. A glyph, an action's
+//! glyph and a list's count are read when their readers are told, and set.
 //!
 //! Glyphs are arkui's (Lucide's drawings), flattened into line segments
 //! by the emitter ([`Glyph`]) and painted here into 1-bit bitmaps at the
@@ -17,7 +21,10 @@
 
 use alloc::vec::Vec;
 
+use ark_kernel::{Node, Read, Reader, Sink, Store};
+
 use crate::sys;
+use crate::text::Line;
 use crate::tokens::{GLYPH_STROKE, HEADER_HEIGHT, ROW_HEIGHT, TEXT_LIFT};
 
 /// One of Gothic's sizes, regular or bold (`tokens::FONT_*`).
@@ -80,6 +87,50 @@ pub struct ListStyle {
     pub inset: i16,
 }
 
+/// A source's words, written into the line a layer is drawn from.
+pub type Words = fn(&dyn Read, &mut Line);
+/// A source's fraction, in thousandths.
+pub type Fraction = fn(&dyn Read) -> u16;
+/// A source's glyph, by its name (one of the screen's).
+pub type Name = fn(&dyn Read) -> &'static [u8];
+/// How many rows a list's source holds.
+pub type Count = fn(&dyn Read) -> usize;
+/// The words of a list's row `i`.
+pub type RowWords = fn(&dyn Read, usize, &mut Line);
+/// Whether an `if`'s first branch is the one shown.
+pub type Flag = fn(&dyn Read) -> bool;
+
+/// A list's bindings: its heading, its count and each row's two lines.
+pub struct List {
+    pub header: Words,
+    pub count: Count,
+    pub title: RowWords,
+    pub line: RowWords,
+}
+
+/// What a screen's layers show, by their ids: the emitter writes it from
+/// the view's paths, a table of the screen's source functions.
+pub struct Bindings {
+    pub words: &'static [(u8, Words)],
+    pub meters: &'static [(u8, Fraction)],
+    pub glyphs: &'static [(u8, Name)],
+    pub actions: &'static [(Button, Name)],
+    pub lists: &'static [(u8, List)],
+    /// Each `if`: its source, and its branches' layers.
+    pub shown: &'static [(Flag, &'static [u8], &'static [u8])],
+}
+
+/// What a reader is bound to.
+#[derive(Clone, Copy)]
+enum Bound {
+    Words(u8, Words),
+    Meter(u8, Fraction),
+    Glyph(u8, Name),
+    Action(Button, Name),
+    List(u8, &'static List),
+    Shown(Flag, &'static [u8], &'static [u8]),
+}
+
 /// A glyph painted: which, at what side, how, in what colour, and the
 /// shim's bitmap.
 struct Painted {
@@ -103,6 +154,14 @@ pub struct Ui {
     /// The action bar's glyphs' side and colour, once there is one.
     bar: Option<(i16, u8)>,
     room: (i16, i16),
+    /// Each binding's reader, in the order made, from the first's.
+    bound: Vec<Bound>,
+    first: u32,
+    /// A reader for what a list's rows read as they are drawn: its count's
+    /// reads say when they change.
+    scratch: Option<Reader>,
+    /// The readers told since they were last read.
+    told: Vec<u32>,
 }
 
 impl Ui {
@@ -117,7 +176,105 @@ impl Ui {
             actions: [NONE; 4],
             bar: None,
             room: sys::ui_bounds(),
+            bound: Vec::new(),
+            first: 0,
+            scratch: None,
+            told: Vec::new(),
         }
+    }
+
+    /// Binds the screen's layers to its sources, a reader of `node`'s
+    /// each, all read once now.
+    pub fn bind<B: ark_kernel::Body + Clone + 'static, S: Store>(&mut self, node: &mut Node<B, S>, b: &'static Bindings) {
+        let mut bound: Vec<Bound> = Vec::new();
+        bound.extend(b.words.iter().map(|&(id, f)| Bound::Words(id, f)));
+        bound.extend(b.meters.iter().map(|&(id, f)| Bound::Meter(id, f)));
+        bound.extend(b.glyphs.iter().map(|&(id, f)| Bound::Glyph(id, f)));
+        bound.extend(b.actions.iter().map(|&(button, f)| Bound::Action(button, f)));
+        bound.extend(b.lists.iter().map(|(id, l)| Bound::List(*id, l)));
+        bound.extend(b.shown.iter().map(|&(f, yes, no)| Bound::Shown(f, yes, no)));
+        for (i, _) in bound.iter().enumerate() {
+            let r = node.reader();
+            if i == 0 {
+                self.first = r.0;
+            }
+        }
+        self.scratch = Some(node.reader());
+        self.told = (0..bound.len() as u32).collect();
+        self.bound = bound;
+        self.show(node);
+    }
+
+    /// Sets what its told readers that are not drawn show (a glyph, an
+    /// action's glyph, a list's count) and marks the rest dirty, for
+    /// PebbleOS to draw them again: after each settle.
+    pub fn show<B: ark_kernel::Body + Clone + 'static, S: Store>(&mut self, node: &mut Node<B, S>) {
+        for i in core::mem::take(&mut self.told) {
+            let r = Reader(self.first + i);
+            match self.bound[i as usize] {
+                Bound::Words(id, _) | Bound::Meter(id, _) => sys::ui_dirty(id),
+                Bound::Glyph(id, f) => {
+                    let mut name: &[u8] = &[];
+                    node.record(r, &mut |db| name = f(db));
+                    self.set_glyph(id, name);
+                }
+                Bound::Action(button, f) => {
+                    let mut name: &[u8] = &[];
+                    node.record(r, &mut |db| name = f(db));
+                    self.set_action(button, name);
+                }
+                Bound::List(id, l) => {
+                    let mut n = 0;
+                    node.record(r, &mut |db| n = (l.count)(db));
+                    sys::ui_set_rows(id, n.min(usize::from(u8::MAX)) as u8);
+                }
+                Bound::Shown(f, yes, no) => {
+                    let mut on = false;
+                    node.record(r, &mut |db| on = f(db));
+                    for &id in yes {
+                        sys::ui_hide(id, !on);
+                    }
+                    for &id in no {
+                        sys::ui_hide(id, on);
+                    }
+                }
+            }
+        }
+    }
+
+    /// What layer `id` shows as PebbleOS draws it: `part` 0 its words, 1 a
+    /// list's heading, 2 + 2i a row's title, 3 + 2i the line under it; its
+    /// reads recorded against its reader.
+    pub fn pull<B: ark_kernel::Body + Clone + 'static, S: Store>(&self, node: &mut Node<B, S>, id: u8, part: u8, out: &mut Line) {
+        for (i, b) in self.bound.iter().enumerate() {
+            match *b {
+                Bound::Words(at, f) if at == id && part == 0 => return node.record(Reader(self.first + i as u32), &mut |db| f(db, out)),
+                Bound::List(at, l) if at == id => {
+                    let Some(r) = self.scratch else { return };
+                    let row = usize::from(part.saturating_sub(2) / 2);
+                    return node.record(r, &mut |db| match part {
+                        1 => (l.header)(db, out),
+                        p if p % 2 == 0 => (l.title)(db, row, out),
+                        _ => (l.line)(db, row, out),
+                    });
+                }
+                _ => {}
+            }
+        }
+    }
+
+    /// A meter's fraction, in thousandths, as PebbleOS draws it.
+    pub fn fraction<B: ark_kernel::Body + Clone + 'static, S: Store>(&self, node: &mut Node<B, S>, id: u8) -> u16 {
+        for (i, b) in self.bound.iter().enumerate() {
+            if let Bound::Meter(at, f) = *b {
+                if at == id {
+                    let mut v = 0;
+                    node.record(Reader(self.first + i as u32), &mut |db| v = f(db));
+                    return v;
+                }
+            }
+        }
+        0
     }
 
     /// The width and height the screen's content is laid out in: the
@@ -173,32 +330,12 @@ impl Ui {
         sys::ui_hide(id, hidden);
     }
 
-    pub fn set_text(&mut self, id: u8, s: &[u8]) {
-        sys::ui_set_text(id, s);
-    }
-
-    /// The meter at `fraction` of the way, 0 to 1.
-    pub fn set_meter(&mut self, id: u8, fraction: f64) {
-        sys::ui_set_meter(id, (fraction.clamp(0.0, 1.0) * 1000.0) as u16);
-    }
-
     /// The glyph called `name` (none of the screen's: nothing).
     pub fn set_glyph(&mut self, id: u8, name: &[u8]) {
         self.slot(id);
         let (side, ink, solid) = self.glyph_style[usize::from(id)];
         let bitmap = self.bitmap(name, side, ink, solid);
         sys::ui_set_image(id, bitmap);
-    }
-
-    /// The list's heading and rows.
-    pub fn set_rows<'a>(&mut self, id: u8, header: &[u8], rows: impl Iterator<Item = (&'a [u8], &'a [u8])>) {
-        sys::ui_set_header(id, header);
-        let mut n = 0u8;
-        for (t, s) in rows {
-            sys::ui_set_row(id, n, t, s);
-            n = n.saturating_add(1);
-        }
-        sys::ui_set_rows(id, n);
     }
 
     /// The action bar's glyph for `button`, solid as the system's are
@@ -237,6 +374,16 @@ impl Ui {
             });
         }
         bitmap
+    }
+}
+
+/// The node's settle tells the screen: each told reader is kept, to be
+/// shown ([`Ui::show`]) once the settle is done.
+impl Sink for Ui {
+    fn dirty(&mut self, r: Reader) {
+        if let Some(i) = r.0.checked_sub(self.first).filter(|&i| (i as usize) < self.bound.len()) {
+            self.told.push(i);
+        }
     }
 }
 

@@ -537,6 +537,13 @@ impl<B: Body + Clone + 'static, S: Store> Node<B, S> {
         out
     }
 
+    /// [`Node::read`] for a caller with many kinds of reader (a toolkit's
+    /// sink): one copy linked, whatever `f` is.
+    #[inline(never)]
+    pub fn record(&mut self, reader: Reader, f: &mut dyn FnMut(&dyn Read)) {
+        self.read(reader, |db| f(db));
+    }
+
     /// A cell's value now, unrecorded.
     pub fn get<T: 'static>(&self, c: Cell<T>) -> Option<&T> {
         self.sources.slots.get(c.0, false)

@@ -80,10 +80,10 @@ uint32_t ark_random(void) {
 //
 // arkui's Pebble toolkit (ui/docs/pebble.md): the layers a screen generated
 // from a `#[view]` is made of, each made by id at the frame Rust worked out
-// and given its value by id after. What each shows is kept here, once, in
-// the buffers PebbleOS draws from, and a layer is marked dirty only when a
-// value differs from it. Glyphs come painted, as bits, and are made 1-bit
-// bitmaps here in the colour asked.
+// and drawn by asking Rust, as PebbleOS draws it, for what it shows
+// (`ark_pull`): nothing of it is kept here. Rust marks a layer dirty when
+// what it read changed (`ark_ui_dirty`). Glyphs come painted, as bits, and
+// are made 1-bit bitmaps here in the colour asked.
 
 enum { ARK_LAYERS = 16, TEXT_MAX = 48, ROW_MAX = 6, BITMAP_MAX = 12 };
 enum { KIND_NONE, KIND_TEXT, KIND_METER, KIND_RECT, KIND_IMAGE, KIND_LIST };
@@ -99,10 +99,26 @@ typedef struct {
 } ArkListStyle;
 
 typedef struct {
-  uint8_t fill, track;
+  uint8_t id, fill, track;
   int16_t track_h, corner;
-  uint16_t permille;
 } Meter;
+
+// Words drawn from what Rust says at each draw.
+typedef struct {
+  GFont font;
+  uint8_t id, ink, align;
+} Words;
+
+// What a layer shows, asked of Rust as it is drawn: part 0 a layer's
+// words, 1 a list's heading, 2 + 2i a row's title, 3 + 2i the line under
+// it; a meter's fraction in thousandths.
+extern size_t ark_pull(uint8_t id, uint8_t part, uint8_t *buf, size_t cap);
+extern uint16_t ark_pull_meter(uint8_t id);
+
+static void pull(uint8_t id, uint8_t part, char *buf) {
+  size_t n = ark_pull(id, part, (uint8_t *)buf, TEXT_MAX - 1);
+  buf[n < TEXT_MAX ? n : TEXT_MAX - 1] = 0;
+}
 
 typedef struct {
   uint8_t color;
@@ -111,20 +127,16 @@ typedef struct {
 
 typedef struct {
   ArkListStyle style;
-  char header[TEXT_MAX];
-  char rows[ROW_MAX][2][TEXT_MAX];
+  uint8_t id;
   uint16_t count;
-  bool changed;
 } List;
 
 static Window *s_window;
 static uint8_t s_kind[ARK_LAYERS];
 static Layer *s_layer[ARK_LAYERS];
-static TextLayer *s_text[ARK_LAYERS];
 static BitmapLayer *s_image[ARK_LAYERS];
 static MenuLayer *s_menu[ARK_LAYERS];
 static List *s_list[ARK_LAYERS];
-static char s_words[ARK_LAYERS][TEXT_MAX];
 static ActionBarLayer *s_bar;
 static GBitmap *s_bitmaps[BITMAP_MAX];
 static GColor s_palettes[BITMAP_MAX][2];
@@ -136,16 +148,6 @@ static GColor color(uint8_t argb) {
 
 static GRect rect(const ArkFrame *f) {
   return GRect(f->x, f->y, f->w, f->h);
-}
-
-// Words into a layer's buffer, cut to fit: whether they differ from what
-// it held.
-static bool copy_text(char *dst, const uint8_t *src, size_t len) {
-  if (len >= TEXT_MAX) len = TEXT_MAX - 1;
-  if (dst[len] == 0 && memcmp(dst, src, len) == 0) return false;
-  memcpy(dst, src, len);
-  dst[len] = 0;
-  return true;
 }
 
 // Gothic at a size the theme's tokens name (ui/theme.toml's pebble-type-*).
@@ -201,18 +203,21 @@ int16_t ark_ui_action_bar(uint8_t ground) {
   return ACTION_BAR_WIDTH;
 }
 
+static void words_update(Layer *layer, GContext *ctx) {
+  Words *w = layer_get_data(layer);
+  char buf[TEXT_MAX];
+  pull(w->id, 0, buf);
+  graphics_context_set_text_color(ctx, color(w->ink));
+  graphics_draw_text(ctx, buf, w->font, layer_get_bounds(layer), GTextOverflowModeTrailingEllipsis,
+                     w->align == 1 ? GTextAlignmentCenter : w->align == 2 ? GTextAlignmentRight : GTextAlignmentLeft, NULL);
+}
+
 void ark_ui_text(uint8_t id, const ArkFrame *f, uint8_t size, bool bold, uint8_t ink, uint8_t align) {
   if (!fresh(id)) return;
-  TextLayer *t = text_layer_create(rect(f));
-  text_layer_set_background_color(t, GColorClear);
-  text_layer_set_text_color(t, color(ink));
-  text_layer_set_font(t, gothic(size, bold));
-  text_layer_set_overflow_mode(t, GTextOverflowModeTrailingEllipsis);
-  text_layer_set_text_alignment(t, align == 1 ? GTextAlignmentCenter : align == 2 ? GTextAlignmentRight : GTextAlignmentLeft);
-  s_words[id][0] = 0;
-  text_layer_set_text(t, s_words[id]);
-  s_text[id] = t;
-  place(id, KIND_TEXT, text_layer_get_layer(t));
+  Layer *l = layer_create_with_data(rect(f), sizeof(Words));
+  *(Words *)layer_get_data(l) = (Words){ .font = gothic(size, bold), .id = id, .ink = ink, .align = align };
+  layer_set_update_proc(l, words_update);
+  place(id, KIND_TEXT, l);
 }
 
 static void meter_update(Layer *layer, GContext *ctx) {
@@ -221,13 +226,15 @@ static void meter_update(Layer *layer, GContext *ctx) {
   graphics_context_set_fill_color(ctx, color(m->track));
   graphics_fill_rect(ctx, GRect(0, (b.size.h - m->track_h) / 2, b.size.w, m->track_h), 0, GCornerNone);
   graphics_context_set_fill_color(ctx, color(m->fill));
-  graphics_fill_rect(ctx, GRect(0, 0, b.size.w * m->permille / 1000, b.size.h), m->corner, GCornersAll);
+  uint16_t permille = ark_pull_meter(m->id);
+  if (permille > 1000) permille = 1000;
+  graphics_fill_rect(ctx, GRect(0, 0, b.size.w * permille / 1000, b.size.h), m->corner, GCornersAll);
 }
 
 void ark_ui_meter(uint8_t id, const ArkFrame *f, uint8_t fill, uint8_t track, int16_t track_h, int16_t corner) {
   if (!fresh(id)) return;
   Layer *l = layer_create_with_data(rect(f), sizeof(Meter));
-  *(Meter *)layer_get_data(l) = (Meter){ .fill = fill, .track = track, .track_h = track_h, .corner = corner };
+  *(Meter *)layer_get_data(l) = (Meter){ .id = id, .fill = fill, .track = track, .track_h = track_h, .corner = corner };
   layer_set_update_proc(l, meter_update);
   place(id, KIND_METER, l);
 }
@@ -268,16 +275,17 @@ static int16_t list_row_height(MenuLayer *menu, MenuIndex *index, void *ctx) {
 }
 
 static int16_t list_header_height(MenuLayer *menu, uint16_t section, void *ctx) {
-  List *l = ctx;
-  return l->header[0] ? l->style.header_height : 0;
+  return ((List *)ctx)->style.header_height;
 }
 
 static void list_draw_header(GContext *ctx, const Layer *cell, uint16_t section, void *data) {
   List *l = data;
   GRect b = layer_get_bounds(cell);
   const ArkListStyle *s = &l->style;
+  char buf[TEXT_MAX];
+  pull(l->id, 1, buf);
   graphics_context_set_text_color(ctx, color(s->quiet));
-  graphics_draw_text(ctx, l->header, gothic(s->header_size, s->header_bold),
+  graphics_draw_text(ctx, buf, gothic(s->header_size, s->header_bold),
                      GRect(s->inset, -s->lift, b.size.w - 2 * s->inset, b.size.h + s->lift),
                      GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, NULL);
 }
@@ -288,12 +296,15 @@ static void list_draw_row(GContext *ctx, const Layer *cell, MenuIndex *index, vo
   GRect b = layer_get_bounds(cell);
   const ArkListStyle *s = &l->style;
   int16_t w = b.size.w - 2 * s->inset;
+  char buf[TEXT_MAX];
+  pull(l->id, 2 + 2 * index->row, buf);
   graphics_context_set_text_color(ctx, color(s->ink));
-  graphics_draw_text(ctx, l->rows[index->row][0], gothic(s->title_size, s->title_bold),
+  graphics_draw_text(ctx, buf, gothic(s->title_size, s->title_bold),
                      GRect(s->inset, -s->lift, w, s->title_line), GTextOverflowModeTrailingEllipsis,
                      GTextAlignmentLeft, NULL);
+  pull(l->id, 3 + 2 * index->row, buf);
   graphics_context_set_text_color(ctx, color(s->quiet));
-  graphics_draw_text(ctx, l->rows[index->row][1], gothic(s->sub_size, s->sub_bold),
+  graphics_draw_text(ctx, buf, gothic(s->sub_size, s->sub_bold),
                      GRect(s->inset, s->title_line - 2 * s->lift, w, b.size.h - s->title_line + 2 * s->lift),
                      GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, NULL);
 }
@@ -304,6 +315,7 @@ void ark_ui_list(uint8_t id, const ArkFrame *f, const ArkListStyle *style) {
   if (!l) return;
   memset(l, 0, sizeof(List));
   l->style = *style;
+  l->id = id;
   MenuLayer *m = menu_layer_create(rect(f));
   menu_layer_set_callbacks(m, l, (MenuLayerCallbacks){
     .get_num_sections = list_sections,
@@ -344,18 +356,9 @@ void ark_ui_hide(uint8_t id, bool hidden) {
   if (id < ARK_LAYERS && s_layer[id] && layer_get_hidden(s_layer[id]) != hidden) layer_set_hidden(s_layer[id], hidden);
 }
 
-void ark_ui_set_text(uint8_t id, const uint8_t *s, size_t len) {
-  if (id >= ARK_LAYERS || s_kind[id] != KIND_TEXT) return;
-  if (copy_text(s_words[id], s, len)) text_layer_set_text(s_text[id], s_words[id]);
-}
-
-void ark_ui_set_meter(uint8_t id, uint16_t permille) {
-  if (id >= ARK_LAYERS || s_kind[id] != KIND_METER) return;
-  Meter *m = layer_get_data(s_layer[id]);
-  if (permille > 1000) permille = 1000;
-  if (m->permille == permille) return;
-  m->permille = permille;
-  layer_mark_dirty(s_layer[id]);
+// What a layer shows changed: it is drawn again, asking Rust.
+void ark_ui_dirty(uint8_t id) {
+  if (id < ARK_LAYERS && s_layer[id]) layer_mark_dirty(s_layer[id]);
 }
 
 void ark_ui_set_image(uint8_t id, uint8_t bitmap) {
@@ -369,25 +372,15 @@ static List *list_of(uint8_t id) {
   return s_list[id];
 }
 
-void ark_ui_set_header(uint8_t id, const uint8_t *s, size_t len) {
-  List *l = list_of(id);
-  if (l && copy_text(l->header, s, len)) l->changed = true;
-}
-
-void ark_ui_set_row(uint8_t id, uint8_t i, const uint8_t *t, size_t tl, const uint8_t *s, size_t sl) {
-  List *l = list_of(id);
-  if (!l || i >= ROW_MAX) return;
-  if (copy_text(l->rows[i][0], t, tl)) l->changed = true;
-  if (copy_text(l->rows[i][1], s, sl)) l->changed = true;
-}
-
 void ark_ui_set_rows(uint8_t id, uint8_t n) {
   List *l = list_of(id);
   if (!l) return;
   if (n > ROW_MAX) n = ROW_MAX;
-  if (l->count == n && !l->changed) return;
+  if (l->count == n) {
+    layer_mark_dirty(s_layer[id]);
+    return;
+  }
   l->count = n;
-  l->changed = false;
   menu_layer_reload_data(s_menu[id]);
 }
 
@@ -410,12 +403,12 @@ static void window_unload(Window *window) {
   if (s_bar) action_bar_layer_destroy(s_bar);
   for (int i = 0; i < ARK_LAYERS; i++) {
     switch (s_kind[i]) {
-      case KIND_TEXT: text_layer_destroy(s_text[i]); break;
       case KIND_IMAGE: bitmap_layer_destroy(s_image[i]); break;
       case KIND_LIST:
         menu_layer_destroy(s_menu[i]);
         free(s_list[i]);
         break;
+      case KIND_TEXT:
       case KIND_METER:
       case KIND_RECT: layer_destroy(s_layer[i]); break;
       default: break;

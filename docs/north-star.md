@@ -479,11 +479,16 @@ a `List`; an `if` is a leaf's visibility bound to a `bool`. The bindings
 are written as tables, data in rodata, not as draw code per screen, so a
 second screen costs its table and not another copy of the code.
 
+A view's text is `Text`, never `String`: a literal converts, and `text!`
+builds a template whose holes are bindings of their own, so a sink can
+tell the words from what fills them. There is no `From<String>`; logging
+keeps `format!`. The rule is every view's, on every toolkit.
+
 Each toolkit draws a binding as a **sink** that pulls:
 
 | Toolkit | A text leaf | A list | Reads known by |
 |---|---|---|---|
-| Pebble | a layer whose `update_proc` pulls its value at draw | a `MenuLayer` of `count` rows, each pulled | reader masks the emitter writes from the view's paths |
+| Pebble | a layer whose `update_proc` pulls its value at draw | a `MenuLayer` of `count` rows, each pulled | the kernel: each binding's reader records what its source read as it ran |
 | SwiftUI | an `@Observable` screen whose getters call into Rust; the settle's dirty readers fire its registrar per property | `List`/`ForEach` over `count` and a row pulled through `fetch`, ids from each row's identity, patches as inserts, removes and moves | Observation's own tracking |
 | Compose | a snapshot `State` per source, bumped by the settle, read through a getter | `LazyColumn` over `fetch`, keys from each row's identity | the snapshot system |
 | web | a signal per source, fine-grained DOM updates | keyed by identity, patched | signals |
@@ -772,11 +777,16 @@ on main with the apps working. Nothing is kept for compatibility.
    visits nothing whose reads did not change. The unsafe core is one
    module, run under Miri on the host. **Done**, but for Miri, which the
    machine it was built on did not have.
-7. **The watch on bindings.** The emitter writes binding tables and
-   reader masks from the view's paths in place of `draw(record)`; the
-   Pebble host is the sink, its layers pulling at draw; the demo loses its
-   `Face` record. Within a few hundred bytes of the 58.5 KB measured for
-   it, and pixel-identical in the emulator.
+7. **The watch on bindings.** The emitter writes binding tables from the
+   view's paths in place of `draw(record)`; the Pebble host is the sink,
+   its layers pulling at draw; the demo loses its `Face` record. Within a
+   few hundred bytes of the 58.5 KB measured for it, and pixel-identical
+   in the emulator. **Done.** What a layer reads is recorded by its
+   reader as its source runs, not a mask the emitter writes: a source is
+   a function of the node (`p.title` is `sources::title`), and only
+   running it says what it reads. The view's `Sources` struct stays as
+   its declaration, which the recorder walks for the snapshots and the
+   phones until step 10.
 8. **`#[view]` records bindings and sources.** ark_app's recorder keeps
    paths rooted at sources, and `Real` reads them; functions returning a
    plan become keyed watches, and scalar functions share one result per

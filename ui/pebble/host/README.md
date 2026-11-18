@@ -36,9 +36,12 @@ callbacks, which the shim passes to Rust (`ark_on_*`):
 | the app's timer | `App::wake` at the time the app asked: for playback, `Anchor::next` (no tick) |
 | AppMessage sent or failed | the next chunk, or the same one again |
 
-After each, the host **settles**: it takes each space's changes and the
-refusals from the node and hands them to the app (`App::update`), whose
-queries (`Live::push`) and screen redraw only what changed. A change to
+After each, the host **settles**: it sets its status cell (`STATUS`: the
+link, the subscriptions, what waits and what was refused), lets the app set
+its own (`App::settled`: the demo's time), and calls `Node::settle` with
+the screen as its sink: each layer whose recorded reads changed is marked
+dirty, and PebbleOS draws it again, pulling its words from its source as
+it draws. A change to
 what the disk keeps arms a flush 400 ms later, so a burst of frames is
 written once; the host flushes at exit too.
 
@@ -81,14 +84,15 @@ phones' generator and iced draw. The watch's build (`watch/build.rs`)
 records it and ark-ui-gen's `pebble` emitter writes it out as no_std Rust:
 the layers made once at frames worked out from the window and
 ui/theme.toml's tokens (`rust/src/tokens.rs`, written by `nix run
-.#update-theme`), what each shows of the record (`now_playing::face::Face`),
-and what each button sends. `ui.rs` is the toolkit it is written over:
-`Ui` paints arkui's glyphs into 1-bit bitmaps, so the app has no
-resources, and hands each value to the shim. The shim makes each layer by
-id (a `TextLayer`, a drawn meter, a `BitmapLayer`, a `MenuLayer`, the
-`ActionBarLayer`) and sets it by id, keeping what each shows once, in the
-buffers PebbleOS draws from: a value the same as the one there marks
-nothing dirty.
+.#update-theme`), a table binding each layer to a source function of the
+node (`demo/watch/src/sources.rs`: `p.title` is `sources::title`), and what
+each button sends. `ui.rs` is the toolkit it is written over: `Ui` paints
+arkui's glyphs into 1-bit bitmaps, so the app has no resources, gives each
+binding a kernel reader, and is the node's sink. The shim makes each layer
+by id (a drawn text layer, a drawn meter, a `BitmapLayer`, a `MenuLayer`,
+the `ActionBarLayer`) and, as PebbleOS draws one, asks Rust for its words
+(`ark_pull`, `ark_pull_meter`) into a stack buffer: nothing a layer shows
+is kept between draws, on either side.
 
 ## The demo
 

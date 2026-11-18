@@ -2,8 +2,8 @@
 // The layout is said once, in Rust; change it there.
 
 use ark_pebble::tokens::*;
-use ark_pebble::ui::{Align, Button, Frame, Glyph, ListStyle, Ui};
-use things_app::{GlancePage, ListMsg};
+use ark_pebble::ui::{Align, Bindings, Button, Frame, Glyph, List, ListStyle, Ui};
+use things_app::ListMsg;
 
 /// The glyphs it draws: Lucide's, flattened (`ark_pebble::ui::Glyph`).
 pub static GLYPHS: &[Glyph] = &[
@@ -28,45 +28,42 @@ pub fn build(ui: &mut Ui) {
     ui.text(2, Frame { x: PAGE_MARGIN, y: (SIDE_CAPTION).max(LINE_CAPTION) + SPACE_XS, w: w - PAGE_MARGIN - PAGE_MARGIN, h: LINE_TITLE }, FONT_TITLE, INK, Align::Start);
     ui.meter(3, Frame { x: PAGE_MARGIN, y: (SIDE_CAPTION).max(LINE_CAPTION) + SPACE_XS + LINE_TITLE + SPACE_XS, w: w - PAGE_MARGIN - PAGE_MARGIN, h: PROGRESS_HEIGHT }, BLUE_ACCENT, CONTAINER_HIGH);
     ui.text(4, Frame { x: PAGE_MARGIN, y: (SIDE_CAPTION).max(LINE_CAPTION) + SPACE_XS + LINE_TITLE + SPACE_XS, w: w - PAGE_MARGIN - PAGE_MARGIN, h: LINE_FOOTNOTE }, FONT_FOOTNOTE, BLUE_ACCENT_TEXT, Align::Start);
-    ui.set_text(4, "Paused".as_bytes());
     let fill2 = (w - PAGE_MARGIN - PAGE_MARGIN - SIDE_CAPTION) / 2;
     ui.text(5, Frame { x: PAGE_MARGIN, y: (SIDE_CAPTION).max(LINE_CAPTION) + SPACE_XS + LINE_TITLE + SPACE_XS + (PROGRESS_HEIGHT).max(LINE_FOOTNOTE) + SPACE_XS + ((LINE_CAPTION).max(SIDE_CAPTION) - LINE_CAPTION) / 2, w: fill2, h: LINE_CAPTION }, FONT_CAPTION, INK, Align::Start);
-    ui.set_text(5, "Now".as_bytes());
     ui.glyph(6, Frame { x: PAGE_MARGIN + fill2 + fill2, y: (SIDE_CAPTION).max(LINE_CAPTION) + SPACE_XS + LINE_TITLE + SPACE_XS + (PROGRESS_HEIGHT).max(LINE_FOOTNOTE) + SPACE_XS + ((LINE_CAPTION).max(SIDE_CAPTION) - SIDE_CAPTION) / 2, w: SIDE_CAPTION, h: SIDE_CAPTION }, SIDE_CAPTION, INK);
     ui.set_glyph(6, "music".as_bytes());
     ui.list(7, Frame { x: PAGE_MARGIN, y: (SIDE_CAPTION).max(LINE_CAPTION) + SPACE_XS + LINE_TITLE + SPACE_XS + (PROGRESS_HEIGHT).max(LINE_FOOTNOTE) + SPACE_XS + (LINE_CAPTION).max(SIDE_CAPTION) + SPACE_XS, w: w - PAGE_MARGIN - PAGE_MARGIN, h: fill0 }, ListStyle { title: FONT_HEADLINE, title_line: LINE_HEADLINE, subtitle: FONT_FOOTNOTE, header: FONT_HEADER, ink: INK, quiet: QUIET, ground: BACKGROUND, inset: PAGE_MARGIN });
 }
 
-/// What it shows of `p`: the toolkit tells PebbleOS only what changed.
-#[allow(unused_variables)]
-pub fn draw(ui: &mut Ui, p: &GlancePage) {
-    ui.set_action(Button::Select, p.play_glyph.as_bytes());
-    ui.set_glyph(0, p.link.as_bytes());
-    ui.set_text(1, p.status.as_bytes());
-    ui.set_text(2, p.title.as_bytes());
-    if p.playing {
-        ui.hide(3, false);
-        ui.hide(4, true);
-        ui.set_meter(3, p.progress);
-    } else {
-        ui.hide(4, false);
-        ui.hide(3, true);
-    }
-    if let Some(q) = &p.next {
-        ui.hide(7, false);
-        ui.set_rows(7, q.heading.as_bytes(), q.tracks.iter().map(|t| (t.title.as_bytes(), t.by.as_bytes())));
-    } else {
-        ui.hide(7, true);
-    }
-}
+/// What each layer shows: the screen's sources (things_app::glance), read as PebbleOS draws.
+pub static BINDINGS: Bindings = Bindings {
+    words: &[
+        (1, things_app::glance::status),
+        (2, things_app::glance::title),
+        (4, |_, out| { out.s("Paused".as_bytes()); }),
+        (5, |_, out| { out.s("Now".as_bytes()); }),
+    ],
+    meters: &[
+        (3, things_app::glance::progress),
+    ],
+    glyphs: &[
+        (0, things_app::glance::link),
+    ],
+    actions: &[
+        (Button::Select, things_app::glance::play_glyph),
+    ],
+    lists: &[
+        (7, List { header: things_app::glance::next_heading, count: things_app::glance::next_tracks, title: things_app::glance::next_tracks_title, line: things_app::glance::next_tracks_by }),
+    ],
+    shown: &[
+        (things_app::glance::playing, &[3], &[4]),
+        (things_app::glance::next, &[7], &[]),
+    ],
+};
 
 /// What a button sends.
-#[allow(unused_variables)]
-pub fn press(p: &GlancePage, button: Button) -> Option<ListMsg> {
-    match button {
-        Button::Up => Some(ListMsg::Back),
-        Button::Select => Some(ListMsg::Toggle),
-        Button::Down => Some(ListMsg::Forward),
-        _ => None,
-    }
-}
+pub static PRESS: &[(Button, ListMsg)] = &[
+    (Button::Up, ListMsg::Back),
+    (Button::Select, ListMsg::Toggle),
+    (Button::Down, ListMsg::Forward),
+];

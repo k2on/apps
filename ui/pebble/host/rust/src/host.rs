@@ -10,10 +10,13 @@
 //! | the app's timer | [`App::wake`], at the time the app asked: an [`ark_kernel::Anchor`]'s next step |
 //! | AppMessage sent or failed | the next chunk, or the same again |
 //!
-//! After each, the host **settles**: it takes each space's changes from
-//! the node ([`Node::take_changes`]) and the refusals, and hands them to
-//! the app ([`App::update`]), whose views push them through their queries
-//! and redraw only what changed. A change to what the disk keeps (the
+//! After each, the host **settles**: it sets its status cell
+//! ([`STATUS`]: the link, the subscriptions, what waits, what was
+//! refused), lets the app set its own ([`App::settled`]: the time), and
+//! calls [`Node::settle`] with the screen as the sink: the layers whose
+//! recorded reads changed are marked dirty and PebbleOS draws them again,
+//! asking their sources as it draws ([`Ui`]). A change to what the disk
+//! keeps (the
 //! confirmed rows, the device space, the pending records, the cursor, the
 //! count) arms a flush a little later, so a burst of frames is written
 //! once; the host flushes at exit too, and at once when the count of
@@ -26,7 +29,8 @@ use core::cell::UnsafeCell;
 
 use ark_kernel::codec::{put_varint, Error, Reader};
 use ark_kernel::{
-    Actor, Body, Changes, Decode, Down, Encode, Frames, Handler, Node, Origin, Pending, QueryId, Refusal, Seq, Space, Spaces, Store, TableId, Version,
+    Actor, Body, Cell, Changes, Decode, Down, Encode, Frames, Handler, Node, Origin, Pending, QueryId, Refusal, Seq, Sink, Space, Spaces, Store,
+    TableId, Version,
 };
 
 use crate::disk::{Disk, Meta};
@@ -34,7 +38,7 @@ use crate::link::{AmLink, Wants};
 use crate::rows::Rows;
 use crate::sys;
 use crate::text::Line;
-use crate::ui::Button;
+use crate::ui::{Bindings, Button, Glyph, Ui};
 
 /// The largest frame the watch reads: a fill's part is cut to fit.
 pub const FRAME_MOST: usize = 4096;
@@ -53,10 +57,17 @@ mod timer {
     pub const RETRY: u8 = 2;
 }
 
-/// The link and what waits, for a status line.
+/// The link and what waits, for a status line: the host's cell
+/// ([`STATUS`]), set after every callback, so a screen's source reads it
+/// as it reads any other.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Status {
     pub online: bool,
+    /// Every query subscribed to has its rows: the link is in step.
+    pub complete: bool,
+    /// A control was refused for want of a link, since the link was last
+    /// in step.
+    pub unreached: bool,
     /// The node's shared entries not yet confirmed.
     pub pending: usize,
     /// The entries refused since the app started, but those refused
@@ -64,14 +75,19 @@ pub struct Status {
     pub refused: u32,
 }
 
+/// The host's status, the node's first cell.
+pub const STATUS: Cell<Status> = Cell::at(0);
+
 /// What an app's code is given: the node, the time, the link.
 pub struct Ctx<'a, B: 'static> {
     pub node: &'a mut Node<B, Rows>,
     link: &'a mut AmLink,
+    ui: &'a mut Option<Ui>,
+    subs: &'a mut Vec<(QueryId, Vec<u8>)>,
+    unreached: &'a mut bool,
     /// The watch's time, in milliseconds.
     pub now: u64,
     wake: &'a mut Option<u64>,
-    pub status: Status,
 }
 
 impl<B: Body + Clone + Encode + 'static> Ctx<'_, B> {
@@ -84,7 +100,10 @@ impl<B: Body + Clone + Encode + 'static> Ctx<'_, B> {
         let id = e.id;
         self.node.route(e, self.link);
         match self.node.refusals().iter().find(|r| r.0 == id) {
-            Some(&(_, why)) => Err(why),
+            Some(&(_, why)) => {
+                *self.unreached |= why == Refusal::OFFLINE;
+                Err(why)
+            }
             None => Ok(()),
         }
     }
@@ -102,7 +121,17 @@ impl<B: Body + Clone + Encode + 'static> Ctx<'_, B> {
 
     /// Holds a query's rows, now and at every connection.
     pub fn subscribe(&mut self, query: QueryId, args: Vec<u8>) {
+        self.subs.push((query, args.clone()));
         self.node.subscribe(query, args, self.link);
+    }
+
+    /// The screen: its layers made by `build` over `ground`, drawing
+    /// `glyphs`, and bound to the node by `bindings`.
+    pub fn screen(&mut self, glyphs: &'static [Glyph], ground: u8, build: fn(&mut Ui), bindings: &'static Bindings) {
+        let mut ui = Ui::new(glyphs, ground);
+        build(&mut ui);
+        ui.bind(self.node, bindings);
+        *self.ui = Some(ui);
     }
 
     /// Asks for [`App::wake`] at `at` (the watch's milliseconds), or never.
@@ -120,14 +149,15 @@ pub trait App: 'static {
     fn version(&self) -> Version;
     /// Who this watch's entries are from: its phone's user.
     fn actor(&self) -> Actor;
-    /// At start, the node put back from the disk: subscribe, draw.
+    /// At start, the node put back from the disk: its cells and watches,
+    /// its subscriptions and its screen ([`Ctx::screen`]).
     fn start(&mut self, cx: &mut Ctx<'_, Self::Body>);
     fn button(&mut self, cx: &mut Ctx<'_, Self::Body>, button: Button);
-    /// What changed in each space (by [`Space`] as a number) or in the
-    /// status since the last call.
-    fn update(&mut self, cx: &mut Ctx<'_, Self::Body>, changes: &[Changes; 4]);
     /// The time asked with [`Ctx::wake_at`] has come.
     fn wake(&mut self, cx: &mut Ctx<'_, Self::Body>);
+    /// Before each settle: what a callback did is in the node; the app
+    /// sets what cells it keeps and its next wake.
+    fn settled(&mut self, _cx: &mut Ctx<'_, Self::Body>) {}
 }
 
 /// The host, as the callbacks reach it.
@@ -141,6 +171,8 @@ trait Driver {
     fn timer(&mut self, kind: u8);
     fn phone(&mut self, connected: bool);
     fn stop(&mut self);
+    fn pull(&mut self, id: u8, part: u8, out: &mut Line);
+    fn meter(&mut self, id: u8) -> u16;
 }
 
 struct Global(UnsafeCell<Option<Box<dyn Driver>>>);
@@ -162,12 +194,14 @@ pub struct Host<A: App> {
     link: AmLink,
     frames: Frames,
     app: A,
+    ui: Option<Ui>,
+    subs: Vec<(QueryId, Vec<u8>)>,
+    unreached: bool,
     origin: [u8; 16],
     /// The time the app asked to wake at, and the one the timer is set to.
     wake: Option<u64>,
     armed: Option<u64>,
     flush_armed: bool,
-    status: Status,
     refused: u32,
     /// The most of the app heap seen in use, after a callback.
     heap_peak: usize,
@@ -236,6 +270,8 @@ fn open<A: App>(app: A) -> Box<Host<A>> {
     let mut node = Node::new(Origin(meta.origin), meta.made, app.version(), app.handlers(), stores);
     node.set_actor(app.actor());
     node.resume(Seq(meta.cursor), pending);
+    // The node's first cell, the status (`STATUS`).
+    node.cell(Status::default());
     let mut origin = [0u8; 16];
     origin.copy_from_slice(Line::new().hex(meta.origin).bytes());
     let chunk = (sys::outbox_size() as usize).saturating_sub(MESSAGE_OVERHEAD);
@@ -245,11 +281,13 @@ fn open<A: App>(app: A) -> Box<Host<A>> {
         link: AmLink::new(chunk),
         frames: Frames::new(FRAME_MOST),
         app,
+        ui: None,
+        subs: Vec::new(),
+        unreached: false,
         origin,
         wake: None,
         armed: None,
         flush_armed: false,
-        status: Status::default(),
         refused: 0,
         heap_peak: 0,
     });
@@ -287,24 +325,29 @@ impl<A: App> Host<A> {
             node,
             link,
             app,
+            ui,
+            subs,
+            unreached,
             wake,
-            status,
             ..
         } = self;
         let mut cx = Ctx {
             node,
             link,
+            ui,
+            subs,
+            unreached,
             now: sys::now(),
             wake,
-            status: *status,
         };
         f(app, &mut cx)
     }
 
-    /// After a callback: hands the node's changes to the app, arms the
-    /// app's timer and a flush, and sends what the link has.
+    /// After a callback: the status set, the app's cells and wake, then
+    /// the node's settle, which tells the screen what to draw again and
+    /// says what the disk keeps; arms the app's timer and a flush, and
+    /// sends what the link has.
     fn settle(&mut self) {
-        let changes = Space::ALL.map(|s| self.node.take_changes(s));
         for (id, why) in self.node.take_refused() {
             // Offline refusals are the app's to show, as `Ctx::make` says
             // them.
@@ -313,19 +356,30 @@ impl<A: App> Host<A> {
             }
             crate::log!("refused entry ", id.n, " with ", why.0);
         }
+        let online = self.link.online();
+        let complete = self.subs.iter().all(|(q, a)| self.node.complete(*q, a));
+        // Reached again once a hello is answered, not at a link that
+        // closes before it is.
+        self.unreached &= !(online && complete);
         let status = Status {
-            online: self.link.online(),
+            online,
+            complete,
+            unreached: self.unreached,
             pending: self.node.pending().len(),
             refused: self.refused,
         };
-        let changed = changes.iter().any(|c| c.reset || !c.rows.is_empty());
-        if changed || status != self.status {
-            self.status = status;
-            self.cx(|app, cx| app.update(cx, &changes));
-        }
-        let kept = |s: Space| changes[s as usize].reset || !changes[s as usize].rows.is_empty();
-        if kept(Space::Shared) || kept(Space::Device) {
+        self.node.set(STATUS, status);
+        self.cx(|app, cx| app.settled(cx));
+        let mut told = Told {
+            ui: self.ui.as_mut(),
+            kept: false,
+        };
+        self.node.settle(&mut told);
+        if told.kept {
             self.dirty();
+        }
+        if let Some(ui) = &mut self.ui {
+            ui.show(&mut self.node);
         }
         if self.node.made() + 4 >= self.disk.lease() {
             self.flush();
@@ -423,7 +477,36 @@ impl<A: App> Host<A> {
     }
 }
 
+/// What a settle tells the host: the screen what to draw again, and
+/// whether the disk keeps what changed.
+struct Told<'a> {
+    ui: Option<&'a mut Ui>,
+    kept: bool,
+}
+
+impl Sink for Told<'_> {
+    fn dirty(&mut self, r: ark_kernel::Reader) {
+        if let Some(ui) = &mut self.ui {
+            ui.dirty(r);
+        }
+    }
+
+    fn changes(&mut self, space: Space, c: &Changes) {
+        self.kept |= space != Space::Session && (c.reset || !c.rows.is_empty());
+    }
+}
+
 impl<A: App> Driver for Host<A> {
+    fn pull(&mut self, id: u8, part: u8, out: &mut Line) {
+        if let Some(ui) = &self.ui {
+            ui.pull(&mut self.node, id, part, out);
+        }
+    }
+
+    fn meter(&mut self, id: u8) -> u16 {
+        self.ui.as_ref().map_or(0, |ui| ui.fraction(&mut self.node, id))
+    }
+
     fn button(&mut self, id: u8) {
         let Some(button) = Button::from(id) else { return };
         if self.node.made() + 8 >= self.disk.lease() {
@@ -597,4 +680,26 @@ pub extern "C" fn ark_on_phone(connected: bool) {
 #[no_mangle]
 pub extern "C" fn ark_on_stop() {
     with(|h| h.stop());
+}
+
+/// What a layer shows, asked as PebbleOS draws it: its bytes into `buf`.
+///
+/// # Safety
+/// `buf` is `cap` bytes the shim holds for the call.
+#[no_mangle]
+pub unsafe extern "C" fn ark_pull(id: u8, part: u8, buf: *mut u8, cap: usize) -> usize {
+    let mut line = Line::new();
+    with(|h| h.pull(id, part, &mut line));
+    let b = line.bytes();
+    let n = b.len().min(cap);
+    unsafe { core::ptr::copy_nonoverlapping(b.as_ptr(), buf, n) };
+    n
+}
+
+/// A meter's fraction in thousandths, asked as PebbleOS draws it.
+#[no_mangle]
+pub extern "C" fn ark_pull_meter(id: u8) -> u16 {
+    let mut p = 0;
+    with(|h| p = h.meter(id));
+    p
 }

@@ -10,8 +10,9 @@
 
 use ark_app::view::{ActionButton, Part, View};
 use ark_ui_gen::{kotlin, swift, Screen};
-use now_playing::face::{Act, Face, Next};
+use now_playing::Act;
 use now_playing_view::screen;
+use now_playing_view::{Next, Sources};
 
 fn phones() -> Vec<(&'static str, String)> {
     let names = Screen {
@@ -65,7 +66,7 @@ fn every_file_is_its_snapshot() {
 #[test]
 fn the_watch_names_only_tokens() {
     let rs = now_playing_view::watch();
-    let build = rs.split("pub fn build").nth(1).unwrap().split("pub fn draw").next().unwrap();
+    let build = rs.split("pub fn build").nth(1).unwrap().split("pub static BINDINGS").next().unwrap();
     // A frame is the room and the theme's tokens: no number of pixels,
     // only a share's divisor and the room's own origin.
     for line in build.lines().filter(|l| l.contains("Frame {")) {
@@ -79,25 +80,31 @@ fn the_watch_names_only_tokens() {
         }
     }
     assert!(build.contains("ui.action_bar(CONTAINER_HIGH, INK, ACTION_GLYPH);"), "{build}");
-    assert!(rs.contains("Button::Select => Some(Act::Toggle)"), "{rs}");
-    assert!(rs.contains("Button::Down => Some(Act::Skip)"), "{rs}");
-    assert!(rs.contains("ui.set_rows("), "{rs}");
+    assert!(rs.contains("(Button::Select, Act::Toggle),"), "{rs}");
+    assert!(rs.contains("(Button::Down, Act::Skip),"), "{rs}");
+    // Each layer bound to a source, as data: no code per layer.
+    assert!(rs.contains("(2, crate::sources::title),"), "{rs}");
+    assert!(
+        rs.contains("(7, List { header: crate::sources::queue, count: crate::sources::next, title: crate::sources::next_title, line: crate::sources::next_line }),"),
+        "{rs}"
+    );
+    assert!(!rs.contains("pub fn draw"), "{rs}");
 }
 
 #[test]
 fn the_same_view_is_drawn_from_a_record() {
-    let face = Face {
+    let face = Sources {
         status: "Online".into(),
         link: "wifi".into(),
         title: "Second Summer".into(),
         artist: "The Quiet Fleet".into(),
         progress: 0.25,
-        at: "0:15".into(),
+        at: ark_app::text!("{}:{}", 0, 15),
         length: "0:52".into(),
         queue: "Up Next".into(),
         next: vec![Next {
             title: "Under Lamplight".into(),
-            line: "Juniper Lane  0:36".into(),
+            line: ark_app::text!("{}  {}", "Juniper Lane", "0:36"),
         }],
         play_glyph: "pause".into(),
         play_label: "Pause".into(),
