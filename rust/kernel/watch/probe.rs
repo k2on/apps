@@ -11,8 +11,9 @@
 //! queue subscribed to at the connection and a row that moved into it held
 //! until the query is got; and two queries kept live over
 //! it all, as the watch's screen keeps them:
-//! the next four tracks (a bounded take of a filter) and how many there
-//! are (a group); and the phone's playback position, an anchor in the
+//! the next four tracks (a bounded take of a filter, each track with its
+//! album, which its map reads, run again when an album changes) and how
+//! many there are (a group); and the phone's playback position, an anchor in the
 //! session space the screen extrapolates. It prints the most heap it held and exits 1 past the
 //! budget's 24 KB.
 
@@ -139,6 +140,26 @@ fn track(i: u8) -> Msg {
     }
 }
 
+/// The table of albums, by a track's number.
+const ALBUMS: TableId = TableId(4);
+
+/// A track's album, named by one letter.
+fn album(i: u8, name: u8) -> Msg {
+    Msg::Put {
+        table: ALBUMS.0,
+        key: [i].into(),
+        value: [name].into(),
+    }
+}
+
+fn album_is(i: u8, name: u8) -> Writes {
+    Writes(alloc::vec![Write {
+        table: ALBUMS,
+        key: [i].into(),
+        value: Some([name].into()),
+    }])
+}
+
 /// What a server would say: each entry logged with the writes it made, in
 /// frames.
 fn logged(wire: &mut Vec<u8>, e: Entry<Msg>, seq: u64, facts: Writes) {
@@ -198,6 +219,12 @@ fn main() -> ! {
         seq += 1;
         logged(&mut wire, e, seq, facts);
     }
+    // Two tracks' albums, which the screen reads beside them.
+    for i in [black_box(1u8), 2] {
+        let e = phone.make(Space::Shared, album(i, b'a'), black_box(1_000));
+        seq += 1;
+        logged(&mut wire, e, seq, album_is(i, b'a'));
+    }
     // The phone's player, playing from 30 s: a session row it sets whole.
     let anchor = Anchor {
         at: 30_000,
@@ -215,13 +242,21 @@ fn main() -> ! {
         black_box(1_000),
     );
     put_frame(&mut wire, &Down::Live(live));
-    // The screen's queries: the next four tracks, and how many there are.
+    // The screen's queries: the next four tracks, each with its album, and
+    // how many there are.
     let all = || scan(TableId(1), Bound::Unbounded, Bound::Unbounded);
-    let mut queries = [
+    let next = || {
         all()
             .filter(|_, v| v[0] != b' ')
+            .map_with(|db, k, v| {
+                let mut v = v.to_vec();
+                v.extend(db.get(ALBUMS, &k[1..]).unwrap_or_default());
+                v
+            })
             .take(black_box(4), black_box(false))
-            .live(&node.view(Space::Shared)),
+    };
+    let mut queries = [
+        next().live(&node.view(Space::Shared)),
         all()
             .group(|_, _| Vec::new(), |_, v| v.len() as i64, black_box(false), true)
             .live(&node.view(Space::Shared)),
@@ -293,6 +328,10 @@ fn main() -> ! {
             value: None
         }]),
     );
+    // An album the screen shows changes: its track's map runs again.
+    let renamed = phone.make(Space::Shared, album(2, b'b'), black_box(3_000));
+    seq += 1;
+    logged(&mut wire, renamed, seq, album_is(2, b'b'));
     // The hello's answer ends with the server's clock, 1000 ahead.
     put_frame(&mut wire, &Down::<Msg>::Welcome { sent: 3_000, time: 4_000 });
     take(&mut node, &mut wire, &mut up);
@@ -344,9 +383,10 @@ fn main() -> ! {
 
     // The queries kept live are what a fresh run over the view answers.
     let view = node.view(Space::Shared);
-    let next = all().filter(|_, v| v[0] != b' ').take(4, false).live(&view);
+    let next = next().live(&view);
     let total = from_slice::<Agg>(&queries[1].rows()[0].1).map_or(0, |a| a.count);
     let right = queries[0].rows() == next.rows()
+        && queries[0].rows().iter().any(|(k, v)| k[..] == [0, 2] && v.last() == Some(&b'b'))
         && total == node.store(Space::Shared).len(TableId(1)) as u64
         && node.store(Space::Shared).get(TableId(1), &[0, 20]).is_some();
     // Its position two and a half seconds on in the server's time, its

@@ -30,7 +30,7 @@
 //! - A node too far behind for its upstream's log is sent a fill: the
 //!   confirmed rows at a `seq` ([`Down::Fill`], then its parts), in
 //!   place of the log up to it, then the log after it. Its parts are held
-//!   until the last, which empties the tables it names and takes the rows
+//!   until the last, which (a whole fill) empties the shared rows, takes the rows
 //!   at once; then the pending entries are rebased. One interrupted is let
 //!   go, the rows as they were, and started again at the next connection.
 //! - An entry the server refuses is dropped, and its refusal kept in the
@@ -275,8 +275,8 @@ pub struct Node<B: 'static, S> {
     layer: Layer,
     refused: Vec<(EntryId, Refusal)>,
     /// A fill under way: the `seq` it reaches, the parts still to come and
-    /// the tables it empties.
-    filling: Option<(Seq, u32, Vec<TableId>)>,
+    /// whether it replaces every row.
+    filling: Option<(Seq, u32, bool)>,
     /// Rows a fill or the upstream's moves sent, held until they are all
     /// here; and the cursor when the first came.
     incoming: Layer,
@@ -762,8 +762,8 @@ impl<B: Body + Clone + 'static, S: Store> Node<B, S> {
                 self.take_live(e, true, link);
             }
             Down::Welcome { sent, time } => self.welcome(sent, time, now, link),
-            Down::Fill { seq, tables, parts } => {
-                self.filling = Some((seq, parts, tables));
+            Down::Fill { seq, whole, parts } => {
+                self.filling = Some((seq, parts, whole));
                 self.filled();
             }
             // A fill's part, while one is under way; else rows that moved.
@@ -808,11 +808,12 @@ impl<B: Body + Clone + 'static, S: Store> Node<B, S> {
         self.rebase();
     }
 
-    /// Ends a fill whose every part has come: its tables emptied and its
-    /// rows taken at once, the node is at its `seq`.
+    /// Ends a fill whose every part has come: its rows taken at once (in
+    /// place of every row, when whole), the node is at its `seq`.
     fn filled(&mut self) {
-        let Some((seq, 0, _)) = self.filling else { return };
-        let Some((_, _, tables)) = self.filling.take() else { return };
+        let Some((seq, 0, whole)) = self.filling else { return };
+        self.filling = None;
+        let tables = if whole { self.stores.shared.tables() } else { Vec::new() };
         for table in tables {
             let mut keys = Vec::new();
             self.stores.shared.scan(table, Range::all(), &mut |k, _| {
@@ -946,6 +947,9 @@ pub(crate) mod app {
     pub(crate) const COUNTS: TableId = TableId(1);
     /// A session table: a position per key, set whole.
     pub(crate) const POSITIONS: TableId = TableId(2);
+    /// Notes on a count: rows keyed by the count's key, then the note's;
+    /// what a query's closures read, and its counts' children.
+    pub(crate) const NOTES: TableId = TableId(3);
 
     /// A position's row: its key after its owner's origin, which is the
     /// node of origin 1 for keys 0 to 9, 2 for 10 to 19, and so on.
@@ -957,8 +961,10 @@ pub(crate) mod app {
 
     /// A counter app: `Add` adds to a count, `Take` takes one and refuses
     /// at none, `Tap` asks for a shared `Add` and a local `Seen`, `Seen`
-    /// counts taps, `Refuse` writes and refuses.
+    /// counts taps, `Refuse` writes and refuses, `Note` puts a count's note
+    /// or takes it away.
     #[derive(Clone, Debug, PartialEq, Eq)]
+    #[cfg_attr(not(feature = "upstream"), allow(dead_code))]
     pub(crate) enum Msg {
         Add { key: u8, by: u64 },
         Tap { key: u8 },
@@ -966,6 +972,7 @@ pub(crate) mod app {
         Refuse,
         Take { key: u8 },
         Set { key: u8, value: u64 },
+        Note { key: u8, n: u8 },
         Unknown,
     }
 
@@ -981,6 +988,7 @@ pub(crate) mod app {
                 Msg::Refuse => 3,
                 Msg::Take { .. } => 4,
                 Msg::Set { .. } => 5,
+                Msg::Note { .. } => 6,
                 Msg::Unknown => 9,
             })
         }
@@ -1002,7 +1010,7 @@ pub(crate) mod app {
         cx.db.put(COUNTS, &[key], &n.to_le_bytes());
     }
 
-    pub(crate) static HANDLERS: [Handler<Msg>; 6] = [
+    pub(crate) static HANDLERS: [Handler<Msg>; 7] = [
         |cx| {
             let Msg::Add { key, by } = cx.entry.body else { unreachable!() };
             add(cx, key, by);
@@ -1041,6 +1049,14 @@ pub(crate) mod app {
             cx.db.put(POSITIONS, &at(key), &value.to_le_bytes());
             Ok(())
         },
+        |cx| {
+            let Msg::Note { key, n } = cx.entry.body else { unreachable!() };
+            match cx.db.get(NOTES, &[key, n]) {
+                Some(_) => cx.db.delete(NOTES, &[key, n]),
+                None => cx.db.put(NOTES, &[key, n], &[n]),
+            }
+            Ok(())
+        },
     ];
 
     pub(crate) fn node(origin: u64) -> Node<Msg, Memory> {
@@ -1051,6 +1067,19 @@ pub(crate) mod app {
             shared: Memory::new(),
         };
         Node::new(Origin(origin), 0, Version(1), &HANDLERS, stores)
+    }
+
+    /// Every row of the shared tables a store or view holds, by its table.
+    #[cfg_attr(not(feature = "upstream"), allow(dead_code))]
+    pub(crate) fn shared(db: &dyn Read) -> Vec<(TableId, Vec<u8>, Vec<u8>)> {
+        let mut out = Vec::new();
+        for t in [COUNTS, NOTES] {
+            db.scan(t, crate::store::Range::all(), &mut |k, v| {
+                out.push((t, k.to_vec(), v.to_vec()));
+                true
+            });
+        }
+        out
     }
 
     /// Every count a store or view holds.
@@ -1324,7 +1353,7 @@ pub(crate) mod tests {
         n.receive(
             Down::Fill {
                 seq: Seq(5),
-                tables: vec![COUNTS],
+                whole: true,
                 parts: 2,
             },
             &mut up,
@@ -1356,7 +1385,7 @@ pub(crate) mod tests {
         n.receive(
             Down::Fill {
                 seq: Seq(9),
-                tables: vec![COUNTS],
+                whole: true,
                 parts: 2,
             },
             &mut up,
@@ -1376,7 +1405,7 @@ pub(crate) mod tests {
         n.receive(
             Down::Fill {
                 seq: Seq(9),
-                tables: vec![COUNTS],
+                whole: true,
                 parts: 0,
             },
             &mut up,

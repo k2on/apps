@@ -77,6 +77,10 @@ pub trait Read {
     /// Calls `f` with each row in `range`, in its order, until `f` returns
     /// false.
     fn scan(&self, table: TableId, range: Range<'_>, f: &mut dyn FnMut(&[u8], &[u8]) -> bool);
+
+    /// Every table it may hold a row of (a view's may be named twice): what
+    /// a fill that replaces every row empties.
+    fn tables(&self) -> Vec<TableId>;
 }
 
 /// Reading and writing rows.
@@ -204,6 +208,29 @@ impl Read for Memory {
     fn scan(&self, table: TableId, range: Range<'_>, f: &mut dyn FnMut(&[u8], &[u8]) -> bool) {
         each(&self.rows, table, range, &mut |k, v| v.as_deref().is_none_or(|v| f(k, v)));
     }
+
+    fn tables(&self) -> Vec<TableId> {
+        tables(&self.rows)
+    }
+}
+
+/// The tables `rows` holds a path of, each found by seeking past the last.
+fn tables(rows: &Tree) -> Vec<TableId> {
+    let mut out: Vec<TableId> = Vec::new();
+    loop {
+        let from = out.last().map(|t| t.0.checked_add(1));
+        let Some(from) = from.unwrap_or(Some(0)) else { break };
+        let mut next = None;
+        walk(rows, Bound::Included(&from.to_be_bytes()[..]), Bound::Unbounded, false, &mut |k, _| {
+            next = Some(TableId(u32::from_be_bytes([k[0], k[1], k[2], k[3]])));
+            false
+        });
+        match next {
+            Some(t) => out.push(t),
+            None => break,
+        }
+    }
+    out
 }
 
 impl Store for Memory {
@@ -278,6 +305,12 @@ pub struct View<'a> {
 }
 
 impl Read for View<'_> {
+    fn tables(&self) -> Vec<TableId> {
+        let mut out = self.base.tables();
+        out.extend(tables(&self.layer.0));
+        out
+    }
+
     fn get(&self, table: TableId, key: &[u8]) -> Option<Vec<u8>> {
         match self.layer.0.get(&path(table, key)) {
             Some(w) => w.clone(),
@@ -359,6 +392,10 @@ impl<'a> Overlay<'a> {
 }
 
 impl Read for Overlay<'_> {
+    fn tables(&self) -> Vec<TableId> {
+        self.view().tables()
+    }
+
     fn get(&self, table: TableId, key: &[u8]) -> Option<Vec<u8>> {
         self.view().get(table, key)
     }

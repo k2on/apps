@@ -5,7 +5,7 @@
 //! Up     Hello { cursor, time } | Push(Entry) | Live(Entry) | Rate { table, every }
 //!        | Subscribe { query, args } | Unsubscribe { query, args }
 //! Down   Logged { entry, facts } | Verdict { id, verdict } | Live(Entry)
-//!        | Fill { seq, tables, parts } | Moved(writes) | Got { query, args }
+//!        | Fill { seq, whole, parts } | Moved(writes) | Got { query, args }
 //!        | Welcome { sent, time }
 //! Verdict  At(seq) | Refused(code)
 //! Pending  { entry, writes, judged }
@@ -24,8 +24,8 @@
 //! cursor is below what it keeps is answered with a `Fill`: the confirmed
 //! rows at `seq`, in `parts` frames of `Moved` after it (so each frame stays
 //! within what a watch reads at once), and then the log after `seq` as
-//! usual. The node empties the `tables` it names (every table the log has
-//! written) at the first part and takes `seq` as its cursor at the last.
+//! usual. At its last part a whole fill replaces every row the node holds,
+//! and the node takes `seq` as its cursor.
 //!
 //! **Subscriptions.** A node that holds only what its queries read (a
 //! watch) subscribes to each by its number and arguments, never by sending
@@ -83,11 +83,10 @@ use crate::store::{TableId, Writes};
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct QueryId(pub u32);
 
-/// A query's plan for its arguments, over one table's rows, which it keeps
-/// whole (a scan, its filters and its take): what a node that subscribes
-/// holds, and its upstream runs. The node runs its own maps, sorts and
-/// groups over them.
-pub type Query = fn(args: &[u8]) -> (TableId, Plan);
+/// A query's plan for its arguments: what a node that subscribes holds the
+/// base rows of ([`crate::Live::base`]), and its upstream runs. A scan, its
+/// filters, maps and takes; the node runs its own sorts and groups.
+pub type Query = fn(args: &[u8]) -> Plan;
 
 /// An entry as the master log holds it: ordered (`entry.seq` is set) and
 /// with the rows its run wrote, which every other node applies in place of
@@ -162,8 +161,9 @@ pub enum Down<B> {
     Live(Entry<B>),
     /// The confirmed rows at `seq` follow, in the next `parts` frames,
     /// each `Moved`, in place of the log up to it: the node's cursor is
-    /// below what its upstream keeps. `tables` are emptied first.
-    Fill { seq: Seq, tables: Vec<TableId>, parts: u32 },
+    /// below what its upstream keeps. When `whole`, they replace every row
+    /// the node holds.
+    Fill { seq: Seq, whole: bool, parts: u32 },
     /// A fill's part; else rows that came into the node's queries, or moved
     /// out of them (a removal), at its cursor.
     Moved(Writes),
@@ -402,10 +402,10 @@ impl<B: Encode> Encode for Down<B> {
                 2u32.encode(out);
                 e.encode(out);
             }
-            Down::Fill { seq, tables, parts } => {
+            Down::Fill { seq, whole, parts } => {
                 3u32.encode(out);
                 seq.encode(out);
-                tables.encode(out);
+                whole.encode(out);
                 parts.encode(out);
             }
             Down::Moved(rows) => {
@@ -437,7 +437,7 @@ impl<B: Decode> Decode for Down<B> {
             2 => Ok(Down::Live(Entry::decode(r)?)),
             3 => Ok(Down::Fill {
                 seq: Seq::decode(r)?,
-                tables: Vec::decode(r)?,
+                whole: bool::decode(r)?,
                 parts: u32::decode(r)?,
             }),
             4 => Ok(Down::Moved(Writes::decode(r)?)),
@@ -528,7 +528,7 @@ pub(crate) mod tests {
             Down::Live(entry(3, None)),
             Down::Fill {
                 seq: Seq(9),
-                tables: vec![TableId(1), TableId(3)],
+                whole: true,
                 parts: 2,
             },
             Down::Moved(facts.clone()),

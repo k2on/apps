@@ -12,8 +12,9 @@
 //! its cursor, as Zero's per-client records do, in place of every row.
 //!
 //! A record keeps the client's subscriptions, each a [`Live`] answer over
-//! the upstream's rows, kept current while it is away, and the rows it
-//! holds: for each, how many of its subscriptions read it and the version
+//! the upstream's rows, kept current while it is away, with the base rows
+//! it reads ([`Live::base`]: its scan's rows in the answer and what its
+//! closures read for them), and the rows the client holds: for each, how many of its subscriptions read it and the version
 //! at which it was last sent, or that it is still to send. A row no
 //! subscription reads any longer stays as a removal to send until the
 //! client is known to have it. Never the rows' contents.
@@ -30,9 +31,9 @@
 //! fill of every row the record sent it (its cursor says so, as for any
 //! row) and is not past the head, is sent the rows still to send and those
 //! sent at a version above twice its cursor, each whole or as a removal,
-//! as a fill that empties nothing ([`Down::Fill`] with no tables); any
-//! other is sent every row it holds, as a fill that empties its queries'
-//! tables. Then `Got` for each subscription it said.
+//! as a fill that empties nothing ([`Down::Fill`], not whole); any other
+//! is sent every row it holds, as a whole fill, which replaces every row
+//! the node holds. Then `Got` for each subscription it said.
 //!
 //! **A query let go** stays held for the query TTL: its rows stay, it
 //! is kept current, and the client subscribing again is told `Got` at
@@ -56,7 +57,7 @@ use alloc::vec::Vec;
 
 use crate::entry::{Actor, Entry, Origin, Seq};
 use crate::node::{Body, Refusal};
-use crate::plan::{Changes, Diff, Live};
+use crate::plan::{Changes, Live};
 use crate::store::{Read, TableId, Write, Writes};
 use crate::sync::{Down, Feed, Logged, Query, QueryId};
 
@@ -91,8 +92,9 @@ const UNSAID: u64 = u64::MAX;
 struct Sub {
     query: QueryId,
     args: Vec<u8>,
-    table: TableId,
     live: Live,
+    /// The base rows its answer reads ([`Live::base`]), as last counted.
+    base: Vec<At>,
     until: Option<u64>,
 }
 
@@ -116,19 +118,19 @@ struct Record {
 impl Record {
     /// One more subscription reads each of `rows`: those that come into
     /// the client's hold, sent now at version `send`, or marked to send.
-    fn hold<'r>(&mut self, table: TableId, rows: impl Iterator<Item = &'r Vec<u8>>, db: &dyn Read, send: Option<u64>) -> Vec<Write> {
+    fn hold(&mut self, rows: &[At], db: &dyn Read, send: Option<u64>) -> Vec<Write> {
         let mut out = Vec::new();
         let Some(held) = &mut self.held else { return out };
-        for key in rows {
-            let h = held.entry((table, key.clone())).or_insert(Held { count: 0, sent: UNSENT });
+        for (table, key) in rows {
+            let h = held.entry((*table, key.clone())).or_insert(Held { count: 0, sent: UNSENT });
             h.count += 1;
             if h.count == 1 {
                 h.sent = send.unwrap_or(UNSENT);
                 if send.is_some() {
                     out.push(Write {
-                        table,
+                        table: *table,
                         key: key.clone(),
-                        value: db.get(table, key),
+                        value: db.get(*table, key),
                     });
                 }
             }
@@ -141,15 +143,15 @@ impl Record {
     fn release(&mut self, sub: &Sub, send: Option<u64>) -> Vec<Write> {
         let mut out = Vec::new();
         let Some(held) = &mut self.held else { return out };
-        for (key, _) in sub.live.rows() {
-            let Some(h) = held.get_mut(&(sub.table, key.clone())) else { continue };
+        for at in &sub.base {
+            let Some(h) = held.get_mut(at) else { continue };
             h.count -= 1;
             if h.count == 0 {
                 h.sent = send.unwrap_or(UNSENT);
                 if send.is_some() {
                     out.push(Write {
-                        table: sub.table,
-                        key: key.clone(),
+                        table: at.0,
+                        key: at.1.clone(),
                         value: None,
                     });
                 }
@@ -210,19 +212,23 @@ impl Record {
         // Whether each row was held before the settle.
         let mut was: BTreeMap<At, bool> = BTreeMap::new();
         for sub in &mut self.subs {
-            for Diff { key, old, new } in sub.live.diffs(db, changes) {
-                let (Some(held), true) = (&mut self.held, old.is_some() != new.is_some()) else {
-                    continue;
-                };
-                let at = (sub.table, key);
-                was.entry(at.clone()).or_insert_with(|| held.get(&at).is_some_and(|h| h.count > 0));
-                let h = held.entry(at).or_insert(Held { count: 0, sent: UNSENT });
-                if new.is_some() {
-                    h.count += 1;
-                } else {
-                    h.count -= 1;
+            sub.live.diffs(db, changes);
+            let base = sub.live.base(db);
+            if let Some(held) = &mut self.held {
+                // The rows that left its answer's base, and those that came.
+                for (from, to, by) in [(&sub.base, &base, false), (&base, &sub.base, true)] {
+                    for at in from.iter().filter(|a| to.binary_search(a).is_err()) {
+                        was.entry(at.clone()).or_insert_with(|| held.get(at).is_some_and(|h| h.count > 0));
+                        let h = held.entry(at.clone()).or_insert(Held { count: 0, sent: UNSENT });
+                        if by {
+                            h.count += 1;
+                        } else {
+                            h.count -= 1;
+                        }
+                    }
                 }
             }
+            sub.base = base;
         }
         let Some(held) = &mut self.held else { return out };
         for (table, d) in &changes.rows {
@@ -398,16 +404,14 @@ impl<B: Body + Clone> Serve<B> {
         let Some(make) = self.queries.get(query.0 as usize) else {
             return got(Vec::new());
         };
-        let (table, plan) = make(&args);
-        let live = plan.live(db);
-        let came = peer
-            .record
-            .hold(table, live.rows().iter().map(|(k, _)| k), db, hello.then(|| moved(head)));
+        let live = make(&args).live(db);
+        let base = live.base(db);
+        let came = peer.record.hold(&base, db, hello.then(|| moved(head)));
         peer.record.subs.push(Sub {
             query,
             args: args.clone(),
-            table,
             live,
+            base,
             until: None,
         });
         let rows = self.parts(came);
@@ -480,14 +484,7 @@ impl<B: Body + Clone> Serve<B> {
             if !delta {
                 record.filled = version;
             }
-            let mut tables: Vec<TableId> = if delta {
-                Vec::new()
-            } else {
-                record.subs.iter().map(|s| s.table).collect()
-            };
-            tables.sort();
-            tables.dedup();
-            out.extend(fill(head, tables, &rows, self.part));
+            out.extend(fill(head, !delta, &rows, self.part));
             out.extend(peer.said.iter().map(|(query, args)| Down::Got {
                 query: *query,
                 args: args.clone(),
@@ -546,7 +543,7 @@ impl<B: Body + Clone> Serve<B> {
                 continue;
             }
             let rows = peer.record.unsent(db, version);
-            out.extend(fill(head, Vec::new(), &rows, part).into_iter().map(|d| (c, d)));
+            out.extend(fill(head, false, &rows, part).into_iter().map(|d| (c, d)));
         }
         for (record, _) in self.kept.values_mut() {
             record.settle(db, changes, None);
@@ -637,12 +634,12 @@ fn parts<B>(rows: &[Write], part: usize) -> impl Iterator<Item = Down<B>> + '_ {
     rows.chunks(part).map(|c| Down::Moved(Writes(c.to_vec())))
 }
 
-/// A fill to `seq` of `rows`, emptying `tables` first: its frame, then its
-/// parts.
-pub(crate) fn fill<B>(seq: Seq, tables: Vec<TableId>, rows: &[Write], part: usize) -> Vec<Down<B>> {
+/// A fill to `seq` of `rows`, replacing every row the node holds when
+/// `whole`: its frame, then its parts.
+pub(crate) fn fill<B>(seq: Seq, whole: bool, rows: &[Write], part: usize) -> Vec<Down<B>> {
     let mut out = Vec::from([Down::Fill {
         seq,
-        tables,
+        whole,
         parts: rows.len().div_ceil(part) as u32,
     }]);
     out.extend(parts(rows, part));
@@ -736,13 +733,13 @@ pub(crate) mod tests {
         }
     }
 
-    /// The rows a fill carries, and the tables it empties.
-    fn filled(sent: &[Down<Msg>]) -> (Vec<TableId>, Vec<Write>) {
-        let Some(Down::Fill { tables, .. }) = sent.first() else {
+    /// Whether a fill replaces every row, and the rows it carries.
+    fn filled(sent: &[Down<Msg>]) -> (bool, Vec<Write>) {
+        let Some(&Down::Fill { whole, .. }) = sent.first() else {
             panic!("a fill: {sent:?}")
         };
         let rows = sent.iter().filter_map(|d| if let Down::Moved(w) = d { Some(w.0.clone()) } else { None });
-        (tables.clone(), rows.flatten().collect())
+        (whole, rows.flatten().collect())
     }
 
     /// A client that connects again while its record is kept is sent only
@@ -760,13 +757,13 @@ pub(crate) mod tests {
             push(&mut a, &mut writer, key, by);
         }
         let sent = connect(&mut a, &mut watch, 3, 200);
-        let (tables, rows_sent) = filled(&sent);
+        let (whole, rows_sent) = filled(&sent);
         let gone = Write {
             table: COUNTS,
             key: vec![3],
             value: None,
         };
-        assert_eq!((tables, rows_sent), (vec![], vec![count_is(1, 3), count_is(2, 3), gone]));
+        assert_eq!((whole, rows_sent), (false, vec![count_is(1, 3), count_is(2, 3), gone]));
         assert!(matches!(sent[sent.len() - 2..], [Down::Got { .. }, Down::Welcome { .. }]));
         assert_eq!(rows(watch.store(Space::Shared)), odd(a.store()));
         assert!(watch.complete(QueryId(0), &[1]) && watch.cursor() == a.head());
@@ -776,13 +773,13 @@ pub(crate) mod tests {
         assert_eq!(lost.iter().filter(|(c, _)| *c == Conn(3)).count(), 1);
         a.close(Conn(3), 300);
         let sent = connect(&mut a, &mut watch, 4, 400);
-        assert_eq!(filled(&sent), (vec![], vec![count_is(1, 5)]));
+        assert_eq!(filled(&sent), (false, vec![count_is(1, 5)]));
         assert_eq!(rows(watch.store(Space::Shared)), odd(a.store()));
         // With nothing new, nothing: the fill that sent it reached its
         // cursor, so it had it.
         a.close(Conn(4), 500);
         let sent = connect(&mut a, &mut watch, 5, 600);
-        assert_eq!(filled(&sent), (vec![], vec![]));
+        assert_eq!(filled(&sent), (false, vec![]));
         // A row moved in outside the log, at the head, is sent again: the
         // client cannot tell it from what it had there.
         let mut up = Vec::new();
@@ -810,7 +807,7 @@ pub(crate) mod tests {
         assert_eq!(
             filled(&sent),
             (
-                vec![COUNTS],
+                true,
                 odd(a.store())
                     .into_iter()
                     .map(|(k, v)| count_is(k[0], u64::from_le_bytes(v.try_into().unwrap())))
@@ -864,7 +861,7 @@ pub(crate) mod tests {
         let mut again = node(2);
         let sent = connect(&mut a, &mut again, 3, 300);
         // A node with none of the rows the record sent is filled whole.
-        assert_eq!(filled(&sent).0, vec![COUNTS]);
+        assert!(filled(&sent).0);
         assert_eq!(a.next_tick(), Some(400));
         assert!(a.tick(400).iter().any(|(_, d)| matches!(d, Down::Moved(_))));
     }

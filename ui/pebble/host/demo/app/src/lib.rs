@@ -121,8 +121,8 @@ fn play(cx: &mut Cx<'_, Msg>) -> Result<(), Refusal> {
 }
 
 /// The queue's first rows, as an upstream runs it for a watch.
-fn next(_args: &[u8]) -> (TableId, Plan) {
-    (QUEUE, scan(QUEUE, Bound::Unbounded, Bound::Unbounded).take(HELD, false))
+fn next(_args: &[u8]) -> Plan {
+    scan(QUEUE, Bound::Unbounded, Bound::Unbounded).take(HELD, false)
 }
 
 /// The queries, by their numbers.

@@ -22,7 +22,7 @@
 //! | operator | holds | on a change |
 //! |---|---|---|
 //! | `scan` | nothing | its table's changes in its range |
-//! | `filter`, `map` | nothing | the closure again on the old and new row |
+//! | `filter`, `map` | nothing (what each row read, when it reads) | the closure again on the old and new row |
 //! | `take` | its size and its last place | fetches the neighbours of its window that come in or go out |
 //! | `sort` | its input, sorted | the expensive case: a sort no index provides |
 //! | `group` | each group's running count, sum, min and max | count and sum in constant time; min or max fetched again when the extreme leaves |
@@ -31,20 +31,35 @@
 //! facts did to what it reads, its store already after them) go up through
 //! the operators, each answering the [`Diff`]s of its own rows; a [`Live`]
 //! answer turns them into the positional [`Patch`]es that splice a list a
-//! view holds into the new answer. The contract, held by the tests: after
-//! every push, every operator's rows are a fresh run's, and the patches
-//! splice the old answer into the new one.
+//! view holds into the new answer. An operator is given the rows after the
+//! settle and as they were before it ([`Settle`]), so a row's old side is
+//! made over the rows it was made over. The contract, held by the tests:
+//! after every push, every operator's rows are a fresh run's, and the
+//! patches splice the old answer into the new one.
 //!
-//! Closures read their row only; reads of other rows (recorded, as the old
-//! engine's are) and `join` are for later.
+//! **Reads.** The `_with` forms' closures read other rows through the
+//! `&dyn Read` they are given. What each row's run read is recorded, per
+//! row, as ranges of keys (a key read is the range of itself; a scan
+//! stopped early read up to where it stopped), and a change a recorded
+//! range covers runs the closure again for just the rows whose runs read
+//! it: their old side over the rows before, their new over the rows after.
+//! An operator whose closures read holds those ranges for every row of its
+//! input, and nothing for a row that read nothing.
+//!
+//! **What syncs.** An upstream sends a subscriber the base rows its query's
+//! answer is made of ([`Live::base`]): each answer row's row of its scan,
+//! and the rows its closures read for it, so the node runs the same plan
+//! over what it holds and gets the same answer. A subscription's query is a
+//! scan, its filters, maps and takes; sorts and groups are the node's own.
 
 use alloc::boxed::Box;
 use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
+use core::cell::RefCell;
 use core::ops::Bound;
 
-use crate::codec::{from_slice, to_vec, Decode, Encode, Error, Reader};
-use crate::store::{walk, Range, Read, TableId, Tree};
+use crate::codec::{from_slice, put_bytes, to_vec, Decode, Encode, Error, Reader};
+use crate::store::{walk, Layer, Range, Read, TableId, Tree, View};
 
 /// A row of an answer: its place and its value.
 pub type Row = (Vec<u8>, Vec<u8>);
@@ -66,6 +81,14 @@ pub struct Changes {
     pub rows: Vec<(TableId, Diff)>,
 }
 
+/// One settle, as an operator takes it: the rows after it (`db`), the rows
+/// as they were before it (`was`), and what changed.
+pub struct Settle<'a> {
+    pub db: &'a dyn Read,
+    pub was: &'a dyn Read,
+    pub changes: &'a Changes,
+}
+
 /// One operator of a plan.
 pub trait Op {
     /// Calls `f` with each row in order, ascending or, when `reverse`,
@@ -73,12 +96,18 @@ pub trait Op {
     /// until `f` returns false or the rows end.
     fn fetch(&self, db: &dyn Read, from: Bound<&[u8]>, reverse: bool, f: &mut dyn FnMut(&[u8], &[u8]) -> bool);
 
-    /// Takes one settle's changes, `db` already after them, and answers
-    /// what they did to this operator's rows, in place order.
-    fn push(&mut self, db: &dyn Read, changes: &Changes) -> Vec<Diff>;
+    /// Takes one settle, and answers what it did to this operator's rows,
+    /// in place order.
+    fn push(&mut self, s: &Settle<'_>) -> Vec<Diff>;
 
     /// Builds its state over `db`, after its input's.
     fn hydrate(&mut self, db: &dyn Read);
+
+    /// Calls `f` with each base row its row at `place` is made of, and each
+    /// row its closures read for it, as `db` holds them: what an upstream
+    /// sends a node subscribed to it.
+    #[cfg(feature = "upstream")]
+    fn base(&self, db: &dyn Read, place: &[u8], f: &mut dyn FnMut(TableId, &[u8]));
 
     /// The bytes of state it and its inputs hold: what the tests hold to a
     /// bound.
@@ -86,8 +115,9 @@ pub trait Op {
     fn held(&self) -> usize;
 }
 
-/// A row-wise closure: its place and value in, a verdict or bytes out.
-pub type Fun<T> = Box<dyn Fn(&[u8], &[u8]) -> T>;
+/// A row-wise closure: what it may read, and a row's place and value, in; a
+/// verdict or bytes out.
+pub type Fun<T> = Box<dyn Fn(&dyn Read, &[u8], &[u8]) -> T>;
 
 /// Whether `k` is in the range from `lo` to `hi`.
 fn within(lo: Bound<&[u8]>, hi: Bound<&[u8]>, k: &[u8]) -> bool {
@@ -165,6 +195,171 @@ fn merge(a: Vec<Diff>, b: Vec<Diff>) -> Vec<Diff> {
     out
 }
 
+/// A store read through, each read noted as the range of keys it covered,
+/// when `on`: what a closure that reads is given.
+struct Recorder<'a> {
+    db: &'a dyn Read,
+    /// The ranges read, each its table and its bounds, encoded.
+    spans: Option<RefCell<Vec<u8>>>,
+}
+
+impl<'a> Recorder<'a> {
+    fn new(db: &'a dyn Read, on: bool) -> Recorder<'a> {
+        Recorder {
+            db,
+            spans: on.then(Default::default),
+        }
+    }
+
+    fn note(&self, table: TableId, lo: Bound<&[u8]>, hi: Bound<&[u8]>) {
+        if let Some(s) = &self.spans {
+            let out = &mut *s.borrow_mut();
+            table.encode(out);
+            for b in [lo, hi] {
+                match b {
+                    Bound::Unbounded => out.push(0),
+                    Bound::Included(k) | Bound::Excluded(k) => {
+                        out.push(if matches!(b, Bound::Included(_)) { 1 } else { 2 });
+                        put_bytes(out, k);
+                    }
+                }
+            }
+        }
+    }
+}
+
+impl Read for Recorder<'_> {
+    fn tables(&self) -> Vec<TableId> {
+        self.db.tables()
+    }
+
+    fn get(&self, table: TableId, key: &[u8]) -> Option<Vec<u8>> {
+        self.note(table, Bound::Included(key), Bound::Included(key));
+        self.db.get(table, key)
+    }
+
+    fn scan(&self, table: TableId, range: Range<'_>, f: &mut dyn FnMut(&[u8], &[u8]) -> bool) {
+        let mut stop = None;
+        self.db.scan(table, range, &mut |k, v| {
+            let on = f(k, v);
+            if !on {
+                stop = Some(k.to_vec());
+            }
+            on
+        });
+        // Stopped, it read only as far as the row it stopped at.
+        let (lo, hi) = match (stop.as_deref(), range.reverse) {
+            (Some(at), false) => (range.lo, Bound::Included(at)),
+            (Some(at), true) => (Bound::Included(at), range.hi),
+            (None, _) => (range.lo, range.hi),
+        };
+        self.note(table, lo, hi);
+    }
+}
+
+/// A recorded range: its table and bounds.
+type Span<'a> = (TableId, Bound<&'a [u8]>, Bound<&'a [u8]>);
+
+/// The ranges `spans` records.
+fn spans(spans: &[u8]) -> impl Iterator<Item = Span<'_>> {
+    let mut r = Reader::new(spans);
+    core::iter::from_fn(move || {
+        let table = TableId::decode(&mut r).ok()?;
+        Some((table, bound(&mut r).ok()?, bound(&mut r).ok()?))
+    })
+}
+
+/// A recorded bound.
+fn bound<'a>(r: &mut Reader<'a>) -> Result<Bound<&'a [u8]>, Error> {
+    Ok(match r.byte()? {
+        0 => Bound::Unbounded,
+        1 => Bound::Included(r.bytes()?),
+        _ => Bound::Excluded(r.bytes()?),
+    })
+}
+
+/// What an operator's closures read, by the place of the input row each
+/// run was for. A row whose run read nothing holds nothing.
+#[derive(Default)]
+struct Reads(Tree);
+
+impl Reads {
+    /// Runs `f` over `db` for the row at `place`, keeping what it read in
+    /// place of what it read before, when the operator records reads.
+    fn run<T>(reads: &mut Option<Reads>, db: &dyn Read, place: &Vec<u8>, f: impl FnOnce(&dyn Read) -> T) -> T {
+        let r = Recorder::new(db, reads.is_some());
+        let out = f(&r);
+        if let (Some(reads), Some(s)) = (reads, r.spans) {
+            let s = s.into_inner();
+            if s.is_empty() {
+                reads.0.remove(place);
+            } else {
+                reads.0.insert(place.clone(), Some(s));
+            }
+        }
+        out
+    }
+
+    /// Lets go of what the row at `place` read: it left the input.
+    fn drop(reads: &mut Option<Reads>, place: &Vec<u8>) {
+        if let Some(reads) = reads {
+            reads.0.remove(place);
+        }
+    }
+
+    /// The input's diffs for one settle, and for each row whose recorded
+    /// reads a change covers, a diff of the row (unchanged) to itself: its
+    /// closures run again, over the rows before and after.
+    fn pull(reads: &Option<Reads>, input: &mut dyn Op, s: &Settle<'_>) -> Vec<Diff> {
+        let mut out = input.push(s);
+        let Some(reads) = reads else { return out };
+        let changes = &s.changes.rows;
+        for (place, read) in &reads.0 {
+            let mut read = spans(read.as_deref().unwrap_or_default());
+            if !read.any(|(t, lo, hi)| changes.iter().any(|(ct, d)| *ct == t && within(lo, hi, &d.key))) {
+                continue;
+            }
+            let Err(i) = out.binary_search_by(|d| d.key.cmp(place)) else { continue };
+            let mut row = None;
+            input.fetch(s.db, Bound::Included(place), false, &mut |k, v| {
+                if k == &place[..] {
+                    row = Some(v.to_vec());
+                }
+                false
+            });
+            if let Some(v) = row {
+                let d = Diff {
+                    key: place.clone(),
+                    old: Some(v.clone()),
+                    new: Some(v),
+                };
+                out.insert(i, d);
+            }
+        }
+        out
+    }
+
+    /// Calls `f` with each row `db` holds that the row at `place` read.
+    #[cfg(feature = "upstream")]
+    fn base(reads: &Option<Reads>, db: &dyn Read, place: &[u8], f: &mut dyn FnMut(TableId, &[u8])) {
+        let Some(read) = reads.as_ref().and_then(|r| r.0.get(place)) else {
+            return;
+        };
+        for (t, lo, hi) in spans(read.as_deref().unwrap_or_default()) {
+            db.scan(t, Range { lo, hi, reverse: false }, &mut |k, _| {
+                f(t, k);
+                true
+            });
+        }
+    }
+
+    /// The bytes it holds.
+    #[cfg(any(test, ark_selftest))]
+    fn held(reads: &Option<Reads>) -> usize {
+        reads.as_ref().map_or(0, |r| held(&r.0))
+    }
+}
+
 /// A table's rows from `lo` to `hi`, by their keys.
 struct Scan {
     table: TableId,
@@ -181,13 +376,18 @@ impl Op for Scan {
         );
     }
 
-    fn push(&mut self, _: &dyn Read, changes: &Changes) -> Vec<Diff> {
+    fn push(&mut self, s: &Settle<'_>) -> Vec<Diff> {
         let (lo, hi) = (self.lo.as_ref().map(Vec::as_slice), self.hi.as_ref().map(Vec::as_slice));
-        let mine = changes.rows.iter().filter(|(t, d)| *t == self.table && within(lo, hi, &d.key));
+        let mine = s.changes.rows.iter().filter(|(t, d)| *t == self.table && within(lo, hi, &d.key));
         mine.map(|(_, d)| d.clone()).collect()
     }
 
     fn hydrate(&mut self, _: &dyn Read) {}
+
+    #[cfg(feature = "upstream")]
+    fn base(&self, _: &dyn Read, place: &[u8], f: &mut dyn FnMut(TableId, &[u8])) {
+        f(self.table, place);
+    }
 
     #[cfg(any(test, ark_selftest))]
     fn held(&self) -> usize {
@@ -200,19 +400,31 @@ impl Op for Scan {
 struct Each {
     input: Box<dyn Op>,
     f: Fun<Option<Vec<u8>>>,
+    reads: Option<Reads>,
 }
 
 impl Op for Each {
     fn fetch(&self, db: &dyn Read, from: Bound<&[u8]>, reverse: bool, f: &mut dyn FnMut(&[u8], &[u8]) -> bool) {
-        self.input.fetch(db, from, reverse, &mut |k, v| (self.f)(k, v).is_none_or(|u| f(k, &u)));
+        self.input
+            .fetch(db, from, reverse, &mut |k, v| (self.f)(db, k, v).is_none_or(|u| f(k, &u)));
     }
 
-    fn push(&mut self, db: &dyn Read, changes: &Changes) -> Vec<Diff> {
+    fn push(&mut self, s: &Settle<'_>) -> Vec<Diff> {
+        if s.changes.reset {
+            self.hydrate(s.db);
+            return Vec::new();
+        }
+        let mut out = Reads::pull(&self.reads, &mut *self.input, s);
         let each = &self.f;
-        let mut out = self.input.push(db, changes);
         for d in &mut out {
-            d.old = d.old.take().and_then(|v| each(&d.key, &v));
-            d.new = d.new.take().and_then(|v| each(&d.key, &v));
+            d.old = d.old.take().and_then(|v| each(s.was, &d.key, &v));
+            d.new = match d.new.take() {
+                Some(v) => Reads::run(&mut self.reads, s.db, &d.key, |db| each(db, &d.key, &v)),
+                None => {
+                    Reads::drop(&mut self.reads, &d.key);
+                    None
+                }
+            };
         }
         out.retain(|d| d.old != d.new);
         out
@@ -220,11 +432,23 @@ impl Op for Each {
 
     fn hydrate(&mut self, db: &dyn Read) {
         self.input.hydrate(db);
+        if self.reads.is_some() {
+            self.reads = Some(Reads::default());
+            for (k, v) in fetch(&*self.input, db, Bound::Unbounded, false, usize::MAX) {
+                Reads::run(&mut self.reads, db, &k, |db| (self.f)(db, &k, &v));
+            }
+        }
+    }
+
+    #[cfg(feature = "upstream")]
+    fn base(&self, db: &dyn Read, place: &[u8], f: &mut dyn FnMut(TableId, &[u8])) {
+        self.input.base(db, place, f);
+        Reads::base(&self.reads, db, place, f);
     }
 
     #[cfg(any(test, ark_selftest))]
     fn held(&self) -> usize {
-        self.input.held()
+        self.input.held() + Reads::held(&self.reads)
     }
 }
 
@@ -235,30 +459,30 @@ struct Sort {
     input: Box<dyn Op>,
     by: Fun<Vec<u8>>,
     rows: Tree,
+    reads: Option<Reads>,
 }
 
-impl Sort {
-    fn place(&self, k: &[u8], v: &[u8]) -> Vec<u8> {
-        let mut at = (self.by)(k, v);
-        at.extend_from_slice(k);
-        at
-    }
+/// A row's place in a sort: `by`'s bytes, then its place.
+fn sorted(by: &Fun<Vec<u8>>, db: &dyn Read, k: &[u8], v: &[u8]) -> Vec<u8> {
+    let mut at = by(db, k, v);
+    at.extend_from_slice(k);
+    at
 }
 
 impl Op for Sort {
     fn fetch(&self, _: &dyn Read, from: Bound<&[u8]>, reverse: bool, f: &mut dyn FnMut(&[u8], &[u8]) -> bool) {
-        fetch_map(&self.rows, from, reverse, &mut |k, v| f(k, v));
+        fetch_map(&self.rows, from, reverse, f);
     }
 
-    fn push(&mut self, db: &dyn Read, changes: &Changes) -> Vec<Diff> {
-        if changes.reset {
-            self.hydrate(db);
+    fn push(&mut self, s: &Settle<'_>) -> Vec<Diff> {
+        if s.changes.reset {
+            self.hydrate(s.db);
             return Vec::new();
         }
         let mut out: BTreeMap<Vec<u8>, Diff> = BTreeMap::new();
-        for d in self.input.push(db, changes) {
+        for d in Reads::pull(&self.reads, &mut *self.input, s) {
             if let Some(old) = d.old {
-                let at = self.place(&d.key, &old);
+                let at = sorted(&self.by, s.was, &d.key, &old);
                 self.rows.remove(&at);
                 out.insert(
                     at.clone(),
@@ -269,34 +493,42 @@ impl Op for Sort {
                     },
                 );
             }
-            if let Some(new) = d.new {
-                let at = self.place(&d.key, &new);
-                self.rows.insert(at.clone(), Some(new.clone()));
-                out.entry(at.clone())
-                    .or_insert(Diff {
-                        key: at,
-                        old: None,
-                        new: None,
-                    })
-                    .new = Some(new);
-            }
+            let Some(new) = d.new else {
+                Reads::drop(&mut self.reads, &d.key);
+                continue;
+            };
+            let by = &self.by;
+            let at = Reads::run(&mut self.reads, s.db, &d.key, |db| sorted(by, db, &d.key, &new));
+            self.rows.insert(at.clone(), Some(new.clone()));
+            out.entry(at.clone())
+                .or_insert(Diff {
+                    key: at,
+                    old: None,
+                    new: None,
+                })
+                .new = Some(new);
         }
         merge(out.into_values().collect(), Vec::new())
     }
 
     fn hydrate(&mut self, db: &dyn Read) {
         self.input.hydrate(db);
-        let mut rows = Tree::new();
-        self.input.fetch(db, Bound::Unbounded, false, &mut |k, v| {
-            rows.insert(self.place(k, v), Some(v.to_vec()));
-            true
-        });
-        self.rows = rows;
+        self.rows = Tree::new();
+        self.reads = self.reads.take().map(|_| Reads::default());
+        for (k, v) in fetch(&*self.input, db, Bound::Unbounded, false, usize::MAX) {
+            let by = &self.by;
+            let at = Reads::run(&mut self.reads, db, &k, |db| sorted(by, db, &k, &v));
+            self.rows.insert(at, Some(v));
+        }
     }
+
+    /// Not a subscription's: a node sorts what it holds.
+    #[cfg(feature = "upstream")]
+    fn base(&self, _: &dyn Read, _: &[u8], _: &mut dyn FnMut(TableId, &[u8])) {}
 
     #[cfg(any(test, ark_selftest))]
     fn held(&self) -> usize {
-        self.input.held() + held(&self.rows)
+        self.input.held() + held(&self.rows) + Reads::held(&self.reads)
     }
 }
 
@@ -347,12 +579,13 @@ impl Op for Take {
         }
     }
 
-    fn push(&mut self, db: &dyn Read, changes: &Changes) -> Vec<Diff> {
-        if changes.reset {
+    fn push(&mut self, s: &Settle<'_>) -> Vec<Diff> {
+        let db = s.db;
+        if s.changes.reset {
             self.hydrate(db);
             return Vec::new();
         }
-        let d = self.input.push(db, changes);
+        let d = self.input.push(s);
         if d.is_empty() || self.limit == 0 {
             return Vec::new();
         }
@@ -433,6 +666,11 @@ impl Op for Take {
         (self.size, self.bound) = (size, bound);
     }
 
+    #[cfg(feature = "upstream")]
+    fn base(&self, db: &dyn Read, place: &[u8], f: &mut dyn FnMut(TableId, &[u8])) {
+        self.input.base(db, place, f);
+    }
+
     #[cfg(any(test, ark_selftest))]
     fn held(&self) -> usize {
         self.input.held() + self.bound.as_ref().map_or(0, Vec::len)
@@ -494,6 +732,7 @@ struct Group {
     extremes: bool,
     prefix: bool,
     groups: Tree,
+    reads: Option<Reads>,
 }
 
 impl Group {
@@ -505,19 +744,28 @@ impl Group {
             if self.prefix && !k.starts_with(g) {
                 return false;
             }
-            if (self.by)(k, v) == g {
-                agg.add((self.of)(k, v), self.extremes);
+            if (self.by)(db, k, v) == g {
+                agg.add((self.of)(db, k, v), self.extremes);
             }
             true
         });
         agg
     }
 
-    /// Adds `v`'s number to its group, or takes it away: whether the group
-    /// lost its least or most.
-    fn count(&mut self, k: &[u8], v: &[u8], add: bool) -> bool {
-        let g = (self.by)(k, v);
-        let n = (self.of)(k, v);
+    /// A row's group and number, over `db`, what it read kept when `keep`.
+    fn place(&mut self, db: &dyn Read, k: &Vec<u8>, v: &[u8], keep: bool) -> (Vec<u8>, i64) {
+        let (by, of) = (&self.by, &self.of);
+        let run = |db: &dyn Read| (by(db, k, v), of(db, k, v));
+        if keep {
+            Reads::run(&mut self.reads, db, k, run)
+        } else {
+            run(db)
+        }
+    }
+
+    /// Adds `n` to group `g`, or takes it away: whether the group lost its
+    /// least or most.
+    fn count(&mut self, g: Vec<u8>, n: i64, add: bool) -> bool {
         let mut agg: Agg = self
             .groups
             .get(&g)
@@ -544,22 +792,25 @@ impl Group {
 
 impl Op for Group {
     fn fetch(&self, _: &dyn Read, from: Bound<&[u8]>, reverse: bool, f: &mut dyn FnMut(&[u8], &[u8]) -> bool) {
-        fetch_map(&self.groups, from, reverse, &mut |k, v| f(k, v));
+        fetch_map(&self.groups, from, reverse, f);
     }
 
-    fn push(&mut self, db: &dyn Read, changes: &Changes) -> Vec<Diff> {
-        if changes.reset {
-            self.hydrate(db);
+    fn push(&mut self, s: &Settle<'_>) -> Vec<Diff> {
+        if s.changes.reset {
+            self.hydrate(s.db);
             return Vec::new();
         }
         // Each group touched, in key order, with its row before; and those
         // whose least or most left.
         let mut before: Vec<Diff> = Vec::new();
         let mut stale: Vec<Vec<u8>> = Vec::new();
-        for d in self.input.push(db, changes) {
+        for d in Reads::pull(&self.reads, &mut *self.input, s) {
+            if d.new.is_none() {
+                Reads::drop(&mut self.reads, &d.key);
+            }
             for (v, add) in [(&d.old, false), (&d.new, true)] {
                 let Some(v) = v else { continue };
-                let g = (self.by)(&d.key, v);
+                let (g, n) = self.place(if add { s.db } else { s.was }, &d.key, v, add);
                 if let Err(i) = before.binary_search_by(|x| x.key.cmp(&g)) {
                     let old = self.groups.get(&g).cloned().flatten();
                     before.insert(
@@ -571,7 +822,7 @@ impl Op for Group {
                         },
                     );
                 }
-                if self.count(&d.key, v, add) {
+                if self.count(g.clone(), n, add) {
                     stale.push(g);
                 }
             }
@@ -579,7 +830,7 @@ impl Op for Group {
         // The extremes that left, fetched again once every change is in.
         for g in stale {
             if self.groups.contains_key(&g) {
-                let agg = to_vec(&self.refetch(db, &g));
+                let agg = to_vec(&self.refetch(s.db, &g));
                 self.groups.insert(g, Some(agg));
             }
         }
@@ -592,19 +843,20 @@ impl Op for Group {
     fn hydrate(&mut self, db: &dyn Read) {
         self.input.hydrate(db);
         self.groups.clear();
-        let mut rows = Vec::new();
-        self.input.fetch(db, Bound::Unbounded, false, &mut |k, v| {
-            rows.push((k.to_vec(), v.to_vec()));
-            true
-        });
-        for (k, v) in rows {
-            self.count(&k, &v, true);
+        self.reads = self.reads.take().map(|_| Reads::default());
+        for (k, v) in fetch(&*self.input, db, Bound::Unbounded, false, usize::MAX) {
+            let (g, n) = self.place(db, &k, &v, true);
+            self.count(g, n, true);
         }
     }
 
+    /// Not a subscription's: a node groups what it holds.
+    #[cfg(feature = "upstream")]
+    fn base(&self, _: &dyn Read, _: &[u8], _: &mut dyn FnMut(TableId, &[u8])) {}
+
     #[cfg(any(test, ark_selftest))]
     fn held(&self) -> usize {
-        self.input.held() + held(&self.groups)
+        self.input.held() + held(&self.groups) + Reads::held(&self.reads)
     }
 }
 
@@ -626,26 +878,54 @@ pub fn scan(table: TableId, lo: Bound<Vec<u8>>, hi: Bound<Vec<u8>>) -> Plan {
 impl Plan {
     /// The rows `keep` keeps.
     pub fn filter(self, keep: impl Fn(&[u8], &[u8]) -> bool + 'static) -> Plan {
-        self.each(Box::new(move |k, v| keep(k, v).then(|| v.to_vec())))
+        self.each(Box::new(move |_, k, v| keep(k, v).then(|| v.to_vec())), false)
+    }
+
+    /// The rows `keep` keeps, reading what it will of the rows given it:
+    /// what it read is recorded per row, and runs it again for that row
+    /// when it changes.
+    pub fn filter_with(self, keep: impl Fn(&dyn Read, &[u8], &[u8]) -> bool + 'static) -> Plan {
+        self.each(Box::new(move |db, k, v| keep(db, k, v).then(|| v.to_vec())), true)
     }
 
     /// Each row's value made another by `make`.
     pub fn map(self, make: impl Fn(&[u8], &[u8]) -> Vec<u8> + 'static) -> Plan {
-        self.each(Box::new(move |k, v| Some(make(k, v))))
+        self.each(Box::new(move |_, k, v| Some(make(k, v))), false)
     }
 
-    fn each(self, f: Fun<Option<Vec<u8>>>) -> Plan {
-        Plan(Box::new(Each { input: self.0, f }))
+    /// Each row's value made another by `make`, reading what it will, as
+    /// [`Plan::filter_with`] does.
+    pub fn map_with(self, make: impl Fn(&dyn Read, &[u8], &[u8]) -> Vec<u8> + 'static) -> Plan {
+        self.each(Box::new(move |db, k, v| Some(make(db, k, v))), true)
+    }
+
+    fn each(self, f: Fun<Option<Vec<u8>>>, reads: bool) -> Plan {
+        Plan(Box::new(Each {
+            input: self.0,
+            f,
+            reads: reads.then(Reads::default),
+        }))
     }
 
     /// The rows placed by the bytes `by` gives first: bytes whose order is
     /// the sort's, none a prefix of another. Holds its input: where an
     /// index gives the order, scan the index instead.
     pub fn sort(self, by: impl Fn(&[u8], &[u8]) -> Vec<u8> + 'static) -> Plan {
+        self.sorted(Box::new(move |_, k, v| by(k, v)), false)
+    }
+
+    /// [`Plan::sort`], `by` reading what it will, as [`Plan::filter_with`]
+    /// does.
+    pub fn sort_with(self, by: impl Fn(&dyn Read, &[u8], &[u8]) -> Vec<u8> + 'static) -> Plan {
+        self.sorted(Box::new(by), true)
+    }
+
+    fn sorted(self, by: Fun<Vec<u8>>, reads: bool) -> Plan {
         Plan(Box::new(Sort {
             input: self.0,
-            by: Box::new(by),
+            by,
             rows: Tree::new(),
+            reads: reads.then(Reads::default),
         }))
     }
 
@@ -671,13 +951,36 @@ impl Plan {
         extremes: bool,
         prefix: bool,
     ) -> Plan {
+        self.grouped(
+            Box::new(move |_, k, v| by(k, v)),
+            Box::new(move |_, k, v| of(k, v)),
+            extremes,
+            prefix,
+            false,
+        )
+    }
+
+    /// [`Plan::group`], `by` and `of` reading what they will, as
+    /// [`Plan::filter_with`] does.
+    pub fn group_with(
+        self,
+        by: impl Fn(&dyn Read, &[u8], &[u8]) -> Vec<u8> + 'static,
+        of: impl Fn(&dyn Read, &[u8], &[u8]) -> i64 + 'static,
+        extremes: bool,
+        prefix: bool,
+    ) -> Plan {
+        self.grouped(Box::new(by), Box::new(of), extremes, prefix, true)
+    }
+
+    fn grouped(self, by: Fun<Vec<u8>>, of: Fun<i64>, extremes: bool, prefix: bool, reads: bool) -> Plan {
         Plan(Box::new(Group {
             input: self.0,
-            by: Box::new(by),
-            of: Box::new(of),
+            by,
+            of,
             extremes,
             prefix,
             groups: Tree::new(),
+            reads: reads.then(Reads::default),
         }))
     }
 
@@ -755,9 +1058,30 @@ impl Live {
         diffs
     }
 
+    /// The base rows the answer is made of, and the rows its closures read
+    /// for it, each once, in table and key order, as `db` holds them: what
+    /// an upstream sends a node subscribed to its query.
+    #[cfg(feature = "upstream")]
+    pub fn base(&self, db: &dyn Read) -> Vec<(TableId, Vec<u8>)> {
+        let mut out = Vec::new();
+        for (k, _) in &self.rows {
+            self.op.base(db, k, &mut |t, key| out.push((t, key.to_vec())));
+        }
+        out.sort_unstable();
+        out.dedup();
+        out
+    }
+
     fn settle(&mut self, db: &dyn Read, changes: &Changes) -> Vec<Diff> {
+        // The rows as they were: what changed, put back over the rows now.
+        let mut layer = Layer::new();
+        for (t, d) in &changes.rows {
+            layer.keep(*t, &d.key, || d.old.clone());
+        }
+        let was = View { base: db, layer: &layer };
+        let s = Settle { db, was: &was, changes };
         if changes.reset {
-            self.op.push(db, changes);
+            self.op.push(&s);
             let new = fetch(&*self.op, db, Bound::Unbounded, false, usize::MAX);
             let diff = |rows: Vec<Row>, old: bool| {
                 let each = rows.into_iter().map(|(key, v)| Diff {
@@ -769,7 +1093,7 @@ impl Live {
             };
             merge(diff(self.rows.clone(), true), diff(new, false))
         } else {
-            self.op.push(db, changes)
+            self.op.push(&s)
         }
     }
 
@@ -877,14 +1201,31 @@ pub(crate) mod tests {
         }
     }
 
+    /// The first byte of the first row of the other table at or after
+    /// `from`, or 7: a read of a range, stopped early.
+    fn first(db: &dyn Read, from: &[u8]) -> u8 {
+        let mut out = 7;
+        let range = Range {
+            lo: Bound::Included(from),
+            hi: Bound::Unbounded,
+            reverse: false,
+        };
+        db.scan(U, range, &mut |_, u| {
+            out = u[0];
+            false
+        });
+        out
+    }
+
     /// A random plan, the same for the same seed: a scan of a range, then
-    /// up to four of filter, map, sort, take and group, in any order.
+    /// up to four of filter, map, sort, take and group, in any order, and
+    /// their forms whose closures read the other table.
     fn plan(seed: u64) -> Plan {
         let mut rng = Rng::new(seed);
         let (lo, hi) = (key(&mut rng), key(&mut rng));
         let mut p = scan(T, bound(&mut rng, lo), bound(&mut rng, hi));
         for _ in 0..rng.below(5) {
-            p = match rng.below(7) {
+            p = match rng.below(11) {
                 0 => {
                     let m = 2 + rng.below(3) as u8;
                     p.filter(move |_, v| v[0] % m != 0)
@@ -893,7 +1234,18 @@ pub(crate) mod tests {
                 2 => p.sort(|_, v| vec![v[0] % 4]),
                 3 | 4 => p.take(rng.below(5) as usize, rng.below(2) == 0),
                 5 => p.group(|k, _| vec![k[0]], |_, v| i64::from(v[0]) - 3, rng.below(2) == 0, true),
-                _ => p.group(|_, v| vec![v[0] % 3], |_, v| i64::from(v[0]), true, false),
+                6 => p.group(|_, v| vec![v[0] % 3], |_, v| i64::from(v[0]), true, false),
+                // Closures that read the other table: a key, and a scan
+                // stopped at its first row.
+                7 => p.filter_with(|db, k, _| db.get(U, &k[..1]).is_none_or(|u| u[0] % 2 == 0)),
+                8 => p.map_with(|db, k, v| vec![v[0], first(db, &k[..1])]),
+                9 => p.sort_with(|db, _, v| vec![first(db, &[v[0] % 6]) % 3]),
+                _ => p.group_with(
+                    |db, k, _| vec![db.get(U, &k[..1]).map_or(9, |u| u[0] % 2)],
+                    |db, _, v| i64::from(v[0]) + i64::from(first(db, &[])),
+                    true,
+                    false,
+                ),
             };
         }
         p
@@ -914,7 +1266,8 @@ pub(crate) mod tests {
     /// anywhere, either way, of any length, is the fresh run's.
     #[cfg_attr(test, test)]
     fn every_answer_is_a_fresh_runs() {
-        for seed in 0..150 {
+        let seeds = option_env!("ARK_PLANS").and_then(|n| n.parse().ok()).unwrap_or(150);
+        for seed in 0..seeds {
             let mut rng = Rng::new(seed ^ 0x5eed);
             let mut db = Memory::new();
             for _ in 0..rng.below(12) {

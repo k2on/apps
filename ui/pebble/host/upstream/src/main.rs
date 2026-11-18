@@ -111,7 +111,7 @@ fn down(d: &Down<Msg>) -> String {
             Verdict::Refused(r) => format!("Verdict {:x}/{} refused {}", id.origin.0, id.n, r.0),
         },
         Down::Live(e) => format!("Live {}", entry(e)),
-        Down::Fill { seq, tables, parts } => format!("Fill to seq {} emptying {} tables, {parts} parts", seq.0, tables.len()),
+        Down::Fill { seq, whole, parts } => format!("Fill to seq {}{}, {parts} parts", seq.0, if *whole { " replacing every row" } else { "" }),
         Down::Moved(w) => format!("Moved {} rows", w.0.len()),
         Down::Got { query, .. } => format!("Got query {}", query.0),
         Down::Welcome { sent, time } => format!("Welcome: its {sent}, our {time} ({} ms ahead)", *time as i64 - *sent as i64),

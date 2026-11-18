@@ -58,7 +58,7 @@
 //! the journal are the server host's. The entries a handler emits on the
 //! authority are not taken yet: reactions are a later step.
 
-use alloc::collections::{BTreeMap, BTreeSet};
+use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
 
 use crate::entry::{Actor, Entry, EntryId, Origin, Seq, Space};
@@ -66,7 +66,7 @@ use crate::node::{run, Body, Handler, Refusal};
 use crate::plan::{Changes, Diff};
 use crate::serve::{fill, stamped, Serve};
 pub use crate::serve::{Conn, Out};
-use crate::store::{Range, Store, TableId, Write};
+use crate::store::{Range, Store, Write};
 pub use crate::sync::Query;
 use crate::sync::{Down, Logged, Up, Verdict};
 
@@ -76,8 +76,6 @@ pub struct Authority<B: 'static, S> {
     /// The log after `base`: the entry at `seq` is `log[seq - base - 1]`.
     log: Vec<Logged<B>>,
     base: u64,
-    /// Every table the log has written: what a fill empties.
-    tables: BTreeSet<TableId>,
     last: BTreeMap<Origin, u64>,
     refused: BTreeMap<EntryId, Refusal>,
     serve: Serve<B>,
@@ -91,7 +89,6 @@ impl<B: Body + Clone + 'static, S: Store> Authority<B, S> {
             store,
             log: Vec::new(),
             base: 0,
-            tables: BTreeSet::new(),
             last: BTreeMap::new(),
             refused: BTreeMap::new(),
             serve: Serve::new(true),
@@ -222,7 +219,7 @@ impl<B: Body + Clone + 'static, S: Store> Authority<B, S> {
             return self.log[from..].iter().cloned().map(Down::Logged).collect();
         }
         let mut rows = Vec::new();
-        for &table in &self.tables {
+        for table in self.store.tables() {
             self.store.scan(table, Range::all(), &mut |k, v| {
                 rows.push(Write {
                     table,
@@ -232,7 +229,7 @@ impl<B: Body + Clone + 'static, S: Store> Authority<B, S> {
                 true
             });
         }
-        fill(self.head(), self.tables.iter().copied().collect(), &rows, self.serve.part())
+        fill(self.head(), true, &rows, self.serve.part())
     }
 
     /// Judges an entry `actor`'s connection pushed: the verdict for its
@@ -272,7 +269,6 @@ impl<B: Body + Clone + 'static, S: Store> Authority<B, S> {
                     rows: changes.collect(),
                 };
                 self.store.apply(&facts);
-                self.tables.extend(facts.0.iter().map(|w| w.table));
                 let seq = Seq(self.head().0 + 1);
                 let logged = Logged {
                     entry: Entry { seq: Some(seq), ..e },
@@ -295,7 +291,7 @@ pub(crate) mod tests {
     use crate::store::{Memory, Read};
     use crate::sync::QueryId;
     use crate::Rng;
-    use alloc::collections::VecDeque;
+    use alloc::collections::{BTreeSet, VecDeque};
     use alloc::vec;
     use core::ops::Bound;
 
@@ -507,7 +503,7 @@ pub(crate) mod tests {
             fill[0],
             Down::Fill {
                 seq: Seq(5),
-                tables: vec![COUNTS],
+                whole: true,
                 parts: 3
             }
         );
@@ -520,17 +516,40 @@ pub(crate) mod tests {
     }
 
     /// The tests' queries: the counts whose value is odd or even as the
-    /// argument says, and the first two.
-    pub(crate) static QUERIES: [Query; 2] = [
+    /// argument says; the first two; and the counts with notes ([`noted`]).
+    pub(crate) static QUERIES: [Query; 3] = [
         |args| {
             let odd = args.first().copied().unwrap_or(0);
-            (
-                COUNTS,
-                scan(COUNTS, Bound::Unbounded, Bound::Unbounded).filter(move |_, v| v[0] % 2 == odd),
-            )
+            scan(COUNTS, Bound::Unbounded, Bound::Unbounded).filter(move |_, v| v[0] % 2 == odd)
         },
-        |_| (COUNTS, scan(COUNTS, Bound::Unbounded, Bound::Unbounded).take(2, false)),
+        |_| scan(COUNTS, Bound::Unbounded, Bound::Unbounded).take(2, false),
+        |_| noted(),
     ];
+
+    /// The counts that have a note, found by a scan of the notes from the
+    /// count's key that stops at the first, each with its note 1's value
+    /// after its own, read by its key: a plan whose closures read.
+    pub(crate) fn noted() -> crate::plan::Plan {
+        scan(COUNTS, Bound::Unbounded, Bound::Unbounded)
+            .filter_with(|db, k, _| {
+                let mut any = false;
+                let from = crate::store::Range {
+                    lo: Bound::Included(k),
+                    hi: Bound::Unbounded,
+                    reverse: false,
+                };
+                db.scan(NOTES, from, &mut |n, _| {
+                    any = n.starts_with(k);
+                    false
+                });
+                any
+            })
+            .map_with(|db, k, v| {
+                let mut v = v.to_vec();
+                v.extend(db.get(NOTES, &[k[0], 1]).unwrap_or_default());
+                v
+            })
+    }
 
     /// A node that subscribes holds its queries' rows: filled at its
     /// hello, sent the rows a later subscription adds, the facts of what
@@ -641,12 +660,14 @@ pub(crate) mod tests {
     }
 
     /// The queries each device keeps over its shared view: a bounded take
-    /// of a filter, and a group of every row.
-    fn queries(last: bool) -> [crate::plan::Plan; 2] {
+    /// of a filter, a group of every row, and the first of the counts with
+    /// notes.
+    fn queries(last: bool) -> [crate::plan::Plan; 3] {
         let all = || scan(COUNTS, Bound::Unbounded, Bound::Unbounded);
         [
             all().filter(|_, v| v[0] % 3 != 0).take(2, last),
             all().group(|_, _| Vec::new(), |_, v| i64::from(v[0]), true, true),
+            noted().take(1, last),
         ]
     }
 
@@ -680,13 +701,13 @@ pub(crate) mod tests {
             if !changes.reset {
                 assert_eq!(
                     changes,
-                    diff(&self.seen, &view, &[COUNTS, POSITIONS]),
+                    diff(&self.seen, &view, &[COUNTS, NOTES, POSITIONS]),
                     "seed {seed}: the changes are the view's"
                 );
             }
             let mut seen = Memory::new();
-            for (k, v) in rows(&view) {
-                seen.put(COUNTS, &k, &v);
+            for (t, k, v) in crate::node::app::shared(&view) {
+                seen.put(t, &k, &v);
             }
             self.seen = seen;
             for ((live, shown), fresh) in self.lives.iter_mut().zip(queries(seed.is_multiple_of(2))) {
@@ -721,6 +742,9 @@ pub(crate) mod tests {
         /// refused offline.
         controls: u32,
         offline: u32,
+        /// Rows a device holding only its queries' rows held because a
+        /// query's closures read them.
+        read: u32,
     }
 
     /// The phone, which serves the watch through its relay.
@@ -778,7 +802,7 @@ pub(crate) mod tests {
             })
             .collect();
         for d in [2, WATCH] {
-            for (query, args) in [(QueryId(1), vec![]), (QueryId(0), vec![1])] {
+            for (query, args) in [(QueryId(1), vec![]), (QueryId(0), vec![1]), (QueryId(2), vec![])] {
                 devices[d].node.subscribe(query, args.clone(), &mut Vec::new());
                 devices[d].subs.push((query, args));
             }
@@ -847,10 +871,10 @@ pub(crate) mod tests {
                 // is from someone else.
                 0 | 3 | 4 => {
                     let key = rng.below(3) as u8;
-                    let body = if rng.below(2) == 0 {
-                        Msg::Take { key }
-                    } else {
-                        Msg::Add { key, by: 1 + rng.below(2) }
+                    let body = match rng.below(3) {
+                        0 => Msg::Take { key },
+                        1 => Msg::Add { key, by: 1 + rng.below(2) },
+                        _ => Msg::Note { key, n: rng.below(2) as u8 },
                     };
                     let dev = &mut devices[d];
                     let mut e = dev.node.make(Space::Shared, body, rng.below(100));
@@ -902,10 +926,7 @@ pub(crate) mod tests {
                         log.entry(l.entry.seq.unwrap()).or_insert_with(|| l.clone());
                     }
                     seen.fills += out.iter().filter(|(_, down)| matches!(down, Down::Fill { .. })).count() as u32;
-                    seen.deltas += out
-                        .iter()
-                        .filter(|(_, down)| matches!(down, Down::Fill { tables, .. } if tables.is_empty()))
-                        .count() as u32;
+                    seen.deltas += out.iter().filter(|(_, down)| matches!(down, Down::Fill { whole: false, .. })).count() as u32;
                     deliver(out, devices);
                 }
                 // The device takes what its upstream sent.
@@ -1014,15 +1035,16 @@ pub(crate) mod tests {
                 12 if d == 2 || d == WATCH => {
                     let dev = &mut devices[d];
                     let mut said = Vec::new();
-                    match dev.subs.iter().position(|s| s.0 == QueryId(0)) {
+                    let query = [QueryId(0), QueryId(2)][rng.below(2) as usize];
+                    match dev.subs.iter().position(|s| s.0 == query) {
                         Some(i) => {
                             let (query, args) = dev.subs.remove(i);
                             dev.node.unsubscribe(query, args, &mut said);
                         }
                         None => {
                             let args = vec![rng.below(2) as u8];
-                            dev.node.subscribe(QueryId(0), args.clone(), &mut said);
-                            dev.subs.push((QueryId(0), args));
+                            dev.node.subscribe(query, args.clone(), &mut said);
+                            dev.subs.push((query, args));
                         }
                     }
                     dev.send(said);
@@ -1080,18 +1102,24 @@ pub(crate) mod tests {
         let relay_latest: Vec<Entry<Msg>> = relay.serve().latest().cloned().collect();
         for (d, dev) in devices.iter().enumerate() {
             // What it holds: every row, or the rows its queries read now.
-            let mut held = rows(server.store());
+            let mut held = shared(server.store());
             if !dev.subs.is_empty() {
                 let mut read = BTreeSet::new();
                 for (query, args) in &dev.subs {
-                    let (_, plan) = QUERIES[query.0 as usize](args);
-                    read.extend(plan.live(server.store()).rows().iter().cloned());
+                    let live = QUERIES[query.0 as usize](args).live(server.store());
+                    for (t, k) in live.base(server.store()) {
+                        read.insert((t, k.clone(), server.store().get(t, &k).unwrap()));
+                    }
+                    // Run over what it holds, its query answers as the server's.
+                    let here = QUERIES[query.0 as usize](args).live(dev.node.store(Space::Shared));
+                    assert_eq!(here.rows(), live.rows(), "seed {seed}: device {d}'s {query:?} run where it is");
                     assert!(dev.node.complete(*query, args), "seed {seed}: {query:?} complete");
                 }
                 held = read.into_iter().collect();
+                seen.read += held.iter().filter(|(t, ..)| *t == NOTES).count() as u32;
             }
-            assert_eq!(rows(dev.node.store(Space::Shared)), held, "seed {seed}: device {d}");
-            assert_eq!(rows(&dev.node.view(Space::Shared)), held, "seed {seed}: device {d}");
+            assert_eq!(shared(dev.node.store(Space::Shared)), held, "seed {seed}: device {d}");
+            assert_eq!(shared(&dev.node.view(Space::Shared)), held, "seed {seed}: device {d}");
             assert_eq!(dev.node.pending(), [], "seed {seed}");
             assert_eq!(dev.node.cursor(), server.head(), "seed {seed}: device {d}'s cursor");
             for id in &dev.made {
@@ -1137,7 +1165,7 @@ pub(crate) mod tests {
         for l in log.values() {
             replay.apply(&l.facts);
         }
-        assert_eq!(rows(&replay), rows(server.store()));
+        assert_eq!(shared(&replay), shared(server.store()));
         assert!(rows(&replay).iter().all(|(_, v)| v.len() == 8));
     }
 
@@ -1152,7 +1180,7 @@ pub(crate) mod tests {
         }
         assert!(seen.skipped > 0 && seen.fills > 0 && seen.forged > 0 && seen.held > 0 && seen.deltas > 0);
         assert!(seen.relayed > 0 && seen.queued > 0 && seen.refills > 0);
-        assert!(seen.controls > 0 && seen.offline > 0);
+        assert!(seen.controls > 0 && seen.offline > 0 && seen.read > 0);
     }
 
     crate::listed!(

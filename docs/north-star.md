@@ -288,7 +288,9 @@ its closures make recorded. The target adds what lets it run partially:
 - A device subscribes to queries by name and arguments, never by sending
   a query. The server runs the same Rust.
 - The server sends the **base rows** each plan read, whole, never a plan's
-  mapped output, so two queries share rows and counts stay simple.
+  mapped output, so two queries share rows and counts stay simple. A
+  closure's recorded reads are base rows too: the device re-runs the plan
+  over what it holds and gets the server's answer.
 - An aggregate syncs as its result, in its parts (sum and count, not the
   average), so a device can apply `count` and `sum` changes optimistically.
   `min` and `max` wait for the server.
