@@ -74,7 +74,7 @@ pub use relay::{Relay, Served};
 pub use serve::{Conn, Serve};
 pub use show::{Clock, Fraction, Hole, Put, Text};
 pub use source::{Of, Status, NOW, STATUS};
-pub use store::{Layer, Memory, Overlay, Read, Store, TableId, View, Write, Writes};
+pub use store::{Before, Layer, Memory, Overlay, Read, Store, TableId, Txn, Versioned, View, Write, Writes};
 #[cfg(feature = "upstream")]
 pub use sync::Feed;
 pub use sync::{Down, End, Logged, Pending, Query, QueryId, Refused, Up, REFUSALS};

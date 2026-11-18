@@ -30,8 +30,8 @@ use core::cell::UnsafeCell;
 
 use ark_kernel::codec::{put_varint, Error, Reader};
 use ark_kernel::{
-    Actor, Body, Changes, Decode, Down, Encode, Frames, Handler, Node, Origin, Pending, QueryId, Refusal, Seq, Sink, Space, Spaces, Status, Store,
-    TableId, Version, NOW, STATUS,
+    Actor, Body, Changes, Decode, Down, Encode, Frames, Handler, Node, Origin, Pending, QueryId, Refusal, Seq, Sink, Space, Spaces, Status, TableId,
+    Version, NOW, STATUS,
 };
 
 use crate::disk::{Disk, Meta};

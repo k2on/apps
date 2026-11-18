@@ -1238,14 +1238,16 @@ impl Live {
     /// Takes one settle's changes, `db` already after them, and answers the
     /// patches that take the answer to the new one.
     pub fn push(&mut self, db: &dyn Read, changes: &Changes) -> Vec<Patch> {
-        self.push_over(db, db, changes)
+        let diffs = self.settle(db, None, changes);
+        self.apply(diffs)
     }
 
-    /// [`Live::push`], the rows before the settle read as `was` with the
-    /// changes' old values over it: a node's sources as they were.
+    /// [`Live::push`], reading the rows and sources as they were before
+    /// the settle from `was`: a node's, which keeps them
+    /// ([`crate::Versioned::before`]).
     #[inline(never)]
     pub(crate) fn push_over(&mut self, db: &dyn Read, was: &dyn Read, changes: &Changes) -> Vec<Patch> {
-        let diffs = self.settle(db, was, changes);
+        let diffs = self.settle(db, Some(was), changes);
         self.apply(diffs)
     }
 
@@ -1264,7 +1266,7 @@ impl Live {
     /// an upstream reads to know which rows came into a query or left it.
     #[cfg(feature = "upstream")]
     pub fn diffs(&mut self, db: &dyn Read, changes: &Changes) -> Vec<Diff> {
-        let diffs = self.settle(db, db, changes);
+        let diffs = self.settle(db, None, changes);
         self.apply(diffs.clone());
         diffs
     }
@@ -1283,14 +1285,18 @@ impl Live {
         out
     }
 
-    fn settle(&mut self, db: &dyn Read, was: &dyn Read, changes: &Changes) -> Vec<Diff> {
-        // The rows as they were: what changed, put back over the rows now.
+    fn settle(&mut self, db: &dyn Read, was: Option<&dyn Read>, changes: &Changes) -> Vec<Diff> {
+        // The rows as they were: as kept, or what changed put back over the
+        // rows now.
         let mut layer = Layer::new();
-        for (t, d) in &changes.rows {
-            layer.keep(*t, &d.key, || d.old.clone());
+        if was.is_none() {
+            for (t, d) in &changes.rows {
+                layer.keep(*t, &d.key, || d.old.clone());
+            }
         }
-        let was = View { base: was, layer: &layer };
-        let s = Settle { db, was: &was, changes };
+        let back = View { base: db, layer: &layer };
+        let was = was.unwrap_or(&back);
+        let s = Settle { db, was, changes };
         if changes.reset {
             let mut old = Vec::with_capacity(self.rows.len());
             for (key, v) in &self.rows {
@@ -1374,7 +1380,7 @@ impl Live {
 #[cfg(any(test, ark_selftest))]
 pub(crate) mod tests {
     use super::*;
-    use crate::store::{Memory, Store};
+    use crate::store::Memory;
     use crate::Rng;
     use alloc::collections::BTreeMap;
     use alloc::vec;

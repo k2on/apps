@@ -6,13 +6,6 @@ known bugs, kept here so there is one list.
 
 ## Kernel
 
-### Four Structures Where One Versioned Store Would Do
-
-Pending entries, the overlay, the change-tracking layer and the cells'
-old values are separate structures. One versioned store would serve as
-all four, and as the "before" view plans read. Left because it saves an
-estimated 300 bytes and changes the `Store` trait every host implements.
-
 ### Live State Could Heal More Simply
 
 A reconnect's healing of session rows has several rules (owned rows taken

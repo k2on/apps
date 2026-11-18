@@ -95,8 +95,11 @@ the toolkits that draw it are the hosts'.
 A **host** is everything that differs by platform, given to the kernel
 through traits:
 
-- `Store`: rows and indexes. In memory on a watch, SQLite on phones,
-  desktop and the server, OPFS on the web.
+- `Store`: the confirmed rows and their indexes, given only whole batches
+  of confirmed writes. In memory on a watch, SQLite on phones, desktop and
+  the server, OPFS on the web. Every other version of a row (what pending
+  entries wrote, rows held apart, its value before a settle) is the
+  kernel's, in one versioned store per space over the host's.
 - `Link`: bytes to and from the node's upstream. A socket, Bluetooth to a
   phone, a test harness.
 - `Sink`: what is told after a settle: a toolkit's views, the disk's

@@ -1,5 +1,7 @@
-//! Rows, as a host keeps them: the [`Store`] trait, an in-memory store
-//! ([`Memory`]) and an [`Overlay`] of writes over any store.
+//! Rows, as a host keeps them and a node reads them: the [`Store`] trait
+//! (the confirmed rows, which a host keeps), an in-memory store
+//! ([`Memory`]), an [`Overlay`] of a step's writes over any rows, and the
+//! [`Versioned`] store a node keeps each space in.
 //!
 //! A row is its key's bytes and its value's bytes in a table, the table
 //! named by a number ([`TableId`]). Keys are ordered by their bytes, so a
@@ -8,10 +10,15 @@
 //! [`Memory`]; on a phone, a desktop and the server it is SQLite behind
 //! the same trait.
 //!
-//! A step's writes go into an [`Overlay`] over its space's store, which
-//! reads as the store with the writes made, and become [`Writes`] that the
-//! store applies at once or not at all. A node's pending entries' writes
-//! are a [`Layer`] over its confirmed rows, read through a [`View`].
+//! A step's writes go into an [`Overlay`] over its space's rows, which
+//! reads as the rows with the writes made, and become [`Writes`] that are
+//! applied at once or not at all. A host's store is only ever given
+//! confirmed writes, whole ([`Store::apply`]); every other version of a row
+//! is the node's, in one [`Versioned`] store per space: the confirmed rows
+//! (the host's store), what the pending entries wrote over them, the rows a
+//! fill or a subscription holds apart until they are all here, and each
+//! row's value before the settle under way, which is how its changes are
+//! told and what plans read as the rows were ([`Versioned::before`]).
 
 use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
@@ -94,47 +101,19 @@ pub trait Read {
     }
 }
 
-/// Reading and writing rows.
+/// The confirmed rows, as a host keeps them: given only whole batches of
+/// confirmed writes, or emptied by a fill. What is not confirmed (pending
+/// entries' writes, rows held apart, a row's value before a settle) is
+/// the node's ([`Versioned`]), never the host's.
 pub trait Store: Read {
-    /// Every table it may hold a row of: what a fill that replaces every
-    /// row empties. An overlay names the tables its writes do.
-    fn tables(&self) -> Vec<TableId>
-    where
-        Self: Sized;
+    /// Every table it holds a row of.
+    fn tables(&self) -> Vec<TableId>;
 
-    fn put(&mut self, table: TableId, key: &[u8], value: &[u8]);
-
-    fn delete(&mut self, table: TableId, key: &[u8]);
+    /// Makes every write, in order, at once.
+    fn apply(&mut self, writes: &Writes);
 
     /// Takes every row out: what a whole fill does before its rows.
-    fn clear(&mut self)
-    where
-        Self: Sized,
-    {
-        for table in self.tables() {
-            let mut keys = Vec::new();
-            self.scan(table, Range::all(), &mut |k, _| {
-                keys.push(k.to_vec());
-                true
-            });
-            for k in keys {
-                self.delete(table, &k);
-            }
-        }
-    }
-
-    /// Makes every write, in order.
-    fn apply(&mut self, writes: &Writes)
-    where
-        Self: Sized,
-    {
-        for w in &writes.0 {
-            match &w.value {
-                Some(v) => self.put(w.table, &w.key, v),
-                None => self.delete(w.table, &w.key),
-            }
-        }
-    }
+    fn clear(&mut self);
 }
 
 /// One write: a row's value at a key, or `None` for its removal.
@@ -317,21 +296,32 @@ fn tables(rows: &Tree) -> Vec<TableId> {
     out
 }
 
+impl Memory {
+    pub fn put(&mut self, table: TableId, key: &[u8], value: &[u8]) {
+        self.rows.put(path(table, key), value.to_vec());
+    }
+
+    pub fn delete(&mut self, table: TableId, key: &[u8]) {
+        self.rows.take(&path(table, key));
+    }
+}
+
 impl Store for Memory {
     fn tables(&self) -> Vec<TableId> {
         tables(&self.rows.tree)
     }
 
+    fn apply(&mut self, writes: &Writes) {
+        for w in &writes.0 {
+            match &w.value {
+                Some(v) => self.put(w.table, &w.key, v),
+                None => self.delete(w.table, &w.key),
+            }
+        }
+    }
+
     fn clear(&mut self) {
         self.rows = Sparse::default();
-    }
-
-    fn put(&mut self, table: TableId, key: &[u8], value: &[u8]) {
-        self.rows.put(path(table, key), value.to_vec());
-    }
-
-    fn delete(&mut self, table: TableId, key: &[u8]) {
-        self.rows.take(&path(table, key));
     }
 }
 
@@ -503,17 +493,223 @@ impl Read for Overlay<'_> {
     }
 }
 
-impl Store for Overlay<'_> {
-    fn tables(&self) -> Vec<TableId> {
-        tables(&self.layer.0)
-    }
+/// What a handler reads and writes (`Cx::db`): its step's transaction,
+/// kept whole or dropped whole.
+pub trait Txn: Read {
+    fn put(&mut self, table: TableId, key: &[u8], value: &[u8]);
 
+    fn delete(&mut self, table: TableId, key: &[u8]);
+}
+
+impl Txn for Overlay<'_> {
     fn put(&mut self, table: TableId, key: &[u8], value: &[u8]) {
         self.layer.0.insert(path(table, key), Some(value.to_vec()));
     }
 
     fn delete(&mut self, table: TableId, key: &[u8]) {
         self.layer.0.insert(path(table, key), None);
+    }
+}
+
+/// A space's rows as a node keeps them, every version of each in one
+/// store: the confirmed rows (the host's [`Store`]), what the pending
+/// entries wrote over them (shared only), the rows held apart until all of
+/// a fill or a subscription is here, and each row's value before the
+/// settle under way, kept the first time anything writes it. Every write
+/// goes through it, so its changes are known without anyone noting them
+/// ([`Versioned::take_changes`]), and the rows as they were are read
+/// from it ([`Versioned::before`]): what plans read in a settle.
+pub struct Versioned<S> {
+    base: S,
+    pending: Layer,
+    held: Layer,
+    before: Layer,
+    reset: bool,
+}
+
+impl<S: Store> Versioned<S> {
+    pub fn new(base: S) -> Versioned<S> {
+        Versioned {
+            base,
+            pending: Layer::new(),
+            held: Layer::new(),
+            before: Layer::new(),
+            reset: false,
+        }
+    }
+
+    /// The confirmed rows.
+    pub fn base(&self) -> &S {
+        &self.base
+    }
+
+    /// The rows as they read now: the confirmed, the pending writes over
+    /// them.
+    pub fn now(&self) -> View<'_> {
+        View {
+            base: &self.base,
+            layer: &self.pending,
+        }
+    }
+
+    /// The rows as they read before the settle under way: each row written
+    /// since its changes were last taken as it was then.
+    pub fn before(&self) -> Before<'_> {
+        Before {
+            now: self.now(),
+            before: &self.before,
+        }
+    }
+
+    /// Confirmed writes, made in the host's store.
+    pub(crate) fn confirm(&mut self, writes: &Writes) {
+        keep(
+            &self.base,
+            &self.pending,
+            &mut self.before,
+            &mut writes.0.iter().map(|w| (w.table, &w.key[..])),
+        );
+        self.base.apply(writes);
+    }
+
+    /// A pending entry's writes, over the rest.
+    pub(crate) fn propose(&mut self, writes: &Writes) {
+        keep(
+            &self.base,
+            &self.pending,
+            &mut self.before,
+            &mut writes.0.iter().map(|w| (w.table, &w.key[..])),
+        );
+        self.pending.apply(writes);
+    }
+
+    /// The pending writes made again whole (a rebase), or none.
+    pub(crate) fn repend(&mut self, pending: Layer) {
+        keep(
+            &self.base,
+            &self.pending,
+            &mut self.before,
+            &mut self.pending.keys().chain(pending.keys()),
+        );
+        self.pending = pending;
+    }
+
+    /// The pending writes made again whole, as a node put them back from
+    /// its records: no change to tell, the node's rows being told whole.
+    pub(crate) fn resume(&mut self, pending: Layer) {
+        self.pending = pending;
+        self.reset = true;
+    }
+
+    /// Every confirmed row taken out (a whole fill): its changes are told
+    /// as a reset.
+    pub(crate) fn clear(&mut self) {
+        self.base.clear();
+        self.reset();
+    }
+
+    /// Its rows changed in ways told whole: a fill's.
+    pub(crate) fn reset(&mut self) {
+        self.before = Layer::new();
+        self.reset = true;
+    }
+
+    /// Rows to hold apart until all of what they are part of is here.
+    pub(crate) fn hold(&mut self, rows: &Writes) {
+        self.held.apply(rows);
+    }
+
+    /// Makes `w` among the rows held, if they hold its row: whether they did.
+    pub(crate) fn update_held(&mut self, w: &Write) -> bool {
+        self.held.update(w)
+    }
+
+    /// Whether no rows are held apart.
+    pub(crate) fn holds_none(&self) -> bool {
+        self.held.is_empty()
+    }
+
+    /// The rows held apart, taken out.
+    pub(crate) fn take_held(&mut self) -> Writes {
+        core::mem::take(&mut self.held).into_writes()
+    }
+
+    /// What changed since this was last called: each row written as it was
+    /// and as it reads now, or a reset when its rows changed whole.
+    pub fn take_changes(&mut self) -> crate::plan::Changes {
+        let changes = self.changes();
+        self.told();
+        changes
+    }
+
+    /// The changes told: the rows now are what the next are told from.
+    pub(crate) fn told(&mut self) {
+        self.before = Layer::new();
+        self.reset = false;
+    }
+
+    /// What changed since the changes were last taken, kept.
+    pub fn changes(&self) -> crate::plan::Changes {
+        let mut rows = Vec::new();
+        if !self.reset {
+            let now = self.now();
+            for (table, key) in self.before.keys() {
+                let old = self.before.0.get(&path(table, key)).cloned().flatten();
+                let new = now.get(table, key);
+                if old != new {
+                    rows.push((table, crate::plan::Diff { key: key.to_vec(), old, new }));
+                }
+            }
+        }
+        crate::plan::Changes { reset: self.reset, rows }
+    }
+}
+
+/// Keeps what each of `keys` reads now (`base` with `pending` over it) in
+/// `before`, unless kept since the changes were last taken: one copy
+/// linked, whatever the keys come from.
+#[inline(never)]
+fn keep(base: &dyn Read, pending: &Layer, before: &mut Layer, keys: &mut dyn Iterator<Item = (TableId, &[u8])>) {
+    let now = View { base, layer: pending };
+    for (table, key) in keys {
+        before.keep(table, key, || now.get(table, key));
+    }
+}
+
+/// The rows as they read now.
+impl<S: Store> Read for Versioned<S> {
+    fn get(&self, table: TableId, key: &[u8]) -> Option<Vec<u8>> {
+        self.now().get(table, key)
+    }
+
+    fn scan(&self, table: TableId, range: Range<'_>, f: &mut dyn FnMut(&[u8], &[u8]) -> bool) {
+        self.now().scan(table, range, f)
+    }
+}
+
+/// A space's rows as they read before the settle under way: each row
+/// written since its changes were last taken as it was then, over the rows
+/// now.
+pub struct Before<'a> {
+    now: View<'a>,
+    before: &'a Layer,
+}
+
+impl Read for Before<'_> {
+    fn get(&self, table: TableId, key: &[u8]) -> Option<Vec<u8>> {
+        View {
+            base: &self.now,
+            layer: self.before,
+        }
+        .get(table, key)
+    }
+
+    fn scan(&self, table: TableId, range: Range<'_>, f: &mut dyn FnMut(&[u8], &[u8]) -> bool) {
+        View {
+            base: &self.now,
+            layer: self.before,
+        }
+        .scan(table, range, f)
     }
 }
 
@@ -735,10 +931,57 @@ pub(crate) mod tests {
         assert_eq!(m, again);
     }
 
+    /// One store keeps every version of a row: the confirmed, the pending
+    /// over it, those held apart, and what each read before, from which
+    /// its changes are told and the rows as they were are read.
+    #[cfg_attr(test, test)]
+    fn a_versioned_store_tells_what_changed() {
+        let w = |k: u8, v: Option<u8>| Write {
+            table: TableId(1),
+            key: alloc::vec![k],
+            value: v.map(|v| alloc::vec![v]),
+        };
+        let mut rows = Versioned::new(Memory::new());
+        rows.confirm(&Writes(alloc::vec![w(1, Some(1)), w(2, Some(2))]));
+        rows.take_changes();
+        rows.propose(&Writes(alloc::vec![w(1, Some(10))]));
+        rows.confirm(&Writes(alloc::vec![w(2, None)]));
+        rows.hold(&Writes(alloc::vec![w(3, Some(3))]));
+        assert_eq!(rows.now().get(TableId(1), &[1]), Some(alloc::vec![10]));
+        assert_eq!(rows.base().get(TableId(1), &[1]), Some(alloc::vec![1]));
+        // Held apart: not read until taken.
+        assert_eq!(rows.get(TableId(1), &[3]), None);
+        // As it was: before the proposal and the removal.
+        let before = rows.before();
+        assert_eq!(
+            read(&before, TableId(1), Range::all()),
+            [(alloc::vec![1], alloc::vec![1]), (alloc::vec![2], alloc::vec![2])]
+        );
+        let changes = rows.take_changes();
+        assert_eq!(
+            changes
+                .rows
+                .iter()
+                .map(|(_, d)| (d.key[0], d.old.clone(), d.new.clone()))
+                .collect::<Vec<_>>(),
+            [(1, Some(alloc::vec![1]), Some(alloc::vec![10])), (2, Some(alloc::vec![2]), None)]
+        );
+        // A rebase that writes what was pending tells nothing.
+        let mut same = Layer::new();
+        same.apply(&Writes(alloc::vec![w(1, Some(10))]));
+        rows.repend(same);
+        assert_eq!(rows.take_changes(), crate::plan::Changes::default());
+        let held = rows.take_held();
+        rows.confirm(&held);
+        rows.clear();
+        assert!(rows.take_changes().reset);
+    }
+
     crate::listed!(
         memory_scans_ranges,
         an_overlay_reads_through,
         an_overlay_is_its_writes_made,
-        rows_taken_out_are_let_go
+        rows_taken_out_are_let_go,
+        a_versioned_store_tells_what_changed
     );
 }

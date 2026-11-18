@@ -5,9 +5,17 @@
 //!
 //! A handler is found by the number its body names ([`Body::handler`]) in
 //! the node's table of them, written by the build. It reads and writes
-//! through [`Cx::db`], an [`Overlay`] whose writes are kept whole when it
-//! returns `Ok` and dropped when it refuses. A refusal is a code
-//! ([`Refusal`]).
+//! through [`Cx::db`] (a [`Txn`]: an [`Overlay`] over its space's rows),
+//! whose writes are kept whole when it returns `Ok` and dropped when it
+//! refuses. A refusal is a code ([`Refusal`]).
+//!
+//! **Each space's rows** are one [`Versioned`] store: the host's
+//! confirmed rows ([`Store`], given only confirmed writes, whole), what
+//! the pending entries wrote over them, the rows held apart until a fill
+//! or a subscription is all here, and each row's value before the settle
+//! under way. Every write goes through it, so what changed is known
+//! without noting it ([`Node::take_changes`]), and a settle's plans read
+//! the rows as they were from it, with the cells as they were beside them.
 //!
 //! **The shared space** is the master log's, on the server (an
 //! [`crate::Authority`]). A node keeps two things of it: the confirmed
@@ -114,9 +122,9 @@ use alloc::vec::Vec;
 use crate::cell::{hit, key, Cell, Reader, Scope, Sink, Sources, Watch};
 use crate::codec::Decode;
 use crate::entry::{Actor, Entry, EntryId, Hlc, Origin, Seq, Space, Version};
-use crate::plan::{Changes, Diff, Live, Plan, Recorder};
+use crate::plan::{Changes, Live, Plan, Recorder};
 use crate::slot::Boxed;
-use crate::store::{Layer, Nothing, Overlay, Read, Store, TableId, View, Write, Writes, EMPTY};
+use crate::store::{Layer, Nothing, Overlay, Read, Store, TableId, Txn, Versioned, View, Write, Writes, EMPTY};
 use crate::sync::{Down, End, Logged, Pending, QueryId, Refused, Up, REFUSALS};
 
 /// A handler, by the number its build gives it.
@@ -163,7 +171,7 @@ impl Refusal {
 pub struct Cx<'a, B> {
     pub entry: &'a Entry<B>,
     /// The entry's space's rows, as this run has written them.
-    pub db: &'a mut dyn Store,
+    pub db: &'a mut dyn Txn,
     src: Option<&'a Sources>,
     /// The cells this run wrote, kept with its rows or dropped with them.
     journal: Vec<(u32, Boxed)>,
@@ -303,24 +311,17 @@ pub struct Node<B: 'static, S> {
     version: Version,
     clock: Hlc,
     handlers: &'static [Handler<B>],
-    stores: Spaces<S>,
+    /// Each space's rows, every version of them: the host's confirmed
+    /// rows, the pending entries' writes over the shared, the rows held
+    /// apart, and what each read before the settle under way.
+    stores: Spaces<Versioned<S>>,
     /// The last `seq` whose facts the confirmed rows hold.
     cursor: Seq,
     /// This node's shared entries not yet confirmed, oldest first.
     pending: Vec<Pending<B>>,
-    /// Every pending entry's writes, in order: what the shared space reads
-    /// as over the confirmed rows.
-    layer: Layer,
     refused: Vec<(EntryId, Refusal)>,
-    /// Rows a fill or the upstream's moves sent, held until they are all
-    /// here; and the cursor when the first came.
-    incoming: Layer,
+    /// The cursor when the rows held apart began to come.
     since: Seq,
-    /// Each space's rows touched since its changes were last taken, each
-    /// with what it read before; and whether the shared view changed
-    /// whole, after a fill or a resume.
-    touched: [Layer; 4],
-    reset: bool,
     /// Its subscriptions, each with whether its rows are all here.
     subs: Vec<(QueryId, Vec<u8>, bool)>,
     /// The session rows it took, each by its latest entry, and the
@@ -360,15 +361,15 @@ impl<B: Body + Clone + 'static, S: Store> Node<B, S> {
             version,
             clock: Hlc::default(),
             handlers,
-            stores,
+            stores: Spaces {
+                device: Versioned::new(stores.device),
+                session: Versioned::new(stores.session),
+                shared: Versioned::new(stores.shared),
+            },
             cursor: Seq(0),
             pending: Vec::new(),
-            layer: Layer::new(),
             refused: Vec::new(),
-            incoming: Layer::new(),
             since: Seq(0),
-            touched: Default::default(),
-            reset: false,
             subs: Vec::new(),
             rows: Vec::new(),
             below: Vec::new(),
@@ -391,38 +392,19 @@ impl<B: Body + Clone + 'static, S: Store> Node<B, S> {
     /// were, not run again.
     pub fn resume(&mut self, cursor: Seq, pending: Vec<Pending<B>>) {
         self.cursor = cursor;
-        self.layer = Layer::new();
+        let mut layer = Layer::new();
         for p in &pending {
-            self.layer.apply(&p.writes);
+            layer.apply(&p.writes);
         }
+        self.stores.shared.resume(layer);
         self.pending = pending;
-        self.reset = true;
     }
 
     /// What changed in a space as this node reads it ([`Node::view`])
     /// since this was last called for it, its rows as they read now.
     #[inline(never)]
     pub fn take_changes(&mut self, space: Space) -> Changes {
-        let touched = core::mem::take(&mut self.touched[space as usize]);
-        let reset = space == Space::Shared && core::mem::take(&mut self.reset);
-        let mut rows = Vec::new();
-        if !reset {
-            let view = self.view(space);
-            for w in touched.into_writes().0 {
-                let new = view.get(w.table, &w.key);
-                if w.value != new {
-                    rows.push((
-                        w.table,
-                        Diff {
-                            key: w.key,
-                            old: w.value,
-                            new,
-                        },
-                    ));
-                }
-            }
-        }
-        Changes { reset, rows }
+        self.stores.get_mut(space).map(Versioned::take_changes).unwrap_or_default()
     }
 
     /// Who the entries this node makes are from.
@@ -459,17 +441,19 @@ impl<B: Body + Clone + 'static, S: Store> Node<B, S> {
     /// A space's store: for `shared`, its confirmed rows alone; none for
     /// `local`, whose state is cells.
     pub fn store(&self, space: Space) -> Option<&S> {
-        self.stores.get(space)
+        self.stores.get(space).map(Versioned::base)
     }
 
     /// A space as this node reads it: for `shared`, the confirmed rows
     /// with the pending entries' writes over them.
     #[inline(never)]
     pub fn view(&self, space: Space) -> View<'_> {
-        let layer = if space == Space::Shared { &self.layer } else { &EMPTY };
-        View {
-            base: self.rows(space),
-            layer,
+        match self.stores.get(space) {
+            Some(s) => s.now(),
+            None => View {
+                base: &Nothing,
+                layer: &EMPTY,
+            },
         }
     }
 
@@ -478,6 +462,23 @@ impl<B: Body + Clone + 'static, S: Store> Node<B, S> {
         match self.stores.get(space) {
             Some(s) => s,
             None => &Nothing,
+        }
+    }
+
+    /// Every space's changes told.
+    fn told(&mut self) {
+        self.stores.device.told();
+        self.stores.session.told();
+        self.stores.shared.told();
+    }
+
+    /// The rows as they were before the settle under way, and the cells:
+    /// what a plan reads as `was` ([`crate::plan::Settle`]).
+    fn was<'a>(&'a self, rows: &'a [crate::store::Before<'a>; 3]) -> Scope<'a> {
+        Scope {
+            rows: [&rows[0], &rows[1], &rows[2]],
+            src: &self.sources,
+            was: true,
         }
     }
 
@@ -597,9 +598,11 @@ impl<B: Body + Clone + 'static, S: Store> Node<B, S> {
     // Not inlined: the watch links one copy (checks.kernel-size).
     #[inline(never)]
     pub fn settle(&mut self, sink: &mut dyn Sink) {
+        // What changed, kept until the plans have read the rows as they
+        // were.
         let mut rows = Changes::default();
         for space in [Space::Device, Space::Session, Space::Shared] {
-            let c = self.take_changes(space);
+            let c = self.stores.get(space).map(Versioned::changes).unwrap_or_default();
             sink.changes(space, &c);
             rows.reset |= c.reset;
             rows.rows.extend(c.rows);
@@ -608,13 +611,15 @@ impl<B: Body + Clone + 'static, S: Store> Node<B, S> {
         let keys = &mut self.sources.keys;
         keys.extend(rows.rows.iter().map(|(t, d)| (*t, d.key.clone())));
         if keys.is_empty() && !rows.reset {
+            self.told();
             return self.sources.end();
         }
         let mut lives = core::mem::take(&mut self.sources.lives);
         let mut changed = Vec::new();
         {
             let shared = self.view(Space::Shared);
-            let (now, was) = (self.scope(&shared, false), self.scope(&shared, true));
+            let before = [self.stores.device.before(), self.stores.session.before(), self.stores.shared.before()];
+            let (now, was) = (self.scope(&shared, false), self.was(&before));
             for (id, _, live) in &mut lives {
                 let patches = live.push_over(&now, &was, &rows);
                 if !patches.is_empty() {
@@ -624,6 +629,7 @@ impl<B: Body + Clone + 'static, S: Store> Node<B, S> {
             }
         }
         self.sources.lives = lives;
+        self.told();
         self.sources.keys.append(&mut changed);
         for (i, read) in self.sources.readers.iter().enumerate() {
             if rows.reset || hit(read, &self.sources.keys) {
@@ -740,10 +746,8 @@ impl<B: Body + Clone + 'static, S: Store> Node<B, S> {
         }
         match run(self.handlers, self.rows(e.space), &e, Some(&self.sources)) {
             Ok((writes, made, journal)) => {
-                let space = e.space as usize;
                 if let Some(s) = self.stores.get_mut(e.space) {
-                    note(&mut self.touched[space], s, &mut rows_of(&writes));
-                    s.apply(&writes);
+                    s.confirm(&writes);
                 }
                 for (id, v) in journal {
                     self.sources.write(id, v);
@@ -764,13 +768,8 @@ impl<B: Body + Clone + 'static, S: Store> Node<B, S> {
             self.refused.push((e.id, Refusal::NOT_OWN));
             return Vec::new();
         }
-        let view = View {
-            base: &self.stores.shared,
-            layer: &self.layer,
-        };
-        let (writes, made, _) = run(self.handlers, &view, &e, None).unwrap_or_default();
-        note(&mut self.touched[Space::Shared as usize], &view, &mut rows_of(&writes));
-        self.layer.apply(&writes);
+        let (writes, made, _) = run(self.handlers, &self.stores.shared, &e, None).unwrap_or_default();
+        self.stores.shared.propose(&writes);
         let made = self.made_all(&e, made);
         self.pending.push(Pending { entry: e, writes });
         made
@@ -903,9 +902,12 @@ impl<B: Body + Clone + 'static, S: Store> Node<B, S> {
                 i += 1;
             } else {
                 let k = self.rows.swap_remove(i);
-                let session = &self.stores.session;
-                self.touched[Space::Session as usize].keep(k.table, &k.key, || session.get(k.table, &k.key));
-                self.stores.session.delete(k.table, &k.key);
+                let gone = Write {
+                    table: k.table,
+                    key: k.key,
+                    value: None,
+                };
+                self.stores.session.confirm(&Writes(Vec::from([gone])));
             }
         }
     }
@@ -931,7 +933,7 @@ impl<B: Body + Clone + 'static, S: Store> Node<B, S> {
 
     /// Whether a subscription's rows are all here, and taken.
     pub fn complete(&self, query: QueryId, args: &[u8]) -> bool {
-        self.incoming.is_empty() && self.subs.iter().any(|s| s.0 == query && s.1 == args && s.2)
+        self.stores.shared.holds_none() && self.subs.iter().any(|s| s.0 == query && s.1 == args && s.2)
     }
 
     /// Its link upstream is up, at this node's time `now`: what it says at
@@ -948,8 +950,8 @@ impl<B: Body + Clone + 'static, S: Store> Node<B, S> {
         for k in &mut self.rows {
             k.said = false;
         }
-        let cursor = if self.incoming.is_empty() { self.cursor } else { self.since };
-        self.incoming = Layer::new();
+        let cursor = if self.stores.shared.holds_none() { self.cursor } else { self.since };
+        self.stores.shared.take_held();
         for (query, args, got) in &mut self.subs {
             *got = false;
             link.send(Up::Subscribe {
@@ -1000,24 +1002,19 @@ impl<B: Body + Clone + 'static, S: Store> Node<B, S> {
 
     /// Holds rows apart until they are all here.
     fn hold(&mut self, rows: &Writes) {
-        if self.incoming.is_empty() {
+        if self.stores.shared.holds_none() {
             self.since = self.cursor;
         }
-        self.incoming.apply(rows);
+        self.stores.shared.hold(rows);
     }
 
     /// Takes the rows held, once every query this node wants is got.
     fn flush(&mut self) {
-        if self.incoming.is_empty() || self.subs.iter().any(|s| !s.2) {
+        if self.stores.shared.holds_none() || self.subs.iter().any(|s| !s.2) {
             return;
         }
-        let rows = core::mem::take(&mut self.incoming).into_writes();
-        let view = View {
-            base: &self.stores.shared,
-            layer: &self.layer,
-        };
-        note(&mut self.touched[Space::Shared as usize], &view, &mut rows_of(&rows));
-        self.stores.shared.apply(&rows);
+        let rows = self.stores.shared.take_held();
+        self.stores.shared.confirm(&rows);
         self.rebase();
     }
 
@@ -1034,7 +1031,7 @@ impl<B: Body + Clone + 'static, S: Store> Node<B, S> {
             #[cfg(feature = "upstream")]
             let mut kept = Vec::new();
             #[cfg(feature = "upstream")]
-            self.stores.shared.scan(REFUSALS, crate::store::Range::all(), &mut |k, v| {
+            self.stores.shared.base().scan(REFUSALS, crate::store::Range::all(), &mut |k, v| {
                 kept.push(Write {
                     table: REFUSALS,
                     key: k.to_vec(),
@@ -1044,12 +1041,12 @@ impl<B: Body + Clone + 'static, S: Store> Node<B, S> {
             });
             self.stores.shared.clear();
             #[cfg(feature = "upstream")]
-            self.stores.shared.apply(&Writes(kept));
+            self.stores.shared.confirm(&Writes(kept));
         }
-        let mut rows = core::mem::take(&mut self.incoming).into_writes();
+        let mut rows = self.stores.shared.take_held();
         self.take_refusals(&mut rows.0);
-        self.stores.shared.apply(&rows);
-        self.reset = true;
+        self.stores.shared.confirm(&rows);
+        self.stores.shared.reset();
         self.cursor = seq;
         let origin = self.origin;
         for &(o, n) in judged {
@@ -1115,7 +1112,7 @@ impl<B: Body + Clone + 'static, S: Store> Node<B, S> {
     #[cfg(feature = "upstream")]
     pub fn forget(&mut self, origin: Origin, seq: Seq) {
         let mut gone = Vec::new();
-        self.stores.shared.scan(REFUSALS, crate::store::Range::all(), &mut |k, v| {
+        self.stores.shared.base().scan(REFUSALS, crate::store::Range::all(), &mut |k, v| {
             let mine = Refused::id(k).is_some_and(|id| id.origin == origin);
             if mine && crate::codec::from_slice::<Refused>(v).is_ok_and(|r| r.seq <= seq) {
                 gone.push(Write {
@@ -1129,13 +1126,7 @@ impl<B: Body + Clone + 'static, S: Store> Node<B, S> {
         if gone.is_empty() {
             return;
         }
-        let gone = Writes(gone);
-        let view = View {
-            base: &self.stores.shared,
-            layer: &self.layer,
-        };
-        note(&mut self.touched[Space::Shared as usize], &view, &mut rows_of(&gone));
-        self.stores.shared.apply(&gone);
+        self.stores.shared.confirm(&Writes(gone));
     }
 
     /// Applies the log's next entry by its facts, lets go of what it
@@ -1152,14 +1143,9 @@ impl<B: Body + Clone + 'static, S: Store> Node<B, S> {
         self.take_refusals(&mut facts.0);
         #[cfg(feature = "upstream")]
         self.judge(l.entry.id.origin, l.entry.id.n);
-        let incoming = &mut self.incoming;
-        facts.0.retain(|w| !incoming.update(w));
-        let view = View {
-            base: &self.stores.shared,
-            layer: &self.layer,
-        };
-        note(&mut self.touched[Space::Shared as usize], &view, &mut rows_of(&facts));
-        self.stores.shared.apply(&facts);
+        let shared = &mut self.stores.shared;
+        facts.0.retain(|w| !shared.update_held(w));
+        shared.confirm(&facts);
         self.cursor = seq;
         let id = l.entry.id;
         let previewed = self.pending.first().is_some_and(|p| p.entry.id == id && p.writes == facts);
@@ -1170,10 +1156,11 @@ impl<B: Body + Clone + 'static, S: Store> Node<B, S> {
             // rows are what the entries after it ran over: their writes
             // stand, and only the layer is made again without it, which
             // reads the same.
-            self.layer = Layer::new();
+            let mut layer = Layer::new();
             for p in &self.pending {
-                self.layer.apply(&p.writes);
+                layer.apply(&p.writes);
             }
+            self.stores.shared.repend(layer);
             #[cfg(any(test, ark_selftest))]
             {
                 self.skipped += 1;
@@ -1185,37 +1172,17 @@ impl<B: Body + Clone + 'static, S: Store> Node<B, S> {
 
     /// Runs every pending entry again, in order, over the confirmed rows.
     fn rebase(&mut self) {
-        let view = View {
-            base: &self.stores.shared,
-            layer: &self.layer,
-        };
-        note(&mut self.touched[Space::Shared as usize], &view, &mut self.layer.keys());
         let mut layer = Layer::new();
         for p in &mut self.pending {
             let view = View {
-                base: &self.stores.shared,
+                base: self.stores.shared.base(),
                 layer: &layer,
             };
             p.writes = run(self.handlers, &view, &p.entry, None).map(|(writes, ..)| writes).unwrap_or_default();
             layer.apply(&p.writes);
         }
-        // A row only the new layer writes was read from the confirmed rows
-        // before, which the facts did not touch, or it would be noted.
-        note(&mut self.touched[Space::Shared as usize], &self.stores.shared, &mut layer.keys());
-        self.layer = layer;
+        self.stores.shared.repend(layer);
     }
-}
-
-/// Notes what each of `keys` reads in `view` now, unless it is noted.
-fn note(touched: &mut Layer, view: &dyn Read, keys: &mut dyn Iterator<Item = (TableId, &[u8])>) {
-    for (table, key) in keys {
-        touched.keep(table, key, || view.get(table, key));
-    }
-}
-
-/// The rows `writes` writes, as [`note`] takes them.
-fn rows_of(writes: &Writes) -> impl Iterator<Item = (TableId, &[u8])> {
-    writes.0.iter().map(|w| (w.table, &w.key[..]))
 }
 
 /// The tests' app, shared by the node's, the authority's and the
@@ -1779,7 +1746,7 @@ pub(crate) mod tests {
     #[cfg_attr(test, test)]
     fn each_spaces_changes_are_taken() {
         let value = |n: u64| Some(n.to_le_bytes().to_vec());
-        let change = |table, key: u8, old, new| (table, Diff { key: vec![key], old, new });
+        let change = |table, key: u8, old, new| (table, crate::plan::Diff { key: vec![key], old, new });
         let mut n = node(1);
         let mut up = Vec::new();
         let set = n.make(Space::Session, Msg::Set { key: 1, value: 5 }, 10);
@@ -1794,7 +1761,7 @@ pub(crate) mod tests {
         let pos = |key, new| {
             (
                 POSITIONS,
-                Diff {
+                crate::plan::Diff {
                     key: at(key),
                     old: None,
                     new,

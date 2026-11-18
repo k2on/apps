@@ -1,11 +1,13 @@
-//! A space's rows on the watch: the kernel's [`Memory`], with the tables
-//! it has held noted, so that the disk can walk every row in order
-//! ([`Rows::each`]) to page it out.
+//! A space's confirmed rows on the watch: the kernel's [`Memory`], with
+//! the tables it has held noted, so that the disk can walk every row in
+//! order ([`Rows::each`]) to page it out. The node gives it only
+//! confirmed writes, whole; what is pending, held apart or as it was
+//! before a settle is the node's own (`ark_kernel::Versioned`).
 
 use alloc::vec::Vec;
 
 use ark_kernel::store::Range;
-use ark_kernel::{Memory, Read, Store, TableId};
+use ark_kernel::{Memory, Read, Store, TableId, Writes};
 
 /// Called with each row's table, key and value.
 pub type Visit<'a> = dyn FnMut(TableId, &[u8], &[u8]) + 'a;
@@ -52,19 +54,31 @@ impl Read for Rows {
     }
 }
 
-impl Store for Rows {
-    fn tables(&self) -> Vec<TableId> {
-        self.tables.clone()
-    }
-
-    fn put(&mut self, table: TableId, key: &[u8], value: &[u8]) {
+impl Rows {
+    /// Puts a row, as the disk gives it back.
+    pub fn put(&mut self, table: TableId, key: &[u8], value: &[u8]) {
         if let Err(i) = self.tables.binary_search(&table) {
             self.tables.insert(i, table);
         }
         self.mem.put(table, key, value);
     }
+}
 
-    fn delete(&mut self, table: TableId, key: &[u8]) {
-        self.mem.delete(table, key);
+impl Store for Rows {
+    fn tables(&self) -> Vec<TableId> {
+        self.tables.clone()
+    }
+
+    fn apply(&mut self, writes: &Writes) {
+        for w in &writes.0 {
+            match &w.value {
+                Some(v) => self.put(w.table, &w.key, v),
+                None => self.mem.delete(w.table, &w.key),
+            }
+        }
+    }
+
+    fn clear(&mut self) {
+        self.mem.clear();
     }
 }

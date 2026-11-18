@@ -246,9 +246,12 @@ impl<B: Body + Clone + 'static, S: Store> Authority<B, S> {
             }
             true
         });
-        for k in gone {
-            self.store.delete(REFUSALS, &k);
-        }
+        let gone = gone.into_iter().map(|key| Write {
+            table: REFUSALS,
+            key,
+            value: None,
+        });
+        self.store.apply(&crate::store::Writes(gone.collect()));
     }
 
     /// The answer to a node's hello on `conn`: the log after its cursor,
