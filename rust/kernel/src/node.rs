@@ -24,7 +24,14 @@
 //!   its facts, which are applied to the confirmed rows ([`Down::Logged`]).
 //! - After facts, the pending entries are run again, in order, over the new
 //!   confirmed rows: the rebase. One that refuses there stays pending with
-//!   no writes; the server's run decides.
+//!   no writes; the server's run decides. When the facts are this node's
+//!   oldest pending entry's and say what its run here wrote, the entries
+//!   after it ran over those very rows, so nothing is run again.
+//! - A node too far behind for its upstream's log is sent a fill: the
+//!   confirmed rows at a `seq` ([`Down::Fill`], then [`Down::Rows`]), in
+//!   place of the log up to it, then the log after it. Its pending entries
+//!   are rebased once the fill ends; one interrupted is started again at
+//!   the next connection, its first part emptying what the last left.
 //! - An entry the server refuses is dropped, and its refusal kept in the
 //!   node's journal of refusals for the host to show. It never blocks the
 //!   entries after it: each is judged on its own.
@@ -40,7 +47,7 @@ use alloc::collections::VecDeque;
 use alloc::vec::Vec;
 
 use crate::entry::{Actor, Entry, EntryId, Hlc, Origin, Seq, Space, Version};
-use crate::store::{Layer, Overlay, Read, Store, View, Writes, EMPTY};
+use crate::store::{Layer, Overlay, Range, Read, Store, TableId, View, Writes, EMPTY};
 use crate::sync::{Down, Logged, Pending, Up, Verdict};
 
 /// The machine every node is: one entry in, the entries it made out.
@@ -56,6 +63,14 @@ pub struct HandlerId(pub u32);
 /// A body names the handler that runs it.
 pub trait Body {
     fn handler(&self) -> HandlerId;
+
+    /// The one session row this entry sets whole, if it does: a later
+    /// entry for the same row replaces it, so a node sent the entries at a
+    /// rate is sent only the latest ([`crate::sync::Feed`]). `None`, the
+    /// default, is never held back.
+    fn row(&self) -> Option<(TableId, Vec<u8>)> {
+        None
+    }
 }
 
 /// Why an entry was not run: a code the host words. Codes below 256 are
@@ -71,6 +86,8 @@ impl Refusal {
     /// Another node's shared entry, which a node takes as facts, never
     /// runs.
     pub const NOT_OWN: Refusal = Refusal(3);
+    /// An entry that says it is from an actor other than its connection's.
+    pub const NOT_YOURS: Refusal = Refusal(4);
 }
 
 /// What a handler runs with: the entry, its space's rows, and the entries
@@ -189,6 +206,12 @@ pub struct Node<B: 'static, S> {
     /// as over the confirmed rows.
     layer: Layer,
     refused: Vec<(EntryId, Refusal)>,
+    /// A fill under way: the `seq` it reaches and the parts still to come.
+    filling: Option<(Seq, u32)>,
+    /// How many confirmations ran nothing again: what the tests see of a
+    /// skipped replay.
+    #[cfg(any(test, ark_selftest))]
+    pub(crate) skipped: u32,
 }
 
 impl<B: Body + Clone + 'static, S: Store> Node<B, S> {
@@ -208,6 +231,9 @@ impl<B: Body + Clone + 'static, S: Store> Node<B, S> {
             pending: Vec::new(),
             layer: Layer::new(),
             refused: Vec::new(),
+            filling: None,
+            #[cfg(any(test, ark_selftest))]
+            skipped: 0,
         }
     }
 
@@ -376,7 +402,9 @@ impl<B: Body + Clone + 'static, S: Store> Node<B, S> {
 
     /// What this node says at each connection: its cursor, then every
     /// pending entry again, oldest first. The upstream judges each once.
-    pub fn connect(&self, link: &mut dyn Link<B>) {
+    /// A fill the last connection left unfinished is let go.
+    pub fn connect(&mut self, link: &mut dyn Link<B>) {
+        self.filling = None;
         link.send(Up::Hello { cursor: self.cursor });
         for p in &self.pending {
             link.send(Up::Push(p.entry.clone()));
@@ -392,22 +420,68 @@ impl<B: Body + Clone + 'static, S: Store> Node<B, S> {
                 let made = self.step(e);
                 self.run(made.into(), link);
             }
+            Down::Fill { seq, tables, parts } => {
+                for table in tables {
+                    let mut keys = Vec::new();
+                    self.stores.shared.scan(table, Range::all(), &mut |k, _| {
+                        keys.push(k.to_vec());
+                        true
+                    });
+                    for k in keys {
+                        self.stores.shared.delete(table, &k);
+                    }
+                }
+                self.filling = Some((seq, parts));
+                self.filled();
+            }
+            Down::Rows(rows) => {
+                if let Some((_, parts)) = &mut self.filling {
+                    self.stores.shared.apply(&rows);
+                    *parts = parts.saturating_sub(1);
+                    self.filled();
+                }
+            }
         }
+    }
+
+    /// Ends a fill whose every part has come: the node is at its `seq`.
+    fn filled(&mut self) {
+        let Some((seq, 0)) = self.filling else { return };
+        self.filling = None;
+        self.cursor = seq;
+        self.pending.retain(|p| p.judged.is_none_or(|j| j > seq));
+        self.rebase();
     }
 
     /// Applies the log's next entry by its facts, lets go of what it
     /// confirms, and rebases. An entry this node has, or one past a gap
     /// (which the next connection's hello fills), is passed over.
     fn confirm(&mut self, l: Logged<B>) {
-        let Some(seq) = l.entry.seq.filter(|s| s.0 == self.cursor.0 + 1) else {
+        let Some(seq) = l.entry.seq.filter(|s| s.0 == self.cursor.0 + 1 && self.filling.is_none()) else {
             return;
         };
         self.clock = self.clock.witness(l.entry.at, l.entry.at.wall);
         self.stores.shared.apply(&l.facts);
         self.cursor = seq;
         let id = l.entry.id;
+        let previewed = self.pending.first().is_some_and(|p| p.entry.id == id && p.writes == l.facts);
+        let before = self.pending.len();
         self.pending.retain(|p| p.entry.id != id && p.judged.is_none_or(|j| j > seq));
-        self.rebase();
+        if previewed && self.pending.len() + 1 == before {
+            // The server wrote what this node's run did, so the confirmed
+            // rows are what the entries after it ran over: their writes
+            // stand, and only the layer is made again without it.
+            self.layer = Layer::new();
+            for p in &self.pending {
+                self.layer.apply(&p.writes);
+            }
+            #[cfg(any(test, ark_selftest))]
+            {
+                self.skipped += 1;
+            }
+        } else {
+            self.rebase();
+        }
     }
 
     /// Takes the authority's answer to one of this node's pushes.
@@ -471,6 +545,8 @@ pub(crate) mod app {
     use crate::store::{Memory, TableId};
 
     pub(crate) const COUNTS: TableId = TableId(1);
+    /// A session table: a position per key, set whole.
+    pub(crate) const POSITIONS: TableId = TableId(2);
 
     /// A counter app: `Add` adds to a count, `Take` takes one and refuses
     /// at none, `Tap` asks for a shared `Add` and a local `Seen`, `Seen`
@@ -482,6 +558,7 @@ pub(crate) mod app {
         Seen,
         Refuse,
         Take { key: u8 },
+        Set { key: u8, value: u64 },
         Unknown,
     }
 
@@ -496,8 +573,16 @@ pub(crate) mod app {
                 Msg::Seen => 2,
                 Msg::Refuse => 3,
                 Msg::Take { .. } => 4,
+                Msg::Set { .. } => 5,
                 Msg::Unknown => 9,
             })
+        }
+
+        fn row(&self) -> Option<(TableId, Vec<u8>)> {
+            match self {
+                Msg::Set { key, .. } => Some((POSITIONS, alloc::vec![*key])),
+                _ => None,
+            }
         }
     }
 
@@ -510,7 +595,7 @@ pub(crate) mod app {
         cx.db.put(COUNTS, &[key], &n.to_le_bytes());
     }
 
-    pub(crate) static HANDLERS: [Handler<Msg>; 5] = [
+    pub(crate) static HANDLERS: [Handler<Msg>; 6] = [
         |cx| {
             let Msg::Add { key, by } = cx.entry.body else { unreachable!() };
             add(cx, key, by);
@@ -542,6 +627,11 @@ pub(crate) mod app {
             } else {
                 cx.db.put(COUNTS, &[key], &(n - 1).to_le_bytes());
             }
+            Ok(())
+        },
+        |cx| {
+            let Msg::Set { key, value } = cx.entry.body else { unreachable!() };
+            cx.db.put(POSITIONS, &[key], &value.to_le_bytes());
             Ok(())
         },
     ];
@@ -764,6 +854,115 @@ pub(crate) mod tests {
         assert_eq!(up, [Up::Hello { cursor: Seq(0) }, Up::Push(e)]);
     }
 
+    /// Facts that are what this node's run of its oldest pending entry
+    /// wrote run nothing again; other facts rebase what is pending.
+    #[cfg_attr(test, test)]
+    fn a_confirmed_preview_is_not_run_again() {
+        let mut n = node(1);
+        let mut up = Vec::new();
+        let first = n.make(Space::Shared, Msg::Add { key: 6, by: 1 }, 10);
+        let second = n.make(Space::Shared, Msg::Add { key: 6, by: 2 }, 10);
+        n.route(first.clone(), &mut up);
+        n.route(second, &mut up);
+        let mut kept = n.pending().to_vec();
+        // Writes no run makes show which are run again.
+        kept[1].writes = count_is(6, 40);
+        n.resume(Seq(0), kept);
+        n.receive(logged(&first, 1, count_is(6, 1)), &mut up);
+        assert_eq!((n.skipped, n.pending().len()), (1, 1));
+        assert_eq!(n.pending()[0].writes, count_is(6, 40));
+        assert_eq!(count(&n.view(Space::Shared), 6), 40);
+        // Another node's facts: the rest is run again over them.
+        let theirs = node(2).make(Space::Shared, Msg::Add { key: 6, by: 4 }, 10);
+        n.receive(logged(&theirs, 2, count_is(6, 5)), &mut up);
+        assert_eq!(n.skipped, 1);
+        assert_eq!(n.pending()[0].writes, count_is(6, 7));
+        // The node's own facts unlike its preview: run again too.
+        let mut m = node(3);
+        let a = m.make(Space::Shared, Msg::Add { key: 1, by: 1 }, 10);
+        let b = m.make(Space::Shared, Msg::Add { key: 1, by: 1 }, 10);
+        m.route(a.clone(), &mut up);
+        m.route(b, &mut up);
+        m.receive(logged(&a, 1, count_is(1, 9)), &mut up);
+        assert_eq!((m.skipped, count(&m.view(Space::Shared), 1)), (0, 10));
+    }
+
+    /// A fill empties the tables it names, takes its rows in parts, and
+    /// at its end puts the node at its `seq`, lets go of what that
+    /// confirms, and rebases the rest. One interrupted is let go at the
+    /// next connection.
+    #[cfg_attr(test, test)]
+    fn a_fill_replaces_the_confirmed_rows() {
+        let mut n = node(1);
+        let mut up = Vec::new();
+        let theirs = node(2).make(Space::Shared, Msg::Add { key: 1, by: 3 }, 10);
+        n.receive(logged(&theirs, 1, count_is(1, 3)), &mut up);
+        let mine = n.make(Space::Shared, Msg::Add { key: 2, by: 1 }, 10);
+        let late = n.make(Space::Shared, Msg::Add { key: 2, by: 10 }, 10);
+        n.route(mine.clone(), &mut up);
+        n.route(late.clone(), &mut up);
+        // Judged at 5, in the part of the log the upstream let go.
+        n.receive(
+            Down::Verdict {
+                id: mine.id,
+                verdict: Verdict::At {
+                    seq: Seq(5),
+                    last: mine.id.n,
+                },
+            },
+            &mut up,
+        );
+        n.connect(&mut up);
+        n.receive(
+            Down::Fill {
+                seq: Seq(5),
+                tables: vec![COUNTS],
+                parts: 2,
+            },
+            &mut up,
+        );
+        assert_eq!((count(n.store(Space::Shared), 1), n.cursor()), (0, Seq(1)));
+        // The log is not taken during a fill.
+        n.receive(logged(&theirs, 2, count_is(1, 50)), &mut up);
+        n.receive(Down::Rows(count_is(2, 1)), &mut up);
+        assert_eq!(n.cursor(), Seq(1));
+        n.receive(Down::Rows(count_is(3, 4)), &mut up);
+        assert_eq!(n.cursor(), Seq(5));
+        assert_eq!(
+            rows(n.store(Space::Shared)),
+            [(vec![2], 1u64.to_le_bytes().to_vec()), (vec![3], 4u64.to_le_bytes().to_vec())]
+        );
+        assert_eq!(n.pending().len(), 1);
+        assert_eq!(count(&n.view(Space::Shared), 2), 11);
+        n.receive(logged(&late, 6, count_is(2, 11)), &mut up);
+        assert_eq!((n.pending(), n.cursor()), (&[][..], Seq(6)));
+
+        // Interrupted: the rest of its parts are not taken after a new
+        // connection, and a part with no fill is passed over.
+        n.receive(
+            Down::Fill {
+                seq: Seq(9),
+                tables: vec![COUNTS],
+                parts: 2,
+            },
+            &mut up,
+        );
+        n.receive(Down::Rows(count_is(7, 1)), &mut up);
+        n.connect(&mut up);
+        n.receive(Down::Rows(count_is(8, 1)), &mut up);
+        assert_eq!((count(n.store(Space::Shared), 8), n.cursor()), (0, Seq(6)));
+        // An empty fill ends at once.
+        n.receive(
+            Down::Fill {
+                seq: Seq(9),
+                tables: vec![COUNTS],
+                parts: 0,
+            },
+            &mut up,
+        );
+        assert_eq!((rows(n.store(Space::Shared)), n.cursor()), (vec![], Seq(9)));
+    }
+
     #[cfg_attr(test, test)]
     fn session_entries_are_sent_and_taken() {
         let mut a = node(1);
@@ -789,6 +988,8 @@ pub(crate) mod tests {
         local_refusals,
         an_at_verdict_lets_go_once_applied,
         pending_records_are_put_back,
+        a_confirmed_preview_is_not_run_again,
+        a_fill_replaces_the_confirmed_rows,
         session_entries_are_sent_and_taken,
         routes,
     );

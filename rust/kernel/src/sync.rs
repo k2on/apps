@@ -2,8 +2,9 @@
 //! and the records each keeps of it.
 //!
 //! ```text
-//! Up     Hello { cursor } | Push(Entry) | Live(Entry)
+//! Up     Hello { cursor } | Push(Entry) | Live(Entry) | Rate { table, every }
 //! Down   Logged { entry, facts } | Verdict { id, verdict } | Live(Entry)
+//!        | Fill { seq, tables, parts } | Rows(writes)
 //! Verdict  At { seq, last } | Refused(code)
 //! Pending  { entry, writes, judged }
 //! ```
@@ -18,17 +19,29 @@
 //! the log at or below `seq`, or was refused; one past it was not judged.
 //! So a push that arrives twice is judged once.
 //!
-//! `Live` carries a session entry, which is forwarded and never logged.
+//! **A fill.** An upstream keeps only the end of the log. A node whose
+//! cursor is below what it keeps is answered with a `Fill`: the confirmed
+//! rows at `seq`, in `parts` frames of `Rows` after it (so each frame stays
+//! within what a watch reads at once), and then the log after `seq` as
+//! usual. The node empties the `tables` it names (every table the log has
+//! written) at the first part and takes `seq` as its cursor at the last.
+//!
+//! **Session entries.** `Live` carries a session entry, which is forwarded
+//! to its actor's other nodes and never logged. A node states with `Rate`
+//! how often it wants a session table's rows: between its sends, only the
+//! latest entry for each row is held ([`Feed`]). A table it names no rate
+//! for is sent every entry at once.
+//!
 //! Ported from `rust/ark`'s `frames.rs` and `peer.rs` as far as pending
-//! entries, facts and the rebase need: snapshots, fills, schemas, calls and
-//! files are for later rounds.
+//! entries, facts and the rebase need: schemas, calls and files are for
+//! later rounds.
 
 use alloc::vec::Vec;
 
 use crate::codec::{Decode, Encode, Error, Reader};
 use crate::entry::{Entry, EntryId, Seq};
-use crate::node::Refusal;
-use crate::store::Writes;
+use crate::node::{Body, Refusal};
+use crate::store::{TableId, Writes};
 
 /// An entry as the master log holds it: ordered (`entry.seq` is set) and
 /// with the rows its run wrote, which every other node applies in place of
@@ -74,6 +87,9 @@ pub enum Up<B> {
     Push(Entry<B>),
     /// A session entry, forwarded and never logged.
     Live(Entry<B>),
+    /// The least time in milliseconds this node wants between the session
+    /// entries it is sent for `table`'s rows; 0 for each at once.
+    Rate { table: TableId, every: u32 },
 }
 
 /// From an upstream to a node.
@@ -85,6 +101,88 @@ pub enum Down<B> {
     Verdict { id: EntryId, verdict: Verdict },
     /// A session entry from another of the user's nodes.
     Live(Entry<B>),
+    /// The confirmed rows at `seq` follow, in `parts` frames of `Rows`, in
+    /// place of the log up to it: the node's cursor is below what its
+    /// upstream keeps. `tables` are emptied first.
+    Fill { seq: Seq, tables: Vec<TableId>, parts: u32 },
+    /// A part of a fill's rows.
+    Rows(Writes),
+}
+
+/// What one node is sent of the session space: every entry at once, but
+/// in a table it asked a rate for, only the latest entry for each row
+/// ([`Body::row`]) is held between the table's turns, which come at most
+/// once each `every` milliseconds. Time comes in as an argument.
+pub struct Feed<B> {
+    /// Per table: its rate, and when its next turn may come.
+    rates: Vec<(TableId, u32, u64)>,
+    /// At most one entry per row, in the order their rows were first held.
+    held: Vec<Entry<B>>,
+}
+
+impl<B> Default for Feed<B> {
+    fn default() -> Feed<B> {
+        Feed {
+            rates: Vec::new(),
+            held: Vec::new(),
+        }
+    }
+}
+
+impl<B: Body> Feed<B> {
+    /// Sets `table`'s rate: at most one turn each `every` milliseconds.
+    pub fn rate(&mut self, table: TableId, every: u32) {
+        self.rates.retain(|r| r.0 != table);
+        if every > 0 {
+            self.rates.push((table, every, 0));
+        }
+    }
+
+    /// Takes an entry at `now`: what to send now, of it and of what was
+    /// held.
+    pub fn offer(&mut self, e: Entry<B>, now: u64) -> Vec<Entry<B>> {
+        let row = e.body.row();
+        let Some(row) = row.filter(|(table, _)| self.rates.iter().any(|r| r.0 == *table)) else {
+            let mut out = self.due(now);
+            out.push(e);
+            return out;
+        };
+        match self.held.iter_mut().find(|h| h.body.row().as_ref() == Some(&row)) {
+            Some(h) => *h = e,
+            None => self.held.push(e),
+        }
+        self.due(now)
+    }
+
+    /// What is held of the tables whose turn has come by `now`.
+    pub fn due(&mut self, now: u64) -> Vec<Entry<B>> {
+        let mut out = Vec::new();
+        for (table, every, next) in &mut self.rates {
+            if *next > now || !self.held.iter().any(|h| h.body.row().is_some_and(|r| r.0 == *table)) {
+                continue;
+            }
+            *next = now + u64::from(*every);
+            let mut i = 0;
+            while i < self.held.len() {
+                if self.held[i].body.row().is_some_and(|r| r.0 == *table) {
+                    out.push(self.held.remove(i));
+                } else {
+                    i += 1;
+                }
+            }
+        }
+        out
+    }
+
+    /// When the next held entry's turn comes, if one is held: for the host
+    /// to call [`Feed::due`] then.
+    pub fn next(&self) -> Option<u64> {
+        self.rates
+            .iter()
+            .filter(|(table, ..)| self.held.iter().any(|h| h.body.row().is_some_and(|r| r.0 == *table)))
+            .map(|r| r.2)
+            .min()
+    }
 }
 
 impl Encode for Refusal {
@@ -177,6 +275,11 @@ impl<B: Encode> Encode for Up<B> {
                 2u32.encode(out);
                 e.encode(out);
             }
+            Up::Rate { table, every } => {
+                3u32.encode(out);
+                table.encode(out);
+                every.encode(out);
+            }
         }
     }
 }
@@ -187,6 +290,10 @@ impl<B: Decode> Decode for Up<B> {
             0 => Ok(Up::Hello { cursor: Seq::decode(r)? }),
             1 => Ok(Up::Push(Entry::decode(r)?)),
             2 => Ok(Up::Live(Entry::decode(r)?)),
+            3 => Ok(Up::Rate {
+                table: TableId::decode(r)?,
+                every: u32::decode(r)?,
+            }),
             _ => Err(Error::Tag),
         }
     }
@@ -208,6 +315,16 @@ impl<B: Encode> Encode for Down<B> {
                 2u32.encode(out);
                 e.encode(out);
             }
+            Down::Fill { seq, tables, parts } => {
+                3u32.encode(out);
+                seq.encode(out);
+                tables.encode(out);
+                parts.encode(out);
+            }
+            Down::Rows(rows) => {
+                4u32.encode(out);
+                rows.encode(out);
+            }
         }
     }
 }
@@ -221,6 +338,12 @@ impl<B: Decode> Decode for Down<B> {
                 verdict: Verdict::decode(r)?,
             }),
             2 => Ok(Down::Live(Entry::decode(r)?)),
+            3 => Ok(Down::Fill {
+                seq: Seq::decode(r)?,
+                tables: Vec::decode(r)?,
+                parts: u32::decode(r)?,
+            }),
+            4 => Ok(Down::Rows(Writes::decode(r)?)),
             _ => Err(Error::Tag),
         }
     }
@@ -261,7 +384,15 @@ pub(crate) mod tests {
                 value: None,
             },
         ]);
-        let ups = [Up::Hello { cursor: Seq(4) }, Up::Push(entry(1, None)), Up::Live(entry(2, None))];
+        let ups = [
+            Up::Hello { cursor: Seq(4) },
+            Up::Push(entry(1, None)),
+            Up::Live(entry(2, None)),
+            Up::Rate {
+                table: TableId(2),
+                every: 250,
+            },
+        ];
         for up in ups {
             assert_eq!(from_slice::<Up<Vec<u8>>>(&to_vec(&up)), Ok(up));
         }
@@ -279,6 +410,12 @@ pub(crate) mod tests {
                 verdict: Verdict::Refused(Refusal(300)),
             },
             Down::Live(entry(3, None)),
+            Down::Fill {
+                seq: Seq(9),
+                tables: vec![TableId(1), TableId(3)],
+                parts: 2,
+            },
+            Down::Rows(facts.clone()),
         ];
         for down in downs {
             assert_eq!(from_slice::<Down<Vec<u8>>>(&to_vec(&down)), Ok(down));
@@ -292,5 +429,36 @@ pub(crate) mod tests {
         assert_eq!(from_slice::<Verdict>(&[2]), Err(Error::Tag));
     }
 
-    crate::listed!(frames_round_trip);
+    /// A session table with a rate is sent at most once a turn, the
+    /// latest entry for each row; other tables' entries go at once.
+    #[cfg_attr(test, test)]
+    fn a_feed_keeps_the_latest_per_row_between_turns() {
+        use crate::node::app::{node, Msg, POSITIONS};
+        let mut n = node(1);
+        let mut set = |key, value| n.make(Space::Session, Msg::Set { key, value }, 0);
+        let mut feed = Feed::default();
+        let a1 = set(1, 10);
+        assert_eq!(feed.offer(a1.clone(), 0), [a1]);
+        feed.rate(POSITIONS, 100);
+        // The first goes at once; the next two for row 1 within the turn
+        // leave the latest; row 2's is held beside it.
+        let (a2, a3, b1, a4) = (set(1, 11), set(1, 12), set(2, 20), set(1, 13));
+        assert_eq!(feed.offer(a2.clone(), 5), [a2]);
+        assert_eq!(feed.offer(a3, 20), []);
+        assert_eq!(feed.offer(b1.clone(), 30), []);
+        assert_eq!(feed.offer(a4.clone(), 40), []);
+        assert_eq!(feed.next(), Some(105));
+        assert_eq!(feed.due(104), []);
+        assert_eq!(feed.due(105), [a4, b1]);
+        assert_eq!(feed.next(), None);
+        // An entry naming no row is never held.
+        let tap = n.make(Space::Session, Msg::Seen, 0);
+        assert_eq!(feed.offer(tap.clone(), 106), [tap]);
+        // A rate of 0 sends each at once again.
+        feed.rate(POSITIONS, 0);
+        let a5 = n.make(Space::Session, Msg::Set { key: 1, value: 14 }, 0);
+        assert_eq!(feed.offer(a5.clone(), 107), [a5]);
+    }
+
+    crate::listed!(frames_round_trip, a_feed_keeps_the_latest_per_row_between_turns);
 }

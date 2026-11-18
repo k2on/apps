@@ -27,12 +27,12 @@ pub mod node;
 pub mod store;
 pub mod sync;
 
-pub use authority::Authority;
+pub use authority::{Authority, Conn};
 pub use codec::{Decode, Encode, Frames};
 pub use entry::{Actor, Entry, EntryId, Hlc, Origin, Seq, Space, Version};
 pub use node::{Body, Cx, Handler, HandlerId, Link, Machine, Node, Refusal, Route, Spaces};
 pub use store::{Layer, Memory, Overlay, Read, Store, TableId, View, Write, Writes};
-pub use sync::{Down, Logged, Pending, Up, Verdict};
+pub use sync::{Down, Feed, Logged, Pending, Up, Verdict};
 
 /// The tests, as a list a runner with no test harness calls one by one:
 /// the watch's under QEMU (`rust/kernel/watch/selftest.rs`). Each module's
