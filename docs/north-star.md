@@ -120,7 +120,10 @@ together (Pebble 2 Duo: 64 KB, a later target). The kernel's budget is
 **48 KB of code and 24 KB of heap**, leaving room for an app's domain, its
 views and the renderer. CI gates it: a build of the kernel for
 `thumbv7m-none-eabi` at `opt-level = "z"` that fails when it grows past
-the budget.
+the budget. What it builds is a watch and nothing else: the watch's slice
+run over the frames its upstream sends, recorded at build time from a
+real authority and phone node, so no server's or phone's code is counted
+as the kernel's.
 
 Measured today, linking the real `Peer::step` at those settings: about
 **133 KB** of Thumb-2 code with its dependencies (ark 79 KB, postcard
