@@ -3,8 +3,10 @@
 //!
 //! ```text
 //! Up     Hello { cursor } | Push(Entry) | Live(Entry) | Rate { table, every }
+//!        | Subscribe { query, args } | Unsubscribe { query, args }
 //! Down   Logged { entry, facts } | Verdict { id, verdict } | Live(Entry)
-//!        | Fill { seq, tables, parts } | Rows(writes)
+//!        | Fill { seq, tables, parts } | Rows(writes) | Moved(writes)
+//!        | Got { query, args }
 //! Verdict  At { seq, last } | Refused(code)
 //! Pending  { entry, writes, judged }
 //! ```
@@ -26,6 +28,19 @@
 //! usual. The node empties the `tables` it names (every table the log has
 //! written) at the first part and takes `seq` as its cursor at the last.
 //!
+//! **Subscriptions.** A node that holds only what its queries read (a
+//! watch) subscribes to each by its number and arguments, never by sending
+//! a query; it says its subscriptions at each connection before its hello.
+//! The upstream runs each and sends the rows its plan keeps of its table,
+//! whole: its hello is answered with a fill of them; a subscription after
+//! it with the rows the node did not hold, in `Moved` parts, then `Got`,
+//! which says the query's rows are all there. After that each logged entry
+//! comes with the facts of the rows the node holds, and the rows that
+//! moved into or out of its queries (a move-out is a removal), so a batch
+//! lands at its one `seq`. An unsubscription is answered with the
+//! move-outs of the rows no other query of the node holds. A node that
+//! subscribes to nothing holds every row, and is sent every fact.
+//!
 //! **Session entries.** `Live` carries a session entry, which is forwarded
 //! to its actor's other nodes and never logged. A node states with `Rate`
 //! how often it wants a session table's rows: between its sends, only the
@@ -42,6 +57,11 @@ use crate::codec::{Decode, Encode, Error, Reader};
 use crate::entry::{Entry, EntryId, Seq};
 use crate::node::{Body, Refusal};
 use crate::store::{TableId, Writes};
+
+/// A query, by the number its build gives it: what a node subscribes to,
+/// with its arguments.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct QueryId(pub u32);
 
 /// An entry as the master log holds it: ordered (`entry.seq` is set) and
 /// with the rows its run wrote, which every other node applies in place of
@@ -82,14 +102,28 @@ pub struct Pending<B> {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Up<B> {
     /// At each connection: the last `seq` this node has applied.
-    Hello { cursor: Seq },
+    Hello {
+        cursor: Seq,
+    },
     /// A pending entry, for the authority to judge.
     Push(Entry<B>),
     /// A session entry, forwarded and never logged.
     Live(Entry<B>),
     /// The least time in milliseconds this node wants between the session
     /// entries it is sent for `table`'s rows; 0 for each at once.
-    Rate { table: TableId, every: u32 },
+    Rate {
+        table: TableId,
+        every: u32,
+    },
+    /// Hold the rows this query reads, with these arguments.
+    Subscribe {
+        query: QueryId,
+        args: Vec<u8>,
+    },
+    Unsubscribe {
+        query: QueryId,
+        args: Vec<u8>,
+    },
 }
 
 /// From an upstream to a node.
@@ -107,6 +141,11 @@ pub enum Down<B> {
     Fill { seq: Seq, tables: Vec<TableId>, parts: u32 },
     /// A part of a fill's rows.
     Rows(Writes),
+    /// Rows that came into the node's queries, or moved out of them (a
+    /// removal), at its cursor.
+    Moved(Writes),
+    /// A subscription's rows are all sent.
+    Got { query: QueryId, args: Vec<u8> },
 }
 
 /// What one node is sent of the session space: every entry at once, but
@@ -280,6 +319,16 @@ impl<B: Encode> Encode for Up<B> {
                 table.encode(out);
                 every.encode(out);
             }
+            Up::Subscribe { query, args } => {
+                4u32.encode(out);
+                query.0.encode(out);
+                args.encode(out);
+            }
+            Up::Unsubscribe { query, args } => {
+                5u32.encode(out);
+                query.0.encode(out);
+                args.encode(out);
+            }
         }
     }
 }
@@ -293,6 +342,14 @@ impl<B: Decode> Decode for Up<B> {
             3 => Ok(Up::Rate {
                 table: TableId::decode(r)?,
                 every: u32::decode(r)?,
+            }),
+            4 => Ok(Up::Subscribe {
+                query: QueryId(u32::decode(r)?),
+                args: Vec::decode(r)?,
+            }),
+            5 => Ok(Up::Unsubscribe {
+                query: QueryId(u32::decode(r)?),
+                args: Vec::decode(r)?,
             }),
             _ => Err(Error::Tag),
         }
@@ -325,6 +382,15 @@ impl<B: Encode> Encode for Down<B> {
                 4u32.encode(out);
                 rows.encode(out);
             }
+            Down::Moved(rows) => {
+                5u32.encode(out);
+                rows.encode(out);
+            }
+            Down::Got { query, args } => {
+                6u32.encode(out);
+                query.0.encode(out);
+                args.encode(out);
+            }
         }
     }
 }
@@ -344,6 +410,11 @@ impl<B: Decode> Decode for Down<B> {
                 parts: u32::decode(r)?,
             }),
             4 => Ok(Down::Rows(Writes::decode(r)?)),
+            5 => Ok(Down::Moved(Writes::decode(r)?)),
+            6 => Ok(Down::Got {
+                query: QueryId(u32::decode(r)?),
+                args: Vec::decode(r)?,
+            }),
             _ => Err(Error::Tag),
         }
     }
@@ -392,6 +463,14 @@ pub(crate) mod tests {
                 table: TableId(2),
                 every: 250,
             },
+            Up::Subscribe {
+                query: QueryId(3),
+                args: vec![1, 2],
+            },
+            Up::Unsubscribe {
+                query: QueryId(3),
+                args: vec![],
+            },
         ];
         for up in ups {
             assert_eq!(from_slice::<Up<Vec<u8>>>(&to_vec(&up)), Ok(up));
@@ -416,6 +495,11 @@ pub(crate) mod tests {
                 parts: 2,
             },
             Down::Rows(facts.clone()),
+            Down::Moved(facts.clone()),
+            Down::Got {
+                query: QueryId(7),
+                args: vec![9],
+            },
         ];
         for down in downs {
             assert_eq!(from_slice::<Down<Vec<u8>>>(&to_vec(&down)), Ok(down));

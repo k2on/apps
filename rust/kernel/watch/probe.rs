@@ -7,8 +7,9 @@
 //! Under QEMU (`checks.kernel-qemu`) it runs the watch's slice in small: a
 //! queue of sixteen tracks confirmed, eight writes made offline and kept
 //! as pending records through a restart, then pushed, rebased over
-//! another device's write and confirmed, every frame read in parts; and
-//! two queries kept live over it all, as the watch's screen keeps them:
+//! another device's write and confirmed, every frame read in parts, its
+//! queue subscribed to at the connection; and two queries kept live over
+//! it all, as the watch's screen keeps them:
 //! the next four tracks (a bounded take of a filter) and how many there
 //! are (a group). It prints the most heap it held and exits 1 past the
 //! budget's 24 KB.
@@ -240,6 +241,8 @@ fn main() -> ! {
     // Connected: the pushes go up as frames; the server logs another
     // device's write first, so the rest rebase, then confirms them.
     up.clear();
+    node.subscribe(QueryId(black_box(0)), Vec::new(), &mut up);
+    up.clear();
     node.connect(&mut up);
     let pushed = to_vec(&up);
     let Ok(pushed) = from_slice::<Vec<Up<Msg>>>(&pushed) else {
@@ -270,6 +273,13 @@ fn main() -> ! {
             logged(&mut wire, e, seq, facts);
         }
     }
+    put_frame(
+        &mut wire,
+        &Down::<Msg>::Got {
+            query: QueryId(0),
+            args: Vec::new(),
+        },
+    );
     take(&mut node, &mut wire, &mut up);
 
     // A scan of the view, as a list on the watch reads it.
@@ -307,5 +317,5 @@ fn main() -> ! {
     rt::print("the kernel's probe held at most ");
     rt::print_number(peak);
     rt::print(" bytes of heap, of the 24576 its budget allows\n");
-    rt::exit(peak <= 24 * 1024 && node.pending().is_empty() && right)
+    rt::exit(peak <= 24 * 1024 && node.pending().is_empty() && right && node.complete(QueryId(0), &[]))
 }

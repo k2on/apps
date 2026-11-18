@@ -769,7 +769,20 @@ impl Live {
     /// Takes one settle's changes, `db` already after them, and answers the
     /// patches that take the answer to the new one.
     pub fn push(&mut self, db: &dyn Read, changes: &Changes) -> Vec<Patch> {
-        let diffs = if changes.reset {
+        let diffs = self.settle(db, changes);
+        self.apply(diffs)
+    }
+
+    /// [`Live::push`], answering what changed of each row by its place: what
+    /// an upstream reads to know which rows came into a query or left it.
+    pub fn diffs(&mut self, db: &dyn Read, changes: &Changes) -> Vec<Diff> {
+        let diffs = self.settle(db, changes);
+        self.apply(diffs.clone());
+        diffs
+    }
+
+    fn settle(&mut self, db: &dyn Read, changes: &Changes) -> Vec<Diff> {
+        if changes.reset {
             self.op.push(db, changes);
             let new = fetch(&*self.op, db, Bound::Unbounded, false, usize::MAX);
             let diff = |rows: Vec<Row>, old: bool| {
@@ -783,7 +796,11 @@ impl Live {
             merge(diff(self.rows.clone(), true), diff(new, false))
         } else {
             self.op.push(db, changes)
-        };
+        }
+    }
+
+    /// The diffs made to the answer, as patches.
+    fn apply(&mut self, diffs: Vec<Diff>) -> Vec<Patch> {
         let mut out = Vec::new();
         for d in diffs {
             let found = self.rows.binary_search_by(|(k, _)| k.cmp(&d.key));

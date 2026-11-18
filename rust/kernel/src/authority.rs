@@ -29,6 +29,18 @@
 //! A hello whose cursor is below what is kept is answered with the
 //! confirmed rows at the head, in parts, in place of the log.
 //!
+//! **Subscriptions.** It runs the [`Query`]s the build gives it
+//! ([`Authority::set_queries`]) for the connections that subscribe, each
+//! a [`Live`] answer over its rows, and keeps per connection the rows it
+//! holds with how many of its subscriptions read each, never their
+//! contents. A connection that subscribes before its hello holds only
+//! those rows: its hello is answered with a fill of them, and each entry
+//! logged after with the facts of the rows it holds and the rows that
+//! moved into or out of its queries, at the entry's `seq`. The record
+//! lives as long as the connection, so a node that connects again is
+//! filled again: keeping it across connections, as Zero's per-client
+//! records are, is for later.
+//!
 //! It keeps the log, its rows, the last count judged per origin and the
 //! refusals, all in memory here: storing them and trimming the journal are
 //! the server host's. The entries a handler emits on the authority are not
@@ -39,8 +51,9 @@ use alloc::vec::Vec;
 
 use crate::entry::{Actor, Entry, EntryId, Origin, Seq, Space};
 use crate::node::{run, Body, Handler, Refusal};
+use crate::plan::{Changes, Diff, Live, Plan};
 use crate::store::{Range, Store, TableId, Write, Writes};
-use crate::sync::{Down, Feed, Logged, Up, Verdict};
+use crate::sync::{Down, Feed, Logged, QueryId, Up, Verdict};
 
 /// A connection, by the host's number for it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -48,6 +61,33 @@ pub struct Conn(pub u32);
 
 /// A frame for a connection.
 pub type Out<B> = (Conn, Down<B>);
+
+/// A query's plan for its arguments, over one table's rows, which it keeps
+/// whole (a scan, its filters and its take): what a node that subscribes
+/// holds. The node runs its own maps, sorts and groups over them.
+pub type Query = fn(args: &[u8]) -> (TableId, Plan);
+
+/// A row of the shared space.
+type At = (TableId, Vec<u8>);
+
+/// A subscription: its query and arguments, and its answer kept live.
+struct Sub {
+    query: QueryId,
+    args: Vec<u8>,
+    table: TableId,
+    live: Live,
+}
+
+/// What the authority keeps of a connection.
+struct Peer<B> {
+    actor: Actor,
+    feed: Feed<B>,
+    hello: bool,
+    subs: Vec<Sub>,
+    /// The rows it holds, with how many subscriptions read each; `None`
+    /// for every row.
+    held: Option<BTreeMap<At, u32>>,
+}
 
 pub struct Authority<B: 'static, S> {
     handlers: &'static [Handler<B>],
@@ -59,7 +99,8 @@ pub struct Authority<B: 'static, S> {
     tables: BTreeSet<TableId>,
     last: BTreeMap<Origin, u64>,
     refused: BTreeMap<EntryId, Refusal>,
-    conns: BTreeMap<Conn, (Actor, Feed<B>)>,
+    conns: BTreeMap<Conn, Peer<B>>,
+    queries: &'static [Query],
     /// The most rows a fill's part carries.
     part: usize,
 }
@@ -76,8 +117,14 @@ impl<B: Body + Clone + 'static, S: Store> Authority<B, S> {
             last: BTreeMap::new(),
             refused: BTreeMap::new(),
             conns: BTreeMap::new(),
+            queries: &[],
             part: 32,
         }
+    }
+
+    /// Sets the queries nodes subscribe to, by their numbers.
+    pub fn set_queries(&mut self, queries: &'static [Query]) {
+        self.queries = queries;
     }
 
     /// Sets the most rows a fill's part carries, so that each frame fits
@@ -115,7 +162,14 @@ impl<B: Body + Clone + 'static, S: Store> Authority<B, S> {
 
     /// A connection opened, signed in as `actor`.
     pub fn open(&mut self, conn: Conn, actor: Actor) {
-        self.conns.insert(conn, (actor, Feed::default()));
+        let peer = Peer {
+            actor,
+            feed: Feed::default(),
+            hello: false,
+            subs: Vec::new(),
+            held: None,
+        };
+        self.conns.insert(conn, peer);
     }
 
     /// A connection closed: what was held for it is dropped.
@@ -126,51 +180,223 @@ impl<B: Body + Clone + 'static, S: Store> Authority<B, S> {
     /// Takes what `conn` said at `now`, and answers with what goes where.
     /// A connection not open is not answered.
     pub fn receive(&mut self, conn: Conn, up: Up<B>, now: u64) -> Vec<Out<B>> {
-        let Some((actor, feed)) = self.conns.get_mut(&conn) else {
+        let Some(peer) = self.conns.get_mut(&conn) else {
             return Vec::new();
         };
-        let actor = *actor;
-        match up {
-            Up::Hello { cursor } => self.hello(cursor).into_iter().map(|d| (conn, d)).collect(),
+        let actor = peer.actor;
+        let out = match up {
+            Up::Hello { cursor } => {
+                peer.hello = true;
+                if peer.subs.is_empty() {
+                    peer.held = None;
+                    self.hello(cursor)
+                } else {
+                    self.fill(conn)
+                }
+            }
+            Up::Subscribe { query, args } => self.subscribe(conn, query, args),
+            Up::Unsubscribe { query, args } => {
+                let Some(i) = peer.subs.iter().position(|s| s.query == query && s.args == args) else {
+                    return Vec::new();
+                };
+                let sub = peer.subs.remove(i);
+                let mut gone = Vec::new();
+                if let Some(held) = &mut peer.held {
+                    for (key, _) in sub.live.rows() {
+                        if release(held, (sub.table, key.clone())) {
+                            gone.push(Write {
+                                table: sub.table,
+                                key: key.clone(),
+                                value: None,
+                            });
+                        }
+                    }
+                }
+                self.parts(gone)
+            }
             Up::Push(e) => {
                 let (verdict, logged) = self.push(actor, e);
                 let mut out = Vec::from([(conn, verdict)]);
-                if let Some(l) = logged {
-                    out.extend(self.conns.keys().map(|&c| (c, Down::Logged(l.clone()))));
+                if let Some((l, changes)) = logged {
+                    out.extend(self.feed(&l, &changes));
                 }
-                out
+                return out;
             }
             Up::Rate { table, every } => {
-                feed.rate(table, every);
+                peer.feed.rate(table, every);
                 Vec::new()
             }
-            Up::Live(e) => match stamped(actor, e) {
-                Ok(e) if e.space == Space::Session && actor != Actor::NONE => {
-                    let mut out = Vec::new();
-                    for (&c, (a, feed)) in &mut self.conns {
-                        if c != conn && *a == actor {
-                            out.extend(feed.offer(e.clone(), now).into_iter().map(|e| (c, Down::Live(e))));
+            Up::Live(e) => {
+                let mut out = Vec::new();
+                let e = stamped(actor, e).ok().filter(|e| e.space == Space::Session && actor != Actor::NONE);
+                if let Some(e) = e {
+                    for (&c, peer) in &mut self.conns {
+                        if c != conn && peer.actor == actor {
+                            out.extend(peer.feed.offer(e.clone(), now).into_iter().map(|e| (c, Down::Live(e))));
                         }
                     }
-                    out
                 }
-                _ => Vec::new(),
-            },
+                return out;
+            }
+        };
+        out.into_iter().map(|d| (conn, d)).collect()
+    }
+
+    /// Rows that moved, in parts.
+    fn parts(&self, rows: Vec<Write>) -> Vec<Down<B>> {
+        rows.chunks(self.part).map(|c| Down::Moved(Writes(c.to_vec()))).collect()
+    }
+
+    /// Runs a query for `conn`, and sends what it holds now.
+    fn subscribe(&mut self, conn: Conn, query: QueryId, args: Vec<u8>) -> Vec<Down<B>> {
+        let Some(make) = self.queries.get(query.0 as usize) else {
+            return Vec::new();
+        };
+        let Some(peer) = self.conns.get_mut(&conn) else {
+            return Vec::new();
+        };
+        if peer.subs.iter().any(|s| s.query == query && s.args == args) {
+            return Vec::new();
         }
+        let (table, plan) = make(&args);
+        let live = plan.live(&self.store);
+        let mut came = Vec::new();
+        if let (Some(held), true) = (&mut peer.held, peer.hello) {
+            for (key, _) in live.rows() {
+                let n = held.entry((table, key.clone())).or_insert(0);
+                *n += 1;
+                if *n == 1 {
+                    came.push(Write {
+                        table,
+                        key: key.clone(),
+                        value: self.store.get(table, key),
+                    });
+                }
+            }
+        }
+        let hello = peer.hello;
+        peer.subs.push(Sub {
+            query,
+            args: args.clone(),
+            table,
+            live,
+        });
+        if !hello {
+            return Vec::new();
+        }
+        let mut out = self.parts(came);
+        out.push(Down::Got { query, args });
+        out
+    }
+
+    /// Fills a connection that subscribed before its hello with its
+    /// queries' rows, at the head.
+    fn fill(&mut self, conn: Conn) -> Vec<Down<B>> {
+        let Some(peer) = self.conns.get_mut(&conn) else {
+            return Vec::new();
+        };
+        let mut held = BTreeMap::new();
+        let mut tables = BTreeSet::new();
+        for sub in &peer.subs {
+            tables.insert(sub.table);
+            for (key, _) in sub.live.rows() {
+                *held.entry((sub.table, key.clone())).or_insert(0) += 1;
+            }
+        }
+        let rows: Vec<Write> = held
+            .keys()
+            .map(|(table, key)| Write {
+                table: *table,
+                key: key.clone(),
+                value: self.store.get(*table, key),
+            })
+            .collect();
+        let got: Vec<Down<B>> = peer
+            .subs
+            .iter()
+            .map(|s| Down::Got {
+                query: s.query,
+                args: s.args.clone(),
+            })
+            .collect();
+        peer.held = Some(held);
+        let parts: Vec<Down<B>> = rows.chunks(self.part).map(|c| Down::Rows(Writes(c.to_vec()))).collect();
+        let mut out = Vec::from([Down::Fill {
+            seq: self.head(),
+            tables: tables.into_iter().collect(),
+            parts: parts.len() as u32,
+        }]);
+        out.extend(parts);
+        out.extend(got);
+        out
+    }
+
+    /// What a logged entry is to each connection: every fact, to one that
+    /// holds every row; to one that holds its queries' rows, the facts of
+    /// those it holds, and the rows that came into its queries or left
+    /// them. A connection that has subscribed and not said hello is sent
+    /// nothing: its hello fills it.
+    fn feed(&mut self, l: &Logged<B>, changes: &Changes) -> Vec<Out<B>> {
+        let mut out = Vec::new();
+        for (&c, peer) in &mut self.conns {
+            // Whether each row whose count of subscriptions changed was
+            // held before.
+            let mut was: BTreeMap<At, bool> = BTreeMap::new();
+            for sub in &mut peer.subs {
+                for Diff { key, old, new } in sub.live.diffs(&self.store, changes) {
+                    let (Some(held), true) = (&mut peer.held, old.is_some() != new.is_some()) else {
+                        continue;
+                    };
+                    let at = (sub.table, key);
+                    was.entry(at.clone()).or_insert_with(|| held.contains_key(&at));
+                    if new.is_some() {
+                        *held.entry(at).or_insert(0) += 1;
+                    } else {
+                        release(held, at);
+                    }
+                }
+            }
+            let facts = match &peer.held {
+                _ if !peer.hello && !peer.subs.is_empty() => continue,
+                None => l.facts.clone(),
+                Some(held) => {
+                    for w in &l.facts.0 {
+                        let at = (w.table, w.key.clone());
+                        was.entry(at).or_insert_with(|| held.contains_key(&(w.table, w.key.clone())));
+                    }
+                    // A row held now is sent whole; one held before only
+                    // is a move-out.
+                    let rows = was.into_iter().filter_map(|((table, key), before)| {
+                        let now = held.contains_key(&(table, key.clone()));
+                        let value = if now { self.store.get(table, &key) } else { None };
+                        (now || before).then_some(Write { table, key, value })
+                    });
+                    Writes(rows.collect())
+                }
+            };
+            out.push((
+                c,
+                Down::Logged(Logged {
+                    entry: l.entry.clone(),
+                    facts,
+                }),
+            ));
+        }
+        out
     }
 
     /// The session entries whose turn has come by `now`.
     pub fn tick(&mut self, now: u64) -> Vec<Out<B>> {
         let mut out = Vec::new();
-        for (&c, (_, feed)) in &mut self.conns {
-            out.extend(feed.due(now).into_iter().map(|e| (c, Down::Live(e))));
+        for (&c, peer) in &mut self.conns {
+            out.extend(peer.feed.due(now).into_iter().map(|e| (c, Down::Live(e))));
         }
         out
     }
 
     /// When [`Authority::tick`] next has something to send, if ever.
     pub fn next_tick(&self) -> Option<u64> {
-        self.conns.values().filter_map(|(_, feed)| feed.next()).min()
+        self.conns.values().filter_map(|peer| peer.feed.next()).min()
     }
 
     /// The answer to a node's hello: the log after its cursor, or, when
@@ -202,8 +428,8 @@ impl<B: Body + Clone + 'static, S: Store> Authority<B, S> {
     }
 
     /// Judges an entry `actor`'s connection pushed: the verdict for its
-    /// node, and what it logged, for every node.
-    fn push(&mut self, actor: Actor, e: Entry<B>) -> (Down<B>, Option<Logged<B>>) {
+    /// node, and what it logged with what that changed, for every node.
+    fn push(&mut self, actor: Actor, e: Entry<B>) -> (Down<B>, Option<(Logged<B>, Changes)>) {
         let id = e.id;
         let answer = |verdict| Down::Verdict { id, verdict };
         if e.space != Space::Shared || e.seq.is_some() {
@@ -224,6 +450,19 @@ impl<B: Body + Clone + 'static, S: Store> Authority<B, S> {
                 (answer(Verdict::Refused(why)), None)
             }
             Ok((e, facts)) => {
+                let changes = facts.0.iter().filter_map(|w| {
+                    let old = self.store.get(w.table, &w.key);
+                    let diff = Diff {
+                        key: w.key.clone(),
+                        old,
+                        new: w.value.clone(),
+                    };
+                    (diff.old != diff.new).then_some((w.table, diff))
+                });
+                let changes = Changes {
+                    reset: false,
+                    rows: changes.collect(),
+                };
                 self.store.apply(&facts);
                 self.tables.extend(facts.0.iter().map(|w| w.table));
                 let seq = Seq(self.head().0 + 1);
@@ -232,10 +471,21 @@ impl<B: Body + Clone + 'static, S: Store> Authority<B, S> {
                     facts,
                 };
                 self.log.push(logged.clone());
-                (answer(Verdict::At { seq, last: id.n }), Some(logged))
+                (answer(Verdict::At { seq, last: id.n }), Some((logged, changes)))
             }
         }
     }
+}
+
+/// Takes away one subscription's hold of a row: whether none holds it now.
+fn release(held: &mut BTreeMap<At, u32>, at: At) -> bool {
+    let Some(n) = held.get_mut(&at) else { return false };
+    *n -= 1;
+    if *n > 0 {
+        return false;
+    }
+    held.remove(&at);
+    true
 }
 
 /// `e` as from `actor`, its connection's: stamped if it names no one,
@@ -259,6 +509,7 @@ pub(crate) mod tests {
     use crate::plan::tests::{diff, splice};
     use crate::plan::{scan, Live, Row};
     use crate::store::{Memory, Read};
+    use crate::sync::QueryId;
     use crate::Rng;
     use alloc::collections::VecDeque;
     use alloc::vec;
@@ -440,6 +691,90 @@ pub(crate) mod tests {
         assert_eq!((rows(d.store(Space::Shared)), d.cursor()), (rows(a.store()), Seq(5)));
     }
 
+    /// The tests' queries: the counts whose value is odd or even as the
+    /// argument says, and the first two.
+    static QUERIES: [Query; 2] = [
+        |args| {
+            let odd = args.first().copied().unwrap_or(0);
+            (
+                COUNTS,
+                scan(COUNTS, Bound::Unbounded, Bound::Unbounded).filter(move |_, v| v[0] % 2 == odd),
+            )
+        },
+        |_| (COUNTS, scan(COUNTS, Bound::Unbounded, Bound::Unbounded).take(2, false)),
+    ];
+
+    /// A node that subscribes holds its queries' rows: filled at its
+    /// hello, sent the rows a later subscription adds, the facts of what
+    /// it holds and the rows that move in or out, and move-outs when it
+    /// lets a query go; never the rest.
+    #[cfg_attr(test, test)]
+    fn a_subscriber_holds_its_queries_rows() {
+        let mut a = authority();
+        a.set_queries(&QUERIES);
+        a.set_part(2);
+        a.open(Conn(1), ME);
+        a.open(Conn(2), ME);
+        let mut writer = node(1);
+        let mut push = |a: &mut Authority<Msg, Memory>, key, by| {
+            let e = writer.make(Space::Shared, Msg::Add { key, by }, 10);
+            a.receive(Conn(1), Up::Push(e), 0)
+        };
+        for (key, by) in [(1, 1), (2, 2), (3, 3), (4, 5)] {
+            push(&mut a, key, by);
+        }
+        let mut watch = node(2);
+        let mut up = Vec::new();
+        watch.subscribe(QueryId(0), vec![1], &mut up);
+        watch.connect(&mut up);
+        let odd = |db: &dyn Read| rows(db).into_iter().filter(|(_, v)| v[0] % 2 == 1).collect::<Vec<_>>();
+        let take = |up: &mut Vec<Up<Msg>>, a: &mut Authority<Msg, Memory>, watch: &mut Node<Msg, Memory>| {
+            for u in core::mem::take(up) {
+                for (c, down) in a.receive(Conn(2), u, 0) {
+                    assert_eq!(c, Conn(2));
+                    watch.receive(down, &mut Vec::new());
+                }
+            }
+        };
+        take(&mut up, &mut a, &mut watch);
+        assert_eq!(rows(watch.store(Space::Shared)), odd(a.store()));
+        assert!(watch.complete(QueryId(0), &[1]));
+        assert_eq!(watch.cursor(), a.head());
+        // A write it holds, one it does not, and one that moves a row out.
+        let deliver = |out: Vec<Out<Msg>>, watch: &mut Node<Msg, Memory>| {
+            for (c, down) in out {
+                if c == Conn(2) {
+                    watch.receive(down, &mut Vec::new());
+                }
+            }
+        };
+        for (key, by) in [(1, 2), (2, 2), (3, 1), (5, 1)] {
+            let out = push(&mut a, key, by);
+            deliver(out, &mut watch);
+            assert_eq!(rows(watch.store(Space::Shared)), odd(a.store()));
+        }
+        // A second query: what it adds comes, what both hold is not sent
+        // twice, and letting the first go moves out only what the second
+        // does not hold.
+        watch.subscribe(QueryId(1), vec![], &mut up);
+        let sent: Vec<Up<Msg>> = up.clone();
+        let out = a.receive(Conn(2), sent[0].clone(), 0);
+        up.clear();
+        assert!(matches!(out.last(), Some((_, Down::Got { .. }))));
+        deliver(out, &mut watch);
+        let first_two: Vec<_> = rows(a.store()).into_iter().take(2).collect();
+        let mut both: BTreeSet<_> = odd(a.store()).into_iter().collect();
+        both.extend(first_two.iter().cloned());
+        assert_eq!(rows(watch.store(Space::Shared)), both.into_iter().collect::<Vec<_>>());
+        watch.unsubscribe(QueryId(0), vec![1], &mut up);
+        take(&mut up, &mut a, &mut watch);
+        assert_eq!(rows(watch.store(Space::Shared)), first_two);
+        // A row that comes before them moves into the take; one moves out.
+        deliver(push(&mut a, 0, 4), &mut watch);
+        assert_eq!(rows(watch.store(Space::Shared)), rows(a.store()).into_iter().take(2).collect::<Vec<_>>());
+        assert!(watch.complete(QueryId(1), &[]) && !watch.complete(QueryId(0), &[1]));
+    }
+
     /// A device in the convergence test: its node, what is in flight on
     /// its connection each way, and whether it is connected.
     struct Device {
@@ -459,6 +794,8 @@ pub(crate) mod tests {
         /// splice, and the view's rows when its changes were last taken.
         lives: Vec<(Live, Vec<Row>)>,
         seen: Memory,
+        /// Its subscriptions, if it holds only what they read.
+        subs: Vec<(QueryId, Vec<u8>)>,
     }
 
     /// The queries each device keeps over its shared view: a bounded take
@@ -520,13 +857,16 @@ pub(crate) mod tests {
         held: u32,
     }
 
-    /// Three devices (two of one actor, one of another) and a server, each
+    /// Three devices (two of one actor, and a third of another, which holds
+    /// only what its queries read and subscribes and lets go at random)
+    /// and a server, each
     /// device writing offline and online, disconnected and reconnected at
     /// random with what was in flight lost, and messages delivered in
     /// random interleavings; the server lets go of its log's start at
     /// random, so a device behind is filled, and its session entries go
     /// to its actor's other devices at the rate each asked. Once all are
-    /// connected and quiet, every device's rows are the server's, nothing
+    /// connected and quiet, every device's rows are the server's (for the
+    /// third, those its queries read, each complete), nothing
     /// is pending, every entry made is logged once or refused, each device
     /// was told of its every refusal, and each holds the latest session
     /// values of its actor's other devices, never another actor's.
@@ -534,6 +874,7 @@ pub(crate) mod tests {
         let mut rng = Rng::new(seed);
         let mut server = authority();
         server.set_part(1 + rng.below(3) as usize);
+        server.set_queries(&QUERIES);
         let actors = [ME, ME, Actor(6)];
         let mut devices: Vec<Device> = (0..3)
             .map(|d| Device {
@@ -547,8 +888,13 @@ pub(crate) mod tests {
                 expect: BTreeMap::new(),
                 lives: queries(seed.is_multiple_of(2)).map(|q| (q.live(&Memory::new()), Vec::new())).into(),
                 seen: Memory::new(),
+                subs: Vec::new(),
             })
             .collect();
+        for (query, args) in [(QueryId(1), vec![]), (QueryId(0), vec![1])] {
+            devices[2].node.subscribe(query, args.clone(), &mut Vec::new());
+            devices[2].subs.push((query, args));
+        }
         // The second device knows who it is from the start; the others
         // learn it at their first connection, their writes before it
         // stamped by the server.
@@ -565,15 +911,12 @@ pub(crate) mod tests {
             dev.watch(seed);
             said.push(Up::Rate {
                 table: POSITIONS,
-                every: [0, 0, 15][rng.below(3) as usize],
+                every: [0, 15, 40][rng.below(3) as usize],
             });
             dev.send(said);
         };
-        let deliver = |out: Vec<Out<Msg>>, devices: &mut Vec<Device>, log: &mut BTreeMap<Seq, Logged<Msg>>| {
+        let deliver = |out: Vec<Out<Msg>>, devices: &mut Vec<Device>| {
             for (c, down) in out {
-                if let Down::Logged(l) = &down {
-                    log.insert(l.entry.seq.unwrap(), l.clone());
-                }
                 let dev = &mut devices[c.0 as usize];
                 assert!(dev.online, "sent only to a connection open");
                 dev.down.push_back(down);
@@ -587,7 +930,7 @@ pub(crate) mod tests {
                         settle: bool| {
             let d = rng.below(3) as usize;
             now += rng.below(6);
-            let op = if settle { 1 + rng.below(2) } else { rng.below(14) };
+            let op = if settle { 1 + rng.below(2) } else { rng.below(15) };
             match op {
                 // A write, connected or not; now and then one that says it
                 // is from someone else.
@@ -613,18 +956,28 @@ pub(crate) mod tests {
                 // The server takes what the device sent.
                 1 | 5 | 6 => {
                     let Some(up) = devices[d].up.pop_front() else { return };
+                    let mut owners = 0;
                     if let Up::Live(e) = &up {
                         let Msg::Set { key, value } = e.body else { unreachable!() };
                         let actor = devices[d].actor;
                         for (o, dev) in devices.iter_mut().enumerate() {
                             if o != d && dev.online && dev.actor == actor {
                                 dev.expect.insert(key, value);
+                                owners += 1;
                             }
                         }
                     }
                     let out = server.receive(Conn(d as u32), up, now);
+                    if out.iter().filter(|(_, down)| matches!(down, Down::Live(_))).count() < owners {
+                        seen.held += 1;
+                    }
+                    // The log as the server keeps it: a subscriber is sent
+                    // only its part of the facts.
+                    if let Some(l) = server.log().last() {
+                        log.entry(l.entry.seq.unwrap()).or_insert_with(|| l.clone());
+                    }
                     seen.fills += out.iter().filter(|(_, down)| matches!(down, Down::Fill { .. })).count() as u32;
-                    deliver(out, devices, log);
+                    deliver(out, devices);
                 }
                 // The device takes what the server sent.
                 2 | 7 | 8 => {
@@ -653,24 +1006,44 @@ pub(crate) mod tests {
                     dev.send(said);
                     dev.refused.extend(dev.node.take_refused().into_iter().map(|(id, _)| id));
                 }
-                // A session value: each device sets its own keys.
+                // Session values, a few at once as a position streams: each
+                // device sets its own keys.
                 9 | 10 => {
                     let dev = &mut devices[d];
-                    value += 1;
-                    let key = 10 * d as u8 + rng.below(2) as u8;
-                    let e = dev.node.make(Space::Session, Msg::Set { key, value }, now);
                     let mut said = Vec::new();
-                    dev.node.route(e, &mut said);
+                    for _ in 0..1 + rng.below(3) {
+                        value += 1;
+                        let key = 10 * d as u8 + rng.below(2) as u8;
+                        let e = dev.node.make(Space::Session, Msg::Set { key, value }, now);
+                        dev.node.route(e, &mut said);
+                    }
                     dev.send(said);
                 }
                 // The server's timer, or its log let go of.
                 11 => {
                     let out = server.tick(now);
-                    deliver(out, devices, log);
+                    deliver(out, devices);
                     if rng.below(3) == 0 {
                         let head = server.head().0;
                         server.trim(Seq(rng.below(head + 1)));
                     }
+                }
+                // The third device lets go of a query, or takes one.
+                12 if d == 2 => {
+                    let dev = &mut devices[d];
+                    let mut said = Vec::new();
+                    match dev.subs.iter().position(|s| s.0 == QueryId(0)) {
+                        Some(i) => {
+                            let (query, args) = dev.subs.remove(i);
+                            dev.node.unsubscribe(query, args, &mut said);
+                        }
+                        None => {
+                            let args = vec![rng.below(2) as u8];
+                            dev.node.subscribe(QueryId(0), args.clone(), &mut said);
+                            dev.subs.push((QueryId(0), args));
+                        }
+                    }
+                    dev.send(said);
                 }
                 // Disconnected, or connected again.
                 _ => {
@@ -699,8 +1072,7 @@ pub(crate) mod tests {
                 step(&mut rng, &mut server, &mut devices, &mut log, seen, true);
             }
             let Some(at) = server.next_tick() else { break };
-            seen.held += 1;
-            deliver(server.tick(at), &mut devices, &mut log);
+            deliver(server.tick(at), &mut devices);
         }
 
         let logged: Vec<EntryId> = log.values().map(|l| l.entry.id).collect();
@@ -708,8 +1080,19 @@ pub(crate) mod tests {
         assert_eq!(once.len(), logged.len(), "an entry logged twice");
         assert_eq!(log.len() as u64, server.head().0, "every seq logged");
         for (d, dev) in devices.iter().enumerate() {
-            assert_eq!(rows(dev.node.store(Space::Shared)), rows(server.store()), "seed {seed}");
-            assert_eq!(rows(&dev.node.view(Space::Shared)), rows(server.store()), "seed {seed}");
+            // What it holds: every row, or the rows its queries read now.
+            let mut held = rows(server.store());
+            if !dev.subs.is_empty() {
+                let mut read = BTreeSet::new();
+                for (query, args) in &dev.subs {
+                    let (_, plan) = QUERIES[query.0 as usize](args);
+                    read.extend(plan.live(server.store()).rows().iter().cloned());
+                    assert!(dev.node.complete(*query, args), "seed {seed}: {query:?} complete");
+                }
+                held = read.into_iter().collect();
+            }
+            assert_eq!(rows(dev.node.store(Space::Shared)), held, "seed {seed}: device {d}");
+            assert_eq!(rows(&dev.node.view(Space::Shared)), held, "seed {seed}: device {d}");
             assert_eq!(dev.node.pending(), [], "seed {seed}");
             assert_eq!(dev.node.cursor(), server.head());
             for id in &dev.made {
@@ -759,6 +1142,7 @@ pub(crate) mod tests {
         the_actor_is_the_connections,
         session_entries_go_to_the_owners_other_connections,
         a_cursor_below_the_log_is_filled,
+        a_subscriber_holds_its_queries_rows,
         devices_and_a_server_converge
     );
 }

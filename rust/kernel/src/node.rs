@@ -43,6 +43,12 @@
 //! The entries a shared handler emits are taken from its first run here
 //! only, never from a rebase.
 //!
+//! **Subscriptions.** A node that holds only what its queries read
+//! subscribes to them ([`Node::subscribe`]), says them again at every
+//! connection before its hello, and takes the rows its upstream sends for
+//! them ([`Down::Moved`]) into its confirmed rows, as it takes facts. A
+//! query is complete ([`Node::complete`]) once its upstream says so.
+//!
 //! **What changed.** The node notes each row of the shared view that its
 //! own writes, facts, fills and rebases touch, with what it read before;
 //! [`Node::take_changes`] answers what changed since the host last asked,
@@ -55,7 +61,7 @@ use alloc::vec::Vec;
 use crate::entry::{Actor, Entry, EntryId, Hlc, Origin, Seq, Space, Version};
 use crate::plan::{Changes, Diff};
 use crate::store::{Layer, Overlay, Range, Read, Store, TableId, View, Writes, EMPTY};
-use crate::sync::{Down, Logged, Pending, Up, Verdict};
+use crate::sync::{Down, Logged, Pending, QueryId, Up, Verdict};
 
 /// The machine every node is: one entry in, the entries it made out.
 pub trait Machine {
@@ -220,6 +226,8 @@ pub struct Node<B: 'static, S> {
     /// resume.
     touched: Layer,
     reset: bool,
+    /// Its subscriptions, each with whether its rows are all here.
+    subs: Vec<(QueryId, Vec<u8>, bool)>,
     /// How many confirmations ran nothing again: what the tests see of a
     /// skipped replay.
     #[cfg(any(test, ark_selftest))]
@@ -246,6 +254,7 @@ impl<B: Body + Clone + 'static, S: Store> Node<B, S> {
             filling: None,
             touched: Layer::new(),
             reset: false,
+            subs: Vec::new(),
             #[cfg(any(test, ark_selftest))]
             skipped: 0,
         }
@@ -439,11 +448,43 @@ impl<B: Body + Clone + 'static, S: Store> Node<B, S> {
         }
     }
 
-    /// What this node says at each connection: its cursor, then every
-    /// pending entry again, oldest first. The upstream judges each once.
-    /// A fill the last connection left unfinished is let go.
+    /// Holds the rows a query reads with `args`, from now and at every
+    /// connection.
+    pub fn subscribe(&mut self, query: QueryId, args: Vec<u8>, link: &mut dyn Link<B>) {
+        if !self.subs.iter().any(|s| s.0 == query && s.1 == args) {
+            self.subs.push((query, args.clone(), false));
+            link.send(Up::Subscribe { query, args });
+        }
+    }
+
+    /// Lets go of a subscription; its upstream moves out what no other
+    /// holds.
+    pub fn unsubscribe(&mut self, query: QueryId, args: Vec<u8>, link: &mut dyn Link<B>) {
+        let before = self.subs.len();
+        self.subs.retain(|s| s.0 != query || s.1 != args);
+        if self.subs.len() < before {
+            link.send(Up::Unsubscribe { query, args });
+        }
+    }
+
+    /// Whether a subscription's rows are all here.
+    pub fn complete(&self, query: QueryId, args: &[u8]) -> bool {
+        self.subs.iter().any(|s| s.0 == query && s.1 == args && s.2)
+    }
+
+    /// What this node says at each connection: its subscriptions, its
+    /// cursor, then every pending entry again, oldest first. The upstream
+    /// judges each once. A fill the last connection left unfinished is let
+    /// go.
     pub fn connect(&mut self, link: &mut dyn Link<B>) {
         self.filling = None;
+        for (query, args, got) in &mut self.subs {
+            *got = false;
+            link.send(Up::Subscribe {
+                query: *query,
+                args: args.clone(),
+            });
+        }
         link.send(Up::Hello { cursor: self.cursor });
         for p in &self.pending {
             link.send(Up::Push(p.entry.clone()));
@@ -482,7 +523,24 @@ impl<B: Body + Clone + 'static, S: Store> Node<B, S> {
                     self.filled();
                 }
             }
+            Down::Moved(rows) => self.moved(rows),
+            Down::Got { query, args } => {
+                for s in &mut self.subs {
+                    s.2 |= s.0 == query && s.1 == args;
+                }
+            }
         }
+    }
+
+    /// Takes rows that moved into or out of its queries.
+    fn moved(&mut self, rows: Writes) {
+        let view = View {
+            base: &self.stores.shared,
+            layer: &self.layer,
+        };
+        note(&mut self.touched, &view, rows.0.iter().map(|w| (w.table, &w.key[..])));
+        self.stores.shared.apply(&rows);
+        self.rebase();
     }
 
     /// Ends a fill whose every part has come: the node is at its `seq`.
