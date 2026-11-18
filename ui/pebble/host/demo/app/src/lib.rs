@@ -15,10 +15,13 @@
 //!   link ([`ark_kernel::Refusal::OFFLINE`]).
 //! - **The query** a watch subscribes to ([`NEXT`]): the queue's first
 //!   [`HELD`] rows, of which its screen shows the first few.
+//! - **The screen's record** ([`face`]): what the watch's `#[view]` reads.
 
 #![no_std]
 
 extern crate alloc;
+
+pub mod face;
 
 use alloc::vec::Vec;
 use core::ops::Bound;

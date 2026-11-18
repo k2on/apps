@@ -12,6 +12,11 @@ crate-type = ["staticlib"]
 test = false
 bench = false
 
+# The screen: its `#[view]`, written out as Pebble's layers by `build.rs`
+# on the dev machine.
+[build-dependencies]
+now-playing-view = { path = "../view" }
+
 [dependencies]
 ark-kernel = { path = "../../../../../rust/kernel" }
 ark-pebble = { path = "../../rust" }

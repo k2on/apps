@@ -10,8 +10,12 @@ host/
   rust/       ark-pebble: the host crate (no_std), linking ark-kernel
   c/          ark_pebble.c: the thin C shim (the SDK's loop, window, layers)
   demo/       a watchapp standing in for harken's now playing
-    app/        its domain (entries, handlers, the query), linked by both sides
-    watch/      its screen, a staticlib for thumbv7m-none-eabi
+    app/        its domain (entries, handlers, the query) and its screen's
+                record, linked by both sides
+    view/       its screen: a `#[view]` of arkui's, written out as Pebble's
+                layers at build time (ui/docs/pebble.md)
+    watch/      the watch's Rust, a staticlib for thumbv7m-none-eabi: the
+                record worked out, the screen its build wrote
     src/pkjs/   the relay: a PebbleKit JS script piping frames to a WebSocket
   upstream/   a test server: the kernel's Authority over a WebSocket, and a
               player node beside it, standing in for harken's phone
@@ -70,20 +74,19 @@ phone -> watch  HELLO                  the script started: say READY
                 EPOCH, DATA            a chunk of the frames coming down
 ```
 
-**The renderer** (`ui.rs`, the shim's screen) is a first cut: a fixed screen
-of five text slots, a progress bar, a list of drawn rows in a `MenuLayer`
-and an `ActionBarLayer` whose glyphs are painted into 1-bit bitmaps at
-start, so the app has no resources. `Screen` keeps what it last showed and
-tells the shim only what changed. The arkui backend proper comes later and
-replaces it, writing an app's `(glance)` views as Pebble's layers:
-
-| here | arkui |
-|---|---|
-| a text slot (`TextLayer`) | the text primitive, its font a token |
-| the slots' fixed frames | a vertical stack and spacers, laid out by `[layout]` tokens |
-| the progress bar (a drawn `Layer`) | a primitive (swatch with a fraction), or a control like the scrubber |
-| the list (`MenuLayer`, drawn rows) | the list container, its rows a component of the app's |
-| the action bar and its glyphs | a native control, its glyphs arkui's glyphs rasterised |
+**The screen** is arkui's (ui/docs/pebble.md). The demo's is a `#[view]`
+(`demo/view`) of arkui's primitives and native parts: text, stacks, a
+spacer, a glyph, a meter, a list and the action bar, the same view the
+phones' generator and iced draw. The watch's build (`watch/build.rs`)
+records it and ark-ui-gen's `pebble` emitter writes it out as no_std Rust:
+the layers made once at frames worked out from the window and
+ui/theme.toml's tokens (`rust/src/tokens.rs`, written by `nix run
+.#update-theme`), what each shows of the record (`now_playing::face::Face`),
+and what each button sends. `ui.rs` is the toolkit it is written over:
+`Ui` keeps what each layer last showed and tells the shim only what
+changed, and paints arkui's glyphs into 1-bit bitmaps, so the app has no
+resources. The shim makes each layer by id (a `TextLayer`, a drawn meter,
+a `BitmapLayer`, a `MenuLayer`, the `ActionBarLayer`) and sets it by id.
 
 ## The demo
 
@@ -123,7 +126,8 @@ aarch64):
 
 The SDK's waf builds it with nixpkgs' arm-none-eabi GCC, and `watch/` is
 built by cargo with the repository's watch toolchain (`watchRust`, for
-thumbv7m-none-eabi). `result/` also has the app's ELF (`emery.elf`), its
+thumbv7m-none-eabi); its build script, on the build machine, writes the
+screen from `view/` first. `result/` also has the app's ELF (`emery.elf`), its
 binary and the link's map. The phone's address is the Pebble app's LAN
 developer connection (`ui/pebble/probe/README.md`, Install). CI builds it
 and the probe, runs the tests below and fails the app past 96 KB with its
@@ -135,7 +139,8 @@ The nix pebble-tool has no emulator (that is the SDK's prebuilt
 qemu-pebble). For the emulator, with the Pebble SDK (4.44, `pebble-tool`)
 installed by hand, Rust and `rustup target add thumbv7m-none-eabi`:
 
-    cd demo && pebble build                 # cargo builds watch/ first
+    cargo fetch                             # once: the build is offline
+    cd demo && pebble build                 # cargo builds watch/ (and its screen) first
     cargo run --release -p now-playing-upstream    # from host/: ws://127.0.0.1:9010/
     pebble install --emulator emery --logs  # or the nix build's result/demo.pbw
 
@@ -143,7 +148,7 @@ The server takes lines on standard input: `toggle`, `skip`, `add TITLE`,
 `offline` (closes every connection and refuses new ones, a phone that lost
 the server), `online` and `state`. It logs every frame either way.
 
-    cargo test -p ark-pebble -p now-playing  # the disk, the link, the domain
+    cargo test -p ark-pebble -p now-playing -p now-playing-view  # the disk, the link, the domain, the screen
 
 On a real phone the relay's upstream is the localStorage key `upstream`
 (by default `ws://127.0.0.1:9010/`, the emulator's host); a phone reaching a
@@ -156,8 +161,16 @@ On the Time 2's emulator (emery, SDK 4.44), a run of subscription, live
 playback, pause and resume either side, skips online and offline, a
 restart with two pending skips, a refusal, a reconnect and confirmations:
 
-- **Image** 54.7 KB (with bss 55.6 KB), of the 128 KB an app gets for code
-  and heap; 51.7 KB before the session's owners, its hello and the clock.
+- **Image** 59.8 KB (with bss 61.2 KB; 61,284 and 62,680 bytes as
+  `checks.pebble-size` reads nix's build), of the 128 KB an app gets for
+  code and heap. The hand-written screen arkui's replaced was 53.2 KB
+  (54.1 KB) in the same build; before the session's owners, its hello and
+  the clock, 51.7 KB. arkui's screen added about 7.3 KB with its bss, by
+  symbol: the toolkit (`ui.rs`: the layer table, the glyphs' painting)
+  1.7 KB, the shim's layers 1.2 KB and their text buffers 1.2 KB (less the
+  old screen's 0.65 KB), the generated screen inlined into the demo's
+  callbacks 1.3 KB, a meter's fraction in soft float 0.8 KB, and the
+  record's strings about 0.9 KB.
   By symbol at 51.7 KB: the kernel's own 11.8 KB, and about 4 KB more
   inlined into the host's callbacks (`Node::receive` in `chunk`, the
   store's B-tree in `Rows::put`); the host about 13 KB; `core`, `alloc`
@@ -166,7 +179,9 @@ restart with two pending skips, a refusal, a reconnect and confirmations:
 - **Heap** at most 10.4 KB in use, by PebbleOS's own count at exit, of
   75.5 KB: AppMessage's buffers 4.9 KB, and Rust at most 5.8 KB (the node,
   its stores, session rows and pending records, the query, the disk's page
-  table).
+  table). With arkui's screen, at most 12.4 KB of 66.6 KB in a run of play,
+  pause, an offline skip and a reconnect (the list's rows, the record, the
+  painted glyphs and what each layer last showed).
 - **Stack**: a watchapp gets 4 KB. Large values are kept on the heap
   (the disk's key map, log lines); the deepest Rust frames are the host's
   start (1.1 KB, once) and a chunk received (1 KB, `Node::receive` inlined).
@@ -182,3 +197,5 @@ restart with two pending skips, a refusal, a reconnect and confirmations:
 - A row larger than a page (about 250 bytes with its key) is not kept.
 - Keys let go by a flush are left as they are and used again, never deleted.
 - The emulator is not in nix or CI: no screenshot walk of the watch yet.
+- The screen animates nothing (ui/docs/pebble.md, Motion), and what arkui
+  lays out on Pebble is only what ui/docs/pebble.md lists.

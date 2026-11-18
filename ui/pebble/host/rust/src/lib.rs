@@ -9,7 +9,9 @@
 //!   its connection upstream are.
 //! - [`host`]: the event loop, PebbleOS's callbacks each becoming entries
 //!   or frames into the node, and each space's changes handed to the app.
-//! - [`ui`]: a first-cut renderer over the C shim's layers.
+//! - [`ui`]: arkui's Pebble toolkit: the native layers a screen generated
+//!   from a `#[view]` is made of (ui/docs/pebble.md), laid out by
+//!   [`tokens`], ui/theme.toml's.
 //!
 //! The C side (`c/ark_pebble.c`) is a thin shim: the SDK's main loop, the
 //! window and its layers, AppMessage and timers, each calling in here.
@@ -25,11 +27,12 @@ pub mod link;
 pub mod rows;
 pub mod sys;
 pub mod text;
+pub mod tokens;
 pub mod ui;
 
 pub use host::{App, Ctx, Status};
 pub use rows::Rows;
-pub use ui::{Button, Glyph, Screen, Slot};
+pub use ui::{Button, Ui};
 
 /// Names the watch's app: the shim's `ark_start` makes it and starts the
 /// host with it.

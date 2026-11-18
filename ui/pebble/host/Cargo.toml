@@ -1,11 +1,12 @@
 # The Pebble host's crates, a workspace of their own apart from the
 # repository's `rust/` one: the host (`rust/`, for the watch), the demo's
-# domain (`demo/app`), the demo's watch library (`demo/watch`, a staticlib
-# for thumbv7m-none-eabi) and the test upstream (`upstream/`, a binary for
-# the dev machine).
+# domain (`demo/app`), its screen (`demo/view`, a `#[view]` the watch's
+# build writes out as Pebble's layers: it runs on the dev machine), the
+# demo's watch library (`demo/watch`, a staticlib for thumbv7m-none-eabi)
+# and the test upstream (`upstream/`, a binary for the dev machine).
 [workspace]
 resolver = "2"
-members = ["rust", "demo/app", "demo/watch", "upstream"]
+members = ["rust", "demo/app", "demo/view", "demo/watch", "upstream"]
 
 [workspace.package]
 edition = "2021"

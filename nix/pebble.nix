@@ -128,18 +128,27 @@ let
   '';
 
   # The host workspace's crates and the kernel they link, without the
-  # READMEs or the C.
+  # READMEs or the C; and what the demo's screen is written out with at
+  # build time (ui/docs/pebble.md): arkui's view model and `#[view]`
+  # (ark-app, its macros, ark and its module port), the generator and the
+  # glyphs it flattens, which run on the build machine only.
   hostCrates = [
     "rust/Cargo.toml" "rust/kernel" "ui/pebble/host/Cargo.toml" "ui/pebble/host/Cargo.lock"
-    "ui/pebble/host/rust" "ui/pebble/host/demo/app" "ui/pebble/host/demo/watch" "ui/pebble/host/upstream"
+    "ui/pebble/host/rust" "ui/pebble/host/demo/app" "ui/pebble/host/demo/view" "ui/pebble/host/demo/watch"
+    "ui/pebble/host/upstream"
+    "rust/ark" "rust/ark-macros" "ui/rust/app" "ui/rust/module" "ui/rust/arkui-macros" "ui/rust/gen" "ui/rust/glyphs"
   ];
 
   # A staticlib for the watch, built by cargo offline with the watch's
-  # profile.
+  # profile. With a C compiler: what runs on the build machine (the demo's
+  # build script, which writes its screen, and the proc macros under it)
+  # is linked by it.
   watchLib = { name, dirs, manifest, package ? null, file }:
-    pkgs.stdenvNoCC.mkDerivation {
+    pkgs.stdenv.mkDerivation {
       inherit name;
       passthru = { inherit file; };
+      # An Arm archive: nothing of the build machine's fixup applies.
+      dontFixup = true;
       src = only dirs;
       nativeBuildInputs = [ watchRust ];
       buildPhase = ''
@@ -227,8 +236,10 @@ rec {
     rustLib = probeLib;
   };
 
-  # The host's tests (the disk, the link, the text, the demo's domain) on
-  # the build machine, and the test upstream built beside them, as
+  # The host's tests (the disk, the link, the text, the glyphs' painting,
+  # the demo's domain, and its screen as each toolkit is handed it: the
+  # watch's layers and the phones' views, held to their snapshots) on the
+  # build machine, and the test upstream built beside them, as
   # ui/pebble/host/README.md runs them.
   pebble-host = pkgs.stdenv.mkDerivation {
     name = "pebble-host-tests";
@@ -239,7 +250,7 @@ rec {
       mkdir -p $CARGO_HOME && cp ${cargoHome}/config.toml $CARGO_HOME/
       set -o pipefail
       cargo test --offline --locked --manifest-path ui/pebble/host/Cargo.toml \
-        -p ark-pebble -p now-playing -p now-playing-upstream --target-dir $TMPDIR/target 2>&1 | tee $TMPDIR/log
+        -p ark-pebble -p now-playing -p now-playing-view -p now-playing-upstream --target-dir $TMPDIR/target 2>&1 | tee $TMPDIR/log
     '';
     installPhase = "cp $TMPDIR/log $out";
   };

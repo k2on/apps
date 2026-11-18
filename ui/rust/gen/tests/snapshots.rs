@@ -306,6 +306,69 @@ pub fn tabs(p: &MediaPage) -> View<ListMsg> {
         .into()
 }
 
+/// The smallest window's view of a sound (ui/docs/pebble.md): a glyph and
+/// words in a row, words read and literal, a bar of how far, the next few
+/// in a list behind an `if let`, and the watch's buttons beside it all.
+#[derive(Clone, Debug, PartialEq)]
+pub struct GlancePage {
+    pub link: String,
+    pub status: String,
+    pub title: String,
+    pub progress: f64,
+    pub play_glyph: String,
+    pub playing: bool,
+    pub next: Option<Queue>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Queue {
+    pub heading: String,
+    pub tracks: Vec<Track>,
+}
+
+#[view]
+pub fn glance(p: &GlancePage) -> View<ListMsg> {
+    action_bar(
+        vstack((
+            hstack((
+                glyph(p.link).style(TextStyle::Caption).ink(Ink::Quiet),
+                text(p.status).style(TextStyle::Caption).lines(1),
+            ))
+            .spacing(Space::S),
+            text(p.title).style(TextStyle::Title).lines(1),
+            if p.playing {
+                meter(p.progress, "accent")
+            } else {
+                text("Paused").style(TextStyle::Footnote).ink(Ink::Accent)
+            },
+            hstack((text("Now").style(TextStyle::Caption), spacer(), glyph("music").style(TextStyle::Caption))),
+            if let Some(q) = p.next {
+                card_section(for t in q.tracks {
+                    list_row(t.title).subtitle(t.by)
+                })
+                .header(q.heading)
+            },
+        ))
+        .spacing(Space::Xs)
+        .align(Align::Start)
+        .padding(Edges::Horizontal, Space::Page),
+    )
+    .up("skip-back", "Back", ListMsg::Back)
+    .select(p.play_glyph, "Play or Pause", ListMsg::Toggle)
+    .down("skip-forward", "Skip", ListMsg::Forward)
+    .into()
+}
+
+/// What the watch is written with: the test's own record and messages.
+const WATCH: ark_ui_gen::pebble::Screen = ark_ui_gen::pebble::Screen {
+    source: "ui/rust/gen/tests/snapshots.rs",
+    root: "p",
+    record: "GlancePage",
+    uses: &["things_app::{GlancePage, ListMsg}"],
+    accent: "blue",
+    glyphs: &["play", "pause"],
+};
+
 fn menus() -> Vec<CommandMenu<ListMsg>> {
     vec![command_menu(
         MenuPlace::File,
@@ -357,6 +420,16 @@ fn app() -> App {
                     ..names
                 },
             ),
+            Generated::view(
+                glance::record,
+                Names {
+                    swift: "GlanceView",
+                    swift_holder: "GlanceScreen",
+                    kotlin: "GlanceScreen",
+                    kotlin_holder: "GlanceHolder",
+                    ..names
+                },
+            ),
             Generated::commands(
                 menus,
                 Names {
@@ -374,7 +447,9 @@ fn every_file_is_its_snapshot() {
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/snapshots");
     let update = std::env::var_os("ARK_UPDATE_SNAPSHOTS").is_some();
     let mut stale = vec![];
-    for (name, text) in files(&app(), "dev.things.android") {
+    let mut all = files(&app(), "dev.things.android");
+    all.push(("glance_watch.rs.snap".into(), ark_ui_gen::pebble::emit(&glance::record(), &WATCH)));
+    for (name, text) in all {
         let path = dir.join(&name);
         if update {
             std::fs::create_dir_all(&dir).unwrap();
@@ -403,6 +478,8 @@ fn the_files_are_named_for_each_language() {
             "MediaScreen.kt",
             "TabsView.swift",
             "TabsScreen.kt",
+            "GlanceView.swift",
+            "GlanceScreen.kt",
             "ThingsCommands.swift",
             "thingsCommands.kt"
         ]
@@ -459,4 +536,48 @@ fn primitives_are_written_as_each_toolkits_own_layout() {
     for f in [&swift, &kotlin] {
         assert!(!f.contains(".dp") && !f.contains("CGFloat("), "{f}");
     }
+}
+
+#[test]
+fn the_watch_is_its_layers_laid_out_by_tokens() {
+    let rs = ark_ui_gen::pebble::emit(&glance::record(), &WATCH);
+    // The action bar first, its literal glyphs set once, its read one drawn.
+    assert!(rs.contains("ui.action_bar(CONTAINER_HIGH, INK, ACTION_GLYPH);"), "{rs}");
+    assert!(rs.contains("ui.set_action(Button::Up, \"skip-back\".as_bytes());"), "{rs}");
+    assert!(rs.contains("ui.set_action(Button::Select, p.play_glyph.as_bytes());"), "{rs}");
+    assert!(rs.contains("Button::Down => Some(ListMsg::Forward),"), "{rs}");
+    // Every glyph it can draw is painted from arkui's drawings.
+    for g in ["\"music\"", "\"pause\"", "\"play\"", "\"skip-back\"", "\"skip-forward\""] {
+        assert!(rs.contains(&format!("Glyph {{ name: {g}.as_bytes()")), "{g}: {rs}");
+    }
+    // An `if` is both branches in one frame, each shown while it holds.
+    assert!(rs.contains("if p.playing {") && rs.contains("ui.hide("), "{rs}");
+    assert!(rs.contains("if let Some(q) = &p.next {"), "{rs}");
+    assert!(rs.contains("ui.set_rows("), "{rs}");
+    assert!(rs.contains("q.tracks.iter().map(|t| (t.title.as_bytes(), t.by.as_bytes()))"), "{rs}");
+    // A glyph after a row's spacer at its end; the accent is the screen's.
+    assert!(rs.contains("ui.glyph(6, Frame { x: PAGE_MARGIN + fill2 + fill2,"), "{rs}");
+    assert!(rs.contains("BLUE_ACCENT"), "{rs}");
+    // No number but a share's divisor: every measure is a token's.
+    for line in rs.lines().filter(|l| l.contains("Frame {")) {
+        let frame = line.split("Frame {").nth(1).unwrap().split('}').next().unwrap();
+        for word in frame
+            .split(|c: char| !c.is_alphanumeric() && c != '_')
+            .filter(|w| w.starts_with(|c: char| c.is_ascii_digit()))
+        {
+            assert!(word == "0" || frame.contains(&format!("/ {word}")), "{word} in {line}");
+        }
+    }
+    // The phones get the same view as their own action bar.
+    let all = files(&app(), "p");
+    let file = |n: &str| all.iter().find(|(f, _)| f == n).unwrap().1.clone();
+    let (swift, kotlin) = (file("GlanceView.swift"), file("GlanceScreen.kt"));
+    assert!(
+        swift.contains("ActionBar(items: [ActionItem(\"skip-back\", label: \"Back\", button: .up, onTap: { screen.send(.back) })"),
+        "{swift}"
+    );
+    assert!(
+        kotlin.contains("ActionItem(p.playGlyph, label = \"Play or Pause\", button = ActionButton.Select"),
+        "{kotlin}"
+    );
 }

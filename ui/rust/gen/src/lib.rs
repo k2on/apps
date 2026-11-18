@@ -1,6 +1,7 @@
 //! The phones' code for a view laid out once in Rust: SwiftUI ([`swift`])
 //! and Compose ([`kotlin`]), written from what the view function says when
-//! it is run over paths (`ark_app::view::Recorder`, `accounts::record()`).
+//! it is run over paths (`ark_app::view::Recorder`, `accounts::record()`);
+//! and the watch's, Pebble's layers as no_std Rust ([`pebble`]).
 //!
 //! A recording is a [`View`] whose values are paths into the screen's
 //! record (`shelf.title`), whose `for`s and `if`s are kept as such, and
@@ -21,6 +22,7 @@ use ark_app::view::{PROBE_CLOSE, PROBE_OPEN};
 
 pub mod app;
 pub mod kotlin;
+pub mod pebble;
 pub mod swift;
 
 /// What an emitter needs to know of the screen besides its view.

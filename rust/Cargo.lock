@@ -526,6 +526,7 @@ name = "ark-ui-gen"
 version = "0.1.0"
 dependencies = [
  "ark-app",
+ "arkui-glyphs",
 ]
 
 [[package]]

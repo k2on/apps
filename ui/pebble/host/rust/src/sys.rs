@@ -1,10 +1,73 @@
 //! What the host asks of PebbleOS (persistent storage, the heap) and of
-//! the C shim (`c/ark_pebble.c`: time, AppMessage, timers, the screen),
+//! the C shim (`c/ark_pebble.c`: time, AppMessage, timers, the screen's
+//! layers, which `ui` makes and sets),
 //! and the allocator over the app heap. Off the watch (the host's tests)
 //! each is a stand-in that does nothing.
 
+/// A frame as the shim takes it: PebbleOS's `GRect`.
+#[repr(C)]
+pub struct Frame {
+    pub x: i16,
+    pub y: i16,
+    pub w: i16,
+    pub h: i16,
+}
+
+/// A list's look as the shim takes it.
+#[repr(C)]
+pub struct CList {
+    pub title_size: u8,
+    pub title_bold: bool,
+    pub sub_size: u8,
+    pub sub_bold: bool,
+    pub header_size: u8,
+    pub header_bold: bool,
+    pub ink: u8,
+    pub quiet: u8,
+    pub ground: u8,
+    pub inset: i16,
+    pub title_line: i16,
+    pub row_height: i16,
+    pub header_height: i16,
+    pub lift: i16,
+}
+
+impl From<crate::ui::Frame> for Frame {
+    fn from(f: crate::ui::Frame) -> Frame {
+        Frame {
+            x: f.x,
+            y: f.y,
+            w: f.w,
+            h: f.h,
+        }
+    }
+}
+
+/// A list's look, its rows `row` tall under a heading `header` tall,
+/// their words lifted by `lift`.
+pub fn list_style(s: &crate::ui::ListStyle, row: i16, header: i16, lift: i16) -> CList {
+    CList {
+        title_size: s.title.size,
+        title_bold: s.title.bold,
+        sub_size: s.subtitle.size,
+        sub_bold: s.subtitle.bold,
+        header_size: s.header.size,
+        header_bold: s.header.bold,
+        ink: s.ink,
+        quiet: s.quiet,
+        ground: s.ground,
+        inset: s.inset,
+        title_line: s.title_line,
+        row_height: row,
+        header_height: header,
+        lift,
+    }
+}
+
 #[cfg(target_os = "none")]
 mod ffi {
+    use super::{CList, Frame};
+
     extern "C" {
         pub fn persist_read_data(key: u32, buf: *mut u8, size: usize) -> i32;
         pub fn persist_write_data(key: u32, data: *const u8, size: usize) -> i32;
@@ -22,11 +85,23 @@ mod ffi {
         pub fn ark_inbox_size() -> u32;
         pub fn ark_outbox_size() -> u32;
         pub fn ark_phone_connected() -> bool;
-        pub fn ark_ui_text(slot: u8, s: *const u8, len: usize);
-        pub fn ark_ui_row(i: u8, t: *const u8, tl: usize, s: *const u8, sl: usize);
-        pub fn ark_ui_rows(n: u8);
-        pub fn ark_ui_action(button: u8, glyph: u8);
-        pub fn ark_ui_progress(permille: u16);
+        pub fn ark_ui_window(ground: u8);
+        pub fn ark_ui_bounds(w: *mut i16, h: *mut i16);
+        pub fn ark_ui_action_bar(ground: u8) -> i16;
+        pub fn ark_ui_text(id: u8, f: *const Frame, size: u8, bold: bool, ink: u8, align: u8);
+        pub fn ark_ui_meter(id: u8, f: *const Frame, fill: u8, track: u8, track_h: i16, corner: i16);
+        pub fn ark_ui_rect(id: u8, f: *const Frame, color: u8, corner: i16);
+        pub fn ark_ui_image(id: u8, f: *const Frame);
+        pub fn ark_ui_list(id: u8, f: *const Frame, style: *const CList);
+        pub fn ark_ui_bitmap(side: i16, bits: *const u8, len: usize, ink: u8) -> u8;
+        pub fn ark_ui_hide(id: u8, hidden: bool);
+        pub fn ark_ui_set_text(id: u8, s: *const u8, len: usize);
+        pub fn ark_ui_set_meter(id: u8, permille: u16);
+        pub fn ark_ui_set_image(id: u8, bitmap: u8);
+        pub fn ark_ui_set_header(id: u8, s: *const u8, len: usize);
+        pub fn ark_ui_set_row(id: u8, i: u8, t: *const u8, tl: usize, s: *const u8, sl: usize);
+        pub fn ark_ui_set_rows(id: u8, n: u8);
+        pub fn ark_ui_set_action(button: u8, bitmap: u8);
         pub fn ark_rust_panicked();
     }
 }
@@ -78,24 +153,78 @@ mod watch {
         unsafe { ffi::ark_phone_connected() }
     }
 
-    pub fn ui_text(slot: u8, s: &[u8]) {
-        unsafe { ffi::ark_ui_text(slot, s.as_ptr(), s.len()) }
+    pub fn ui_window(ground: u8) {
+        unsafe { ffi::ark_ui_window(ground) }
     }
 
-    pub fn ui_row(i: u8, title: &[u8], sub: &[u8]) {
-        unsafe { ffi::ark_ui_row(i, title.as_ptr(), title.len(), sub.as_ptr(), sub.len()) }
+    /// The window's width and height.
+    pub fn ui_bounds() -> (i16, i16) {
+        let (mut w, mut h) = (0, 0);
+        unsafe { ffi::ark_ui_bounds(&mut w, &mut h) };
+        (w, h)
     }
 
-    pub fn ui_rows(n: u8) {
-        unsafe { ffi::ark_ui_rows(n) }
+    /// The action bar, made: its width.
+    pub fn ui_action_bar(ground: u8) -> i16 {
+        unsafe { ffi::ark_ui_action_bar(ground) }
     }
 
-    pub fn ui_action(button: u8, glyph: u8) {
-        unsafe { ffi::ark_ui_action(button, glyph) }
+    pub fn ui_text(id: u8, f: crate::ui::Frame, font: crate::ui::Font, ink: u8, align: u8) {
+        unsafe { ffi::ark_ui_text(id, &f.into(), font.size, font.bold, ink, align) }
     }
 
-    pub fn ui_progress(permille: u16) {
-        unsafe { ffi::ark_ui_progress(permille) }
+    pub fn ui_meter(id: u8, f: crate::ui::Frame, fill: u8, track: u8) {
+        use crate::tokens::{CORNER, TRACK_HEIGHT};
+        unsafe { ffi::ark_ui_meter(id, &f.into(), fill, track, TRACK_HEIGHT, CORNER) }
+    }
+
+    pub fn ui_rect(id: u8, f: crate::ui::Frame, color: u8, corner: i16) {
+        unsafe { ffi::ark_ui_rect(id, &f.into(), color, corner) }
+    }
+
+    pub fn ui_image(id: u8, f: crate::ui::Frame) {
+        unsafe { ffi::ark_ui_image(id, &f.into()) }
+    }
+
+    pub fn ui_list(id: u8, f: crate::ui::Frame, style: &crate::ui::ListStyle, row: i16, header: i16, lift: i16) {
+        unsafe { ffi::ark_ui_list(id, &f.into(), &super::list_style(style, row, header, lift)) }
+    }
+
+    /// A glyph's bits made a bitmap in `ink`: its number, or `u8::MAX`.
+    pub fn ui_bitmap(side: i16, bits: &[u8], ink: u8) -> u8 {
+        unsafe { ffi::ark_ui_bitmap(side, bits.as_ptr(), bits.len(), ink) }
+    }
+
+    pub fn ui_hide(id: u8, hidden: bool) {
+        unsafe { ffi::ark_ui_hide(id, hidden) }
+    }
+
+    pub fn ui_set_text(id: u8, s: &[u8]) {
+        unsafe { ffi::ark_ui_set_text(id, s.as_ptr(), s.len()) }
+    }
+
+    pub fn ui_set_meter(id: u8, permille: u16) {
+        unsafe { ffi::ark_ui_set_meter(id, permille) }
+    }
+
+    pub fn ui_set_image(id: u8, bitmap: u8) {
+        unsafe { ffi::ark_ui_set_image(id, bitmap) }
+    }
+
+    pub fn ui_set_header(id: u8, s: &[u8]) {
+        unsafe { ffi::ark_ui_set_header(id, s.as_ptr(), s.len()) }
+    }
+
+    pub fn ui_set_row(id: u8, i: u8, title: &[u8], sub: &[u8]) {
+        unsafe { ffi::ark_ui_set_row(id, i, title.as_ptr(), title.len(), sub.as_ptr(), sub.len()) }
+    }
+
+    pub fn ui_set_rows(id: u8, n: u8) {
+        unsafe { ffi::ark_ui_set_rows(id, n) }
+    }
+
+    pub fn ui_set_action(button: u8, bitmap: u8) {
+        unsafe { ffi::ark_ui_set_action(button, bitmap) }
     }
 
     /// The app heap: what all of it holds now (the SDK's count, C's
@@ -230,11 +359,30 @@ mod stand_in {
     pub fn phone_connected() -> bool {
         false
     }
-    pub fn ui_text(_: u8, _: &[u8]) {}
-    pub fn ui_row(_: u8, _: &[u8], _: &[u8]) {}
-    pub fn ui_rows(_: u8) {}
-    pub fn ui_action(_: u8, _: u8) {}
-    pub fn ui_progress(_: u16) {}
+    pub fn ui_window(_: u8) {}
+    /// A Time 2's window.
+    pub fn ui_bounds() -> (i16, i16) {
+        (200, 228)
+    }
+    pub fn ui_action_bar(_: u8) -> i16 {
+        34
+    }
+    pub fn ui_text(_: u8, _: crate::ui::Frame, _: crate::ui::Font, _: u8, _: u8) {}
+    pub fn ui_meter(_: u8, _: crate::ui::Frame, _: u8, _: u8) {}
+    pub fn ui_rect(_: u8, _: crate::ui::Frame, _: u8, _: i16) {}
+    pub fn ui_image(_: u8, _: crate::ui::Frame) {}
+    pub fn ui_list(_: u8, _: crate::ui::Frame, _: &crate::ui::ListStyle, _: i16, _: i16, _: i16) {}
+    pub fn ui_bitmap(_: i16, _: &[u8], _: u8) -> u8 {
+        0
+    }
+    pub fn ui_hide(_: u8, _: bool) {}
+    pub fn ui_set_text(_: u8, _: &[u8]) {}
+    pub fn ui_set_meter(_: u8, _: u16) {}
+    pub fn ui_set_image(_: u8, _: u8) {}
+    pub fn ui_set_header(_: u8, _: &[u8]) {}
+    pub fn ui_set_row(_: u8, _: u8, _: &[u8], _: &[u8]) {}
+    pub fn ui_set_rows(_: u8, _: u8) {}
+    pub fn ui_set_action(_: u8, _: u8) {}
     pub fn heap() -> (usize, usize) {
         (0, 0)
     }

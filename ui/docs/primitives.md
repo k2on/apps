@@ -3,8 +3,8 @@
 `ark_app::view` (ui/rust/app/src/view.rs) lays a screen out of ArkUI's
 **primitives**, which the generator writes out as each toolkit's own
 layout, and its **native containers and controls**, each written by hand
-once per toolkit — SwiftUI, Compose, iced and the browser — and called by
-name. Everything else is a **component**: a Rust composition of those,
+once per toolkit — SwiftUI, Compose, iced, the browser and Pebble
+(ui/docs/pebble.md) — and called by name. Everything else is a **component**: a Rust composition of those,
 written once and drawn natively everywhere.
 
 The rule that decides which is which:
@@ -43,7 +43,7 @@ out, and what that asked of ArkUI:
 | **Devices sheet** (`DevicesSheet`, `DeviceLine`; `Sheets.kt`) | the sheet and its navigation bar (Done), the `List`, each line's press, the join button, `VolumeSlider` | a line: `HStack(spacing: l)` of a device glyph (24 wide), a leading `VStack` of name and a caption, `Spacer`, a playing glyph | **glyph row** (glyph, title stack, trailing mark) — ArkUI's `list_row` already covers it |
 | **Queue** (`QueueSheet`, `QueueSheet` Kotlin) | the sheet, `Reorderable` (drag to reorder, handles), the context menu | headings, "Nothing after this one." as a quiet sentence | **empty state** (one sentence); **section heading** |
 | **Car** (`Car.kt`) | none drawn by the app: Android Auto draws its own templates from the media browse tree (`MediaItem`s, `EXTRAS_KEY_ROOT_CHILDREN_LIMIT`) | — | none: a car is data, not layout |
-| **Watch** | harken has no watch app on either platform | — | — |
+| **Watch** (the Pebble host's demo, standing in for harken's now playing: `ui/pebble/host/demo/view`, ui/docs/pebble.md) | the action bar (`action_bar`: Pebble's `ActionBarLayer`), the list of what is next (`card_section` of `list_row`s: a `MenuLayer`) | a leading `vstack` of a glyph and the link's words in a row, the title (`.title`), the artist (quiet), a `meter` over a row of where it is, a `spacer` and its length | none yet: the screen is the demo's |
 | **Onboarding** (`OnboardingViews.swift` `OnboardingPage`, `Onboarding.kt`) | the fields (`AddressField`), `WideButton`, the scan button's camera sheet — already ArkUI's `first_run_page`, `address_field`, `wide_button` | a centred `VStack(spacing: s)`: the mark on a rounded tile, a large-title title, a quiet sentence, the content; at most 420 wide | **title stack** (centred); **glyph tile** |
 | **Settings, diagnostics** (`SettingsView.swift`, `SettingsScreen.kt`) | `Form`, sections, toggles, pushes | `Number`: a label over a figure | **figure with label** (`Number`, money's summary facts) |
 | **Empty and waiting** (`ContentUnavailableView` ×8 on the iPhone, ArkUI's Kotlin `Empty`; `Fetching`) | — | a centred `VStack` of a large quiet glyph, a title, a quiet sentence; for `Fetching` a spinner under the words | **empty state** |
@@ -158,6 +158,7 @@ written once, in `ui/theme.toml`, and a view names it.
 | `tabs`, `toolbar`, `split`, `push`, `inspector`, `searchable` | navigation |
 | `confirm`, `alert`, `prompt` | the system's dialogs |
 | `photo`, `zoom_photo`, `scrubber`, `hairline`, `volume`, the charts | gestures, a clock, decoding, drawing |
+| `action_bar` (`Part::ActionBar`) | a device's own buttons: Pebble's `ActionBarLayer`; a column of glyph buttons, each a give, elsewhere |
 | `pressable`, `press_row` (`Part::Press`) | the platform's button, its press feedback and its context menu |
 | the shell's accessory (`Tabs::accessory`), `ExpandingCard` | the tab view's bottom accessory, its zoom, the system's sheet |
 
@@ -260,6 +261,7 @@ the primitives — moved, or still to move.
 | `tabs`, `adaptive_tabs`, `section_tab`, `tab_group`, `push`, `split`, `toolbar`, `bar_item`, `account_item`, `inspector`, `searchable`, `hosted`, `settings_panes` | ArkShell's, `ExpandingCard`, the accessory | native container (the shell) | every app |
 | `pressable`, `press_row` (`Part::Press`) | `Pressable` (Controls.swift, Controls.kt), a bare button, `<button class="ark-press">` | native control | harken; any app |
 | `scrubber`, `hairline` (`Part::Timeline`), `volume` (`Part::Volume`) | `ClockScrubber`, `ClockHairline`, `VolumePart`, `Scrubber`, `VolumeSlider` | native control | harken |
+| `action_bar` (`Part::ActionBar`) | `ActionBar` (ActionBar.swift, ActionBar.kt), iced's and the browser's column of bar buttons, the watch's `ActionBarLayer` | native control | the watch (ui/docs/pebble.md) |
 | `clock_words` (`Part::ClockWords`) | `ClockWords` | native control (the timeline's clock) | harken |
 | `photo`, `zoom_photo` (`Part::Photo`) | `Photo`, `Zoomed` | native control (decoding, pinch to zoom) | money (a receipt) |
 | `code_image` (`Part::CodeImage`) | `QrCode` | native (drawn) | the first run's pairing |
@@ -283,7 +285,9 @@ sheets on every platform, and no test of their own; the generated SwiftUI and Co
 by `ui/rust/gen/tests/snapshots` (`CardView.swift`, `CardScreen.kt`: the
 rebuilt header card and goal, an empty state, a row of a glyph, words and a
 spacer, a sideways shelf, an image — and a test that neither holds a number);
-iced's and the browser's drawing by `cargo check` and clippy. The phones'
+iced's and the browser's drawing by `cargo check` and clippy; the watch's
+layers by `ui/rust/gen/tests/snapshots` (`glance_watch.rs.snap`) and the
+demo's own snapshots (ui/docs/pebble.md, which says what Pebble lays out). The phones'
 code is compiled in CI (mac-compile, build). Not compared on a device or in
 a screenshot against the hand-written parts: the header card's face is now
 `space-xl` above and below and `space-l` at its sides on both phones (it

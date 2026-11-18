@@ -4,9 +4,9 @@
 // service); every decision is Rust's. It calls in through `ark_on_*` and
 // is called through the functions below, which Rust declares in sys.rs.
 //
-// The screen is the renderer's first cut: five text slots, a progress
-// bar, a list (a MenuLayer of drawn rows) and an action bar whose glyphs
-// are painted into bitmaps here, so the app needs no resources.
+// The screen is arkui's Pebble toolkit: the native layers (text, a meter,
+// a glyph's bitmap, a list, the action bar) a screen generated from a
+// `#[view]` is made of, made and set by id from Rust (ui/docs/pebble.md).
 //
 // Messages, both ways (the keys are package.json's messageKeys):
 //   watch -> phone  READY, INBOX, ORIGIN   what the watch is, at its start
@@ -77,22 +77,64 @@ uint32_t ark_random(void) {
 }
 
 // ---- Screen -----------------------------------------------------------------
+//
+// arkui's Pebble toolkit (ui/docs/pebble.md): the layers a screen generated
+// from a `#[view]` is made of, each made by id at the frame Rust worked out
+// and given its value by id after. Rust (ark-pebble's `ui`) keeps what each
+// last showed and calls in only for what changed. Glyphs come painted, as
+// bits, and are made 1-bit bitmaps here in the colour asked.
 
-enum { SLOT_STATUS, SLOT_TITLE, SLOT_SUBTITLE, SLOT_TIME, SLOT_HEADER, SLOT_COUNT };
-enum { ROW_MAX = 4, TEXT_MAX = 48, ROW_HEIGHT = 34 };
-enum { GLYPH_NONE, GLYPH_PLAY, GLYPH_PAUSE, GLYPH_SKIP, GLYPH_COUNT };
+enum { ARK_LAYERS = 16, TEXT_MAX = 48, ROW_MAX = 6, BITMAP_MAX = 12 };
+enum { KIND_NONE, KIND_TEXT, KIND_METER, KIND_RECT, KIND_IMAGE, KIND_LIST };
+
+// A frame and a list's look as Rust hands them (sys.rs's `Frame`, `CList`).
+typedef struct { int16_t x, y, w, h; } ArkFrame;
+typedef struct {
+  uint8_t title_size; bool title_bold;
+  uint8_t sub_size; bool sub_bold;
+  uint8_t header_size; bool header_bold;
+  uint8_t ink, quiet, ground;
+  int16_t inset, title_line, row_height, header_height, lift;
+} ArkListStyle;
+
+typedef struct {
+  uint8_t fill, track;
+  int16_t track_h, corner;
+  uint16_t permille;
+} Meter;
+
+typedef struct {
+  uint8_t color;
+  int16_t corner;
+} Rect;
+
+typedef struct {
+  ArkListStyle style;
+  char header[TEXT_MAX];
+  char rows[ROW_MAX][2][TEXT_MAX];
+  uint16_t count;
+} List;
 
 static Window *s_window;
-static TextLayer *s_text[SLOT_COUNT];
-static char s_buf[SLOT_COUNT][TEXT_MAX];
-static Layer *s_progress;
-static uint16_t s_permille;
-static MenuLayer *s_menu;
-static char s_rows[ROW_MAX][2][TEXT_MAX];
-static uint16_t s_row_count;
+static uint8_t s_kind[ARK_LAYERS];
+static Layer *s_layer[ARK_LAYERS];
+static TextLayer *s_text[ARK_LAYERS];
+static BitmapLayer *s_image[ARK_LAYERS];
+static MenuLayer *s_menu[ARK_LAYERS];
+static List *s_list[ARK_LAYERS];
+static char s_words[ARK_LAYERS][TEXT_MAX];
 static ActionBarLayer *s_bar;
-static GBitmap *s_glyphs[GLYPH_COUNT];
-static GColor s_palette[2];
+static GBitmap *s_bitmaps[BITMAP_MAX];
+static GColor s_palettes[BITMAP_MAX][2];
+static uint8_t s_bitmap_count;
+
+static GColor color(uint8_t argb) {
+  return (GColor){ .argb = argb };
+}
+
+static GRect rect(const ArkFrame *f) {
+  return GRect(f->x, f->y, f->w, f->h);
+}
 
 static void copy_text(char *dst, const uint8_t *src, size_t len) {
   if (len >= TEXT_MAX) len = TEXT_MAX - 1;
@@ -100,93 +142,37 @@ static void copy_text(char *dst, const uint8_t *src, size_t len) {
   dst[len] = 0;
 }
 
-void ark_ui_text(uint8_t slot, const uint8_t *s, size_t len) {
-  if (slot >= SLOT_COUNT) return;
-  copy_text(s_buf[slot], s, len);
-  text_layer_set_text(s_text[slot], s_buf[slot]);
-}
-
-void ark_ui_row(uint8_t i, const uint8_t *t, size_t tl, const uint8_t *s, size_t sl) {
-  if (i >= ROW_MAX) return;
-  copy_text(s_rows[i][0], t, tl);
-  copy_text(s_rows[i][1], s, sl);
-}
-
-void ark_ui_rows(uint8_t n) {
-  s_row_count = n < ROW_MAX ? n : ROW_MAX;
-  menu_layer_reload_data(s_menu);
-}
-
-void ark_ui_progress(uint16_t permille) {
-  s_permille = permille > 1000 ? 1000 : permille;
-  layer_mark_dirty(s_progress);
-}
-
-void ark_ui_action(uint8_t button, uint8_t glyph) {
-  if (button < BUTTON_ID_UP || button > BUTTON_ID_DOWN) return;
-  if (glyph > GLYPH_NONE && glyph < GLYPH_COUNT) {
-    action_bar_layer_set_icon(s_bar, (ButtonId)button, s_glyphs[glyph]);
-  } else {
-    action_bar_layer_clear_icon(s_bar, (ButtonId)button);
+// Gothic at a size the theme's tokens name (ui/theme.toml's pebble-type-*).
+static GFont gothic(uint8_t size, bool bold) {
+  const char *key;
+  switch (size) {
+    case 9: key = FONT_KEY_GOTHIC_09; break;
+    case 14: key = bold ? FONT_KEY_GOTHIC_14_BOLD : FONT_KEY_GOTHIC_14; break;
+    case 24: key = bold ? FONT_KEY_GOTHIC_24_BOLD : FONT_KEY_GOTHIC_24; break;
+    case 28: key = bold ? FONT_KEY_GOTHIC_28_BOLD : FONT_KEY_GOTHIC_28; break;
+    default: key = bold ? FONT_KEY_GOTHIC_18_BOLD : FONT_KEY_GOTHIC_18; break;
   }
+  return fonts_get_system_font(key);
 }
 
-// A glyph, 18 by 18 pixels: whether the pixel at (x, y) is inked. Shapes
-// span rows 2 to 15; dy is the distance from their middle, in half pixels.
-static bool inked(int glyph, int x, int y) {
-  int dy = 2 * y - 17;
-  if (dy < 0) dy = -dy;
-  if (y < 2 || y > 15) return false;
-  switch (glyph) {
-    case GLYPH_PLAY: return x >= 4 && x <= 15 && dy * 11 <= (15 - x) * 13;
-    case GLYPH_PAUSE: return (x >= 4 && x <= 7) || (x >= 10 && x <= 13);
-    case GLYPH_SKIP: return (x >= 2 && x <= 11 && dy * 9 <= (11 - x) * 13) || (x >= 13 && x <= 15);
-    default: return false;
-  }
+static bool fresh(uint8_t id) {
+  return id < ARK_LAYERS && s_kind[id] == KIND_NONE;
 }
 
-static GBitmap *paint(int glyph) {
-  GBitmap *b = gbitmap_create_blank_with_palette(GSize(18, 18), GBitmapFormat1BitPalette, s_palette, false);
-  if (!b) return NULL;
-  uint8_t *data = gbitmap_get_data(b);
-  int stride = gbitmap_get_bytes_per_row(b);
-  memset(data, 0, stride * 18);
-  for (int y = 0; y < 18; y++) {
-    for (int x = 0; x < 18; x++) {
-      if (inked(glyph, x, y)) data[y * stride + x / 8] |= 0x80 >> (x % 8);
-    }
-  }
-  return b;
+static void place(uint8_t id, uint8_t kind, Layer *layer) {
+  s_kind[id] = kind;
+  s_layer[id] = layer;
+  layer_add_child(window_get_root_layer(s_window), layer);
 }
 
-static void progress_update(Layer *layer, GContext *ctx) {
-  GRect b = layer_get_bounds(layer);
-  graphics_context_set_fill_color(ctx, PBL_IF_COLOR_ELSE(GColorDarkGray, GColorWhite));
-  graphics_fill_rect(ctx, GRect(0, b.size.h / 2 - 1, b.size.w, 2), 0, GCornerNone);
-  int w = b.size.w * s_permille / 1000;
-  graphics_context_set_fill_color(ctx, PBL_IF_COLOR_ELSE(GColorVividCerulean, GColorWhite));
-  graphics_fill_rect(ctx, GRect(0, 0, w, b.size.h), 2, GCornersAll);
+void ark_ui_window(uint8_t ground) {
+  window_set_background_color(s_window, color(ground));
 }
 
-static uint16_t menu_rows(MenuLayer *menu, uint16_t section, void *ctx) {
-  return s_row_count;
-}
-
-static int16_t menu_row_height(MenuLayer *menu, MenuIndex *index, void *ctx) {
-  return ROW_HEIGHT;
-}
-
-static void menu_draw_row(GContext *ctx, const Layer *cell, MenuIndex *index, void *data) {
-  if (index->row >= s_row_count) return;
-  GRect b = layer_get_bounds(cell);
-  graphics_context_set_text_color(ctx, GColorWhite);
-  graphics_draw_text(ctx, s_rows[index->row][0], fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD),
-                     GRect(4, -4, b.size.w - 8, 22), GTextOverflowModeTrailingEllipsis,
-                     GTextAlignmentLeft, NULL);
-  graphics_context_set_text_color(ctx, PBL_IF_COLOR_ELSE(GColorLightGray, GColorWhite));
-  graphics_draw_text(ctx, s_rows[index->row][1], fonts_get_system_font(FONT_KEY_GOTHIC_14),
-                     GRect(4, 15, b.size.w - 8, 18), GTextOverflowModeTrailingEllipsis,
-                     GTextAlignmentLeft, NULL);
+void ark_ui_bounds(int16_t *w, int16_t *h) {
+  GRect b = layer_get_bounds(window_get_root_layer(s_window));
+  *w = b.size.w;
+  *h = b.size.h;
 }
 
 static void click(ClickRecognizerRef r, void *ctx) {
@@ -199,56 +185,233 @@ static void click_config(void *ctx) {
   window_single_click_subscribe(BUTTON_ID_DOWN, click);
 }
 
-static TextLayer *text(Layer *root, GRect frame, const char *font, GColor color) {
-  TextLayer *t = text_layer_create(frame);
+int16_t ark_ui_action_bar(uint8_t ground) {
+  if (!s_bar) {
+    s_bar = action_bar_layer_create();
+    action_bar_layer_set_background_color(s_bar, color(ground));
+    action_bar_layer_add_to_window(s_bar, s_window);
+    action_bar_layer_set_click_config_provider(s_bar, click_config);
+  }
+  return ACTION_BAR_WIDTH;
+}
+
+void ark_ui_text(uint8_t id, const ArkFrame *f, uint8_t size, bool bold, uint8_t ink, uint8_t align) {
+  if (!fresh(id)) return;
+  TextLayer *t = text_layer_create(rect(f));
   text_layer_set_background_color(t, GColorClear);
-  text_layer_set_text_color(t, color);
-  text_layer_set_font(t, fonts_get_system_font(font));
+  text_layer_set_text_color(t, color(ink));
+  text_layer_set_font(t, gothic(size, bold));
   text_layer_set_overflow_mode(t, GTextOverflowModeTrailingEllipsis);
-  layer_add_child(root, text_layer_get_layer(t));
-  return t;
+  text_layer_set_text_alignment(t, align == 1 ? GTextAlignmentCenter : align == 2 ? GTextAlignmentRight : GTextAlignmentLeft);
+  s_words[id][0] = 0;
+  text_layer_set_text(t, s_words[id]);
+  s_text[id] = t;
+  place(id, KIND_TEXT, text_layer_get_layer(t));
+}
+
+static void meter_update(Layer *layer, GContext *ctx) {
+  Meter *m = layer_get_data(layer);
+  GRect b = layer_get_bounds(layer);
+  graphics_context_set_fill_color(ctx, color(m->track));
+  graphics_fill_rect(ctx, GRect(0, (b.size.h - m->track_h) / 2, b.size.w, m->track_h), 0, GCornerNone);
+  graphics_context_set_fill_color(ctx, color(m->fill));
+  graphics_fill_rect(ctx, GRect(0, 0, b.size.w * m->permille / 1000, b.size.h), m->corner, GCornersAll);
+}
+
+void ark_ui_meter(uint8_t id, const ArkFrame *f, uint8_t fill, uint8_t track, int16_t track_h, int16_t corner) {
+  if (!fresh(id)) return;
+  Layer *l = layer_create_with_data(rect(f), sizeof(Meter));
+  *(Meter *)layer_get_data(l) = (Meter){ .fill = fill, .track = track, .track_h = track_h, .corner = corner };
+  layer_set_update_proc(l, meter_update);
+  place(id, KIND_METER, l);
+}
+
+static void rect_update(Layer *layer, GContext *ctx) {
+  Rect *r = layer_get_data(layer);
+  graphics_context_set_fill_color(ctx, color(r->color));
+  graphics_fill_rect(ctx, layer_get_bounds(layer), r->corner, GCornersAll);
+}
+
+void ark_ui_rect(uint8_t id, const ArkFrame *f, uint8_t c, int16_t corner) {
+  if (!fresh(id)) return;
+  Layer *l = layer_create_with_data(rect(f), sizeof(Rect));
+  *(Rect *)layer_get_data(l) = (Rect){ .color = c, .corner = corner };
+  layer_set_update_proc(l, rect_update);
+  place(id, KIND_RECT, l);
+}
+
+void ark_ui_image(uint8_t id, const ArkFrame *f) {
+  if (!fresh(id)) return;
+  BitmapLayer *b = bitmap_layer_create(rect(f));
+  bitmap_layer_set_compositing_mode(b, GCompOpSet);
+  bitmap_layer_set_alignment(b, GAlignCenter);
+  s_image[id] = b;
+  place(id, KIND_IMAGE, bitmap_layer_get_layer(b));
+}
+
+static uint16_t list_sections(MenuLayer *menu, void *ctx) {
+  return 1;
+}
+
+static uint16_t list_rows(MenuLayer *menu, uint16_t section, void *ctx) {
+  return ((List *)ctx)->count;
+}
+
+static int16_t list_row_height(MenuLayer *menu, MenuIndex *index, void *ctx) {
+  return ((List *)ctx)->style.row_height;
+}
+
+static int16_t list_header_height(MenuLayer *menu, uint16_t section, void *ctx) {
+  List *l = ctx;
+  return l->header[0] ? l->style.header_height : 0;
+}
+
+static void list_draw_header(GContext *ctx, const Layer *cell, uint16_t section, void *data) {
+  List *l = data;
+  GRect b = layer_get_bounds(cell);
+  const ArkListStyle *s = &l->style;
+  graphics_context_set_text_color(ctx, color(s->quiet));
+  graphics_draw_text(ctx, l->header, gothic(s->header_size, s->header_bold),
+                     GRect(s->inset, -s->lift, b.size.w - 2 * s->inset, b.size.h + s->lift),
+                     GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, NULL);
+}
+
+static void list_draw_row(GContext *ctx, const Layer *cell, MenuIndex *index, void *data) {
+  List *l = data;
+  if (index->row >= l->count) return;
+  GRect b = layer_get_bounds(cell);
+  const ArkListStyle *s = &l->style;
+  int16_t w = b.size.w - 2 * s->inset;
+  graphics_context_set_text_color(ctx, color(s->ink));
+  graphics_draw_text(ctx, l->rows[index->row][0], gothic(s->title_size, s->title_bold),
+                     GRect(s->inset, -s->lift, w, s->title_line), GTextOverflowModeTrailingEllipsis,
+                     GTextAlignmentLeft, NULL);
+  graphics_context_set_text_color(ctx, color(s->quiet));
+  graphics_draw_text(ctx, l->rows[index->row][1], gothic(s->sub_size, s->sub_bold),
+                     GRect(s->inset, s->title_line - 2 * s->lift, w, b.size.h - s->title_line + 2 * s->lift),
+                     GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, NULL);
+}
+
+void ark_ui_list(uint8_t id, const ArkFrame *f, const ArkListStyle *style) {
+  if (!fresh(id)) return;
+  List *l = malloc(sizeof(List));
+  if (!l) return;
+  memset(l, 0, sizeof(List));
+  l->style = *style;
+  MenuLayer *m = menu_layer_create(rect(f));
+  menu_layer_set_callbacks(m, l, (MenuLayerCallbacks){
+    .get_num_sections = list_sections,
+    .get_num_rows = list_rows,
+    .get_cell_height = list_row_height,
+    .get_header_height = list_header_height,
+    .draw_header = list_draw_header,
+    .draw_row = list_draw_row,
+  });
+  // Nothing is selected on a list the action bar's buttons are beside.
+  menu_layer_set_normal_colors(m, color(style->ground), color(style->ink));
+  menu_layer_set_highlight_colors(m, color(style->ground), color(style->ink));
+  s_menu[id] = m;
+  s_list[id] = l;
+  place(id, KIND_LIST, menu_layer_get_layer(m));
+}
+
+// A glyph's bits (rows of whole bytes, the leftmost pixel the highest bit)
+// as a 1-bit bitmap, clear where it is not inked and `ink` where it is.
+uint8_t ark_ui_bitmap(int16_t side, const uint8_t *bits, size_t len, uint8_t ink) {
+  if (s_bitmap_count >= BITMAP_MAX) return 0xff;
+  uint8_t i = s_bitmap_count;
+  s_palettes[i][0] = GColorClear;
+  s_palettes[i][1] = color(ink);
+  GBitmap *b = gbitmap_create_blank_with_palette(GSize(side, side), GBitmapFormat1BitPalette, s_palettes[i], false);
+  if (!b) return 0xff;
+  uint8_t *data = gbitmap_get_data(b);
+  int stride = gbitmap_get_bytes_per_row(b);
+  int row = (side + 7) / 8;
+  memset(data, 0, stride * side);
+  for (int y = 0; y < side && (size_t)((y + 1) * row) <= len; y++) memcpy(data + y * stride, bits + y * row, row);
+  s_bitmaps[i] = b;
+  s_bitmap_count++;
+  return i;
+}
+
+void ark_ui_hide(uint8_t id, bool hidden) {
+  if (id < ARK_LAYERS && s_layer[id]) layer_set_hidden(s_layer[id], hidden);
+}
+
+void ark_ui_set_text(uint8_t id, const uint8_t *s, size_t len) {
+  if (id >= ARK_LAYERS || s_kind[id] != KIND_TEXT) return;
+  copy_text(s_words[id], s, len);
+  text_layer_set_text(s_text[id], s_words[id]);
+}
+
+void ark_ui_set_meter(uint8_t id, uint16_t permille) {
+  if (id >= ARK_LAYERS || s_kind[id] != KIND_METER) return;
+  ((Meter *)layer_get_data(s_layer[id]))->permille = permille > 1000 ? 1000 : permille;
+  layer_mark_dirty(s_layer[id]);
+}
+
+void ark_ui_set_image(uint8_t id, uint8_t bitmap) {
+  if (id >= ARK_LAYERS || s_kind[id] != KIND_IMAGE) return;
+  bitmap_layer_set_bitmap(s_image[id], bitmap < s_bitmap_count ? s_bitmaps[bitmap] : NULL);
+}
+
+static List *list_of(uint8_t id) {
+  if (id >= ARK_LAYERS || s_kind[id] != KIND_LIST) return NULL;
+  return s_list[id];
+}
+
+void ark_ui_set_header(uint8_t id, const uint8_t *s, size_t len) {
+  List *l = list_of(id);
+  if (l) copy_text(l->header, s, len);
+}
+
+void ark_ui_set_row(uint8_t id, uint8_t i, const uint8_t *t, size_t tl, const uint8_t *s, size_t sl) {
+  List *l = list_of(id);
+  if (!l || i >= ROW_MAX) return;
+  copy_text(l->rows[i][0], t, tl);
+  copy_text(l->rows[i][1], s, sl);
+}
+
+void ark_ui_set_rows(uint8_t id, uint8_t n) {
+  List *l = list_of(id);
+  if (!l) return;
+  l->count = n < ROW_MAX ? n : ROW_MAX;
+  menu_layer_reload_data(s_menu[id]);
+}
+
+void ark_ui_set_action(uint8_t button, uint8_t bitmap) {
+  if (!s_bar || button < BUTTON_ID_UP || button > BUTTON_ID_DOWN) return;
+  if (bitmap < s_bitmap_count) {
+    action_bar_layer_set_icon(s_bar, (ButtonId)button, s_bitmaps[bitmap]);
+  } else {
+    action_bar_layer_clear_icon(s_bar, (ButtonId)button);
+  }
 }
 
 static void window_load(Window *window) {
-  Layer *root = window_get_root_layer(window);
-  GRect b = layer_get_bounds(root);
-  int w = b.size.w - ACTION_BAR_WIDTH;
-  GColor dim = PBL_IF_COLOR_ELSE(GColorLightGray, GColorWhite);
-  s_text[SLOT_STATUS] = text(root, GRect(6, 0, w - 8, 18), FONT_KEY_GOTHIC_14, dim);
-  s_text[SLOT_TITLE] = text(root, GRect(6, 16, w - 8, 30), FONT_KEY_GOTHIC_24_BOLD, GColorWhite);
-  s_text[SLOT_SUBTITLE] = text(root, GRect(6, 44, w - 8, 24), FONT_KEY_GOTHIC_18, dim);
-  s_progress = layer_create(GRect(6, 74, w - 12, 6));
-  layer_set_update_proc(s_progress, progress_update);
-  layer_add_child(root, s_progress);
-  s_text[SLOT_TIME] = text(root, GRect(6, 80, w - 8, 22), FONT_KEY_GOTHIC_18, GColorWhite);
-  s_text[SLOT_HEADER] = text(root, GRect(6, 106, w - 8, 18), FONT_KEY_GOTHIC_14_BOLD, dim);
-  s_menu = menu_layer_create(GRect(2, 124, w - 2, b.size.h - 124));
-  menu_layer_set_callbacks(s_menu, NULL, (MenuLayerCallbacks){
-    .get_num_rows = menu_rows,
-    .get_cell_height = menu_row_height,
-    .draw_row = menu_draw_row,
-  });
-  menu_layer_set_normal_colors(s_menu, GColorBlack, GColorWhite);
-  menu_layer_set_highlight_colors(s_menu, GColorBlack, GColorWhite);
-  layer_add_child(root, menu_layer_get_layer(s_menu));
-
-  s_palette[0] = GColorClear;
-  s_palette[1] = GColorWhite;
-  for (int g = GLYPH_PLAY; g < GLYPH_COUNT; g++) s_glyphs[g] = paint(g);
-  s_bar = action_bar_layer_create();
-  action_bar_layer_set_background_color(s_bar, PBL_IF_COLOR_ELSE(GColorDarkGray, GColorWhite));
-  action_bar_layer_add_to_window(s_bar, window);
-  action_bar_layer_set_click_config_provider(s_bar, click_config);
+  // Buttons reach Rust whether or not the screen has an action bar (whose
+  // own provider replaces this one).
+  window_set_click_config_provider(window, click_config);
 }
 
 static void window_unload(Window *window) {
-  action_bar_layer_destroy(s_bar);
-  for (int g = 0; g < GLYPH_COUNT; g++) {
-    if (s_glyphs[g]) gbitmap_destroy(s_glyphs[g]);
+  if (s_bar) action_bar_layer_destroy(s_bar);
+  for (int i = 0; i < ARK_LAYERS; i++) {
+    switch (s_kind[i]) {
+      case KIND_TEXT: text_layer_destroy(s_text[i]); break;
+      case KIND_IMAGE: bitmap_layer_destroy(s_image[i]); break;
+      case KIND_LIST:
+        menu_layer_destroy(s_menu[i]);
+        free(s_list[i]);
+        break;
+      case KIND_METER:
+      case KIND_RECT: layer_destroy(s_layer[i]); break;
+      default: break;
+    }
+    s_kind[i] = KIND_NONE;
   }
-  menu_layer_destroy(s_menu);
-  layer_destroy(s_progress);
-  for (int i = 0; i < SLOT_COUNT; i++) text_layer_destroy(s_text[i]);
+  for (int i = 0; i < s_bitmap_count; i++) gbitmap_destroy(s_bitmaps[i]);
+  s_bitmap_count = 0;
 }
 
 // ---- Timers -----------------------------------------------------------------
@@ -338,7 +501,6 @@ int main(void) {
       (unsigned long)virt, (unsigned long)heap_bytes_free(), (unsigned long)heap_bytes_used());
 
   s_window = window_create();
-  window_set_background_color(s_window, GColorBlack);
   window_set_window_handlers(s_window, (WindowHandlers){
     .load = window_load,
     .unload = window_unload,

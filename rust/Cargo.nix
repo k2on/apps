@@ -2223,6 +2223,10 @@ rec {
             name = "ark-app";
             packageId = "ark-app";
           }
+          {
+            name = "arkui-glyphs";
+            packageId = "arkui-glyphs";
+          }
         ];
 
       };
