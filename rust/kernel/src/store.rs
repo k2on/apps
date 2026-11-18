@@ -91,14 +91,36 @@ pub trait Read {
 pub trait Store: Read {
     /// Every table it may hold a row of: what a fill that replaces every
     /// row empties. An overlay names the tables its writes do.
-    fn tables(&self) -> Vec<TableId>;
+    fn tables(&self) -> Vec<TableId>
+    where
+        Self: Sized;
 
     fn put(&mut self, table: TableId, key: &[u8], value: &[u8]);
 
     fn delete(&mut self, table: TableId, key: &[u8]);
 
+    /// Takes every row out: what a whole fill does before its rows.
+    fn clear(&mut self)
+    where
+        Self: Sized,
+    {
+        for table in self.tables() {
+            let mut keys = Vec::new();
+            self.scan(table, Range::all(), &mut |k, _| {
+                keys.push(k.to_vec());
+                true
+            });
+            for k in keys {
+                self.delete(table, &k);
+            }
+        }
+    }
+
     /// Makes every write, in order.
-    fn apply(&mut self, writes: &Writes) {
+    fn apply(&mut self, writes: &Writes)
+    where
+        Self: Sized,
+    {
         for w in &writes.0 {
             match &w.value {
                 Some(v) => self.put(w.table, &w.key, v),
@@ -291,6 +313,10 @@ fn tables(rows: &Tree) -> Vec<TableId> {
 impl Store for Memory {
     fn tables(&self) -> Vec<TableId> {
         tables(&self.rows.tree)
+    }
+
+    fn clear(&mut self) {
+        self.rows = Sparse::default();
     }
 
     fn put(&mut self, table: TableId, key: &[u8], value: &[u8]) {

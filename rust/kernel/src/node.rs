@@ -115,7 +115,7 @@ use crate::cell::{hit, key, Cell, Reader, Scope, Sink, Sources, Watch};
 use crate::entry::{Actor, Entry, EntryId, Hlc, Origin, Seq, Space, Version};
 use crate::plan::{Changes, Diff, Live, Plan, Recorder};
 use crate::slot::Boxed;
-use crate::store::{Layer, Nothing, Overlay, Range, Read, Store, TableId, View, Writes, EMPTY};
+use crate::store::{Layer, Nothing, Overlay, Read, Store, TableId, View, Writes, EMPTY};
 use crate::sync::{Down, Logged, Pending, QueryId, Up, Verdict};
 
 /// A handler, by the number its build gives it.
@@ -1007,16 +1007,8 @@ impl<B: Body + Clone + 'static, S: Store> Node<B, S> {
     fn filled(&mut self) {
         let Some((seq, 0, whole)) = self.filling else { return };
         self.filling = None;
-        let tables = if whole { self.stores.shared.tables() } else { Vec::new() };
-        for table in tables {
-            let mut keys = Vec::new();
-            self.stores.shared.scan(table, Range::all(), &mut |k, _| {
-                keys.push(k.to_vec());
-                true
-            });
-            for k in keys {
-                self.stores.shared.delete(table, &k);
-            }
+        if whole {
+            self.stores.shared.clear();
         }
         self.stores.shared.apply(&core::mem::take(&mut self.incoming).into_writes());
         self.reset = true;
