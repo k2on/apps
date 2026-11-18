@@ -148,8 +148,12 @@ by `nix run .#update-theme` into `ui/pebble/host/rust/src/tokens.rs`
   (`LINE_*`, `pebble-line-height` times the size) and a glyph set in it
   (`SIDE_*`);
 - a row, a heading, a meter, the action bar's glyph and a glyph's stroke;
-- the colours: every role of the dark side and each accent's, as the
-  nearest of the Time 2's 64 (`GColor8`, two bits a channel).
+- the colours: every role of the dark side and each accent's, as the one
+  of the Time 2's 64 (`GColor8`, two bits a channel) that looks nearest on
+  its display: by L*a*b* distance to what the display shows of each (the
+  SDK screenshots' colour correction, `ui/theme.py`'s `SHOWN`), not by
+  rounding each channel, which turns harken's gold a peach there. The gold
+  is the display's yellow, a pale gold on it.
 
 ## Motion
 

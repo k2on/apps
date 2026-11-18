@@ -174,7 +174,9 @@ pub mod show {
     /// The link and what waits: "Online", "Offline, 1 Pending".
     pub fn status_line(s: &Status) -> Text {
         let word = match (s.online, s.complete) {
-            _ if s.unreached => "Can't Reach Player",
+            // Short enough that a note after it still fits the watch's
+            // line: "Player Away, 1 Pending".
+            _ if s.unreached => "Player Away",
             (false, _) => "Offline",
             (true, false) => "Syncing",
             (true, true) => "Online",

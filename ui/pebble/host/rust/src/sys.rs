@@ -71,6 +71,7 @@ mod ffi {
     extern "C" {
         pub fn persist_read_data(key: u32, buf: *mut u8, size: usize) -> i32;
         pub fn persist_write_data(key: u32, data: *const u8, size: usize) -> i32;
+        pub fn persist_delete(key: u32) -> i32;
         pub fn malloc(n: usize) -> *mut u8;
         pub fn free(p: *mut u8);
         pub fn heap_bytes_used() -> usize;
@@ -231,6 +232,10 @@ mod watch {
             let n = unsafe { ffi::persist_write_data(key, data.as_ptr(), data.len()) };
             usize::try_from(n).is_ok_and(|n| n == data.len())
         }
+
+        fn delete(&mut self, key: u32) {
+            unsafe { ffi::persist_delete(key) };
+        }
     }
 
     /// The app heap (the SDK's `malloc`), counting what Rust holds of it.
@@ -380,5 +385,7 @@ mod stand_in {
         fn write(&mut self, _: u32, _: &[u8]) -> bool {
             false
         }
+
+        fn delete(&mut self, _: u32) {}
     }
 }

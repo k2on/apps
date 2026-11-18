@@ -801,10 +801,98 @@ def rust_layout(t):
     return "\n".join(out) + "\n"
 
 
+# What each of the Time 2's 64 colours (two bits a channel) looks like on
+# its display, as the SDK's screenshots show it (pebble-tool's colour
+# correction): a colour is chosen by what it looks like, not its numbers.
+SHOWN = {
+    (0, 0, 0): "#000000",
+    (0, 0, 1): "#001E41",
+    (0, 0, 2): "#004387",
+    (0, 0, 3): "#0068CA",
+    (0, 1, 0): "#2B4A2C",
+    (0, 1, 1): "#27514F",
+    (0, 1, 2): "#16638D",
+    (0, 1, 3): "#007DCE",
+    (0, 2, 0): "#5E9860",
+    (0, 2, 1): "#5C9B72",
+    (0, 2, 2): "#57A5A2",
+    (0, 2, 3): "#4CB4DB",
+    (0, 3, 0): "#8EE391",
+    (0, 3, 1): "#8EE69E",
+    (0, 3, 2): "#8AEBC0",
+    (0, 3, 3): "#84F5F1",
+    (1, 0, 0): "#4A161B",
+    (1, 0, 1): "#482748",
+    (1, 0, 2): "#40488A",
+    (1, 0, 3): "#2F6BCC",
+    (1, 1, 0): "#564E36",
+    (1, 1, 1): "#545454",
+    (1, 1, 2): "#4F6790",
+    (1, 1, 3): "#4180D0",
+    (1, 2, 0): "#759A64",
+    (1, 2, 1): "#759D76",
+    (1, 2, 2): "#71A6A4",
+    (1, 2, 3): "#69B5DD",
+    (1, 3, 0): "#9EE594",
+    (1, 3, 1): "#9DE7A0",
+    (1, 3, 2): "#9BECC2",
+    (1, 3, 3): "#95F6F2",
+    (2, 0, 0): "#99353F",
+    (2, 0, 1): "#983E5A",
+    (2, 0, 2): "#955694",
+    (2, 0, 3): "#8F74D2",
+    (2, 1, 0): "#9D5B4D",
+    (2, 1, 1): "#9D6064",
+    (2, 1, 2): "#9A7099",
+    (2, 1, 3): "#9587D5",
+    (2, 2, 0): "#AFA072",
+    (2, 2, 1): "#AEA382",
+    (2, 2, 2): "#ABABAB",
+    (2, 2, 3): "#A7BAE2",
+    (2, 3, 0): "#C9E89D",
+    (2, 3, 1): "#C9EAA7",
+    (2, 3, 2): "#C7F0C8",
+    (2, 3, 3): "#C3F9F7",
+    (3, 0, 0): "#E35462",
+    (3, 0, 1): "#E25874",
+    (3, 0, 2): "#E16AA3",
+    (3, 0, 3): "#DE83DC",
+    (3, 1, 0): "#E66E6B",
+    (3, 1, 1): "#E6727C",
+    (3, 1, 2): "#E37FA7",
+    (3, 1, 3): "#E194DF",
+    (3, 2, 0): "#F1AA86",
+    (3, 2, 1): "#F1AD93",
+    (3, 2, 2): "#EFB5B8",
+    (3, 2, 3): "#ECC3EB",
+    (3, 3, 0): "#FFEEAB",
+    (3, 3, 1): "#FFF1B5",
+    (3, 3, 2): "#FFF6D3",
+    (3, 3, 3): "#FFFFFF",
+}
+
+
+def lab(hex_):
+    """A colour as CIE L*a*b* (D65): a space in which distance is what an
+    eye sees as difference."""
+    def lin(c):
+        c /= 255
+        return c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
+    r, g, b = (lin(c) for c in rgb(hex_))
+    x = (0.4124 * r + 0.3576 * g + 0.1805 * b) / 0.95047
+    y = 0.2126 * r + 0.7152 * g + 0.0722 * b
+    z = (0.0193 * r + 0.1192 * g + 0.9505 * b) / 1.08883
+    f = lambda t: t ** (1 / 3) if t > (6 / 29) ** 3 else t / (3 * (6 / 29) ** 2) + 4 / 29
+    return 116 * f(y) - 16, 500 * (f(x) - f(y)), 200 * (f(y) - f(z))
+
+
 def gcolor(hex_):
-    """The nearest of the Time 2's 64 colours (two bits a channel, 0x55
-    apart), as PebbleOS's `GColor8` byte: opaque, then red, green, blue."""
-    r, g, b = (round(c / 0x55) for c in rgb(hex_))
+    """The one of the Time 2's 64 colours that looks nearest `hex_` on its
+    display (by L*a*b*, of what the display shows: rounding each channel
+    alone makes harken's gold a peach there), as PebbleOS's `GColor8`
+    byte: opaque, then red, green, blue."""
+    want = lab(hex_)
+    r, g, b = min(SHOWN, key=lambda c: sum((p - q) ** 2 for p, q in zip(lab(SHOWN[c]), want)))
     return 0xC0 | r << 4 | g << 2 | b
 
 
@@ -818,7 +906,7 @@ def pebble(t):
         "//!",
         "//! Pebble's tokens (ui/theme.toml `[layout]`'s `pebble-*`, ui/docs/pebble.md): what a",
         "//! generated screen is laid out and drawn by, in pixels and `GColor8` bytes. The colours",
-        "//! are the dark side's, each the nearest of the Time 2's 64.",
+        "//! are the dark side's, each the one of the Time 2's 64 that looks nearest on its display.",
         "",
         "use crate::ui::Font;",
         "",

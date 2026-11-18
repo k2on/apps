@@ -54,11 +54,14 @@ the rows live in memory and the disk holds a copy in 256-byte pages: the
 device and shared spaces' rows in path order, whole rows per page, each
 page holding the rows from its first path to the next page's. A flush packs
 every page again and writes only those whose bytes changed (a row changed:
-its page, the directory and the superblock, three writes). Beside the pages
+its page, the directory and the superblock, three writes). A row too large
+for a page spills: its value in 256-byte chunks, each kept while its bytes
+are the same, its page holding its path and their keys. Beside the pages
 are the pending records in chunks, and a superblock with the origin, the
 cursor, the actor and the count of entries made. Writes are copy on write,
 committed by the superblock, so a watch that dies mid-flush comes back to
-the flush before. The count is kept as a lease 32 ahead, flushed before it
+the flush before; the keys a committed flush let go are deleted after it,
+so the storage holds what the rows hold. The count is kept as a lease 32 ahead, flushed before it
 is reached, so an entry id is never used twice even after a crash between a
 push and a flush. The session and local spaces are memory only, as the
 kernel says: playback comes back with the upstream's hello.
@@ -119,7 +122,7 @@ Standing in for harken's now playing (`demo/app`):
 - **Live controls don't queue.** With no link the kernel refuses the
   watch's session entries for the player's row (`Refusal::OFFLINE`, which
   `Ctx::make` returns): nothing changes on the screen but the status line,
-  "Can't Reach Player", until a hello is answered, and nothing fires
+  "Player Away", until a hello is answered, and nothing fires
   later. Each hello's answer carries the player's latest (and the watch's
   own), so the screen agrees with the player once the link is back.
 - A `Pop` of a track the player already took is refused (`GONE`), and the
@@ -207,10 +210,6 @@ restart with two pending skips, a refusal, a reconnect and confirmations:
 ## Not yet
 
 - Seen only in the emulator, never on a Pebble Time 2 or with a phone.
-- The offset is measured at each hello only, so a watch that stays
-  connected for long drifts with its clock until the next.
-- A row larger than a page (about 250 bytes with its key) is not kept.
-- Keys let go by a flush are left as they are and used again, never deleted.
 - The emulator is not in nix or CI: no screenshot walk of the watch yet.
 - The screen animates nothing (ui/docs/pebble.md, Motion), and what arkui
   lays out on Pebble is only what ui/docs/pebble.md lists.

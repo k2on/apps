@@ -50,12 +50,6 @@ server.
 
 ## Watch
 
-### Large Rows and Freed Keys in the Watch's Store
-
-The watch's store packs rows into 256-byte values. A row over about 250
-bytes is not persisted, and freed storage keys are reused but never
-deleted.
-
 ### A View's Sources Are Lets, Not Yet `api`
 
 A view reads sources in `let`s (`cell(C)`, `row(f(…))`, `list(f(…))`),
@@ -121,8 +115,3 @@ simulator, not CI round trips.
 
 harken's iPad screenshot walk once timed out on an album cover loading.
 It did not recur, and its cause is unknown.
-
-### The Watch's Status Line and Progress Colour
-
-The watch's status line is cut off ("Can't Reach Player, 1 Pe…"), and the
-progress bar's accent comes out peach in the watch's 64 colours.

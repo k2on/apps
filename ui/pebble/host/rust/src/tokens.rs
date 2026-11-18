@@ -2,7 +2,7 @@
 //!
 //! Pebble's tokens (ui/theme.toml `[layout]`'s `pebble-*`, ui/docs/pebble.md): what a
 //! generated screen is laid out and drawn by, in pixels and `GColor8` bytes. The colours
-//! are the dark side's, each the nearest of the Time 2's 64.
+//! are the dark side's, each the one of the Time 2's 64 that looks nearest on its display.
 
 use crate::ui::Font;
 
@@ -133,7 +133,7 @@ pub const ERROR_CONTAINER: u8 = 0xd0;
 /// What is written on that.
 pub const ON_ERROR_CONTAINER: u8 = 0xff;
 /// Worth a look: an amount short of its target.
-pub const CAUTION: u8 = 0xf9;
+pub const CAUTION: u8 = 0xf8;
 /// What is written on the caution colour.
 pub const ON_CAUTION: u8 = 0xd0;
 /// A quiet container for a caution.
@@ -141,34 +141,34 @@ pub const CAUTION_CONTAINER: u8 = 0xd4;
 /// What is written on that.
 pub const ON_CAUTION_CONTAINER: u8 = 0xfe;
 /// Good: money with a job, a goal met.
-pub const POSITIVE: u8 = 0xda;
+pub const POSITIVE: u8 = 0xcd;
 /// Gold's the accent: a filled button, a slider, a selected tab.
-pub const GOLD_ACCENT: u8 = 0xf9;
+pub const GOLD_ACCENT: u8 = 0xfc;
 /// Gold's what is written on the accent.
 pub const GOLD_ON_ACCENT: u8 = 0xc0;
 /// Gold's the accent as text: a link, the row playing.
-pub const GOLD_ACCENT_TEXT: u8 = 0xf9;
+pub const GOLD_ACCENT_TEXT: u8 = 0xfc;
 /// Gold's a quiet container in the accent.
 pub const GOLD_ACCENT_CONTAINER: u8 = 0xd4;
 /// Gold's what is written on that.
-pub const GOLD_ON_ACCENT_CONTAINER: u8 = 0xfe;
+pub const GOLD_ON_ACCENT_CONTAINER: u8 = 0xfc;
 /// Green's the accent: a filled button, a slider, a selected tab.
-pub const GREEN_ACCENT: u8 = 0xda;
+pub const GREEN_ACCENT: u8 = 0xcd;
 /// Green's what is written on the accent.
-pub const GREEN_ON_ACCENT: u8 = 0xc0;
+pub const GREEN_ON_ACCENT: u8 = 0xc4;
 /// Green's the accent as text: a link, the row playing.
-pub const GREEN_ACCENT_TEXT: u8 = 0xda;
+pub const GREEN_ACCENT_TEXT: u8 = 0xcd;
 /// Green's a quiet container in the accent.
-pub const GREEN_ACCENT_CONTAINER: u8 = 0xc5;
+pub const GREEN_ACCENT_CONTAINER: u8 = 0xc4;
 /// Green's what is written on that.
 pub const GREEN_ON_ACCENT_CONTAINER: u8 = 0xee;
 /// Blue's the accent: a filled button, a slider, a selected tab.
-pub const BLUE_ACCENT: u8 = 0xdb;
+pub const BLUE_ACCENT: u8 = 0xd7;
 /// Blue's what is written on the accent.
 pub const BLUE_ON_ACCENT: u8 = 0xc1;
 /// Blue's the accent as text: a link, the row playing.
-pub const BLUE_ACCENT_TEXT: u8 = 0xdb;
+pub const BLUE_ACCENT_TEXT: u8 = 0xd7;
 /// Blue's a quiet container in the accent.
-pub const BLUE_ACCENT_CONTAINER: u8 = 0xc5;
+pub const BLUE_ACCENT_CONTAINER: u8 = 0xc1;
 /// Blue's what is written on that.
-pub const BLUE_ON_ACCENT_CONTAINER: u8 = 0xef;
+pub const BLUE_ON_ACCENT_CONTAINER: u8 = 0xff;

@@ -14,6 +14,8 @@
 //!              in 256-byte chunks
 //! pages        the rows, in path order ([space, table (4 bytes), key]),
 //!              whole rows per page, each page a value
+//! spills       a row too large for a page: its value in 256-byte chunks,
+//!              its page holding its path and their keys
 //! pending      the pending records' bytes, in 256-byte chunks
 //! ```
 //!
@@ -22,14 +24,19 @@
 //! row, packs each page's rows (splitting a page that outgrows a value,
 //! dropping an empty one, joining two small neighbours) and writes only the
 //! pages whose bytes changed, compared by a hash kept from the last write.
-//! A row is at most a value (its path and value 250 bytes or so); a larger
-//! one is not kept, and counted (`Stats::too_big`).
+//! A row whose path and value do not fit a page's value (250 bytes or so)
+//! spills: its value is written in chunks, as the pending records are,
+//! each kept where it is while its bytes are the same, and its page holds
+//! its path and their keys. Only a row whose key list itself outgrows a
+//! value (some 20 KB) is not kept, and counted (`Stats::too_big`).
 //!
 //! **Copy on write.** A changed page, chunk or directory is written to a
 //! free key, never over the one in use, and the superblock, written last
 //! and alone in place, commits the flush: a watch that dies mid-flush comes
-//! back to the flush before. The keys let go are free for the next flush
-//! (left as they are: deleting is a write too).
+//! back to the flush before. The keys a committed flush let go are deleted
+//! after it, so the storage holds what the rows hold and no more; one a
+//! watch died before deleting is free all the same, and written over when
+//! it is next taken.
 //!
 //! **Entry ids.** The kernel's ids are never renumbered, so the count of
 //! entries this origin made must never go back, even after a crash between
@@ -49,7 +56,8 @@ pub const VALUE: usize = 256;
 pub const KEYS: u32 = 4000;
 const SUPER: u32 = 0;
 const MAGIC: &[u8; 4] = b"arkP";
-const FORMAT: u8 = 1;
+/// 2: a page's row says whether its value is inline or spilled.
+const FORMAT: u8 = 2;
 /// How far past the count of entries made the lease runs.
 const LEASE: u64 = 32;
 /// Two neighbouring pages are joined when both fit in this.
@@ -61,6 +69,8 @@ pub trait Persist {
     fn read(&mut self, key: u32, buf: &mut [u8; VALUE]) -> Option<usize>;
     /// Writes a value of at most [`VALUE`] bytes: whether it was written.
     fn write(&mut self, key: u32, data: &[u8]) -> bool;
+    /// Deletes the value at `key`, if there is one.
+    fn delete(&mut self, key: u32);
 }
 
 /// What the host keeps of its node besides rows and pending records.
@@ -89,8 +99,12 @@ pub struct Stats {
     pub bytes: u32,
     /// Values the last flush wrote.
     pub last: u32,
-    /// Rows too large for a page, not kept.
+    /// Rows too large even to spill, not kept.
     pub too_big: u32,
+    /// Rows spilled out of their pages, at the last flush.
+    pub spilled: u32,
+    /// Values deleted, the keys let go.
+    pub deleted: u32,
     /// Flushes refused by the storage (full), kept in memory.
     pub failed: u32,
     /// Values in use: pages, chunks, directory and superblock.
@@ -119,6 +133,8 @@ type Chunk = (u32, u32);
 pub struct Disk<P> {
     p: P,
     pages: Vec<Page>,
+    /// The rows spilled out of their pages, by path: their chunks.
+    spills: Vec<(Vec<u8>, Vec<Chunk>)>,
     pending: Vec<Chunk>,
     dir: Vec<Chunk>,
     /// The superblock as last written.
@@ -175,6 +191,18 @@ fn chunks<P: Persist>(p: &mut P, used: &mut [u32], fresh: &mut Vec<u32>, data: &
     Ok(out)
 }
 
+/// Every key a flush's values are at.
+fn in_use(pages: &[Page], pending: &[Chunk], dir: &[Chunk], spills: &[(Vec<u8>, Vec<Chunk>)]) -> Vec<u32> {
+    let mut out = Vec::new();
+    for p in pages {
+        out.push(p.key);
+    }
+    for c in pending.iter().chain(dir).chain(spills.iter().flat_map(|s| &s.1)) {
+        out.push(c.0);
+    }
+    out
+}
+
 fn keys(chunks: &[Chunk]) -> Vec<u32> {
     chunks.iter().map(|c| c.0).collect()
 }
@@ -188,6 +216,7 @@ impl<P: Persist> Disk<P> {
         let mut d = Disk {
             p,
             pages: Vec::new(),
+            spills: Vec::new(),
             pending: Vec::new(),
             dir: Vec::new(),
             sup: Vec::new(),
@@ -198,6 +227,7 @@ impl<P: Persist> Disk<P> {
         let loaded = d.load(rows);
         if loaded.is_none() {
             d.pages.clear();
+            d.spills.clear();
             d.pending.clear();
             d.dir.clear();
             d.sup.clear();
@@ -256,18 +286,27 @@ impl<P: Persist> Disk<P> {
         let pending_len = u32::decode(&mut r).ok()? as usize;
         for key in page_keys {
             let n = self.p.read(key, &mut buf)?;
-            let page = &buf[..n];
-            let mut r = Reader::new(page);
+            let page = buf[..n].to_vec();
+            let mut r = Reader::new(&page);
             let mut first = None;
             while !r.is_empty() {
-                let (path, value) = (r.bytes().ok()?, r.bytes().ok()?);
+                let path = r.bytes().ok()?;
+                let tag = r.varint().ok()?;
+                let len = usize::try_from(tag >> 1).ok()?;
                 first.get_or_insert_with(|| path.to_vec());
-                rows(path, value);
+                if tag & 1 == 0 {
+                    rows(path, r.take(len).ok()?);
+                } else {
+                    let keys = Vec::<u32>::decode(&mut r).ok()?;
+                    let (value, chunks) = self.blob(&keys, len)?;
+                    rows(path, &value);
+                    self.spills.push((path.to_vec(), chunks));
+                }
             }
             self.pages.push(Page {
                 first: first?,
                 key,
-                hash: hash(page),
+                hash: hash(&page),
             });
             mark(&mut self.used, key, true);
         }
@@ -298,8 +337,10 @@ impl<P: Persist> Disk<P> {
                 Ok(self.stats.last)
             }
             Err(Full) => {
+                // What it wrote is no one's: let go, and deleted.
                 for k in fresh {
                     mark(&mut self.used, k, false);
+                    self.p.delete(k);
                 }
                 self.stats.failed += 1;
                 Err(Full)
@@ -312,14 +353,32 @@ impl<P: Persist> Disk<P> {
         // outgrows a value.
         let mut packed: Vec<(Vec<u8>, Vec<u8>)> = Vec::new();
         let mut group = usize::MAX;
-        let mut too_big = 0;
-        let pages = &self.pages;
+        let (mut too_big, mut full) = (0, false);
+        let mut spills: Vec<(Vec<u8>, Vec<Chunk>)> = Vec::new();
+        let (pages, old_spills, p, used) = (&self.pages, &self.spills, &mut self.p, &mut self.used);
         rows(&mut |path, value| {
-            let mut rec = Vec::with_capacity(path.len() + value.len() + 4);
+            let mut rec = Vec::with_capacity(path.len() + value.len() + 8);
             put_bytes(&mut rec, path);
-            put_bytes(&mut rec, value);
+            if rec.len() + value.len() + 4 <= VALUE {
+                put_varint(&mut rec, (value.len() as u64) << 1);
+                rec.extend_from_slice(value);
+            } else {
+                // Spilled: its value in chunks, those of its last flush
+                // kept where their bytes are the same.
+                let old = old_spills
+                    .binary_search_by(|s| s.0.as_slice().cmp(path))
+                    .map_or(&[][..], |i| &old_spills[i].1);
+                let Ok(c) = chunks(p, used, fresh, value, old) else {
+                    full = true;
+                    return;
+                };
+                put_varint(&mut rec, (value.len() as u64) << 1 | 1);
+                ark_kernel::Encode::encode(&keys(&c), &mut rec);
+                spills.push((path.to_vec(), c));
+            }
             if rec.len() > VALUE {
                 too_big += 1;
+                spills.pop_if(|s| s.0 == path);
                 return;
             }
             let g = pages.partition_point(|p| p.first.as_slice() <= path).saturating_sub(1);
@@ -337,7 +396,11 @@ impl<P: Persist> Disk<P> {
             }
             group = g;
         });
+        if full {
+            return Err(Full);
+        }
         self.stats.too_big = too_big;
+        self.stats.spilled = spills.len() as u32;
         let mut joined: Vec<(Vec<u8>, Vec<u8>)> = Vec::new();
         for (first, bytes) in packed {
             match joined.last_mut() {
@@ -390,20 +453,20 @@ impl<P: Persist> Disk<P> {
         }
 
         // Committed: the keys no longer in use are free.
-        let old: Vec<u32> = self
-            .pages
-            .iter()
-            .map(|p| p.key)
-            .chain(keys(&self.pending))
-            .chain(keys(&self.dir))
-            .collect();
-        let new: Vec<u32> = page_keys.iter().copied().chain(keys(&pend)).chain(keys(&dir_chunks)).collect();
+        // Committed: the keys no longer in use (or written for a row it did
+        // not keep) are free, and deleted.
+        let mut old = in_use(&self.pages, &self.pending, &self.dir, &self.spills);
+        old.extend_from_slice(fresh);
+        let new = in_use(&pages, &pend, &dir_chunks, &spills);
         for k in old {
-            if !new.contains(&k) {
+            if !new.contains(&k) && self.used[(k / 32) as usize] & (1 << (k % 32)) != 0 {
                 mark(&mut self.used, k, false);
+                self.p.delete(k);
+                self.stats.deleted += 1;
             }
         }
         self.pages = pages;
+        self.spills = spills;
         self.pending = pend;
         self.dir = dir_chunks;
         self.sup = sup;
@@ -427,6 +490,9 @@ mod tests {
         values: BTreeMap<u32, Vec<u8>>,
         writes: u32,
         refuse: bool,
+        /// While refusing, how many writes it still takes: a storage that
+        /// fills part way through a flush.
+        allow: u32,
     }
 
     impl Persist for &mut Map {
@@ -439,11 +505,18 @@ mod tests {
         fn write(&mut self, key: u32, data: &[u8]) -> bool {
             assert!(data.len() <= VALUE);
             if self.refuse {
-                return false;
+                if self.allow == 0 {
+                    return false;
+                }
+                self.allow -= 1;
             }
             self.writes += 1;
             self.values.insert(key, data.to_vec());
             true
+        }
+
+        fn delete(&mut self, key: u32) {
+            self.values.remove(&key);
         }
     }
 
@@ -591,5 +664,95 @@ mod tests {
                 d.stats.used
             );
         }
+    }
+
+    /// A generator of the tests' random cases (xorshift64).
+    fn rng(mut seed: u64) -> impl FnMut(u64) -> u64 {
+        move |n: u64| {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            seed % n
+        }
+    }
+
+    /// At random: rows of every size, a few far past a page, put and
+    /// removed, flushed now and then, some flushes refused part way, over
+    /// many reopenings: they always come back as last flushed, the storage
+    /// holds exactly the values in use, and a large row unchanged is not
+    /// written again.
+    #[test]
+    fn large_rows_spill_and_come_back() {
+        let mut rand = rng(0x9e37_79b9_7f4a_7c15);
+        let mut map = Map::default();
+        let mut rows = Rowset::new();
+        let mut spilled = 0;
+        for round in 0..200 {
+            let (mut d, back, _) = open(&mut map);
+            assert_eq!(back, rows, "round {round}");
+            for _ in 0..1 + rand(4) {
+                let mut next = rows.clone();
+                for _ in 0..rand(6) {
+                    let k = vec![3, 0, 0, 0, 2, rand(12) as u8];
+                    if rand(4) == 0 {
+                        next.remove(&k);
+                    } else {
+                        let len = [rand(60), 200 + rand(400), 600 + rand(3000)][rand(3) as usize] as usize;
+                        next.insert(k, (0..len).map(|i| (i as u64 ^ rand(4)) as u8).collect());
+                    }
+                }
+                // Now and then the storage fills part way through.
+                let refuse = rand(8) == 0;
+                if refuse {
+                    d.persist().refuse = true;
+                    d.persist().allow = rand(4) as u32;
+                }
+                let flushed = d.flush(Meta::default(), &each(&next), &[]);
+                match flushed {
+                    Ok(_) => rows = next,
+                    Err(Full) => assert!(refuse),
+                }
+                d.persist().allow = 0;
+                d.persist().refuse = false;
+                spilled = spilled.max(d.stats.spilled);
+                assert_eq!(d.stats.too_big, 0);
+            }
+            assert_eq!(d.stats.used as usize, d.persist().values.len(), "round {round}: values kept, and in use");
+            // An unchanged flush writes nothing, the spilled rows' chunks too.
+            assert_eq!(d.flush(Meta::default(), &each(&rows), &[]).unwrap(), 0);
+        }
+        assert!(spilled > 3);
+    }
+
+    /// Rows put and taken away, many times over: the values stored stay in
+    /// proportion to what is held, as the keys let go are deleted.
+    #[test]
+    fn churn_keeps_the_storage_to_what_is_held() {
+        let mut rand = rng(0x2545_f491_4f6c_dd1d);
+        let mut map = Map::default();
+        let (mut d, _, _) = open(&mut map);
+        let mut rows = Rowset::new();
+        for round in 0..400 {
+            // A burst of rows in, then most of them out.
+            for _ in 0..rand(20) {
+                let mut k = vec![3, 0, 0, 0, 1];
+                k.extend_from_slice(&(rand(1 << 16) as u32).to_be_bytes());
+                rows.insert(k, vec![round as u8; [30, 300, 900][rand(3) as usize]]);
+            }
+            d.flush(Meta::default(), &each(&rows), &[]).unwrap();
+            let keep = rand(4) as usize;
+            let gone: Vec<Vec<u8>> = rows.keys().skip(keep).cloned().collect();
+            for k in gone {
+                rows.remove(&k);
+            }
+            d.flush(Meta::default(), &each(&rows), &[]).unwrap();
+            let bytes: usize = rows.iter().map(|(k, v)| k.len() + v.len() + 4).sum();
+            let stored = d.persist().values.len();
+            assert!(
+                stored <= 3 + 2 * bytes.div_ceil(VALUE) + rows.len(),
+                "round {round}: {stored} values for {bytes} bytes"
+            );
+        }
+        assert!(d.stats.deleted > 1000);
     }
 }
