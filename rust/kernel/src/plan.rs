@@ -293,6 +293,14 @@ impl Read for Recorder<'_> {
         self.note(SOURCES, Bound::Included(&k), Bound::Included(&k));
         self.db.sources(id)
     }
+
+    fn shared(&self) -> Option<crate::cell::Shared<'_>> {
+        let s = self.db.shared()?;
+        Some(crate::cell::Shared {
+            spans: self.spans.as_ref().or(s.spans),
+            ..s
+        })
+    }
 }
 
 /// A recorded range: its table and bounds.

@@ -308,45 +308,87 @@ pub fn tabs(p: &MediaPage) -> View<ListMsg> {
 
 /// The smallest window's view of a sound (ui/docs/pebble.md): a glyph and
 /// words in a row, words read and literal, a bar of how far, the next few
-/// in a list behind an `if let`, and the watch's buttons beside it all.
-#[derive(Clone, Debug, PartialEq)]
-pub struct GlancePage {
-    pub link: String,
-    pub status: String,
-    pub title: String,
-    pub progress: f64,
-    pub play_glyph: String,
+/// in a list behind an `if let`, and the watch's buttons beside it all;
+/// read from sources, as a watch's view is: a cell, a one-row plan and a
+/// plan.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Sound {
+    pub link: &'static str,
+    pub status: Text,
+    pub title: Text,
+    pub progress: Fraction,
+    pub play_glyph: &'static str,
     pub playing: bool,
-    pub next: Option<Queue>,
 }
 
+/// The sound, as the host keeps it.
+pub const SOUND: kernel::Cell<Sound> = kernel::Cell::at(0);
+
+/// A queue's heading: its one row.
 #[derive(Clone, Debug, PartialEq)]
-pub struct Queue {
-    pub heading: String,
-    pub tracks: Vec<Track>,
+pub struct Heading {
+    pub words: Vec<u8>,
+}
+
+/// One of the queue.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Tune {
+    pub title: Vec<u8>,
+    pub by: Vec<u8>,
+}
+
+impl kernel::Decode for Heading {
+    fn decode(r: &mut kernel::codec::Reader<'_>) -> Result<Self, kernel::codec::Error> {
+        Ok(Heading {
+            words: kernel::Decode::decode(r)?,
+        })
+    }
+}
+
+impl kernel::Decode for Tune {
+    fn decode(r: &mut kernel::codec::Reader<'_>) -> Result<Self, kernel::codec::Error> {
+        Ok(Tune {
+            title: kernel::Decode::decode(r)?,
+            by: kernel::Decode::decode(r)?,
+        })
+    }
+}
+
+pub fn heading() -> kernel::Of<Heading> {
+    kernel::Of::new(kernel::scan(kernel::TableId(1), std::ops::Bound::Unbounded, std::ops::Bound::Unbounded).take(1, false))
+}
+
+pub fn up_next(n: u32) -> kernel::Of<Tune> {
+    kernel::Of::new(kernel::scan(kernel::TableId(2), std::ops::Bound::Unbounded, std::ops::Bound::Unbounded).take(n as usize, false))
 }
 
 #[view]
-pub fn glance(p: &GlancePage) -> View<ListMsg> {
+pub fn glance() -> View<ListMsg> {
+    let s = cell(SOUND);
+    let next = row(heading());
+    let tunes = list(up_next(3u32));
     action_bar(
         vstack((
             hstack((
-                glyph(p.link).style(TextStyle::Caption).ink(Ink::Quiet),
-                text(p.status).style(TextStyle::Caption).lines(1),
+                glyph(s.link).style(TextStyle::Caption).ink(Ink::Quiet),
+                text(s.status).style(TextStyle::Caption).lines(1),
             ))
             .spacing(Space::S),
-            text(p.title).style(TextStyle::Title).lines(1),
-            if p.playing {
-                meter(p.progress, "accent")
+            text(s.title).style(TextStyle::Title).lines(1),
+            if s.playing {
+                meter(s.progress, "accent")
             } else {
                 text("Paused").style(TextStyle::Footnote).ink(Ink::Accent)
             },
             hstack((text("Now").style(TextStyle::Caption), spacer(), glyph("music").style(TextStyle::Caption))),
-            if let Some(q) = p.next {
-                card_section(for t in q.tracks {
-                    list_row(t.title).subtitle(t.by)
+            if let Some(q) = next {
+                let words = ark_app::text!("{}", q.words);
+                card_section(for t in tunes {
+                    let name = ark_app::text!("{}", t.title);
+                    let by = ark_app::text!("{}", t.by);
+                    list_row(name).subtitle(by)
                 })
-                .header(q.heading)
+                .header(words)
             },
         ))
         .spacing(Space::Xs)
@@ -354,7 +396,7 @@ pub fn glance(p: &GlancePage) -> View<ListMsg> {
         .padding(Edges::Horizontal, Space::Page),
     )
     .up("skip-back", "Back", ListMsg::Back)
-    .select(p.play_glyph, "Play or Pause", ListMsg::Toggle)
+    .select(s.play_glyph, "Play or Pause", ListMsg::Toggle)
     .down("skip-forward", "Skip", ListMsg::Forward)
     .into()
 }
@@ -362,9 +404,7 @@ pub fn glance(p: &GlancePage) -> View<ListMsg> {
 /// What the watch is written with: the test's own record and messages.
 const WATCH: ark_ui_gen::pebble::Screen = ark_ui_gen::pebble::Screen {
     source: "ui/rust/gen/tests/snapshots.rs",
-    root: "p",
-    sources: "things_app::glance",
-    uses: &["things_app::ListMsg"],
+    uses: &["things_app::{heading, up_next, ListMsg, SOUND}"],
     accent: "blue",
     glyphs: &["play", "pause"],
 };
@@ -448,7 +488,7 @@ fn every_file_is_its_snapshot() {
     let update = std::env::var_os("ARK_UPDATE_SNAPSHOTS").is_some();
     let mut stale = vec![];
     let mut all = files(&app(), "dev.things.android");
-    all.push(("glance_watch.rs.snap".into(), ark_ui_gen::pebble::emit(&glance::record(), &WATCH)));
+    all.push(("glance_watch.rs.snap".into(), ark_ui_gen::pebble::emit(&glance::recording(), &WATCH)));
     for (name, text) in all {
         let path = dir.join(&name);
         if update {
@@ -540,24 +580,31 @@ fn primitives_are_written_as_each_toolkits_own_layout() {
 
 #[test]
 fn the_watch_is_its_layers_laid_out_by_tokens() {
-    let rs = ark_ui_gen::pebble::emit(&glance::record(), &WATCH);
+    let rs = ark_ui_gen::pebble::emit(&glance::recording(), &WATCH);
     // The action bar first, its literal glyphs set once, its read one drawn.
     assert!(rs.contains("ui.action_bar(CONTAINER_HIGH, INK, ACTION_GLYPH);"), "{rs}");
     assert!(rs.contains("ui.set_action(Button::Up, \"skip-back\".as_bytes());"), "{rs}");
-    assert!(rs.contains("(Button::Select, things_app::glance::play_glyph),"), "{rs}");
+    assert!(rs.contains("(Button::Select, name_0),"), "{rs}");
     assert!(rs.contains("(Button::Down, ListMsg::Forward),"), "{rs}");
     // Every glyph it can draw is painted from arkui's drawings.
     for g in ["\"music\"", "\"pause\"", "\"play\"", "\"skip-back\"", "\"skip-forward\""] {
         assert!(rs.contains(&format!("Glyph {{ name: {g}.as_bytes()")), "{g}: {rs}");
     }
-    // An `if` is both branches in one frame, each shown while its source
-    // holds; an `if let`'s item's paths are its source's.
-    assert!(rs.contains("(things_app::glance::playing, &[3], &[4]),"), "{rs}");
-    assert!(rs.contains("(things_app::glance::next, &[7], &[]),"), "{rs}");
+    // An `if` is both branches in one frame, each shown while its flag
+    // holds; an `if let`'s item is what its source holds.
+    assert!(rs.contains("(flag_4, &[3], &[4]),"), "{rs}");
+    assert!(rs.contains("(flag_6, &[7], &[]),"), "{rs}");
     assert!(
-        rs.contains("(7, List { header: things_app::glance::next_heading, count: things_app::glance::next_tracks, title: things_app::glance::next_tracks_title, line: things_app::glance::next_tracks_by }),"),
+        rs.contains("(7, List { header: words_7, count: count_8, title: words_9, line: words_10 }),"),
         "{rs}"
     );
+    // Each binding reads the view's lets: a cell's value in place, a
+    // keyed watch's row shared by the layers that read it, a row's item
+    // by the row.
+    assert!(rs.contains("let s = &::ark_kernel::source::cell(db, SOUND);"), "{rs}");
+    assert!(rs.contains("let next = &::ark_kernel::source::shared(db, "), "{rs}");
+    assert!(rs.contains("let Some(q) = next else { return };"), "{rs}");
+    assert!(rs.contains("::ark_kernel::source::item(db, "), "{rs}");
     // A glyph after a row's spacer at its end; the accent is the screen's.
     assert!(rs.contains("ui.glyph(6, Frame { x: PAGE_MARGIN + fill2 + fill2,"), "{rs}");
     assert!(rs.contains("BLUE_ACCENT"), "{rs}");
@@ -580,7 +627,7 @@ fn the_watch_is_its_layers_laid_out_by_tokens() {
         "{swift}"
     );
     assert!(
-        kotlin.contains("ActionItem(p.playGlyph, label = \"Play or Pause\", button = ActionButton.Select"),
+        kotlin.contains("ActionItem(p.s.playGlyph, label = \"Play or Pause\", button = ActionButton.Select"),
         "{kotlin}"
     );
 }

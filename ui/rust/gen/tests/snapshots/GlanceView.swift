@@ -8,24 +8,24 @@ struct GlanceView: View {
 
     var body: some View {
         let p = screen.page
-        ActionBar(items: [ActionItem("skip-back", label: "Back", button: .up, onTap: { screen.send(.back) }), ActionItem(p.playGlyph, label: "Play or Pause", button: .select, onTap: { screen.send(.toggle) }), ActionItem("skip-forward", label: "Skip", button: .down, onTap: { screen.send(.forward) })]) {
+        ActionBar(items: [ActionItem("skip-back", label: "Back", button: .up, onTap: { screen.send(.back) }), ActionItem(p.s.playGlyph, label: "Play or Pause", button: .select, onTap: { screen.send(.toggle) }), ActionItem("skip-forward", label: "Skip", button: .down, onTap: { screen.send(.forward) })]) {
             VStack(alignment: .leading, spacing: Space.xs) {
                 HStack(alignment: .center, spacing: Space.s) {
-                    Image(systemName: ArkGlyphs.sf(p.link))
+                    Image(systemName: ArkGlyphs.sf(p.s.link))
                         .arkType(.caption)
                         .foregroundStyle(Color.quiet)
                         .accessibilityHidden(true)
-                    Text(p.status)
+                    Text(p.s.status)
                         .arkType(.caption)
                         .foregroundStyle(Color.ink)
                         .lineLimit(1)
                 }
-                Text(p.title)
+                Text(p.s.title)
                     .arkType(.title)
                     .foregroundStyle(Color.ink)
                     .lineLimit(1)
-                if p.playing {
-                    MeterBar(p.progress, tint: "accent")
+                if p.s.playing {
+                    MeterBar(p.s.progress, tint: "accent")
                 } else {
                     Text("Paused")
                         .arkType(.footnote)
@@ -42,10 +42,10 @@ struct GlanceView: View {
                         .accessibilityHidden(true)
                 }
                 if let q = p.next {
-                    CardSection(title: q.heading) {
-                        ForEach(q.tracks, id: \.self) { t in
-                            ListRow(t.title, subtitle: t.by)
-                                .accessibilityIdentifier("list.row:" + ArkId.slug(t.title))
+                    CardSection(title: q.words) {
+                        ForEach(p.tunes, id: \.self) { t in
+                            ListRow(t.name, subtitle: t.by)
+                                .accessibilityIdentifier("list.row:" + ArkId.slug(t.name))
                         }
                     }
                 }

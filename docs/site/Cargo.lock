@@ -228,6 +228,7 @@ name = "ark-app"
 version = "0.1.0"
 dependencies = [
  "ark",
+ "ark-kernel",
  "ark-module",
  "arkui-macros",
 ]
@@ -257,6 +258,10 @@ dependencies = [
 
 [[package]]
 name = "ark-format"
+version = "0.1.0"
+
+[[package]]
+name = "ark-kernel"
 version = "0.1.0"
 
 [[package]]

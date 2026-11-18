@@ -792,6 +792,16 @@ on main with the apps working. Nothing is kept for compatibility.
    plan become keyed watches, and scalar functions share one result per
    settle; the Swift, Kotlin and
    Pebble emitters and their snapshots, all from the same `#[view]`.
+   **Done**, on the demo watchapp, ahead of `api` (step 12): a view's
+   sources are its `let`s (`cell(C)`, `row(f(…))`, `list(f(…))`), and
+   what it works out of them is a `let` over its bindings calling plain
+   functions, its `text!`s' holes kept apart. The recorder keeps them
+   beside the view (`Recording`); `Real` reads them through a node's
+   reader (`ark_kernel::source`); the Pebble emitter writes each layer's
+   binding from them, sharing what more than one layer reads within a
+   settle. The phones are written from the same recording, reading the
+   lets as a record's fields until step 10; harken and money keep their
+   records until their screens move (steps 9 and 13).
 9. **Every other host onto the new kernel:** phones, desktop, web and the
    server. The old kernel is deleted.
 10. **The phones' observable bridges.** Swift Observation and Compose

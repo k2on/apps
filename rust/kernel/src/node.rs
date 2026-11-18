@@ -336,7 +336,7 @@ pub struct Node<B: 'static, S> {
     sample: usize,
     offset: i64,
     /// Its cells, watches and readers.
-    sources: Sources,
+    pub(crate) sources: Sources,
     /// How many confirmations ran nothing again: what the tests see of a
     /// skipped replay.
     #[cfg(any(test, ark_selftest))]
@@ -521,20 +521,41 @@ impl<B: Body + Clone + 'static, S: Store> Node<B, S> {
     }
 
     /// Runs `f` as `reader` pulls: what it reads of rows, cells and
-    /// watches, through whatever functions it calls, is recorded in place of what it read last, and the settle
-    /// tells its sink when any of it changes.
-    pub fn read<R>(&mut self, reader: Reader, f: impl FnOnce(&dyn Read) -> R) -> R {
-        let (out, read) = {
-            let shared = self.view(Space::Shared);
-            let scope = self.scope(&shared, false);
-            let r = Recorder::new(&scope, true);
-            let out = f(&r);
-            (out, r.spans.map(core::cell::RefCell::into_inner).unwrap_or_default())
-        };
-        if let Some(r) = self.sources.readers.get_mut(reader.0 as usize) {
-            *r = read;
+    /// watches, through whatever functions it calls, is recorded in place
+    /// of what it read last, and the settle tells its sink when any of it
+    /// changes. A keyed watch it asked for that the node did not keep yet
+    /// ([`crate::source`]) is made, and `f` run again over it.
+    pub fn read<R>(&mut self, reader: Reader, mut f: impl FnMut(&dyn Read) -> R) -> R {
+        loop {
+            let (out, read) = {
+                let shared = self.view(Space::Shared);
+                let scope = self.scope(&shared, false);
+                let r = Recorder::new(&scope, true);
+                let out = f(&r);
+                (out, r.spans.map(core::cell::RefCell::into_inner).unwrap_or_default())
+            };
+            if !self.watch_wanted() {
+                if let Some(r) = self.sources.readers.get_mut(reader.0 as usize) {
+                    *r = read;
+                }
+                return out;
+            }
         }
-        out
+    }
+
+    /// Makes the keyed watches a read asked for, if it asked for any,
+    /// forgetting what was shared over their absence.
+    #[inline(never)]
+    fn watch_wanted(&mut self) -> bool {
+        let wanted = core::mem::take(self.sources.wanted.get_mut());
+        if wanted.is_empty() {
+            return false;
+        }
+        for (key, args, plan) in wanted {
+            self.watch(key, &args, || plan);
+        }
+        self.sources.calls.get_mut().clear();
+        true
     }
 
     /// [`Node::read`] for a caller with many kinds of reader (a toolkit's

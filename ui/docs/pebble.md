@@ -8,22 +8,35 @@ playing (`ui/pebble/host/demo/view`, step 5 of `docs/north-star.md`).
 
 ```rust
 #[view]
-pub fn screen(p: &Sources) -> View<Act> {
+pub fn screen() -> View<Act> {
+    let link = cell(STATUS);
+    let now = cell(NOW);
+    let p = row(playback());
+    let next = list(up_next(SHOWN));
+    let status = show::status_line(link);
+    let title = show::title(p);
+    let at = show::at(p, now);
+    …
     action_bar(
         vstack((
             vstack((
-                hstack((glyph(p.link).style(TextStyle::Caption).ink(Ink::Quiet), text(p.status)…)).spacing(Space::S),
-                text(p.title).style(TextStyle::Title).lines(1),
+                hstack((glyph(wifi).style(TextStyle::Caption).ink(Ink::Quiet), text(status)…)).spacing(Space::S),
+                text(title).style(TextStyle::Title).lines(1),
                 …
-                vstack((meter(p.progress, "accent"), hstack((text(p.at), spacer(), text(p.length)))))…,
+                vstack((meter(progress, "accent"), hstack((text(at), spacer(), text(length))))),
             ))
             .align(Align::Start)
             .padding(Edges::Horizontal, Space::Page),
-            card_section(for t in p.next { list_row(t.title).subtitle(t.line) }).header(p.queue),
+            card_section(for t in next {
+                let name = text!("{}", t.title);
+                let line = text!("{}  {}", t.artist, Clock(u64::from(t.ms)));
+                list_row(name).subtitle(line)
+            })
+            .header(heading),
         ))
         .spacing(Space::S),
     )
-    .select(p.play_glyph, p.play_label, Act::Toggle)
+    .select(play, say, Act::Toggle)
     .down("skip-forward", "Skip", Act::Skip)
     .into()
 }
@@ -48,8 +61,11 @@ closures) and its layout and diffing linked into the app. Written at build
 time there is one view definition, the layout is worked out once, and the
 watch links only the layers it uses.
 
-What it writes, for a view of `p: &Sources` sending `Act`, where the
-`pebble::Screen` names the module of source functions (`sources`):
+The view reads sources, never a record: the host's two cells (`STATUS`,
+`NOW`), what plays (a one-row plan) and the queue's first few (a plan),
+each a `let`, and what it shows of them is worked out in `let`s by plain
+functions of values (`now_playing::show`), the same on the watch as on
+every toolkit. What it writes, for a view sending `Act`:
 
 - `GLYPHS`: each glyph the view names, and those its paths may name (the
   `glyphs` of its `pebble::Screen`), arkui's Lucide drawings flattened into
@@ -57,31 +73,33 @@ What it writes, for a view of `p: &Sources` sending `Act`, where the
 - `build(ui)`: each layer made once, at a frame that is an expression of
   the room the window gives and the tokens, never a number; a literal's
   glyph or label set here;
-- `BINDINGS`: a table, in rodata, binding each layer the view reads into
-  to a function of the node named by its path (`p.title` is
-  `sources::title`, a `for t in p.next`'s `t.title` is
-  `sources::next_title`, called with the row), and each `if`'s branches to
-  the flag that shows them;
+- a function for each layer that reads a `let`, written from the `let`s
+  its path reads, in order, each the view's own Rust: a cell's value
+  (`ark_kernel::source::cell`), a keyed watch's row or rows (`row`,
+  `rows`, `count`, and a row's item by the row, `item`), a value worked
+  out, and a `text!`'s template written straight into the layer's line,
+  hole by hole. A `let` more than one layer reads (what plays) is worked
+  out once a settle and shared (`ark_kernel::source::shared`);
+- `BINDINGS`: a table, in rodata, binding each layer to its function,
+  and each `if`'s branches to the flag that shows them;
 - `PRESS`: the message a button sends.
 
-`Sources` is the view's declaration, not a value the watch makes: the
-recorder walks it for the snapshots and the phones, which keep drawing
-from it until the watch's way reaches them (`docs/north-star.md`, step
-10). On the watch nothing is copied out of the node. `Ui::bind` gives each
-binding a kernel reader; the host's `Node::settle` hands `Ui` (the sink)
-the readers whose recorded reads changed, and their layers are marked
-dirty; as PebbleOS draws one, the shim asks Rust for its words
-(`ark_pull`, `ark_pull_meter`), and the source runs through the node,
-its reads recorded against the layer again. A layer is drawn only when
-what it read changed, and its words live only on the stack while it is
-drawn. Which reads a layer depends on is recorded, not worked out by the
-emitter: a source is a function, and only running it says what it reads.
+`Ui::bind` gives each binding a kernel reader; the host's `Node::settle`
+hands `Ui` (the sink) the readers whose recorded reads changed, and their
+layers are marked dirty; as PebbleOS draws one, the shim asks Rust for
+its words (`ark_pull`, `ark_pull_meter`), and the binding runs through
+the node, its reads recorded against the layer again. A keyed watch a
+binding asks for that the node does not keep yet is made, and the
+binding read again. A layer is drawn only when what it read changed, and
+its words live only on the stack while it is drawn. Which reads a layer
+depends on is recorded, not worked out by the emitter: only running a
+binding says what it reads.
 
 Text in a view is `Text`, never `String`: a literal converts, and `text!`
 builds a template whose holes are kept apart, so a toolkit that pulls
 (Pebble) or tracks (the phones, later) can tell the words from what fills
 them. There is no `From<String>`; logging keeps `format!`. The rule is
-every view's (`ark_app::view::Text`).
+every view's (`ark_kernel::show::Text`, which `ark_app::view` names).
 
 It paints a glyph into a 1-bit bitmap the first time it is drawn at a size
 and colour. The app has no resources.

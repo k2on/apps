@@ -80,12 +80,6 @@ computed outside a plan re-runs the expensive part on every tick. Plans,
 per-leaf bindings and `Text` templates cover nearly every case. An
 explicit memo waits until a real screen measures slow.
 
-### Scalar Results Are Not Yet Shared Within a Settle
-
-Two bindings calling the same scalar function in one settle each run it.
-Sharing the result within the settle needs the routes macro's keys, and
-comes with that step.
-
 ### Partial to Full Sync Must Start Over
 
 A device that goes from holding its queries' rows to holding everything
@@ -139,6 +133,37 @@ server.
 The watch's store packs rows into 256-byte values. A row over about 250
 bytes is not persisted, and freed storage keys are reused but never
 deleted.
+
+### A View's Sources Are Lets, Not Yet `api`
+
+A view reads sources in `let`s (`cell(C)`, `row(f(…))`, `list(f(…))`),
+and what it works out of them in further lets: the routes macro's `api.*`
+(docs/north-star.md, step 12) replaces the first, and `#[state]` cells
+the page's own (step 13). Until then:
+
+- a keyed watch's arguments are constants or the record's, never read
+  from another source, and are encoded by their own type (a literal is
+  written typed, `3u32`);
+- a keyed watch is kept by its function's name, not yet a generated id
+  (step 14), and once made it is kept while the node runs;
+- a sub-view is handed the record only, not a source's binding;
+- what is worked out goes in a `let`, never in a part's argument, and a
+  view names each `let` once;
+- the phones read a source view's lets as a record's fields (`p.title`),
+  which nothing yet builds for a source view: only the snapshots are
+  written from it. harken's and money's screens still read records, on
+  every toolkit;
+- a result is shared within a settle by the layer's key only on the
+  watch; `Real` works each `let` out once a build.
+
+### The Watch's Screen Grew With Its Sources
+
+Reading sources in place of hand-written functions grew the demo by about
+2.4 KB of code (61.1 KB in all) and its heap by about 0.9 KB: the keyed
+watches, the shared results (each a box and its read set), and each
+`Text`'s holes made before they are written. A binding could write its
+words straight into its line, not through a `Text`, when the emitter can
+see its function's template.
 
 ### The Pebble Generator's Gaps
 

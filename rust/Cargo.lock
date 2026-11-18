@@ -280,6 +280,7 @@ dependencies = [
  "ark-background",
  "ark-camera",
  "ark-haptics",
+ "ark-kernel",
  "ark-module",
  "ark-notifications",
  "ark-peer",

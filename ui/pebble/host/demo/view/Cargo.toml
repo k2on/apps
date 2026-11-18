@@ -8,6 +8,7 @@ description = "The demo watchapp's screen, laid out once in Rust: a `#[view]` of
 
 [dependencies]
 ark-app = { path = "../../../../rust/app" }
+ark-kernel = { path = "../../../../../rust/kernel", default-features = false }
 ark-ui-gen = { path = "../../../../rust/gen" }
 now-playing = { path = "../app" }
 

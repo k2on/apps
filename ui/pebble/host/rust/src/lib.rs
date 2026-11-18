@@ -30,7 +30,7 @@ pub mod text;
 pub mod tokens;
 pub mod ui;
 
-pub use host::{App, Ctx, Status, STATUS};
+pub use host::{App, Ctx};
 pub use rows::Rows;
 pub use ui::{Button, Ui};
 

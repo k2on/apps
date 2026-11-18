@@ -2,8 +2,11 @@
 // The layout is said once, in Rust; change it there.
 
 use ark_pebble::tokens::*;
+use ark_kernel::Read;
+use ark_pebble::text::Line;
 use ark_pebble::ui::{Align, Bindings, Button, Frame, Glyph, List, ListStyle, Ui};
-use now_playing::Act;
+use now_playing::{playback, show, up_next, Act, SHOWN};
+use ark_kernel::{Clock, NOW, STATUS};
 
 /// The glyphs it draws: Lucide's, flattened (`ark_pebble::ui::Glyph`).
 pub static GLYPHS: &[Glyph] = &[
@@ -34,26 +37,112 @@ pub fn build(ui: &mut Ui) {
     ui.list(7, Frame { x: 0, y: (SIDE_CAPTION).max(LINE_CAPTION) + LINE_TITLE + LINE_SUBHEADLINE + PROGRESS_HEIGHT + LINE_BODY + SPACE_S + SPACE_S + SPACE_S, w: w, h: fill0 }, ListStyle { title: FONT_HEADLINE, title_line: LINE_HEADLINE, subtitle: FONT_FOOTNOTE, header: FONT_HEADER, ink: INK, quiet: QUIET, ground: BACKGROUND, inset: PAGE_MARGIN });
 }
 
-/// What each layer shows: the screen's sources (crate::sources), read as PebbleOS draws.
+#[allow(unused_variables, clippy::needless_borrow, clippy::let_and_return)]
+fn name_0(db: &dyn Read) -> &'static [u8] {
+    let p = &::ark_kernel::source::shared(db, 30064771072, &|db| ::ark_kernel::source::row(db, 3481945068, &[], || playback()));
+    let play = &show :: play_glyph(p);
+    let name: &'static str = *(play);
+    name.as_bytes()
+}
+
+#[allow(unused_variables, clippy::needless_borrow, clippy::let_and_return)]
+fn name_1(db: &dyn Read) -> &'static [u8] {
+    let link = &::ark_kernel::source::cell(db, STATUS);
+    let wifi = &show :: link_glyph(link);
+    let name: &'static str = *(wifi);
+    name.as_bytes()
+}
+
+#[allow(unused_variables, clippy::needless_borrow, clippy::let_and_return)]
+fn words_2(db: &dyn Read, out: &mut Line) {
+    let link = &::ark_kernel::source::cell(db, STATUS);
+    let status = &show :: status_line(link);
+    ::ark_kernel::Hole::hole(status, out);
+}
+
+#[allow(unused_variables, clippy::needless_borrow, clippy::let_and_return)]
+fn words_3(db: &dyn Read, out: &mut Line) {
+    let p = &::ark_kernel::source::shared(db, 30064771072, &|db| ::ark_kernel::source::row(db, 3481945068, &[], || playback()));
+    let title = &show :: title(p);
+    ::ark_kernel::Hole::hole(title, out);
+}
+
+#[allow(unused_variables, clippy::needless_borrow, clippy::let_and_return)]
+fn words_4(db: &dyn Read, out: &mut Line) {
+    let p = &::ark_kernel::source::shared(db, 30064771072, &|db| ::ark_kernel::source::row(db, 3481945068, &[], || playback()));
+    let artist = &show :: artist(p);
+    ::ark_kernel::Hole::hole(artist, out);
+}
+
+#[allow(unused_variables, clippy::needless_borrow, clippy::let_and_return)]
+fn fraction_5(db: &dyn Read) -> u16 {
+    let p = &::ark_kernel::source::shared(db, 30064771072, &|db| ::ark_kernel::source::row(db, 3481945068, &[], || playback()));
+    let now = &::ark_kernel::source::cell(db, NOW);
+    let progress = &show :: progress(p, now);
+    (progress).0
+}
+
+#[allow(unused_variables, clippy::needless_borrow, clippy::let_and_return)]
+fn words_6(db: &dyn Read, out: &mut Line) {
+    let p = &::ark_kernel::source::shared(db, 30064771072, &|db| ::ark_kernel::source::row(db, 3481945068, &[], || playback()));
+    let now = &::ark_kernel::source::cell(db, NOW);
+    let at = &show :: at(p, now);
+    ::ark_kernel::Hole::hole(at, out);
+}
+
+#[allow(unused_variables, clippy::needless_borrow, clippy::let_and_return)]
+fn words_7(db: &dyn Read, out: &mut Line) {
+    let p = &::ark_kernel::source::shared(db, 30064771072, &|db| ::ark_kernel::source::row(db, 3481945068, &[], || playback()));
+    let length = &show :: length(p);
+    ::ark_kernel::Hole::hole(length, out);
+}
+
+#[allow(unused_variables, clippy::needless_borrow, clippy::let_and_return)]
+fn words_8(db: &dyn Read, out: &mut Line) {
+    let next = &::ark_kernel::source::rows(db, 1894785296, &{ let mut a = ::alloc::vec::Vec::new(); ::ark_kernel::Encode::encode(&(SHOWN), &mut a); a }, || up_next(SHOWN));
+    let heading = &show :: heading(next);
+    ::ark_kernel::Hole::hole(heading, out);
+}
+
+#[allow(unused_variables, clippy::needless_borrow, clippy::let_and_return)]
+fn count_9(db: &dyn Read) -> usize {
+    ::ark_kernel::source::count(db, 1894785296, &{ let mut a = ::alloc::vec::Vec::new(); ::ark_kernel::Encode::encode(&(SHOWN), &mut a); a }, || up_next(SHOWN))
+}
+
+#[allow(unused_variables, clippy::needless_borrow, clippy::let_and_return)]
+fn words_10(db: &dyn Read, i: usize, out: &mut Line) {
+    let Some(t) = &::ark_kernel::source::item(db, 1894785296, &{ let mut a = ::alloc::vec::Vec::new(); ::ark_kernel::Encode::encode(&(SHOWN), &mut a); a }, || up_next(SHOWN), i) else { return };
+    ::ark_kernel::Hole::hole(&(t.title), out);
+}
+
+#[allow(unused_variables, clippy::needless_borrow, clippy::let_and_return)]
+fn words_11(db: &dyn Read, i: usize, out: &mut Line) {
+    let Some(t) = &::ark_kernel::source::item(db, 1894785296, &{ let mut a = ::alloc::vec::Vec::new(); ::ark_kernel::Encode::encode(&(SHOWN), &mut a); a }, || up_next(SHOWN), i) else { return };
+    ::ark_kernel::Hole::hole(&(t.artist), out);
+    out.s("  ".as_bytes());
+    ::ark_kernel::Hole::hole(&(Clock(u64 :: from(t.ms))), out);
+}
+
+/// What each layer shows, by the functions above: read as PebbleOS draws.
 pub static BINDINGS: Bindings = Bindings {
     words: &[
-        (1, crate::sources::status),
-        (2, crate::sources::title),
-        (3, crate::sources::artist),
-        (5, crate::sources::at),
-        (6, crate::sources::length),
+        (1, words_2),
+        (2, words_3),
+        (3, words_4),
+        (5, words_6),
+        (6, words_7),
     ],
     meters: &[
-        (4, crate::sources::progress),
+        (4, fraction_5),
     ],
     glyphs: &[
-        (0, crate::sources::link),
+        (0, name_1),
     ],
     actions: &[
-        (Button::Select, crate::sources::play_glyph),
+        (Button::Select, name_0),
     ],
     lists: &[
-        (7, List { header: crate::sources::queue, count: crate::sources::next, title: crate::sources::next_title, line: crate::sources::next_line }),
+        (7, List { header: words_8, count: count_9, title: words_10, line: words_11 }),
     ],
     shown: &[],
 };

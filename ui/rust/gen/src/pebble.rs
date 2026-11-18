@@ -4,7 +4,8 @@
 //! written from it (ui/docs/pebble.md). The watch runs no view machinery:
 //! it runs what this writes.
 //!
-//! What it writes, for a view `now_playing(p: &Face) -> View<Act>`:
+//! What it writes, for a view `screen() -> View<Act>` that reads sources
+//! in its `let`s (`let p = row(playback())`, `let title = show::title(p)`):
 //!
 //! - `GLYPHS`: every glyph the view names, and those its paths may hold
 //!   ([`Screen::glyphs`]), arkui's Lucide drawings flattened into line
@@ -13,14 +14,17 @@
 //!   room the window gives and ui/theme.toml's tokens (`ark_pebble::tokens`,
 //!   named, never a number): a text layer, a meter, a glyph's bitmap layer,
 //!   a list (`MenuLayer`), a rectangle behind, and the action bar;
-//! - `BINDINGS`: what each layer shows, as data: for each a source
-//!   function of the screen's (the module [`Screen::sources`] names), by
-//!   the path the view read, `p.title` the source `title`, a `for t in
-//!   p.next`'s `t.title` the source `next_title`; and each `if`'s branches
-//!   shown while its source holds. The toolkit reads them through the
-//!   node, as PebbleOS draws, each layer's reads recorded against it, and
-//!   draws a layer again when what it read changed: no code is written per
-//!   layer, and no record exists between the node and the screen;
+//! - `BINDINGS`: what each layer shows, as data: for each a function of
+//!   the node's reader, written from the `let`s its path reads, in order,
+//!   each the view's own Rust (a cell's value, a keyed watch's row or
+//!   rows, a value worked out, a `text!` whose holes are written straight
+//!   into the layer's line); a `let` more than one layer reads is shared
+//!   within a settle (`ark_kernel::source::shared`); a `for`'s rows read
+//!   their item by the row; each `if`'s branches are shown while its flag
+//!   holds. The toolkit calls them through the node as PebbleOS draws,
+//!   each layer's reads recorded against it, and draws a layer again when
+//!   what it read changed: no record exists between the node and the
+//!   screen;
 //! - `PRESS`: the message each of the action bar's buttons sends.
 //!
 //! What it lays out: a vertical stack's content one under another, what is
@@ -36,7 +40,9 @@
 use std::collections::BTreeSet;
 use std::fmt::Debug;
 
-use ark_app::view::{Align, Axis, Edges, Ink, Layout, Modifier, Part, Prim, Section, Space, Surface, TextStyle, Val, View};
+use ark_app::view::{
+    Align, Axis, Edges, Ink, Keyed, Layout, Let, Modifier, Part, Prim, Recording, Section, Source, Space, Surface, TextStyle, Val, View,
+};
 
 use crate::{Arg, Msg};
 
@@ -45,13 +51,9 @@ use crate::{Arg, Msg};
 pub struct Screen {
     /// The Rust file it is written from, for the header.
     pub source: &'static str,
-    /// The sources' name in the view function (its parameter).
-    pub root: &'static str,
-    /// The module of the screen's source functions, as the generated code
-    /// names it (`crate::sources`): one for each path the view reads.
-    pub sources: &'static str,
-    /// What the generated code brings into scope: the messages' path
-    /// (`now_playing::sources::Act`).
+    /// What the generated code brings into scope: the messages, the
+    /// sources and the functions the view's `let`s name, as the view
+    /// imports them (`now_playing::{show, Act}`).
     pub uses: &'static [&'static str],
     /// The app's accent (ui/theme.toml's `[accent.<name>]`).
     pub accent: &'static str,
@@ -60,12 +62,22 @@ pub struct Screen {
     pub glyphs: &'static [&'static str],
 }
 
-/// The Rust module for `view`.
-pub fn emit<M: Debug>(view: &View<M>, s: &Screen) -> String {
+/// The Rust module for a recording.
+pub fn emit<M: Debug>(rec: &Recording<M>, s: &Screen) -> String {
+    let view = &rec.view;
+    for (i, l) in rec.lets.iter().enumerate() {
+        assert!(
+            !rec.lets[..i].iter().any(|m| m.name == l.name),
+            "a watch's view names each `let` once: `{}` twice",
+            l.name
+        );
+    }
     let mut e = Em {
         s,
         build: vec![],
         b: Tables::default(),
+        lets: rec.lets.clone(),
+        leaves: vec![],
         items: vec![],
         press: vec![],
         next: 0,
@@ -91,7 +103,7 @@ pub fn emit<M: Debug>(view: &View<M>, s: &Screen) -> String {
                         e.build.push(format!("ui.set_action({button}, {});", bytes_lit(g)));
                     }
                     Val::At(p) => {
-                        let f = e.src(p);
+                        let f = e.bind(LeafKind::Name, p);
                         e.b.actions.push(format!("({button}, {f})"));
                     }
                 }
@@ -105,6 +117,190 @@ pub fn emit<M: Debug>(view: &View<M>, s: &Screen) -> String {
         }
     }
     e.text()
+}
+
+/// A layer's binding, as it is placed, written out once every binding is
+/// known (so a let read by more than one is shared).
+struct Leaf {
+    /// The generated function's name.
+    name: String,
+    kind: LeafKind,
+    /// What it shows: a path rooted at a let or an item.
+    path: String,
+    /// The items it is under, outermost first.
+    under: Vec<Item>,
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum LeafKind {
+    /// `fn(&dyn Read, &mut Line)`: words.
+    Words,
+    /// `fn(&dyn Read, usize, &mut Line)`: a row's words.
+    RowWords,
+    /// `fn(&dyn Read) -> u16`: a meter's thousandths.
+    Fraction,
+    /// `fn(&dyn Read) -> &'static [u8]`: a glyph's name.
+    Name,
+    /// `fn(&dyn Read) -> usize`: how many rows.
+    Count,
+    /// `fn(&dyn Read) -> bool`: an `if`'s flag (`Some` for an `if let`'s).
+    Flag,
+    /// An `if let`'s flag: whether the path holds something.
+    Some,
+}
+
+impl LeafKind {
+    fn signature(self) -> &'static str {
+        match self {
+            LeafKind::Words => "(db: &dyn Read, out: &mut Line)",
+            LeafKind::RowWords => "(db: &dyn Read, i: usize, out: &mut Line)",
+            LeafKind::Fraction => "(db: &dyn Read) -> u16",
+            LeafKind::Name => "(db: &dyn Read) -> &'static [u8]",
+            LeafKind::Count => "(db: &dyn Read) -> usize",
+            LeafKind::Flag | LeafKind::Some => "(db: &dyn Read) -> bool",
+        }
+    }
+
+    /// What it shows while a binding it reads holds none.
+    fn none(self) -> &'static str {
+        match self {
+            LeafKind::Words | LeafKind::RowWords => "return",
+            LeafKind::Fraction | LeafKind::Count => "return 0",
+            LeafKind::Name => "return b\"\"",
+            LeafKind::Flag | LeafKind::Some => "return false",
+        }
+    }
+}
+
+/// A `for`'s or an `if let`'s item: its name and the path it is an item of.
+#[derive(Clone, Debug)]
+struct Item {
+    name: String,
+    of: String,
+    /// A `for`'s (one per row, the row `i`), or an `if let`'s.
+    each: bool,
+}
+
+/// How a binding's code is written: the lets and items it reads, each
+/// once, those more than one layer reads shared within a settle.
+struct Code<'e> {
+    lets: &'e [Let],
+    under: &'e [Item],
+    shared: &'e BTreeSet<String>,
+    keys: &'e [String],
+    none: &'static str,
+    done: BTreeSet<String>,
+    lines: Vec<String>,
+}
+
+impl Code<'_> {
+    fn let_of(&self, name: &str) -> Option<&Let> {
+        self.lets.iter().find(|l| l.name == name)
+    }
+
+    fn item(&self, name: &str) -> Option<&Item> {
+        self.under.iter().rev().find(|i| i.name == name)
+    }
+
+    /// The key a shared binding is kept by: its number, and its row's.
+    fn key(&self, name: &str) -> String {
+        let n = self.keys.iter().position(|k| k == name).expect("a binding's key") as u64;
+        let row = self.under.iter().any(|i| i.each) && self.depends_on_row(name);
+        if row {
+            format!("{} | i as u64", n << 32)
+        } else {
+            (n << 32).to_string()
+        }
+    }
+
+    fn depends_on_row(&self, name: &str) -> bool {
+        if let Some(i) = self.item(name) {
+            return i.each || self.depends_on_row(root(&i.of));
+        }
+        self.let_of(name).is_some_and(|l| l.deps.iter().any(|d| self.depends_on_row(d)))
+    }
+
+    /// Makes `name` (a let or an item) a reference in scope.
+    fn need(&mut self, name: &str) {
+        if self.done.contains(name) {
+            return;
+        }
+        if let Some(item) = self.item(name).cloned() {
+            let list = root(&item.of).to_string();
+            let keyed = match self.let_of(&list).map(|l| &l.what) {
+                Some(Source::List(k)) if item.of == list && item.each => Some(k.clone()),
+                _ => None,
+            };
+            let line = match keyed {
+                // A row's item, read by its row's layers alone: decoded by
+                // each, as cheaply as a shared one is cloned.
+                Some(k) => format!(
+                    "let Some({name}) = &::ark_kernel::source::item(db, {}, &{}, || {}, i) else {{ {} }};",
+                    k.key,
+                    args(&k),
+                    k.call,
+                    self.none
+                ),
+                None => {
+                    // An item of what is already a reference: read in place.
+                    self.need(&list);
+                    let of = &item.of;
+                    match item.each {
+                        true => format!("let Some({name}) = ({of}).get(i) else {{ {} }};", self.none),
+                        false if of.contains('.') => format!("let Some({name}) = &{of} else {{ {} }};", self.none),
+                        false => format!("let Some({name}) = {of} else {{ {} }};", self.none),
+                    }
+                }
+            };
+            self.lines.push(line);
+            self.done.insert(name.into());
+            return;
+        }
+        let Some(l) = self.let_of(name).cloned() else {
+            panic!("Pebble binds a view's `let`s and their items, not `{name}`: a watch's view reads sources, never a record")
+        };
+        for d in &l.deps {
+            self.need(d);
+        }
+        let value = match &l.what {
+            Source::Cell(c) => format!("::ark_kernel::source::cell(db, {c})"),
+            Source::Row(k) => format!("::ark_kernel::source::row(db, {}, &{}, || {})", k.key, args(k), k.call),
+            Source::List(k) => format!("::ark_kernel::source::rows(db, {}, &{}, || {})", k.key, args(k), k.call),
+            Source::Derived(e) => e.to_string(),
+            Source::Text { template, holes } => {
+                let holes: Vec<String> = holes.iter().map(|h| format!(", {h}")).collect();
+                format!("::ark_kernel::text!({template:?}{})", holes.join(""))
+            }
+        };
+        let value = self.share(name, value);
+        self.lines.push(format!("let {name} = &{value};"));
+        self.done.insert(name.into());
+    }
+
+    /// `value`, shared within a settle if more than one layer reads `name`
+    /// and it is more than a cell's value (which is read in place).
+    fn share(&self, name: &str, value: String) -> String {
+        let cell = matches!(self.let_of(name).map(|l| &l.what), Some(Source::Cell(_)));
+        if self.shared.contains(name) && !cell {
+            format!("::ark_kernel::source::shared(db, {}, &|db| {value})", self.key(name))
+        } else {
+            value
+        }
+    }
+}
+
+/// A keyed watch's arguments, encoded as its key takes them.
+fn args(k: &Keyed) -> String {
+    if k.args.is_empty() {
+        return "[]".into();
+    }
+    let enc: Vec<String> = k.args.iter().map(|a| format!("::ark_kernel::Encode::encode(&({a}), &mut a);")).collect();
+    format!("{{ let mut a = ::alloc::vec::Vec::new(); {} a }}", enc.join(" "))
+}
+
+/// A path's root binding.
+fn root(path: &str) -> &str {
+    path.split('.').next().unwrap_or(path)
 }
 
 /// A frame as expressions of the room and the tokens.
@@ -157,9 +353,12 @@ struct Em<'s> {
     s: &'s Screen,
     build: Vec<String>,
     b: Tables,
-    /// The `for`s' and `if let`s' items in scope, each with the source
-    /// name of what it is an item of.
-    items: Vec<(String, String)>,
+    /// The view's lets.
+    lets: Vec<Let>,
+    /// Each layer's binding, written once all are known.
+    leaves: Vec<Leaf>,
+    /// The `for`s' and `if let`s' items in scope.
+    items: Vec<Item>,
     press: Vec<(String, String)>,
     next: u8,
     fills: usize,
@@ -174,37 +373,56 @@ impl Em<'_> {
         id
     }
 
-    /// The source a path names: its root's fields (`p.title`, `title`),
-    /// or an item's under the name of what it is an item of (`t.title` in
-    /// `for t in p.next`, `next_title`).
-    fn name(&self, path: &str) -> String {
-        let (root, rest) = path.split_once('.').unwrap_or((path, ""));
-        let base = if root == self.s.root {
-            String::new()
-        } else {
-            match self.items.iter().rev().find(|(i, _)| i == root) {
-                Some((_, of)) => of.clone(),
-                None => panic!("Pebble binds paths from the sources, `{}`, or an item of theirs: {path}", self.s.root),
-            }
+    /// A binding of `kind` to `path`, under the items in scope: the name
+    /// of the function written for it.
+    fn bind(&mut self, kind: LeafKind, path: &str) -> String {
+        let path = &self.resolve(path);
+        let prefix = match kind {
+            LeafKind::Words | LeafKind::RowWords => "words",
+            LeafKind::Fraction => "fraction",
+            LeafKind::Name => "name",
+            LeafKind::Count => "count",
+            LeafKind::Flag | LeafKind::Some => "flag",
         };
-        let rest = rest.replace('.', "_");
-        match (base.is_empty(), rest.is_empty()) {
-            (true, _) => rest,
-            (false, true) => base,
-            (false, false) => format!("{base}_{rest}"),
+        let name = format!("{prefix}_{}", self.leaves.len());
+        self.leaves.push(Leaf {
+            name: name.clone(),
+            kind,
+            path: path.into(),
+            under: self.items.clone(),
+        });
+        name
+    }
+
+    /// A recorded path as the bindings name it: `p.title` (the record that
+    /// stands for the lets on the phones) the let `title`, an item's
+    /// `t.line` the let `line` under it, `t.title` the item's field.
+    fn resolve(&self, path: &str) -> String {
+        let mut parts = path.splitn(2, '.');
+        let (first, rest) = (parts.next().unwrap_or(""), parts.next().unwrap_or(""));
+        let (field, after) = rest.split_once('.').map_or((rest, ""), |(f, a)| (f, a));
+        let under = |l: &Let| match l.under.last() {
+            None => first == ark_app::view::RECORD,
+            Some(i) => i == first,
+        };
+        if self.lets.iter().any(|l| l.name == field && under(l)) {
+            if after.is_empty() {
+                field.to_string()
+            } else {
+                format!("{field}.{after}")
+            }
+        } else {
+            path.to_string()
         }
     }
 
-    /// The source function a path names, as the generated code calls it.
-    fn src(&self, path: &str) -> String {
-        format!("{}::{}", self.s.sources, self.name(path))
-    }
-
-    /// Words: a source's, or a literal's.
-    fn words(&self, v: &Val<String>) -> String {
-        match v {
-            Val::Is(t) => format!("|_, out| {{ out.s({}); }}", bytes_lit(t)),
-            Val::At(p) => self.src(p),
+    /// Words: a binding's, or a literal's.
+    fn words(&mut self, v: &Val<String>, row: bool) -> String {
+        match (v, row) {
+            (Val::Is(t), false) => format!("|_, out| {{ out.s({}); }}", bytes_lit(t)),
+            (Val::Is(t), true) => format!("|_, _, out| {{ out.s({}); }}", bytes_lit(t)),
+            (Val::At(p), false) => self.bind(LeafKind::Words, p),
+            (Val::At(p), true) => self.bind(LeafKind::RowWords, p),
         }
     }
 
@@ -225,12 +443,16 @@ impl Em<'_> {
     /// An `if`'s two branches in one frame, each shown while its source
     /// holds (an `if let`'s: while it is some, its item bound to it).
     fn branches<M: Debug>(&mut self, cond: &str, item: Option<&str>, yes: &View<M>, no: &View<M>, f: &Rect, align: Align) {
-        let flag = self.src(cond);
-        let of = self.name(cond);
+        let cond = &self.resolve(cond);
+        let flag = self.bind(if item.is_some() { LeafKind::Some } else { LeafKind::Flag }, cond);
         let arm = |e: &mut Self, v: &View<M>, item: Option<&str>| {
             let from = e.next;
             if let Some(i) = item {
-                e.items.push((i.to_string(), of.clone()));
+                e.items.push(Item {
+                    name: i.to_string(),
+                    of: cond.to_string(),
+                    each: false,
+                });
             }
             // Each at its own height, at the top of the frame both share.
             let at = Rect {
@@ -291,7 +513,7 @@ impl Em<'_> {
                 let ink = self.ink(&w.ink);
                 self.build
                     .push(format!("ui.text({id}, {}, FONT_{}, {ink}, Align::{at:?});", f.frame(), style(w.style)));
-                let words = self.words(&w.text);
+                let words = self.words(&w.text, false);
                 self.b.words.push(format!("({id}, {words})"));
             }
             Prim::Glyph { name, style: st, ink } => {
@@ -317,7 +539,7 @@ impl Em<'_> {
                         self.build.push(format!("ui.set_glyph({id}, {});", bytes_lit(g)));
                     }
                     Val::At(p) => {
-                        let f = self.src(p);
+                        let f = self.bind(LeafKind::Name, p);
                         self.b.glyphs.push(format!("({id}, {f})"));
                     }
                 }
@@ -407,7 +629,7 @@ impl Em<'_> {
                 self.build.push(format!("ui.meter({id}, {}, {fill}, CONTAINER_HIGH);", f.frame()));
                 let f = match fraction {
                     Val::Is(x) => format!("|_| {}", (x.clamp(0.0, 1.0) * 1000.0) as u16),
-                    Val::At(p) => self.src(p),
+                    Val::At(p) => self.bind(LeafKind::Fraction, p),
                 };
                 self.b.meters.push(format!("({id}, {f})"));
             }
@@ -426,8 +648,8 @@ impl Em<'_> {
             f.frame()
         ));
         let header = match &s.title {
-            None => self.words(&Val::Is(String::new())),
-            Some(t) => self.words(t),
+            None => self.words(&Val::Is(String::new()), false),
+            Some(t) => self.words(t, false),
         };
         let View::Each { list, item, body } = &*s.rows else {
             panic!("Pebble binds a list to a `for` over a source, its rows list_rows")
@@ -435,15 +657,18 @@ impl Em<'_> {
         let View::Part(Part::Row(r)) = &**body else {
             panic!("Pebble lists a `for` of list_rows only")
         };
-        let of = self.name(list);
-        let count = self.src(list);
-        self.items.push((item.clone(), of));
-        let row = |e: &Self, v: Option<&Val<String>>| match v {
+        let count = self.bind(LeafKind::Count, list);
+        let list = self.resolve(list);
+        self.items.push(Item {
+            name: item.clone(),
+            of: list,
+            each: true,
+        });
+        let title = self.words(&r.title, true);
+        let line = match &r.subtitle {
             None => "|_, _, _| {}".to_string(),
-            Some(Val::Is(t)) => format!("|_, _, out| {{ out.s({}); }}", bytes_lit(t)),
-            Some(Val::At(p)) => e.src(p),
+            Some(v) => self.words(v, true),
         };
-        let (title, line) = (row(self, Some(&r.title)), row(self, r.subtitle.as_ref()));
         self.items.pop();
         self.b.lists.push(format!(
             "({id}, List {{ header: {header}, count: {count}, title: {title}, line: {line} }})"
@@ -502,6 +727,106 @@ impl Em<'_> {
         format!("{case} {{ {} }}", fields.join(", "))
     }
 
+    /// Each binding's function: the lets and items its path reads, each
+    /// once and in order, then what it shows.
+    fn leaves(&self) -> Vec<String> {
+        // What each reads, to know what more than one does.
+        let mut reads: std::collections::BTreeMap<String, usize> = Default::default();
+        let empty = BTreeSet::new();
+        for l in &self.leaves {
+            let mut c = self.code(l, &empty, &[]);
+            self.body(l, &mut c);
+            for n in c.done {
+                *reads.entry(n).or_default() += 1;
+            }
+        }
+        let shared: BTreeSet<String> = reads.iter().filter(|r| *r.1 > 1).map(|r| r.0.clone()).collect();
+        let keys: Vec<String> = reads.keys().cloned().collect();
+        let mut out = vec![];
+        for l in &self.leaves {
+            let mut c = self.code(l, &shared, &keys);
+            let last = self.body(l, &mut c);
+            out.push("#[allow(unused_variables, clippy::needless_borrow, clippy::let_and_return)]".to_string());
+            out.push(format!("fn {}{} {{", l.name, l.kind.signature()));
+            out.extend(c.lines.iter().map(|x| format!("    {x}")));
+            out.extend(last.iter().map(|x| format!("    {x}")));
+            out.push("}".into());
+            out.push(String::new());
+        }
+        out
+    }
+
+    fn code<'e>(&'e self, l: &'e Leaf, shared: &'e BTreeSet<String>, keys: &'e [String]) -> Code<'e> {
+        Code {
+            lets: &self.lets,
+            under: &l.under,
+            shared,
+            keys,
+            none: l.kind.none(),
+            done: BTreeSet::new(),
+            lines: vec![],
+        }
+    }
+
+    /// What a binding shows of its path, once `c` has what it reads.
+    fn body(&self, l: &Leaf, c: &mut Code) -> Vec<String> {
+        let root = root(&l.path).to_string();
+        let fields = &l.path[root.len()..];
+        let expr = if fields.is_empty() { root.clone() } else { format!("&{root}{fields}") };
+        let let_ = c.let_of(&root).cloned();
+        match l.kind {
+            LeafKind::Count => {
+                if let (Some(Source::List(k)), true) = (let_.as_ref().map(|l| &l.what), fields.is_empty()) {
+                    if !c.shared.contains(&root) {
+                        return vec![format!("::ark_kernel::source::count(db, {}, &{}, || {})", k.key, args(k), k.call)];
+                    }
+                }
+                c.need(&root);
+                vec![format!("({expr}).len()")]
+            }
+            LeafKind::Words | LeafKind::RowWords => {
+                if let (Some(Source::Text { template, holes }), true) = (let_.as_ref().map(|l| &l.what), fields.is_empty()) {
+                    if !c.shared.contains(&root) {
+                        for d in &let_.as_ref().expect("a let").deps {
+                            c.need(d);
+                        }
+                        let mut lines = vec![];
+                        let mut holes = holes.iter();
+                        for (i, part) in template.split("{}").enumerate() {
+                            if i > 0 {
+                                if let Some(h) = holes.next() {
+                                    lines.push(format!("::ark_kernel::Hole::hole(&({h}), out);"));
+                                }
+                            }
+                            if !part.is_empty() {
+                                lines.push(format!("out.s({});", bytes_lit(part)));
+                            }
+                        }
+                        return lines;
+                    }
+                }
+                c.need(&root);
+                vec![format!("::ark_kernel::Hole::hole({expr}, out);")]
+            }
+            LeafKind::Fraction => {
+                c.need(&root);
+                vec![format!("({expr}).0")]
+            }
+            LeafKind::Name => {
+                c.need(&root);
+                vec![format!("let name: &'static str = *({expr});"), "name.as_bytes()".into()]
+            }
+            LeafKind::Flag => {
+                c.need(&root);
+                vec![format!("*({expr})")]
+            }
+            LeafKind::Some => {
+                c.need(&root);
+                vec![format!("({expr}).is_some()")]
+            }
+        }
+    }
+
     fn text(self) -> String {
         let s = self.s;
         let mut out = vec![
@@ -511,6 +836,8 @@ impl Em<'_> {
             "// The layout is said once, in Rust; change it there.".to_string(),
             String::new(),
             "use ark_pebble::tokens::*;".to_string(),
+            "use ark_kernel::Read;".to_string(),
+            "use ark_pebble::text::Line;".to_string(),
             "use ark_pebble::ui::{Align, Bindings, Button, Frame, Glyph, List, ListStyle, Ui};".to_string(),
         ];
         out.extend(s.uses.iter().map(|u| format!("use {u};")));
@@ -530,10 +857,8 @@ impl Em<'_> {
         out.extend(self.build.iter().map(|l| format!("    {l}")));
         out.push("}".into());
         out.push(String::new());
-        out.push(format!(
-            "/// What each layer shows: the screen's sources ({}), read as PebbleOS draws.",
-            s.sources
-        ));
+        out.extend(self.leaves());
+        out.push("/// What each layer shows, by the functions above: read as PebbleOS draws.".into());
         out.push("pub static BINDINGS: Bindings = Bindings {".into());
         for (name, rows) in [
             ("words", &self.b.words),

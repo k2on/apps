@@ -85,6 +85,13 @@ pub trait Read {
     fn sources(&self, _id: u32) -> Option<(&Sources, bool)> {
         None
     }
+
+    /// The node's sources as a reader shares them, unrecorded, and where
+    /// its reads are recorded: what [`crate::source`] keys its watches and
+    /// shared results in. A store shares none.
+    fn shared(&self) -> Option<crate::cell::Shared<'_>> {
+        None
+    }
 }
 
 /// Reading and writing rows.

@@ -10,9 +10,10 @@
 //! | the app's timer | [`App::wake`], at the time the app asked: an [`ark_kernel::Anchor`]'s next step |
 //! | AppMessage sent or failed | the next chunk, or the same again |
 //!
-//! After each, the host **settles**: it sets its status cell
+//! After each, the host **settles**: it sets its two cells, the status
 //! ([`STATUS`]: the link, the subscriptions, what waits, what was
-//! refused), lets the app set its own ([`App::settled`]: the time), and
+//! refused) and the tree's time ([`NOW`]), lets the app set its own and
+//! its wake ([`App::settled`]), and
 //! calls [`Node::settle`] with the screen as the sink: the layers whose
 //! recorded reads changed are marked dirty and PebbleOS draws them again,
 //! asking their sources as it draws ([`Ui`]). A change to what the disk
@@ -29,8 +30,8 @@ use core::cell::UnsafeCell;
 
 use ark_kernel::codec::{put_varint, Error, Reader};
 use ark_kernel::{
-    Actor, Body, Cell, Changes, Decode, Down, Encode, Frames, Handler, Node, Origin, Pending, QueryId, Refusal, Seq, Sink, Space, Spaces, Store,
-    TableId, Version,
+    Actor, Body, Changes, Decode, Down, Encode, Frames, Handler, Node, Origin, Pending, QueryId, Refusal, Seq, Sink, Space, Spaces, Status, Store,
+    TableId, Version, NOW, STATUS,
 };
 
 use crate::disk::{Disk, Meta};
@@ -56,27 +57,6 @@ mod timer {
     pub const FLUSH: u8 = 1;
     pub const RETRY: u8 = 2;
 }
-
-/// The link and what waits, for a status line: the host's cell
-/// ([`STATUS`]), set after every callback, so a screen's source reads it
-/// as it reads any other.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct Status {
-    pub online: bool,
-    /// Every query subscribed to has its rows: the link is in step.
-    pub complete: bool,
-    /// A control was refused for want of a link, since the link was last
-    /// in step.
-    pub unreached: bool,
-    /// The node's shared entries not yet confirmed.
-    pub pending: usize,
-    /// The entries refused since the app started, but those refused
-    /// offline.
-    pub refused: u32,
-}
-
-/// The host's status, the node's first cell.
-pub const STATUS: Cell<Status> = Cell::at(0);
 
 /// What an app's code is given: the node, the time, the link.
 pub struct Ctx<'a, B: 'static> {
@@ -155,8 +135,9 @@ pub trait App: 'static {
     fn button(&mut self, cx: &mut Ctx<'_, Self::Body>, button: Button);
     /// The time asked with [`Ctx::wake_at`] has come.
     fn wake(&mut self, cx: &mut Ctx<'_, Self::Body>);
-    /// Before each settle: what a callback did is in the node; the app
-    /// sets what cells it keeps and its next wake.
+    /// Before each settle, once the host has set its cells (the status,
+    /// the time): what a callback did is in the node; the app sets what
+    /// cells it keeps and its next wake.
     fn settled(&mut self, _cx: &mut Ctx<'_, Self::Body>) {}
 }
 
@@ -270,8 +251,10 @@ fn open<A: App>(app: A) -> Box<Host<A>> {
     let mut node = Node::new(Origin(meta.origin), meta.made, app.version(), app.handlers(), stores);
     node.set_actor(app.actor());
     node.resume(Seq(meta.cursor), pending);
-    // The node's first cell, the status (`STATUS`).
+    // The node's first two cells, which every view may read: the status
+    // and the time (`ark_kernel::source`).
     node.cell(Status::default());
+    node.cell(0u64);
     let mut origin = [0u8; 16];
     origin.copy_from_slice(Line::new().hex(meta.origin).bytes());
     let chunk = (sys::outbox_size() as usize).saturating_sub(MESSAGE_OVERHEAD);
@@ -369,6 +352,8 @@ impl<A: App> Host<A> {
             refused: self.refused,
         };
         self.node.set(STATUS, status);
+        let now = self.node.time(sys::now());
+        self.node.set(NOW, now);
         self.cx(|app, cx| app.settled(cx));
         let mut told = Told {
             ui: self.ui.as_mut(),

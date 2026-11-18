@@ -8,7 +8,7 @@
 //!   [`ark_kernel::Anchor::next`], never by a tick.
 //! - The queue's first rows come through the subscription
 //!   ([`now_playing::NEXT`]); the list shows the first three of them, a
-//!   plan the node watches ([`sources::NEXT`]).
+//!   plan the screen's view keeps as a watch (`now_playing::up_next`).
 //! - Select toggles play: a session entry setting playback whole at its
 //!   position now. Down skips: a shared `Pop` of the next track, pending
 //!   until the server confirms it (kept through a restart), and a session
@@ -24,30 +24,28 @@
 //!   its hellos measured.
 //! - The screen is a `#[view]` (`now-playing-view`), written out as
 //!   Pebble's layers by this crate's build (`build.rs`, ui/docs/pebble.md)
-//!   into [`screen`]: its layers and a table binding each to a source of
-//!   [`sources`]. No record is made: the node settles, the toolkit draws
-//!   again what read what changed, and asks the sources as it draws.
+//!   into [`screen`]: its layers and a table binding each to a function
+//!   written from the view's `let`s, which read the node's sources (the
+//!   host's status and time, the playback row, the queue's watch) through
+//!   `now_playing::show`. No record is made: the node settles, the toolkit
+//!   draws again what read what changed, and asks the bindings as it draws.
 
 #![no_std]
 
 extern crate alloc;
 
-pub mod sources;
-
 use ark_kernel::codec::from_slice;
-use ark_kernel::{Actor, Anchor, Handler, Space, Version};
+use ark_kernel::store::Range;
+use ark_kernel::{Actor, Anchor, Handler, Read, Space, Version};
 use ark_pebble::tokens::BACKGROUND;
 use ark_pebble::{App, Button, Ctx};
-use now_playing::{place, playing, upcoming, Act, Msg, Playing, Track, HANDLERS, NEXT, VERSION};
+use now_playing::{place, playing, Act, Msg, Playing, Track, HANDLERS, NEXT, QUEUE, VERSION};
 
 /// The screen's layers and their bindings, written at build time from its
 /// `#[view]`.
 pub mod screen {
     include!(concat!(env!("OUT_DIR"), "/screen.rs"));
 }
-
-/// How many of the queue the list shows.
-const SHOWN: usize = 3;
 
 struct NowPlaying;
 
@@ -82,9 +80,6 @@ impl App for NowPlaying {
     }
 
     fn start(&mut self, cx: &mut Ctx<'_, Msg>) {
-        let now = cx.time();
-        assert_eq!(cx.node.cell(now), sources::NOW);
-        assert_eq!(cx.node.watch(NEXT.0, &[], || upcoming(SHOWN)), sources::NEXT);
         cx.subscribe(NEXT, alloc::vec::Vec::new());
         cx.screen(screen::GLYPHS, BACKGROUND, screen::build, &screen::BINDINGS);
     }
@@ -108,7 +103,12 @@ impl App for NowPlaying {
                 let _ = cx.make(Space::Session, Msg::Play { player, playing });
             }
             Act::Skip => {
-                let first = cx.node.answer(sources::NEXT).and_then(|l| l.rows().first().cloned());
+                // The queue's first, as the node's view holds it.
+                let mut first = None;
+                cx.node.view(Space::Shared).scan(QUEUE, Range::all(), &mut |k, v| {
+                    first = Some((k.to_vec(), v.to_vec()));
+                    false
+                });
                 let Some((key, value)) = first else { return };
                 let (Some(at), Ok(track)) = (place(&key), from_slice::<Track>(&value)) else {
                     return;
@@ -130,10 +130,8 @@ impl App for NowPlaying {
 
     fn wake(&mut self, _: &mut Ctx<'_, Msg>) {}
 
-    /// The time, as the clock's layers read it, and the next wake.
+    /// The next wake: when the clock next changes on the screen.
     fn settled(&mut self, cx: &mut Ctx<'_, Msg>) {
-        let now = cx.time();
-        cx.node.set(sources::NOW, now);
         next_wake(cx);
     }
 }

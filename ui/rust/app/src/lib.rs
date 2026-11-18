@@ -682,6 +682,9 @@ mod platform;
 pub mod shell;
 pub mod shots;
 pub mod view;
+
+/// A view's words: a template whose holes are filled apart.
+pub use ark_kernel::text;
 pub mod welcome;
 pub mod window;
 pub mod writing;

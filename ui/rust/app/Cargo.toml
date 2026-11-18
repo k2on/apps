@@ -14,6 +14,9 @@ ark = { path = "../../../rust/ark" }
 ark-module = { path = "../module" }
 # `#[view]`.
 arkui-macros = { path = "../arkui-macros" }
+# What a view reads and shows: sources (cells, keyed watches, shared
+# results) and words (`Text`), as every device agrees on them.
+ark-kernel = { path = "../../../rust/kernel", default-features = false }
 
 [features]
 # The "Notify Me" setting registers the device for push as well as its

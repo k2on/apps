@@ -84,9 +84,10 @@ phones' generator and iced draw. The watch's build (`watch/build.rs`)
 records it and ark-ui-gen's `pebble` emitter writes it out as no_std Rust:
 the layers made once at frames worked out from the window and
 ui/theme.toml's tokens (`rust/src/tokens.rs`, written by `nix run
-.#update-theme`), a table binding each layer to a source function of the
-node (`demo/watch/src/sources.rs`: `p.title` is `sources::title`), and what
-each button sends. `ui.rs` is the toolkit it is written over: `Ui` paints
+.#update-theme`), a function for each layer written from the view's
+`let`s over the node's sources (the host's status and time, the playback
+row, the queue's watch) and a table binding each layer to its own, and
+what each button sends. `ui.rs` is the toolkit it is written over: `Ui` paints
 arkui's glyphs into 1-bit bitmaps, so the app has no resources, gives each
 binding a kernel reader, and is the node's sink. The shim makes each layer
 by id (a drawn text layer, a drawn meter, a `BitmapLayer`, a `MenuLayer`,

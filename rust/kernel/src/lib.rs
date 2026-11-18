@@ -19,7 +19,11 @@
 //! ([`Node::settle`]), which pushes the rows' changes through the watches,
 //! marks what read anything that changed, and tells a [`Sink`] once per
 //! reader. A database with no views has no sink to tell, and views with no
-//! database link no sync. An
+//! database link no sync. What a view reads and shows is here too, as
+//! every device agrees on it: its [`source`]s (a function returning a plan
+//! kept as a watch by its name and arguments, results shared within a
+//! settle, the host's [`STATUS`] and [`NOW`] cells) and its words
+//! ([`show`]: [`Text`] and its holes). An
 //! upstream serves its downstream nodes with a [`Serve`], keeping per
 //! client the record of what it holds: the server's authority does, and a
 //! phone's [`Relay`] serves its watch from the phone's own view. Neither is
@@ -50,7 +54,9 @@ pub mod plan;
 pub mod relay;
 #[cfg(feature = "upstream")]
 pub mod serve;
+pub mod show;
 mod slot;
+pub mod source;
 pub mod store;
 pub mod sync;
 
@@ -66,6 +72,8 @@ pub use plan::{prefix, scan, Changes, Diff, Live, Patch, Plan};
 pub use relay::{Relay, Served};
 #[cfg(feature = "upstream")]
 pub use serve::{Conn, Serve};
+pub use show::{Clock, Fraction, Hole, Put, Text};
+pub use source::{Of, Status, NOW, STATUS};
 pub use store::{Layer, Memory, Overlay, Read, Store, TableId, View, Write, Writes};
 #[cfg(feature = "upstream")]
 pub use sync::Feed;
@@ -84,6 +92,8 @@ pub mod selftest {
         crate::codec::tests::ALL,
         crate::slot::tests::ALL,
         crate::cell::tests::ALL,
+        crate::show::tests::ALL,
+        crate::source::tests::ALL,
         crate::anchor::tests::ALL,
         crate::entry::tests::ALL,
         crate::store::tests::ALL,

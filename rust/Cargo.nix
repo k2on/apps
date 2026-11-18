@@ -1223,6 +1223,11 @@ rec {
             packageId = "ark";
           }
           {
+            name = "ark-kernel";
+            packageId = "ark-kernel";
+            usesDefaultFeatures = false;
+          }
+          {
             name = "ark-module";
             packageId = "ark-module";
           }

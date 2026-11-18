@@ -15,7 +15,10 @@
 //!   link ([`ark_kernel::Refusal::OFFLINE`]).
 //! - **The query** a watch subscribes to ([`NEXT`]): the queue's first
 //!   [`HELD`] rows, of which its screen shows the first few.
-//! - **What the screen's buttons send** ([`Act`]).
+//! - **What the screen's buttons send** ([`Act`]), and **what its view
+//!   reads**: the plans it keeps as watches ([`playback`], [`up_next`])
+//!   and what it shows of them ([`show`]), plain functions of values that
+//!   the view's `let`s call, on the watch as on every other toolkit.
 
 #![no_std]
 
@@ -25,7 +28,9 @@ use alloc::vec::Vec;
 use core::ops::Bound;
 
 use ark_kernel::codec::{from_slice, to_vec, Error, Reader};
-use ark_kernel::{scan, Anchor, Body, Cx, Decode, Encode, Handler, HandlerId, Origin, Plan, Query, QueryId, Read, Refusal, Space, TableId, Version};
+use ark_kernel::{
+    scan, Anchor, Body, Cx, Decode, Encode, Handler, HandlerId, Of, Origin, Plan, Query, QueryId, Read, Refusal, Space, TableId, Version,
+};
 
 /// The build's version.
 pub const VERSION: Version = Version(1);
@@ -143,6 +148,125 @@ pub fn upcoming(n: usize) -> Plan {
 /// A queue row's place, from its key.
 pub fn place(key: &[u8]) -> Option<u32> {
     Some(u32::from_be_bytes(key.try_into().ok()?))
+}
+
+/// How many of the queue the screen shows.
+pub const SHOWN: u32 = 3;
+
+/// What is playing: the first player's playback, a one-row plan the
+/// screen keeps as a watch.
+pub fn playback() -> Of<Playing> {
+    Of::new(scan(PLAYBACK, Bound::Unbounded, Bound::Unbounded).take(1, false))
+}
+
+/// The queue's first `n`, as the screen keeps them.
+pub fn up_next(n: u32) -> Of<Track> {
+    Of::new(upcoming(n as usize))
+}
+
+/// What the screen shows of what it reads: plain functions of values,
+/// which its view's `let`s call (each handed its bindings by reference),
+/// the same on the watch and on every other toolkit.
+pub mod show {
+    use super::{Playing, Track};
+    use ark_kernel::{text, Clock, Fraction, Hole, Put, Status, Text};
+
+    /// The link and what waits: "Online", "Offline, 1 Pending".
+    pub fn status_line(s: &Status) -> Text {
+        let word = match (s.online, s.complete) {
+            _ if s.unreached => "Can't Reach Player",
+            (false, _) => "Offline",
+            (true, false) => "Syncing",
+            (true, true) => "Online",
+        };
+        text!("{}{}{}", word, Note(s.pending as u64, " Pending"), Note(u64::from(s.refused), " Refused"))
+    }
+
+    /// `, 2 Pending`, or nothing at none.
+    struct Note(u64, &'static str);
+
+    impl Hole for Note {
+        fn hole(&self, out: &mut dyn Put) {
+            if self.0 > 0 {
+                out.put(b", ");
+                self.0.hole(out);
+                out.put(self.1.as_bytes());
+            }
+        }
+    }
+
+    /// The glyph before the status: `wifi`, `refresh-cw` (syncing),
+    /// `wifi-off`.
+    pub fn link_glyph(s: &Status) -> &'static str {
+        match s {
+            s if s.online && s.complete && !s.unreached => "wifi",
+            s if s.online && !s.unreached => "refresh-cw",
+            _ => "wifi-off",
+        }
+    }
+
+    pub fn title(p: &Option<Playing>) -> Text {
+        match p {
+            Some(p) => text!("{}", p.track.title),
+            None => text!("Nothing Playing"),
+        }
+    }
+
+    pub fn artist(p: &Option<Playing>) -> Text {
+        text!("{}", p.as_ref().map(|p| &p.track.artist))
+    }
+
+    /// Where playback is at `now`, and how long the track is.
+    fn position(p: &Option<Playing>, now: u64) -> Option<(u64, u64)> {
+        let p = p.as_ref()?;
+        let ms = u64::from(p.track.ms);
+        Some((p.anchor.position(now).min(ms), ms))
+    }
+
+    /// How far along, as the clock under it reads.
+    pub fn progress(p: &Option<Playing>, now: &u64) -> Fraction {
+        position(p, *now).map_or(Fraction(0), |(at, ms)| Fraction::of_seconds(at, ms))
+    }
+
+    /// Where it is: `1:23`.
+    pub fn at(p: &Option<Playing>, now: &u64) -> Text {
+        text!("{}", position(p, *now).map(|(at, _)| Clock(at)))
+    }
+
+    /// How long it is: `3:45`.
+    pub fn length(p: &Option<Playing>) -> Text {
+        text!("{}", p.as_ref().map(|p| Clock(u64::from(p.track.ms))))
+    }
+
+    /// The queue's heading.
+    pub fn heading(next: &[Track]) -> Text {
+        match next.is_empty() {
+            true => text!("Queue Is Empty"),
+            false => text!("Up Next"),
+        }
+    }
+
+    fn playing(p: &Option<Playing>) -> bool {
+        p.as_ref().is_some_and(|p| p.anchor.playing)
+    }
+
+    /// Select's glyph: pause while playing, else play.
+    pub fn play_glyph(p: &Option<Playing>) -> &'static str {
+        if playing(p) {
+            "pause"
+        } else {
+            "play"
+        }
+    }
+
+    /// What Select is said as.
+    pub fn play_label(p: &Option<Playing>) -> Text {
+        if playing(p) {
+            text!("Pause")
+        } else {
+            text!("Play")
+        }
+    }
 }
 
 /// What is playing, from a session space: the first player's, with whose

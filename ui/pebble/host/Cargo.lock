@@ -19,6 +19,7 @@ name = "ark-app"
 version = "0.1.0"
 dependencies = [
  "ark",
+ "ark-kernel",
  "ark-module",
  "arkui-macros",
 ]
@@ -244,6 +245,7 @@ name = "now-playing-view"
 version = "0.1.0"
 dependencies = [
  "ark-app",
+ "ark-kernel",
  "ark-ui-gen",
  "now-playing",
 ]

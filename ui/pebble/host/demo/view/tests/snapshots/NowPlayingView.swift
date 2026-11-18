@@ -8,11 +8,11 @@ struct NowPlayingView: View {
 
     var body: some View {
         let p = screen.page
-        ActionBar(items: [ActionItem(p.playGlyph, label: p.playLabel, button: .select, onTap: { screen.send(.toggle) }), ActionItem("skip-forward", label: "Skip", button: .down, onTap: { screen.send(.skip) })]) {
+        ActionBar(items: [ActionItem(p.play, label: p.say, button: .select, onTap: { screen.send(.toggle) }), ActionItem("skip-forward", label: "Skip", button: .down, onTap: { screen.send(.skip) })]) {
             VStack(alignment: .center, spacing: Space.s) {
                 VStack(alignment: .leading, spacing: 0) {
                     HStack(alignment: .center, spacing: Space.s) {
-                        Image(systemName: ArkGlyphs.sf(p.link))
+                        Image(systemName: ArkGlyphs.sf(p.wifi))
                             .arkType(.caption)
                             .foregroundStyle(Color.quiet)
                             .accessibilityHidden(true)
@@ -46,10 +46,10 @@ struct NowPlayingView: View {
                         .padding(.top, Space.s)
                 }
                     .padding(.horizontal, Space.page)
-                CardSection(title: p.queue) {
+                CardSection(title: p.heading) {
                     ForEach(p.next, id: \.self) { t in
-                        ListRow(t.title, subtitle: t.line)
-                            .accessibilityIdentifier("now-playing.row:" + ArkId.slug(t.title))
+                        ListRow(t.name, subtitle: t.line)
+                            .accessibilityIdentifier("now-playing.row:" + ArkId.slug(t.name))
                     }
                 }
             }

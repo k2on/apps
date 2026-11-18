@@ -10,23 +10,34 @@
 //! - `if p.flag { … } else { … }` into `B::when` (no `else` is nothing);
 //! - `if let Some(x) = p.opt { … }` into `B::when_some`;
 //! - a call handed a binding itself (`account_row(a)`) into a sub-view's,
-//!   `account_row::<B>(a)`.
+//!   `account_row::<B>(a)`;
+//! - a `let` that reads a source or a binding into the backend's: `let s =
+//!   cell(STATUS)` a cell's value, `let p = row(playback())` and `let q =
+//!   list(up_next(3))` a function returning a plan, kept as a watch by its
+//!   name and arguments, `let line = text!("{}  {}", t.artist, t.at)`
+//!   words whose holes are kept apart, and any other `let` over bindings
+//!   (`let title = title(p)`) a value worked out from them, its bindings
+//!   handed to it by reference. A source's binding, or a let's, handed to
+//!   a part is its value (`text(title)`); what is worked out goes in a
+//!   `let`, never in a part's argument.
 //!
 //! What it cannot follow is a compile error that says so: a method called
 //! on the record, `match` over it, a binding that is not one name, `while`
 //! and `loop`. It writes the function's entry points into a module of the
-//! same name: `view(&record)` and `record()`. Drawing it is a toolkit's,
+//! same name: `view(&record)` (`view(db, &record)` when it reads sources),
+//! `record()` and `recording()`. Drawing it is a toolkit's,
 //! an adapter's: `arkui::view::element(view(&record))` in iced,
 //! `arkui_web::render(view(&record))` in the browser; the app's crate
 //! depends on neither.
 
-use std::collections::BTreeSet;
+use std::collections::BTreeMap;
 
 use proc_macro2::{Span, TokenStream};
 use quote::{quote, quote_spanned};
+use syn::punctuated::Punctuated;
 use syn::spanned::Spanned;
 use syn::visit_mut::{self, VisitMut};
-use syn::{parse_quote, Error, Expr, FnArg, Ident, ItemFn, Member, Pat, ReturnType, Type};
+use syn::{parse_quote, Error, Expr, FnArg, Ident, ItemFn, LitStr, Member, Pat, ReturnType, Stmt, Token, Type};
 
 pub fn expand(item: ItemFn) -> syn::Result<TokenStream> {
     let name = &item.sig.ident;
@@ -37,7 +48,7 @@ pub fn expand(item: ItemFn) -> syn::Result<TokenStream> {
         ReturnType::Default => return Err(Error::new(item.sig.span(), "a view returns a View<Msg>")),
     };
     // It returns a `View<Msg>`, or says so.
-    view_msg(&ret)?;
+    let msg = view_msg(&ret)?;
     if !item.sig.generics.params.is_empty() {
         return Err(Error::new(
             item.sig.generics.span(),
@@ -59,8 +70,9 @@ pub fn expand(item: ItemFn) -> syn::Result<TokenStream> {
     }
     let mut body = item.block.clone();
     let mut rw = Rewrite {
-        data: vec![params.iter().map(|(i, _)| i.to_string()).collect()],
+        data: vec![params.iter().map(|(i, _)| (i.to_string(), Kind::Record)).collect()],
         in_msg: 0,
+        sources: false,
         errors: vec![],
     };
     rw.visit_block_mut(&mut body);
@@ -71,33 +83,54 @@ pub fn expand(item: ItemFn) -> syn::Result<TokenStream> {
         return Err(e);
     }
     let generic_params = params.iter().map(|(i, t)| quote!(#i: __B::Ref<'__a, #t>));
-    let plain_params: Vec<_> = params.iter().map(|(i, t)| quote!(#i: &#t)).collect();
-    let names: Vec<_> = params.iter().map(|(i, _)| i).collect();
-    let roots = params.iter().map(|(i, _)| {
-        let s = i.to_string();
-        quote!(::ark_app::view::Sym::root(#s))
-    });
+    let plain_params: Vec<_> = params.iter().map(|(i, t)| quote!(#i: &'__a #t)).collect();
+    let borrowed: Vec<_> = params.iter().map(|(i, _)| quote!(::std::borrow::Cow::Borrowed(#i))).collect();
+    let roots: Vec<_> = params
+        .iter()
+        .map(|(i, _)| {
+            let s = i.to_string();
+            quote!(::ark_app::view::Sym::root(#s))
+        })
+        .collect();
+    // A view that reads sources reads them through the backend's `Db`.
+    let (db_param, db_plain, db_real, db_rec) = if rw.sources {
+        (
+            quote!(__db: __B::Db<'__a>,),
+            quote!(__db: &'__a dyn ::ark_app::view::Db,),
+            quote!(__db,),
+            quote!((),),
+        )
+    } else {
+        (quote!(), quote!(), quote!(), quote!())
+    };
     Ok(quote! {
         #(#attrs)*
-        #[allow(clippy::needless_lifetimes)]
-        #vis fn #name<'__a, __B: ::ark_app::view::Backend>(#(#generic_params),*) -> #ret #body
+        #[allow(clippy::needless_lifetimes, unused_variables)]
+        #vis fn #name<'__a, __B: ::ark_app::view::Backend>(#db_param #(#generic_params),*) -> #ret #body
 
-        /// The view's entry points: drawn from a record, or recorded.
+        /// The view's entry points: drawn from a record and the node's
+        /// sources, or recorded.
         #[allow(non_snake_case, dead_code)]
         #vis mod #name {
             #[allow(unused_imports)]
             use super::*;
 
-            /// The view of the record as it is.
-            pub fn view(#(#plain_params),*) -> #ret {
-                super::#name::<::ark_app::view::Real>(#(#names),*)
+            /// The view of the record as it is, and of the sources as the
+            /// reader reads them.
+            pub fn view<'__a>(#db_plain #(#plain_params),*) -> #ret {
+                super::#name::<::ark_app::view::Real>(#db_real #(#borrowed),*)
             }
 
             /// What the view says, as paths: what SwiftUI and Compose are written from.
             pub fn record() -> #ret {
-                super::#name::<::ark_app::view::Recorder>(#(#roots),*)
+                recording().view
             }
 
+            /// What the view says, as paths, and the lets it reads: what
+            /// every emitter is written from.
+            pub fn recording() -> ::ark_app::view::Recording<#msg> {
+                ::ark_app::view::recording(|| super::#name::<::ark_app::view::Recorder>(#db_rec #(#roots),*))
+            }
         }
     })
 }
@@ -116,18 +149,93 @@ fn view_msg(t: &Type) -> syn::Result<Type> {
     Err(Error::new(t.span(), "a view returns a View<Msg>"))
 }
 
+/// What a binding in a view is: a part of the record, or read from sources
+/// (a `let`, or an item of one).
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Kind {
+    Record,
+    Source,
+}
+
 struct Rewrite {
-    /// The record's bindings in scope, innermost last.
-    data: Vec<BTreeSet<String>>,
+    /// The bindings in scope, innermost last.
+    data: Vec<BTreeMap<String, Kind>>,
     /// How deep inside a struct literal (a message being built).
     in_msg: usize,
+    /// Whether the view reads a source (`cell`, `row`, `list`).
+    sources: bool,
     errors: Vec<Error>,
 }
 
+/// FNV-1a: `ark_kernel::source::key`, worked out as the view is expanded.
+fn key(name: &str) -> u32 {
+    let mut h: u32 = 0x811c_9dc5;
+    for b in name.bytes() {
+        h ^= u32::from(b);
+        h = h.wrapping_mul(0x0100_0193);
+    }
+    h
+}
+
+/// The bindings an expression names, in order: an expression's own
+/// closures' parameters left out.
+struct Names<'r> {
+    rw: &'r Rewrite,
+    found: Vec<Ident>,
+    shadow: Vec<String>,
+}
+
+impl VisitMut for Names<'_> {
+    fn visit_expr_mut(&mut self, e: &mut Expr) {
+        match e {
+            Expr::Path(p) if p.qself.is_none() && p.path.segments.len() == 1 => {
+                let i = &p.path.segments[0].ident;
+                if self.rw.kind(i).is_some() && !self.shadow.contains(&i.to_string()) && !self.found.contains(i) {
+                    self.found.push(i.clone());
+                }
+            }
+            Expr::Closure(c) => {
+                let n = self.shadow.len();
+                for p in &c.inputs {
+                    if let Pat::Ident(i) = p {
+                        self.shadow.push(i.ident.to_string());
+                    }
+                }
+                self.visit_expr_mut(&mut c.body);
+                self.shadow.truncate(n);
+            }
+            Expr::Macro(m) => {
+                // A macro's arguments, where they are expressions (`text!`'s holes).
+                if let Ok(args) = m.mac.parse_body_with(Punctuated::<Expr, Token![,]>::parse_terminated) {
+                    for mut a in args {
+                        self.visit_expr_mut(&mut a);
+                    }
+                }
+            }
+            _ => visit_mut::visit_expr_mut(self, e),
+        }
+    }
+}
+
 impl Rewrite {
-    fn is_data(&self, i: &Ident) -> bool {
+    fn kind(&self, i: &Ident) -> Option<Kind> {
         let s = i.to_string();
-        self.data.iter().rev().any(|d| d.contains(&s))
+        self.data.iter().rev().find_map(|d| d.get(&s).copied())
+    }
+
+    fn is_data(&self, i: &Ident) -> bool {
+        self.kind(i).is_some()
+    }
+
+    /// The bindings `e` names.
+    fn names(&self, e: &Expr) -> Vec<Ident> {
+        let mut n = Names {
+            rw: self,
+            found: vec![],
+            shadow: vec![],
+        };
+        n.visit_expr_mut(&mut e.clone());
+        n.found
     }
 
     /// `e` as a read of the record: its root binding and its fields.
@@ -161,20 +269,23 @@ impl Rewrite {
     }
 
     /// `e` as a `Ref` for `for`/`if`, or an error that says what is not one.
-    fn as_ref(&mut self, e: &Expr, what: &str) -> Option<Expr> {
+    fn as_ref(&mut self, e: &Expr, what: &str) -> Option<(Expr, Kind)> {
         match self.chain(e) {
-            Some((root, fields)) => Some(Rewrite::reference(&root, &fields, e.span())),
+            Some((root, fields)) => {
+                let kind = self.kind(&root).expect("a binding");
+                Some((Rewrite::reference(&root, &fields, e.span()), kind))
+            }
             None => {
                 self.errors.push(Error::new(
                     e.span(),
-                    format!("a view's `{what}` is over the record's fields (`p.list`); work anything else out in the screen record"),
+                    format!("a view's `{what}` is over a binding's fields (`p.list`); work anything else out in a `let`"),
                 ));
                 None
             }
         }
     }
 
-    fn scoped<T>(&mut self, names: impl IntoIterator<Item = String>, f: impl FnOnce(&mut Self) -> T) -> T {
+    fn scoped<T>(&mut self, names: impl IntoIterator<Item = (String, Kind)>, f: impl FnOnce(&mut Self) -> T) -> T {
         self.data.push(names.into_iter().collect());
         let out = f(self);
         self.data.pop();
@@ -196,17 +307,140 @@ impl Rewrite {
         self.visit_block_mut(b);
         parse_quote!(::core::convert::Into::into(#b))
     }
+
+    /// A `let` of a view: a source, or a value worked out from bindings,
+    /// as the backend's; none for a `let` that reads neither.
+    fn binding(&mut self, l: &syn::Local) -> Option<Stmt> {
+        let init = l.init.as_ref()?;
+        if init.diverge.is_some() {
+            return None;
+        }
+        let Pat::Ident(pi) = &l.pat else { return None };
+        let name = pi.ident.clone();
+        let label = name.to_string();
+        let e = &*init.expr;
+        let span = e.span();
+        // A source: `cell(C)`, `row(f(…))`, `list(f(…))`.
+        if let Expr::Call(c) = e {
+            if let Expr::Path(f) = &*c.func {
+                let which = f.path.get_ident().map(Ident::to_string);
+                if let (Some(which @ ("cell" | "row" | "list")), 1) = (which.as_deref(), c.args.len()) {
+                    let arg = &c.args[0];
+                    self.sources = true;
+                    if !self.names(arg).is_empty() {
+                        self.errors.push(Error::new(
+                            arg.span(),
+                            "a source's arguments are not read from other sources yet: a constant, or the record's",
+                        ));
+                        return None;
+                    }
+                    self.data.last_mut().expect("a scope").insert(label.clone(), Kind::Source);
+                    if which == "cell" {
+                        let text = quote!(#arg).to_string();
+                        return Some(parse_quote_spanned(span, quote!(let #name = __B::cell(__db, #label, #text, #arg);)));
+                    }
+                    let Expr::Call(call) = arg else {
+                        self.errors.push(Error::new(
+                            arg.span(),
+                            "a source is a call of a function that returns a plan: `list(up_next(3))`",
+                        ));
+                        return None;
+                    };
+                    let func = &call.func;
+                    let fname = quote!(#func).to_string().replace(' ', "");
+                    let k = key(&fname);
+                    let text = quote!(#call).to_string();
+                    let args: Vec<_> = call.args.iter().collect();
+                    let arg_texts: Vec<_> = args.iter().map(|a| quote!(#a).to_string()).collect();
+                    let method = Ident::new(which, span);
+                    return Some(parse_quote_spanned(
+                        span,
+                        quote!(let #name = __B::#method(
+                            __db,
+                            #label,
+                            (#k, #text, &[#(#arg_texts),*]),
+                            &{
+                                #[allow(unused_mut)]
+                                let mut __a = ::std::vec::Vec::new();
+                                #(::ark_app::view::kernel::Encode::encode(&(#args), &mut __a);)*
+                                __a
+                            },
+                            || #call,
+                        );),
+                    ));
+                }
+            }
+        }
+        // A value worked out from bindings.
+        let deps = self.names(e);
+        if deps.is_empty() {
+            return None;
+        }
+        let what = match e {
+            Expr::Macro(m) if is_text(m) => {
+                let Ok(args) = m.mac.parse_body_with(Punctuated::<Expr, Token![,]>::parse_terminated) else {
+                    self.errors.push(Error::new(m.span(), "`text!` is a literal and its holes"));
+                    return None;
+                };
+                let mut args = args.into_iter();
+                let Some(Expr::Lit(syn::ExprLit { lit: syn::Lit::Str(t), .. })) = args.next() else {
+                    self.errors.push(Error::new(m.span(), "`text!`'s template is a string literal"));
+                    return None;
+                };
+                let holes: Vec<String> = args.map(|h| quote!(#h).to_string()).collect();
+                quote!(::ark_app::view::Source::Text { template: #t, holes: ::std::vec![#(#holes),*] })
+            }
+            _ => {
+                let text = LitStr::new(&quote!(#e).to_string(), span);
+                quote!(::ark_app::view::Source::Derived(#text))
+            }
+        };
+        let dep_names: Vec<String> = deps.iter().map(Ident::to_string).collect();
+        self.data.last_mut().expect("a scope").insert(label.clone(), Kind::Source);
+        Some(parse_quote_spanned(
+            span,
+            quote!(let #name = __B::derive(&[#(#dep_names),*], #label, #what, || {
+                #(let #deps = __B::value(&#deps);)*
+                #e
+            });),
+        ))
+    }
+}
+
+/// Whether a macro is `text!` (or `ark_app::text!`).
+fn is_text(m: &syn::ExprMacro) -> bool {
+    m.mac.path.segments.last().is_some_and(|s| s.ident == "text")
+}
+
+/// A statement the expansion writes, or the error it makes.
+fn parse_quote_spanned(span: Span, t: TokenStream) -> Stmt {
+    syn::parse2(t).unwrap_or_else(|e| {
+        let msg = e.to_string();
+        syn::parse2(quote_spanned!(span=> ::core::compile_error!(#msg);)).expect("an error")
+    })
 }
 
 impl VisitMut for Rewrite {
+    fn visit_block_mut(&mut self, b: &mut syn::Block) {
+        for s in b.stmts.iter_mut() {
+            match s {
+                Stmt::Local(l) => match self.binding(l) {
+                    Some(new) => *s = new,
+                    None => visit_mut::visit_stmt_mut(self, s),
+                },
+                _ => visit_mut::visit_stmt_mut(self, s),
+            }
+        }
+    }
+
     fn visit_expr_mut(&mut self, e: &mut Expr) {
         let span = e.span();
         match e {
             Expr::ForLoop(f) => {
                 let Some(item) = self.one_name(&f.pat) else { return };
-                let Some(list) = self.as_ref(&f.expr, "for") else { return };
+                let Some((list, kind)) = self.as_ref(&f.expr, "for") else { return };
                 let label = item.to_string();
-                let body = self.scoped([label.clone()], |me| me.block_into_view(&mut f.body));
+                let body = self.scoped([(label.clone(), kind)], |me| me.block_into_view(&mut f.body));
                 *e = parse_quote!(__B::each(#list, #label, |#item| #body));
             }
             Expr::If(i) => {
@@ -227,18 +461,18 @@ impl VisitMut for Rewrite {
                         }
                     };
                     let Some(item) = item else { return };
-                    let Some(opt) = self.as_ref(&l.expr, "if let") else { return };
+                    let Some((opt, kind)) = self.as_ref(&l.expr, "if let") else { return };
                     let label = item.to_string();
-                    let yes = self.scoped([label.clone()], |me| me.block_into_view(&mut i.then_branch));
+                    let yes = self.scoped([(label.clone(), kind)], |me| me.block_into_view(&mut i.then_branch));
                     *e = parse_quote!(__B::when_some(#opt, #label, |#item| #yes, || #no));
                 } else if self.chain(&i.cond).is_some() {
-                    let c = self.as_ref(&i.cond, "if").expect("a chain");
+                    let (c, _) = self.as_ref(&i.cond, "if").expect("a chain");
                     let yes = self.block_into_view(&mut i.then_branch);
                     *e = parse_quote!(__B::when(#c, || #yes, || #no));
                 } else {
                     self.errors.push(Error::new(
                         i.cond.span(),
-                        "a view's `if` is over one of the record's flags (`if a.closed`); work the condition out in the screen record",
+                        "a view's `if` is over a flag (`if a.closed`); work the condition out in a `let`",
                     ));
                 }
             }
@@ -258,11 +492,12 @@ impl VisitMut for Rewrite {
             Expr::MethodCall(m) if self.chain(&m.receiver).is_some() => {
                 self.errors.push(Error::new(
                     m.method.span(),
-                    format!(
-                        "a view reads the record's fields, not its methods: put `{}` in the screen record",
-                        m.method
-                    ),
+                    format!("a view reads its bindings' fields, not their methods: work `{}` out in a `let`", m.method),
                 ));
+            }
+            Expr::Macro(m) if is_text(m) && !self.names(&Expr::Macro(m.clone())).is_empty() => {
+                self.errors
+                    .push(Error::new(span, "`text!` over bindings goes in a `let`: `let line = text!(…)`"));
             }
             Expr::Struct(s) => {
                 self.in_msg += 1;
@@ -273,25 +508,31 @@ impl VisitMut for Rewrite {
             }
             Expr::Closure(c) => {
                 // A closure's own parameters are not the record's.
-                let mut shadow = BTreeSet::new();
+                let mut shadow = Vec::new();
                 for p in &c.inputs {
                     if let Pat::Ident(i) = p {
-                        shadow.insert(i.ident.to_string());
+                        shadow.push(i.ident.to_string());
                     }
                 }
                 let saved = std::mem::take(&mut self.data);
                 self.data = saved
                     .iter()
-                    .map(|d| d.iter().filter(|n| !shadow.contains(*n)).cloned().collect())
+                    .map(|d| d.iter().filter(|(n, _)| !shadow.contains(*n)).map(|(n, k)| (n.clone(), *k)).collect())
                     .collect();
                 self.visit_expr_mut(&mut c.body);
                 self.data = saved;
             }
-            Expr::Call(c) if c.args.iter().any(|a| matches!(self.chain(a), Some((_, f)) if f.is_empty())) => {
+            Expr::Call(c)
+                if c.args
+                    .iter()
+                    .any(|a| matches!(self.chain(a), Some((r, f)) if f.is_empty() && self.kind(&r) == Some(Kind::Record))) =>
+            {
                 // A sub-view handed a binding: called over the same backend.
                 for a in c.args.iter_mut() {
                     match self.chain(a) {
-                        Some((root, fields)) if fields.is_empty() => *a = Rewrite::reference(&root, &fields, a.span()),
+                        Some((root, fields)) if fields.is_empty() && self.kind(&root) == Some(Kind::Record) => {
+                            *a = Rewrite::reference(&root, &fields, a.span())
+                        }
                         _ => self.visit_expr_mut(a),
                     }
                 }
@@ -310,6 +551,10 @@ impl VisitMut for Rewrite {
                         0 => syn::parse2(quote_spanned!(span=> __B::val(__B::get(&#base, #s, |__v| &__v.#last)))).expect("a read"),
                         _ => syn::parse2(quote_spanned!(span=> __B::probe(&#base, #s, |__v| &__v.#last))).expect("a probe"),
                     };
+                }
+                Some((root, _)) if self.kind(&root) == Some(Kind::Source) && self.in_msg == 0 => {
+                    // A source's value, or a let's, handed to a part.
+                    *e = syn::parse2(quote_spanned!(span=> __B::val(::core::clone::Clone::clone(&#root)))).expect("a value");
                 }
                 Some((root, _)) => {
                     self.errors.push(Error::new(
@@ -368,10 +613,28 @@ mod tests {
     }
 
     #[test]
+    fn a_let_reads_sources_and_works_values_out() {
+        let out = expanded(
+            "fn v() -> View<M> { let s = cell(STATUS); let q = list(up_next(3)); let w = status_line(s); \
+             card_section(for t in q { let line = text!(\"{}  {}\", t.artist, t.ms); list_row(line) }).header(w) }",
+        );
+        assert!(out.contains("__B :: cell (__db , \"s\" , \"STATUS\" , STATUS)"), "{out}");
+        assert!(out.contains("__B :: list (__db , \"q\""), "{out}");
+        assert!(out.contains("\"up_next (3)\""), "{out}");
+        assert!(out.contains("__B :: derive (& [\"s\"] , \"w\""), "{out}");
+        assert!(out.contains("Source :: Text"), "{out}");
+        assert!(out.contains("__B :: val (:: core :: clone :: Clone :: clone (& w))"), "{out}");
+        assert!(out.contains("__db : __B :: Db < '__a >"), "{out}");
+        assert!(out.contains("pub fn recording"), "{out}");
+    }
+
+    #[test]
     fn what_it_cannot_follow_says_so() {
-        assert!(expanded("fn v(p: &Page) -> View<M> { list_row(p.name.to_uppercase()) }").contains("not its methods"));
+        assert!(expanded("fn v() -> View<M> { let s = cell(S); let q = list(f(s)); hero() }").contains("not read from other sources"));
+        assert!(expanded("fn v() -> View<M> { let s = cell(S); text(text!(\"{}\", s)) }").contains("goes in a `let`"));
+        assert!(expanded("fn v(p: &Page) -> View<M> { list_row(p.name.to_uppercase()) }").contains("not their methods"));
         assert!(expanded("fn v(p: &Page) -> View<M> { match p.kind { _ => hero() } }").contains("`match`"));
-        assert!(expanded("fn v(p: &Page) -> View<M> { if p.n > 0 { hero() } }").contains("flags"));
+        assert!(expanded("fn v(p: &Page) -> View<M> { if p.n > 0 { hero() } }").contains("a flag"));
         assert!(expanded("fn v(p: &Page) -> View<M> { for (i, a) in p.rows { hero() } }").contains("one name"));
         assert!(expanded("fn v(p: Page) -> View<M> { hero() }").contains("by reference"));
         assert!(expanded("fn v(p: &Page) { }").contains("View<Msg>"));

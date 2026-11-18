@@ -2,8 +2,10 @@
 // The layout is said once, in Rust; change it there.
 
 use ark_pebble::tokens::*;
+use ark_kernel::Read;
+use ark_pebble::text::Line;
 use ark_pebble::ui::{Align, Bindings, Button, Frame, Glyph, List, ListStyle, Ui};
-use things_app::ListMsg;
+use things_app::{heading, up_next, ListMsg, SOUND};
 
 /// The glyphs it draws: Lucide's, flattened (`ark_pebble::ui::Glyph`).
 pub static GLYPHS: &[Glyph] = &[
@@ -35,29 +37,97 @@ pub fn build(ui: &mut Ui) {
     ui.list(7, Frame { x: PAGE_MARGIN, y: (SIDE_CAPTION).max(LINE_CAPTION) + SPACE_XS + LINE_TITLE + SPACE_XS + (PROGRESS_HEIGHT).max(LINE_FOOTNOTE) + SPACE_XS + (LINE_CAPTION).max(SIDE_CAPTION) + SPACE_XS, w: w - PAGE_MARGIN - PAGE_MARGIN, h: fill0 }, ListStyle { title: FONT_HEADLINE, title_line: LINE_HEADLINE, subtitle: FONT_FOOTNOTE, header: FONT_HEADER, ink: INK, quiet: QUIET, ground: BACKGROUND, inset: PAGE_MARGIN });
 }
 
-/// What each layer shows: the screen's sources (things_app::glance), read as PebbleOS draws.
+#[allow(unused_variables, clippy::needless_borrow, clippy::let_and_return)]
+fn name_0(db: &dyn Read) -> &'static [u8] {
+    let s = &::ark_kernel::source::cell(db, SOUND);
+    let name: &'static str = *(&s.play_glyph);
+    name.as_bytes()
+}
+
+#[allow(unused_variables, clippy::needless_borrow, clippy::let_and_return)]
+fn name_1(db: &dyn Read) -> &'static [u8] {
+    let s = &::ark_kernel::source::cell(db, SOUND);
+    let name: &'static str = *(&s.link);
+    name.as_bytes()
+}
+
+#[allow(unused_variables, clippy::needless_borrow, clippy::let_and_return)]
+fn words_2(db: &dyn Read, out: &mut Line) {
+    let s = &::ark_kernel::source::cell(db, SOUND);
+    ::ark_kernel::Hole::hole(&s.status, out);
+}
+
+#[allow(unused_variables, clippy::needless_borrow, clippy::let_and_return)]
+fn words_3(db: &dyn Read, out: &mut Line) {
+    let s = &::ark_kernel::source::cell(db, SOUND);
+    ::ark_kernel::Hole::hole(&s.title, out);
+}
+
+#[allow(unused_variables, clippy::needless_borrow, clippy::let_and_return)]
+fn flag_4(db: &dyn Read) -> bool {
+    let s = &::ark_kernel::source::cell(db, SOUND);
+    *(&s.playing)
+}
+
+#[allow(unused_variables, clippy::needless_borrow, clippy::let_and_return)]
+fn fraction_5(db: &dyn Read) -> u16 {
+    let s = &::ark_kernel::source::cell(db, SOUND);
+    (&s.progress).0
+}
+
+#[allow(unused_variables, clippy::needless_borrow, clippy::let_and_return)]
+fn flag_6(db: &dyn Read) -> bool {
+    let next = &::ark_kernel::source::shared(db, 0, &|db| ::ark_kernel::source::row(db, 2672301845, &[], || heading()));
+    (next).is_some()
+}
+
+#[allow(unused_variables, clippy::needless_borrow, clippy::let_and_return)]
+fn words_7(db: &dyn Read, out: &mut Line) {
+    let next = &::ark_kernel::source::shared(db, 0, &|db| ::ark_kernel::source::row(db, 2672301845, &[], || heading()));
+    let Some(q) = next else { return };
+    ::ark_kernel::Hole::hole(&(q.words), out);
+}
+
+#[allow(unused_variables, clippy::needless_borrow, clippy::let_and_return)]
+fn count_8(db: &dyn Read) -> usize {
+    ::ark_kernel::source::count(db, 1894785296, &{ let mut a = ::alloc::vec::Vec::new(); ::ark_kernel::Encode::encode(&(3u32), &mut a); a }, || up_next(3u32))
+}
+
+#[allow(unused_variables, clippy::needless_borrow, clippy::let_and_return)]
+fn words_9(db: &dyn Read, i: usize, out: &mut Line) {
+    let Some(t) = &::ark_kernel::source::item(db, 1894785296, &{ let mut a = ::alloc::vec::Vec::new(); ::ark_kernel::Encode::encode(&(3u32), &mut a); a }, || up_next(3u32), i) else { return };
+    ::ark_kernel::Hole::hole(&(t.title), out);
+}
+
+#[allow(unused_variables, clippy::needless_borrow, clippy::let_and_return)]
+fn words_10(db: &dyn Read, i: usize, out: &mut Line) {
+    let Some(t) = &::ark_kernel::source::item(db, 1894785296, &{ let mut a = ::alloc::vec::Vec::new(); ::ark_kernel::Encode::encode(&(3u32), &mut a); a }, || up_next(3u32), i) else { return };
+    ::ark_kernel::Hole::hole(&(t.by), out);
+}
+
+/// What each layer shows, by the functions above: read as PebbleOS draws.
 pub static BINDINGS: Bindings = Bindings {
     words: &[
-        (1, things_app::glance::status),
-        (2, things_app::glance::title),
+        (1, words_2),
+        (2, words_3),
         (4, |_, out| { out.s("Paused".as_bytes()); }),
         (5, |_, out| { out.s("Now".as_bytes()); }),
     ],
     meters: &[
-        (3, things_app::glance::progress),
+        (3, fraction_5),
     ],
     glyphs: &[
-        (0, things_app::glance::link),
+        (0, name_1),
     ],
     actions: &[
-        (Button::Select, things_app::glance::play_glyph),
+        (Button::Select, name_0),
     ],
     lists: &[
-        (7, List { header: things_app::glance::next_heading, count: things_app::glance::next_tracks, title: things_app::glance::next_tracks_title, line: things_app::glance::next_tracks_by }),
+        (7, List { header: words_7, count: count_8, title: words_9, line: words_10 }),
     ],
     shown: &[
-        (things_app::glance::playing, &[3], &[4]),
-        (things_app::glance::next, &[7], &[]),
+        (flag_4, &[3], &[4]),
+        (flag_6, &[7], &[]),
     ],
 };
 

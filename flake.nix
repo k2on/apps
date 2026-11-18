@@ -239,7 +239,9 @@
           # that is only the docs and the crates they name by path: arkui.
           # So the docs and ArkDB's kernel never rebuild each other: an edit
           # to the docs is no input to the kernel, the kernel is no input to
-          # the docs, and arkui is an input to both. ArkDB's docs, when they
+          # the docs, and arkui is an input to both (and the new kernel,
+          # rust/kernel, which every view reads its sources and words
+          # through, is ark_app's, so the docs'). ArkDB's docs, when they
           # join, add its crates here.
           # The docs are an Ark app (docs/site/app.toml), their page's crate
           # generated as every app's is (nix/ark-app.nix's `webCrate`) and

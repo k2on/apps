@@ -39,11 +39,11 @@ import dev.arkui.*
 @Composable
 fun NowPlayingScreen(screen: NowPlayingHolder) {
     val p by screen.page.collectAsStateWithLifecycle()
-    ActionBar(items = listOf(ActionItem(p.playGlyph, label = p.playLabel, button = ActionButton.Select, onTap = { screen.send(Act.Toggle) }), ActionItem("skip-forward", label = "Skip", button = ActionButton.Down, onTap = { screen.send(Act.Skip) }))) {
+    ActionBar(items = listOf(ActionItem(p.play, label = p.say, button = ActionButton.Select, onTap = { screen.send(Act.Toggle) }), ActionItem("skip-forward", label = "Skip", button = ActionButton.Down, onTap = { screen.send(Act.Skip) }))) {
         Column(verticalArrangement = Arrangement.spacedBy(Space.s), horizontalAlignment = Alignment.CenterHorizontally) {
             Column(modifier = Modifier.padding(horizontal = Space.page), horizontalAlignment = Alignment.Start) {
                 Row(horizontalArrangement = Arrangement.spacedBy(Space.s), verticalAlignment = Alignment.CenterVertically) {
-                    ArkGlyph(p.link, ArkType.Caption, color = ArkInk.quiet)
+                    ArkGlyph(p.wifi, ArkType.Caption, color = ArkInk.quiet)
                     Text(p.status, style = ArkType.Caption.style, color = ArkInk.quiet, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
                 Text(p.title, style = ArkType.Title.style, color = ArkInk.ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -57,10 +57,10 @@ fun NowPlayingScreen(screen: NowPlayingHolder) {
                     }
                 }
             }
-            CardSection(title = p.queue) {
+            CardSection(title = p.heading) {
                 for (t in p.next) {
-                    ArkId("now-playing.row:" + arkSlug(t.title)) {
-                        ListRow(t.title, subtitle = t.line)
+                    ArkId("now-playing.row:" + arkSlug(t.name)) {
+                        ListRow(t.name, subtitle = t.line)
                     }
                 }
             }

@@ -752,6 +752,11 @@ rec {
             packageId = "ark";
           }
           {
+            name = "ark-kernel";
+            packageId = "ark-kernel";
+            usesDefaultFeatures = false;
+          }
+          {
             name = "ark-module";
             packageId = "ark-module";
           }
@@ -897,6 +902,16 @@ rec {
         src = lib.cleanSourceWith { filter = sourceFilter;  src = ../../rust/ark-format; };
         libName = "ark_format";
 
+      };
+      "ark-kernel" = rec {
+        crateName = "ark-kernel";
+        version = "0.1.0";
+        edition = "2021";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../../rust/kernel; };
+        libName = "ark_kernel";
+        features = {
+          "default" = [ "upstream" ];
+        };
       };
       "ark-macros" = rec {
         crateName = "ark-macros";

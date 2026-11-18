@@ -23,11 +23,14 @@
 //! read it, with no mechanism of its own, and one test of a read set
 //! against what changed serves plans and readers alike.
 
+use alloc::boxed::Box;
 use alloc::vec::Vec;
+use core::any::Any;
+use core::cell::RefCell;
 use core::marker::PhantomData;
 
 use crate::entry::Space;
-use crate::plan::{spans, within, Changes, Live, Patch};
+use crate::plan::{spans, within, Changes, Live, Patch, Plan};
 use crate::slot::{Boxed, Slots};
 use crate::store::{Range, Read, TableId};
 
@@ -130,6 +133,22 @@ pub struct Sources {
     /// What changed in the settle under way, as keys of tables: rows, and
     /// sources by their number.
     pub(crate) keys: Vec<(TableId, Vec<u8>)>,
+    /// The plans readers asked for by key that the node keeps no watch of
+    /// yet ([`crate::source`]): watched when the read ends.
+    pub(crate) wanted: RefCell<Vec<(u32, Vec<u8>, Plan)>>,
+    /// The results shared within a settle ([`crate::source::shared`]):
+    /// each by its key, with what it read.
+    pub(crate) calls: RefCell<Vec<Call>>,
+}
+
+/// A result shared within a settle: its key, its value and what it read.
+pub(crate) type Call = (u64, Box<dyn Any>, Vec<u8>);
+
+/// What a reader shares as it reads: the node's sources, and where its
+/// reads are recorded, if they are.
+pub struct Shared<'a> {
+    pub(crate) src: &'a Sources,
+    pub(crate) spans: Option<&'a RefCell<Vec<u8>>>,
 }
 
 /// Whether a read set covers any of `keys`.
@@ -148,6 +167,7 @@ impl Sources {
 
     /// Writes a cell; a watch's number holds no value and takes none.
     pub(crate) fn write(&mut self, id: u32, v: Boxed) {
+        self.calls.get_mut().clear();
         if self.slots.swap(id, v) {
             self.moved.push(id);
         }
@@ -159,6 +179,7 @@ impl Sources {
         let slots = &self.slots;
         let moved = self.moved.drain(..).filter(|&id| slots.changed(id));
         self.keys.extend(moved.map(key));
+        self.calls.get_mut().clear();
     }
 
     pub(crate) fn live(&self, w: Watch) -> Option<&Live> {
@@ -196,6 +217,10 @@ impl Read for Scope<'_> {
 
     fn sources(&self, _: u32) -> Option<(&Sources, bool)> {
         Some((self.src, self.was))
+    }
+
+    fn shared(&self) -> Option<Shared<'_>> {
+        Some(Shared { src: self.src, spans: None })
     }
 }
 

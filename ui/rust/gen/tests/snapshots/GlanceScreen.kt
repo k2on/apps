@@ -40,15 +40,15 @@ import uniffi.things_app.ListMsg
 @Composable
 fun GlanceScreen(screen: GlanceHolder) {
     val p by screen.page.collectAsStateWithLifecycle()
-    ActionBar(items = listOf(ActionItem("skip-back", label = "Back", button = ActionButton.Up, onTap = { screen.send(ListMsg.Back) }), ActionItem(p.playGlyph, label = "Play or Pause", button = ActionButton.Select, onTap = { screen.send(ListMsg.Toggle) }), ActionItem("skip-forward", label = "Skip", button = ActionButton.Down, onTap = { screen.send(ListMsg.Forward) }))) {
+    ActionBar(items = listOf(ActionItem("skip-back", label = "Back", button = ActionButton.Up, onTap = { screen.send(ListMsg.Back) }), ActionItem(p.s.playGlyph, label = "Play or Pause", button = ActionButton.Select, onTap = { screen.send(ListMsg.Toggle) }), ActionItem("skip-forward", label = "Skip", button = ActionButton.Down, onTap = { screen.send(ListMsg.Forward) }))) {
         Column(modifier = Modifier.padding(horizontal = Space.page), verticalArrangement = Arrangement.spacedBy(Space.xs), horizontalAlignment = Alignment.Start) {
             Row(horizontalArrangement = Arrangement.spacedBy(Space.s), verticalAlignment = Alignment.CenterVertically) {
-                ArkGlyph(p.link, ArkType.Caption, color = ArkInk.quiet)
-                Text(p.status, style = ArkType.Caption.style, color = ArkInk.ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                ArkGlyph(p.s.link, ArkType.Caption, color = ArkInk.quiet)
+                Text(p.s.status, style = ArkType.Caption.style, color = ArkInk.ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
-            Text(p.title, style = ArkType.Title.style, color = ArkInk.ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            if (p.playing) {
-                MeterBar(p.progress, tint = "accent")
+            Text(p.s.title, style = ArkType.Title.style, color = ArkInk.ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            if (p.s.playing) {
+                MeterBar(p.s.progress, tint = "accent")
             } else {
                 Text("Paused", style = ArkType.Footnote.style, color = ArkInk.accent)
             }
@@ -58,10 +58,10 @@ fun GlanceScreen(screen: GlanceHolder) {
                 ArkGlyph("music", ArkType.Caption, color = ArkInk.ink)
             }
             p.next?.let { q ->
-                CardSection(title = q.heading) {
-                    for (t in q.tracks) {
-                        ArkId("list.row:" + arkSlug(t.title)) {
-                            ListRow(t.title, subtitle = t.by)
+                CardSection(title = q.words) {
+                    for (t in p.tunes) {
+                        ArkId("list.row:" + arkSlug(t.name)) {
+                            ListRow(t.name, subtitle = t.by)
                         }
                     }
                 }

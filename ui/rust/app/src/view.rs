@@ -25,17 +25,45 @@
 //! view, `arkui::view::element` and `arkui_web::render`). There are
 //! two backends:
 //!
-//! - [`Real`]: the record itself. A `for` makes a row for each item, an
-//!   `if` takes its branch, and the [`View`] holds values: what iced
-//!   (`arkui::view`) and the browser (`arkui-web`) draw.
+//! - [`Real`]: the record itself, and the node's sources read through its
+//!   reader. A `for` makes a row for each item, an `if` takes its branch,
+//!   and the [`View`] holds values: what iced (`arkui::view`) and the
+//!   browser (`arkui-web`) draw.
 //! - [`Recorder`]: the record as paths (`shelf.title`). A `for` is walked
 //!   once with a symbolic item ([`View::Each`]), an `if` both ways
 //!   ([`View::When`]), and the [`View`] holds paths: what `ark-ui-gen`
-//!   writes out as SwiftUI and Compose.
+//!   writes out as SwiftUI and Compose. With them it keeps the view's
+//!   `let`s ([`Recording`]): what the Pebble emitter writes each layer's
+//!   binding from.
+//!
+//! A view may read **sources** in place of a record, in `let`s (docs/
+//! north-star.md, "Sources, Bindings and Sinks"):
+//!
+//! ```ignore
+//! #[view]
+//! pub fn screen() -> View<Act> {
+//!     let link = cell(STATUS);            // a cell's value
+//!     let p = row(playback());            // a one-row plan: a keyed watch
+//!     let next = list(up_next(SHOWN));    // a plan: a keyed watch
+//!     let title = show::title(p);         // worked out: a plain function
+//!     list(for t in next {
+//!         let line = text!("{}  {}", t.artist, Clock(u64::from(t.ms)));
+//!         list_row(line)
+//!     })
+//! }
+//! ```
+//!
+//! Its entry points are then `screen::view(db)`, over a node's reader, and
+//! `screen::recording()`. A function returning a plan ([`kernel::Of`]) is a
+//! watch the node keeps by the function's name and its arguments; a value
+//! worked out is a plain function of its bindings, handed them by
+//! reference; on the watch, one more than one layer reads is shared within
+//! a settle (`ark_kernel::source`). The phones, until their bridges read
+//! sources (step 10), read the lets as a record's fields ([`RECORD`]).
 //!
 //! What a view says is what the backends can follow: a part, a field read,
-//! a `for`, an `if`, an `if let Some`, a message built from fields. Any
-//! other Rust over the record does not compile.
+//! a `for`, an `if`, an `if let Some`, a message built from fields, and a
+//! `let` over sources. Any other Rust over the record does not compile.
 
 use crate::shell::Accessory;
 use std::fmt::Debug;
@@ -76,48 +104,15 @@ impl From<&'static str> for Val<String> {
     }
 }
 
-/// Words a view shows: a literal, or a template whose holes are read
-/// apart (`text!`), never a `String` worked out elsewhere and handed in.
-/// So what a view shows is what it read, each hole a source an emitter
-/// can bind: the rule for every view, not the watch's alone (logging keeps
-/// `format!`).
-///
-/// A literal converts (`"Up Next".into()`); there is no `From<String>`.
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct Text {
-    /// Its words, each hole `{}`.
-    pub template: &'static str,
-    /// What fills each hole, in order.
-    pub holes: Vec<String>,
-}
-
-impl Text {
-    /// A template and what fills its holes: what `text!` makes.
-    pub fn template(template: &'static str, holes: Vec<String>) -> Text {
-        Text { template, holes }
-    }
-
-    /// The words, the holes filled.
-    pub fn words(&self) -> String {
-        let mut out = String::new();
-        let mut holes = self.holes.iter();
-        let mut parts = self.template.split("{}");
-        if let Some(first) = parts.next() {
-            out.push_str(first);
-        }
-        for part in parts {
-            out.push_str(holes.next().map_or("", String::as_str));
-            out.push_str(part);
-        }
-        out
-    }
-}
-
-impl From<&'static str> for Text {
-    fn from(s: &'static str) -> Text {
-        Text::template(s, Vec::new())
-    }
-}
+/// The kernel, as `#[view]`'s expansion names it.
+pub use ark_kernel as kernel;
+/// Words a view shows: the kernel's [`Text`], a literal or a template
+/// whose holes are filled apart (`text!`), never a `String` worked out
+/// elsewhere and handed in. So what a view shows is what it read, each
+/// hole a source an emitter can bind: the rule for every view, not the
+/// watch's alone (logging keeps `format!`). A literal converts
+/// (`"Up Next".into()`); there is no `From<String>`.
+pub use ark_kernel::show::{Clock, Fraction, Hole, Text};
 
 /// Text read by a view is words a part takes: the same path, or the words.
 impl From<Val<Text>> for Val<String> {
@@ -129,16 +124,24 @@ impl From<Val<Text>> for Val<String> {
     }
 }
 
-/// A [`Text`] template, its holes filled by what follows it:
-/// `text!("{}, {} Pending", status, pending)`. Holes are `{}` alone.
-#[macro_export]
-macro_rules! text {
-    ($t:literal) => {
-        $crate::view::Text::from($t)
-    };
-    ($t:literal, $($hole:expr),+ $(,)?) => {
-        $crate::view::Text::template($t, ::std::vec![$(::std::string::ToString::to_string(&$hole)),+])
-    };
+/// A name read by a view (a glyph's): the same path, or the name.
+impl From<Val<&'static str>> for Val<String> {
+    fn from(v: Val<&'static str>) -> Val<String> {
+        match v {
+            Val::Is(t) => Val::Is(t.into()),
+            Val::At(p) => Val::At(p),
+        }
+    }
+}
+
+/// A fraction read by a view, in thousandths, as a meter takes it.
+impl From<Val<Fraction>> for Val<f64> {
+    fn from(v: Val<Fraction>) -> Val<f64> {
+        match v {
+            Val::Is(f) => Val::Is(f64::from(f.0) / 1000.0),
+            Val::At(p) => Val::At(p),
+        }
+    }
 }
 
 impl<T: Clone> Val<T> {
@@ -174,11 +177,59 @@ impl Probe for String {
     }
 }
 
+/// What a view reads its sources through: the node's reader, as `Real`
+/// draws it ([`kernel::Read`]).
+pub use ark_kernel::Read as Db;
+
+/// A source or a value worked out from sources, as the recorder keeps it:
+/// a `let` of the view.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Let {
+    /// Its name in the view: what a leaf that reads it is bound to.
+    pub name: String,
+    /// The `for` and `if let` items it is under, outermost first: a let
+    /// under `for t in …` is one per row.
+    pub under: Vec<String>,
+    pub what: Source,
+    /// The bindings its expression reads, by name.
+    pub deps: Vec<String>,
+}
+
+/// What a [`Let`] is.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Source {
+    /// A cell's value (`cell(STATUS)`): the cell's expression.
+    Cell(&'static str),
+    /// A function returning a one-row plan (`row(playback())`), kept as a
+    /// watch by its key and arguments: its first row.
+    Row(Keyed),
+    /// A function returning a plan (`list(up_next(SHOWN))`), kept as a
+    /// watch by its key and arguments: its rows.
+    List(Keyed),
+    /// A value worked out from bindings: its expression, as Rust.
+    Derived(&'static str),
+    /// Words (`text!`): the template, and each hole's expression.
+    Text { template: &'static str, holes: Vec<&'static str> },
+}
+
+/// A function returning a plan, as a watch is kept by it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Keyed {
+    /// The function's key: its name's ([`kernel::source::key`]).
+    pub key: u32,
+    /// The call, as Rust: `up_next (SHOWN)`.
+    pub call: &'static str,
+    /// Each argument, as Rust: what the key's arguments are encoded from.
+    pub args: Vec<&'static str>,
+}
+
 /// What reads the record: [`Real`] or [`Recorder`]. Only `#[view]`'s
 /// rewriting names it.
 pub trait Backend {
-    /// A part of the record.
+    /// A part of the record, or a value read from sources.
     type Ref<'a, T: Value>: Clone;
+    /// What sources are read through: the node's reader, or nothing.
+    type Db<'a>: Copy;
     /// The field of `r` called `name`.
     fn get<'a, T: Value + 'a, F: Value>(r: &Self::Ref<'a, T>, name: &'static str, f: fn(&T) -> &F) -> Self::Ref<'a, F>;
     /// A part of the record as a part's input.
@@ -196,26 +247,62 @@ pub trait Backend {
         yes: impl FnOnce(Self::Ref<'a, T>) -> View<M>,
         no: impl FnOnce() -> View<M>,
     ) -> View<M>;
+    /// `let name = cell(C)`: the cell's value.
+    fn cell<'a, T: Value + Default>(db: Self::Db<'a>, name: &'static str, expr: &'static str, c: kernel::Cell<T>) -> Self::Ref<'a, T>;
+    /// `let name = row(f(…))`: the first row of the plan `f` returns, kept
+    /// as a watch by `keyed`'s key and `args`.
+    fn row<'a, T: Value + kernel::Decode>(
+        db: Self::Db<'a>,
+        name: &'static str,
+        keyed: (u32, &'static str, &'static [&'static str]),
+        args: &[u8],
+        of: fn() -> kernel::Of<T>,
+    ) -> Self::Ref<'a, Option<T>>;
+    /// `let name = list(f(…))`: the rows of the plan `f` returns, kept as a
+    /// watch by `keyed`'s key and `args`.
+    fn list<'a, T: Value + kernel::Decode>(
+        db: Self::Db<'a>,
+        name: &'static str,
+        keyed: (u32, &'static str, &'static [&'static str]),
+        args: &[u8],
+        of: fn() -> kernel::Of<T>,
+    ) -> Self::Ref<'a, Vec<T>>;
+    /// `let name = …` over bindings, `deps` by name: `f`'s result, `f`
+    /// reading each through [`Backend::value`]. The recorder keeps `what`
+    /// and runs nothing.
+    fn derive<'a, R: Value>(deps: &'static [&'static str], name: &'static str, what: Source, f: impl FnOnce() -> R) -> Self::Ref<'a, R>;
+    /// What a binding holds, for a derived `let`'s expression.
+    fn value<'r, 'a, T: Value>(r: &'r Self::Ref<'a, T>) -> &'r T;
 }
 
-/// The record itself.
+/// The record itself, and the node's sources read through its reader.
 pub struct Real;
 
+/// What [`Real`] holds: a part of the record, or a value it read.
+pub type Of<'a, T> = std::borrow::Cow<'a, T>;
+
 impl Backend for Real {
-    type Ref<'a, T: Value> = &'a T;
-    fn get<'a, T: Value + 'a, F: Value>(r: &&'a T, _: &'static str, f: fn(&T) -> &F) -> &'a F {
-        f(r)
+    type Ref<'a, T: Value> = Of<'a, T>;
+    type Db<'a> = &'a dyn Db;
+    fn get<'a, T: Value + 'a, F: Value>(r: &Of<'a, T>, _: &'static str, f: fn(&T) -> &F) -> Of<'a, F> {
+        match r {
+            Of::Borrowed(r) => Of::Borrowed(f(r)),
+            Of::Owned(r) => Of::Owned(f(r).clone()),
+        }
     }
-    fn val<T: Value>(r: &T) -> Val<T> {
-        Val::Is(r.clone())
+    fn val<T: Value>(r: Of<'_, T>) -> Val<T> {
+        Val::Is(r.into_owned())
     }
-    fn probe<T: Value, F: Value + Probe>(r: &&T, _: &'static str, f: fn(&T) -> &F) -> F {
+    fn probe<T: Value, F: Value + Probe>(r: &Of<'_, T>, _: &'static str, f: fn(&T) -> &F) -> F {
         f(r).clone()
     }
-    fn each<'a, T: Value + 'a, M>(list: &'a Vec<T>, _: &'static str, body: impl FnMut(&'a T) -> View<M>) -> View<M> {
-        View::List(list.iter().map(body).collect())
+    fn each<'a, T: Value + 'a, M>(list: Of<'a, Vec<T>>, _: &'static str, mut body: impl FnMut(Of<'a, T>) -> View<M>) -> View<M> {
+        View::List(match list {
+            Of::Borrowed(l) => l.iter().map(|t| body(Of::Borrowed(t))).collect(),
+            Of::Owned(l) => l.into_iter().map(|t| body(Of::Owned(t))).collect(),
+        })
     }
-    fn when<M>(c: &bool, yes: impl FnOnce() -> View<M>, no: impl FnOnce() -> View<M>) -> View<M> {
+    fn when<M>(c: Of<'_, bool>, yes: impl FnOnce() -> View<M>, no: impl FnOnce() -> View<M>) -> View<M> {
         if *c {
             yes()
         } else {
@@ -223,15 +310,43 @@ impl Backend for Real {
         }
     }
     fn when_some<'a, T: Value + 'a, M>(
-        o: &'a Option<T>,
+        o: Of<'a, Option<T>>,
         _: &'static str,
-        yes: impl FnOnce(&'a T) -> View<M>,
+        yes: impl FnOnce(Of<'a, T>) -> View<M>,
         no: impl FnOnce() -> View<M>,
     ) -> View<M> {
         match o {
-            Some(t) => yes(t),
-            None => no(),
+            Of::Borrowed(Some(t)) => yes(Of::Borrowed(t)),
+            Of::Owned(Some(t)) => yes(Of::Owned(t)),
+            _ => no(),
         }
+    }
+    fn cell<'a, T: Value + Default>(db: Self::Db<'a>, _: &'static str, _: &'static str, c: kernel::Cell<T>) -> Self::Ref<'a, T> {
+        Of::Owned(kernel::source::cell(db, c))
+    }
+    fn row<'a, T: Value + kernel::Decode>(
+        db: Self::Db<'a>,
+        _: &'static str,
+        keyed: (u32, &'static str, &'static [&'static str]),
+        args: &[u8],
+        of: fn() -> kernel::Of<T>,
+    ) -> Of<'a, Option<T>> {
+        Of::Owned(kernel::source::row(db, keyed.0, args, of))
+    }
+    fn list<'a, T: Value + kernel::Decode>(
+        db: Self::Db<'a>,
+        _: &'static str,
+        keyed: (u32, &'static str, &'static [&'static str]),
+        args: &[u8],
+        of: fn() -> kernel::Of<T>,
+    ) -> Of<'a, Vec<T>> {
+        Of::Owned(kernel::source::rows(db, keyed.0, args, of))
+    }
+    fn derive<'a, R: Value>(_: &'static [&'static str], _: &'static str, _: Source, f: impl FnOnce() -> R) -> Self::Ref<'a, R> {
+        Of::Owned(f())
+    }
+    fn value<'r, 'a, T: Value>(r: &'r Of<'a, T>) -> &'r T {
+        r
     }
 }
 
@@ -254,8 +369,69 @@ impl<T> Sym<T> {
     }
 }
 
+/// What a source view's lets are read as fields of, where a record stands
+/// for them: the phones', until they read sources (docs/north-star.md,
+/// step 10). A recorded path `p.title` is the let `title`; an item's
+/// `t.line`, the let `line` under it.
+pub const RECORD: &str = "p";
+
+/// What a recording says: the view, and the lets it read.
+#[derive(Clone, Debug)]
+pub struct Recording<M> {
+    pub view: View<M>,
+    pub lets: Vec<Let>,
+}
+
+thread_local! {
+    /// The lets of the recording under way, and the items they are under.
+    static RECORDING: std::cell::RefCell<(Vec<Let>, Vec<String>)> = const { std::cell::RefCell::new((Vec::new(), Vec::new())) };
+}
+
+/// What `view` says, run over paths, and the lets it read: what
+/// `#[view]`'s `recording()` returns.
+pub fn recording<M>(view: impl FnOnce() -> View<M>) -> Recording<M> {
+    let outer = RECORDING.with(|r| std::mem::take(&mut *r.borrow_mut()));
+    let view = view();
+    let (lets, _) = RECORDING.with(|r| std::mem::replace(&mut *r.borrow_mut(), outer));
+    Recording { view, lets }
+}
+
+impl Recorder {
+    /// A let kept, read as a field of what stands for it on the phones:
+    /// the record's ([`RECORD`]), or the item's it is under.
+    fn keep<T>(name: &'static str, what: Source, deps: Vec<String>) -> Sym<T> {
+        RECORDING.with(|r| {
+            let (lets, under) = &mut *r.borrow_mut();
+            let path = format!("{}.{name}", under.last().map_or(RECORD, String::as_str));
+            lets.push(Let {
+                name: name.into(),
+                under: under.clone(),
+                what,
+                deps,
+            });
+            Sym(path, PhantomData)
+        })
+    }
+
+    fn under<T>(item: &str, f: impl FnOnce() -> T) -> T {
+        RECORDING.with(|r| r.borrow_mut().1.push(item.into()));
+        let out = f();
+        RECORDING.with(|r| r.borrow_mut().1.pop());
+        out
+    }
+
+    fn keyed(keyed: (u32, &'static str, &'static [&'static str])) -> Keyed {
+        Keyed {
+            key: keyed.0,
+            call: keyed.1,
+            args: keyed.2.to_vec(),
+        }
+    }
+}
+
 impl Backend for Recorder {
     type Ref<'a, T: Value> = Sym<T>;
+    type Db<'a> = ();
     fn get<'a, T: Value + 'a, F: Value>(r: &Sym<T>, name: &'static str, _: fn(&T) -> &F) -> Sym<F> {
         Sym(format!("{}.{name}", r.0), PhantomData)
     }
@@ -269,7 +445,7 @@ impl Backend for Recorder {
         View::Each {
             list: list.0,
             item: item.into(),
-            body: Box::new(body(Sym::root(item))),
+            body: Box::new(Recorder::under(item, || body(Sym::root(item)))),
         }
     }
     fn when<M>(c: Sym<bool>, yes: impl FnOnce() -> View<M>, no: impl FnOnce() -> View<M>) -> View<M> {
@@ -288,9 +464,37 @@ impl Backend for Recorder {
         View::WhenSome {
             opt: o.0,
             item: item.into(),
-            yes: Box::new(yes(Sym::root(item))),
+            yes: Box::new(Recorder::under(item, || yes(Sym::root(item)))),
             no: Box::new(no()),
         }
+    }
+    fn cell<'a, T: Value + Default>(_: Self::Db<'a>, name: &'static str, expr: &'static str, _: kernel::Cell<T>) -> Self::Ref<'a, T> {
+        Recorder::keep(name, Source::Cell(expr), Vec::new())
+    }
+    fn row<'a, T: Value + kernel::Decode>(
+        _: Self::Db<'a>,
+        name: &'static str,
+        keyed: (u32, &'static str, &'static [&'static str]),
+        _: &[u8],
+        _: fn() -> kernel::Of<T>,
+    ) -> Self::Ref<'a, Option<T>> {
+        Recorder::keep(name, Source::Row(Recorder::keyed(keyed)), Vec::new())
+    }
+    fn list<'a, T: Value + kernel::Decode>(
+        _: Self::Db<'a>,
+        name: &'static str,
+        keyed: (u32, &'static str, &'static [&'static str]),
+        _: &[u8],
+        _: fn() -> kernel::Of<T>,
+    ) -> Self::Ref<'a, Vec<T>> {
+        Recorder::keep(name, Source::List(Recorder::keyed(keyed)), Vec::new())
+    }
+    fn derive<'a, R: Value>(deps: &'static [&'static str], name: &'static str, what: Source, _: impl FnOnce() -> R) -> Self::Ref<'a, R> {
+        Recorder::keep(name, what, deps.iter().map(|d| d.to_string()).collect())
+    }
+    #[allow(clippy::needless_lifetimes)]
+    fn value<'r, 'a, T: Value>(_: &'r Sym<T>) -> &'r T {
+        unreachable!("the recorder works nothing out")
     }
 }
 

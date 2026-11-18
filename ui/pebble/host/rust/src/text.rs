@@ -7,6 +7,13 @@ pub struct Line {
     len: usize,
 }
 
+/// A view's words are written into a line (`ark_kernel::Hole`).
+impl ark_kernel::Put for Line {
+    fn put(&mut self, bytes: &[u8]) {
+        self.s(bytes);
+    }
+}
+
 impl Default for Line {
     fn default() -> Line {
         Line::new()
@@ -32,22 +39,11 @@ impl Line {
         self
     }
 
-    /// Adds a number in decimal. In 32 bits, which a Cortex-M3 divides
-    /// (64-bit division links a kilobyte of compiler builtins): a number
-    /// past `u32::MAX` is shown as it.
+    /// Adds a number in decimal, as a view's holes are written
+    /// (`ark_kernel::show`, in 32 bits).
     pub fn n(&mut self, v: u64) -> &mut Line {
-        let mut v = v.min(u64::from(u32::MAX)) as u32;
-        let mut digits = [0u8; 10];
-        let mut at = digits.len();
-        loop {
-            at -= 1;
-            digits[at] = b'0' + (v % 10) as u8;
-            v /= 10;
-            if v == 0 {
-                break;
-            }
-        }
-        self.s(&digits[at..])
+        ark_kernel::show::decimal(self, v);
+        self
     }
 
     /// Adds a number in hexadecimal, sixteen digits.
@@ -58,27 +54,6 @@ impl Line {
             *d = if nib < 10 { b'0' + nib } else { b'a' + nib - 10 };
         }
         self.s(&digits)
-    }
-
-    /// Adds milliseconds as a clock reads them, `m:ss`, or `h:mm:ss` from
-    /// an hour: the text `ark_format::clock` gives every other client.
-    pub fn clock(&mut self, ms: u64) -> &mut Line {
-        let secs = ms.min(u64::from(u32::MAX)) as u32 / 1000;
-        if secs >= 3600 {
-            self.n(u64::from(secs / 3600)).s(b":").two(secs / 60 % 60)
-        } else {
-            self.n(u64::from(secs / 60))
-        }
-        .s(b":")
-        .two(secs % 60)
-    }
-
-    /// Adds a number below a hundred in two digits.
-    fn two(&mut self, v: u32) -> &mut Line {
-        if v < 10 {
-            self.s(b"0");
-        }
-        self.n(u64::from(v))
     }
 
     pub fn bytes(&self) -> &[u8] {
@@ -147,8 +122,9 @@ mod tests {
     #[test]
     fn lines() {
         let mut l = Line::new();
-        l.s(b"at ").clock(83_400).s(b" of ").clock(605_000).s(b", ").n(0).s(b" ").hex(0xab);
-        assert_eq!(l.bytes(), b"at 1:23 of 10:05, 0 00000000000000ab");
+        l.s(b"at ").n(83).s(b", ").n(0).s(b" ").hex(0xab);
+        ark_kernel::Hole::hole(&ark_kernel::Clock(605_000), &mut l);
+        assert_eq!(l.bytes(), b"at 83, 0 00000000000000ab10:05");
     }
 
     /// `ark_format::clock`'s cases, which the phones, the desktop and the
@@ -165,7 +141,7 @@ mod tests {
             (36_005_000, "10:00:05"),
         ] {
             let mut l = Line::new();
-            l.clock(ms);
+            ark_kernel::Hole::hole(&ark_kernel::Clock(ms), &mut l);
             assert_eq!(l.bytes(), text.as_bytes(), "{ms}");
         }
     }
