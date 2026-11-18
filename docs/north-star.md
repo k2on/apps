@@ -364,11 +364,11 @@ its closures make recorded. The target adds what lets it run partially:
   of nested places, a row's parent the nearest row before it whose place
   begins its own, so a view shows it as a nested list from the same
   positional patches; `join` is the same without the parents' rows.
-- **Aggregates as folds.** A group holds its rows' numbers by group and
-  folds a group again when one of its rows changes: count, sum, the least
-  and the most at once, with no running state to keep right. `filter`,
-  `map`, `sort` and `group` are one operator, a closure per row with, for
-  a sort or a group, a key it holds the row under.
+- **Aggregates as running state.** Count, sum and average update in
+  constant time; min and max are folded again over the group's numbers,
+  which it holds, only when the extreme leaves. `filter`, `map`, `sort`
+  and `group` are one operator, a closure per row with, for a sort or a
+  group, a key it holds the row under.
 
 ### What Syncs
 

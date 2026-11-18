@@ -34,7 +34,7 @@
 //! | `filter`, `map` | nothing (what each row read, when it reads) | the closure again on the old and new row |
 //! | `take` | its window, at most its limit | fetches its window again |
 //! | `sort` | its input, sorted | the expensive case: a sort no index provides |
-//! | `group` | its input's numbers, by group | the group folded again |
+//! | `group` | its input's numbers by group, and each group's running count, sum, least and most | count and sum in constant time; the least or most folded again over the group's numbers when the row that was one leaves |
 //! | `related`, `join` | per parent, its children's plan (a take's window), never more | a parent's children pushed the settle; a parent that changed, its children made again |
 //!
 //! **Push.** One settle's [`Changes`] (what a node's overlay or the log's
@@ -445,7 +445,7 @@ impl Op for Scan {
 /// as a parent's place is and then the row's own place, and held, so a
 /// fetch reads them in that order: a sort. With `fold` as well, `f` gives
 /// each row's number, and every run of rows that share a `by` is one row,
-/// placed by it, its value the [`Agg`] of their numbers: a group. One
+/// placed by it, its value the running [`Agg`] of their numbers: a group. One
 /// operator, so the three share how they read, record and push.
 struct Each {
     input: Box<dyn Op>,
@@ -453,6 +453,8 @@ struct Each {
     by: Option<Fun<Vec<u8>>>,
     fold: bool,
     rows: Sparse,
+    /// A group's running aggregates, by its key.
+    aggs: Sparse,
     reads: Option<Reads>,
 }
 
@@ -467,32 +469,10 @@ fn sorted(by: &Fun<Vec<u8>>, db: &dyn Read, k: &[u8], v: &[u8]) -> Vec<u8> {
 
 impl Each {
     /// The value of its row at `key` as it holds them now: a sort's held
-    /// row, or a group's fold.
+    /// row, or a group's running aggregates.
     fn value(&self, key: &[u8]) -> Option<Vec<u8>> {
-        if !self.fold {
-            return self.rows.get(&key.to_vec()).cloned();
-        }
-        let at = escaped(key);
-        let mut agg: Option<Agg> = None;
-        walk(&self.rows.tree, Bound::Included(&at), Bound::Unbounded, false, &mut |k, v| {
-            let Some(v) = v else { return true };
-            if !k.starts_with(&at) {
-                return false;
-            }
-            let n = from_slice::<i64>(v).unwrap_or_default();
-            let a = agg.get_or_insert(Agg {
-                count: 0,
-                sum: 0,
-                min: n,
-                max: n,
-            });
-            a.count += 1;
-            a.sum = a.sum.wrapping_add(n);
-            a.min = a.min.min(n);
-            a.max = a.max.max(n);
-            true
-        });
-        agg.map(|a| to_vec(&a))
+        let key = key.to_vec();
+        if self.fold { self.aggs.get(&key) } else { self.rows.get(&key) }.cloned()
     }
 
     /// Takes its input's diffs, each side made over the rows before or
@@ -526,6 +506,19 @@ impl Each {
                         i
                     }
                 };
+                if self.fold {
+                    // The row taken out first, so a refold reads the rest.
+                    if !came {
+                        self.rows.take(&at);
+                    }
+                    count(
+                        &mut self.aggs,
+                        &self.rows,
+                        out[i].key.clone(),
+                        from_slice::<i64>(&v).unwrap_or_default(),
+                        came,
+                    );
+                }
                 match (held, came) {
                     (true, true) => self.rows.put(at, v),
                     (true, false) => self.rows.take(&at),
@@ -544,6 +537,53 @@ impl Each {
     }
 }
 
+/// A group's row counted in, or (`n` taken back) out: count and sum in
+/// constant time; the least and the most folded again over the group's
+/// held numbers only when the row that was one leaves.
+fn count(aggs: &mut Sparse, rows: &Sparse, g: Vec<u8>, n: i64, came: bool) {
+    let a = aggs.get(&g).and_then(|b| from_slice::<Agg>(b).ok());
+    let a = match (a, came) {
+        (Some(mut a), true) => {
+            a.count += 1;
+            a.sum = a.sum.wrapping_add(n);
+            a.min = a.min.min(n);
+            a.max = a.max.max(n);
+            Some(a)
+        }
+        (None, true) => Some(Agg {
+            count: 1,
+            sum: n,
+            min: n,
+            max: n,
+        }),
+        (Some(a), false) if a.count > 1 => {
+            let (mut a, mut least, mut most) = (a, a.min, a.max);
+            if n == a.min || n == a.max {
+                (least, most) = (i64::MAX, i64::MIN);
+                let at = escaped(&g);
+                walk(&rows.tree, Bound::Included(&at), Bound::Unbounded, false, &mut |k, v| {
+                    if !k.starts_with(&at) {
+                        return false;
+                    }
+                    if let Some(n) = v.as_deref().and_then(|v| from_slice::<i64>(v).ok()) {
+                        (least, most) = (least.min(n), most.max(n));
+                    }
+                    true
+                });
+            }
+            a.count -= 1;
+            a.sum = a.sum.wrapping_sub(n);
+            (a.min, a.max) = (least, most);
+            Some(a)
+        }
+        _ => None,
+    };
+    match a {
+        Some(a) => aggs.put(g, to_vec(&a)),
+        None => aggs.take(&g),
+    }
+}
+
 /// A row through `f`, at its place: its own, or, held by `by`, its key's
 /// first.
 fn placed(f: &Fun<Option<Vec<u8>>>, by: &Option<Fun<Vec<u8>>>, db: &dyn Read, k: &[u8], v: &[u8]) -> Option<(Vec<u8>, Vec<u8>)> {
@@ -558,26 +598,7 @@ impl Op for Each {
                 .input
                 .fetch(db, from, reverse, &mut |k, v| (self.f)(db, k, v).is_none_or(|u| f(k, &u)));
         }
-        if !self.fold {
-            return fetch_map(&self.rows.tree, from, reverse, f);
-        }
-        // Each group once, folded, in its order.
-        let mut groups: Vec<Vec<u8>> = Vec::new();
-        walk(&self.rows.tree, Bound::Unbounded, Bound::Unbounded, reverse, &mut |k, v| {
-            if let (Some(_), Some((g, _))) = (v, unescaped(k)) {
-                if groups.last() != Some(&g) && reached(from, reverse, &g) {
-                    groups.push(g);
-                }
-            }
-            true
-        });
-        for g in groups {
-            if let Some(v) = self.value(&g) {
-                if !f(&g, &v) {
-                    return;
-                }
-            }
-        }
+        fetch_map(if self.fold { &self.aggs.tree } else { &self.rows.tree }, from, reverse, f);
     }
 
     fn push(&mut self, s: &Settle<'_>) -> Vec<Diff> {
@@ -592,6 +613,7 @@ impl Op for Each {
     fn hydrate(&mut self, db: &dyn Read) {
         self.input.hydrate(db);
         self.rows = Sparse::default();
+        self.aggs = Sparse::default();
         self.reads = self.reads.take().map(|_| Reads::default());
         // A filter or a map holds nothing but what its rows read: it runs
         // over them, rather than taking them all at once.
@@ -636,7 +658,7 @@ impl Op for Each {
 
     #[cfg(any(test, ark_selftest))]
     fn held(&self) -> usize {
-        self.input.held() + held(&self.rows.tree) + Reads::held(&self.reads)
+        self.input.held() + held(&self.rows.tree) + held(&self.aggs.tree) + Reads::held(&self.reads)
     }
 }
 
@@ -1053,6 +1075,7 @@ impl Plan {
             by,
             fold,
             rows: Sparse::default(),
+            aggs: Sparse::default(),
             reads: reads.then(Reads::default),
         }))
     }
@@ -1080,8 +1103,9 @@ impl Plan {
     }
 
     /// One row per group of the rows (`by` its key), its value the group's
-    /// [`Agg`] of the numbers `of` gives. Holds its input, by group, and
-    /// folds a group again when one of its rows changes.
+    /// [`Agg`] of the numbers `of` gives, kept running: count and sum in
+    /// constant time. Holds its input's numbers, by group, to fold the
+    /// least and the most again when the row that was one leaves.
     pub fn group(self, by: impl Fn(&[u8], &[u8]) -> Vec<u8> + 'static, of: impl Fn(&[u8], &[u8]) -> i64 + 'static) -> Plan {
         self.group_with(move |_, k, v| by(k, v), move |_, k, v| of(k, v))
     }
