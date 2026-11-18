@@ -35,9 +35,9 @@ Everything is built from eleven things:
 | **Handler** | a query, a mutation, a reaction, or a local entry's: a view's `&mut self` method is one like any other |
 | **Cx\<Role\>** | what a handler runs with: the database as middleware narrowed it, the cells, and the role |
 | **Cell** | a single value that never travels: a view's state, a selection, a draft. Typed (`Cell<T>`) at the app's edge; in the kernel a type-erased slot (a pointer, a vtable to compare and drop it, and a version). A write is a pointer swap, cut off when the value is equal; it is never encoded. The `local` space is cells |
-| **Plan** | a query of incremental operators over rows, kept live by the node and pulled by `fetch`; also one row (`Plan::get`) and a **memo**, a pure function of cells and rows, computed when read and cut off when equal |
+| **Plan** | a query of incremental operators over rows, kept live by the node and pulled by `fetch`, also one row (`Plan::get`): a persistent node of the graph, kept by the function that made it and its arguments |
 | **Sink** | what is told that something it read changed: a view's leaf, the disk's flush, an upstream's record of what a downstream node holds. It pulls what it needs when it next draws or writes |
-| **Binding** | a leaf of a view joined to what it shows: a path from a source (a row, a list, a cell) through memo calls. Written by the build as data, never as code per screen |
+| **Binding** | a leaf of a view joined to what it shows: a tracked thunk, its every read of a cell, a row or a plan's answer, through whatever functions it calls, recorded against it. It runs again only when one of those changes, and is cut off by equality. Written by the build as data, never as code per screen |
 | **Port** | the outside world: disk, network, clock, camera, a bank |
 | **Version** | a frozen schema and API, and the lenses between it and the next |
 
@@ -50,7 +50,7 @@ A view is a plan over those whose leaves are sinks that pull.
 ```
 ark           everything a device runs and must agree on: Entry, Space,
               Node::step and its settle, the Store trait, sync, plans
-              (memos and one-row plans included), cells, read sets, the
+              (one-row plans included), cells, read sets, the
               Sink trait and the interpreter of binding tables.
               no_std + alloc. No I/O, no threads. The same build everywhere.
 
@@ -207,18 +207,29 @@ Every step, and everything received from upstream, ends in one
 2. **Rows.** Each space's changes go through the node's watched plans, in
    the order they were watched, each answering its patches.
 3. **Marks.** The readers of every changed cell, row and plan answer are
-   marked, a memo's readers with it. Only marks move: values are worked
-   out when they are read, after the settle, so no reader sees half a
-   step. A memo whose reads changed but whose value did not stops the
-   marks there.
+   marked. Only marks move: values are worked out when they are read,
+   after the settle, so no reader sees half a step. A reader whose value
+   comes out equal to what it shows stops there.
 4. **Sinks.** Each sink is told once: which of its readers are dirty, and
    the patches of the plans it holds. The disk's sink gets the rows it
    keeps.
 
 Everything that reads records what it read, in one read set: a plan's
-closures, a memo, a view's leaf as it pulls. Cells by slot, rows by table
-and key range, a plan's answer by its watch. Nothing is computed when it
-is written.
+closures, a view's leaf as it pulls. Cells by slot, rows by table and key
+range, a plan's answer by its watch. Nothing is computed when it is
+written.
+
+A value derived from cells and rows is a plain function, with no
+annotation and nothing kept per call. What it reads is recorded against
+the binding that called it. A scalar function's result is shared within
+one settle, so two bindings that call it with the same arguments run it
+once; that cache is cleared when the settle ends. A function that
+returns a `List<T>` or a `Plan<T>` is different: the macro sees the
+return type and keeps it as a persistent plan in the graph, keyed by the
+function and its arguments, so every view that asks for it shares one.
+An explicit memo, kept across settles, is a possible later optimisation,
+for a binding that mixes a fast input (the time) with an expensive
+scalar that is not a plan; it is deferred until a screen needs it.
 
 A tap is a local entry whose handler writes cells; a sync is a shared or
 session entry whose handlers write rows. Both end in the same settle, and
@@ -420,7 +431,7 @@ impl Register {
         let txs = api.txs.list(self.id);                       // a List<Txn>
         list(for t in txs {
             row(t)
-                .selected(self.selected == Some(t.id))         // a memo
+                .selected(self.selected == Some(t.id))         // a function
                 .on_tap(self.select(t.id))                     // a local entry
                 .on_swipe("Approve", api.txs.approve(t.id))    // a shared entry
         })
@@ -450,13 +461,13 @@ A view reads **sources**, never a record. What `api` answers is one:
 - a `#[state]` field, or a value the host keeps (the link, the time), is a
   `Cell<T>`;
 - a call on the way (`clock(p.at(now))`, `self.selected == Some(t.id)`) is
-  a memo.
+  a plain function, its reads the binding's.
 
 No source is passed in as a parameter: a page's inputs are plain values,
 and what it reads it asks `api` for.
 
 The recorder keeps each leaf as a **binding**: a path rooted at a source,
-through the memo calls on the way. A `for` over a list is a list bound to
+through the function calls on the way. A `for` over a list is a list bound to
 a `List`; an `if` is a leaf's visibility bound to a `bool`. The bindings
 are written as tables, data in rodata, not as draw code per screen, so a
 second screen costs its table and not another copy of the code.
@@ -662,8 +673,8 @@ way, with ports answered by the test.
 - **The engine:** every incremental result equals a fresh run, and
   Noria's invariants hold, under the fuzzer's random changes and
   evictions.
-- **The settle:** after any steps, every memo and watched answer equals a
-  fresh run's, every reader whose value changed was told, none twice, and
+- **The settle:** after any steps, every watched answer equals a fresh
+  run's, every reader whose reads changed was told, none twice, and
   nothing whose reads did not change was run again.
 - **The kernel:** the fuzzer, run at depth nightly (1,000 sessions and
   more), checking convergence.
@@ -747,19 +758,22 @@ on main with the apps working. Nothing is kept for compatibility.
    A type-erased slot arena with typed `Cell<T>` handles, `Cx::get` and
    `Cx::set` journaled with the step's rows so a refusal drops both, and
    no `local` store; one read set for plan closures, cells, one-row gets
-   and memos; watches the node owns (`Node::watch`); `Node::settle(&mut
-   dyn Sink)`; `Plan::get` and `memo`; patches with a depth, a move and
-   each row's identity. Every incremental answer and derived value equals
-   a fresh run's, no sink is told twice in a settle, and the walk visits
-   nothing whose reads did not change. The unsafe core is one module,
-   run under Miri on the host.
+   and readers; watches the node owns, one per query and arguments
+   (`Node::watch`); `Node::settle(&mut dyn Sink)`; `Plan::get`; patches
+   with a depth, a move and each row's identity. Every incremental answer
+   equals a fresh run's, no sink is told twice in a settle, and the walk
+   visits nothing whose reads did not change. The unsafe core is one
+   module, run under Miri on the host. **Done**, but for Miri, which the
+   machine it was built on did not have.
 7. **The watch on bindings.** The emitter writes binding tables and
    reader masks from the view's paths in place of `draw(record)`; the
    Pebble host is the sink, its layers pulling at draw; the demo loses its
    `Face` record. Within a few hundred bytes of the 58.5 KB measured for
    it, and pixel-identical in the emulator.
 8. **`#[view]` records bindings and sources.** ark_app's recorder keeps
-   paths rooted at sources, and `Real` reads them; the Swift, Kotlin and
+   paths rooted at sources, and `Real` reads them; functions returning a
+   plan become keyed watches, and scalar functions share one result per
+   settle; the Swift, Kotlin and
    Pebble emitters and their snapshots, all from the same `#[view]`.
 9. **Every other host onto the new kernel:** phones, desktop, web and the
    server. The old kernel is deleted.
