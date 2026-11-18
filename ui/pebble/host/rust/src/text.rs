@@ -60,14 +60,25 @@ impl Line {
         self.s(&digits)
     }
 
-    /// Adds milliseconds as minutes and seconds, `m:ss`.
+    /// Adds milliseconds as a clock reads them, `m:ss`, or `h:mm:ss` from
+    /// an hour: the text `ark_format::clock` gives every other client.
     pub fn clock(&mut self, ms: u64) -> &mut Line {
         let secs = ms.min(u64::from(u32::MAX)) as u32 / 1000;
-        self.n(u64::from(secs / 60)).s(b":");
-        if secs % 60 < 10 {
+        if secs >= 3600 {
+            self.n(u64::from(secs / 3600)).s(b":").two(secs / 60 % 60)
+        } else {
+            self.n(u64::from(secs / 60))
+        }
+        .s(b":")
+        .two(secs % 60)
+    }
+
+    /// Adds a number below a hundred in two digits.
+    fn two(&mut self, v: u32) -> &mut Line {
+        if v < 10 {
             self.s(b"0");
         }
-        self.n(u64::from(secs % 60))
+        self.n(u64::from(v))
     }
 
     pub fn bytes(&self) -> &[u8] {
@@ -138,5 +149,24 @@ mod tests {
         let mut l = Line::new();
         l.s(b"at ").clock(83_400).s(b" of ").clock(605_000).s(b", ").n(0).s(b" ").hex(0xab);
         assert_eq!(l.bytes(), b"at 1:23 of 10:05, 0 00000000000000ab");
+    }
+
+    /// `ark_format::clock`'s cases, which the phones, the desktop and the
+    /// browser show. Falsified by writing an hour as minutes: `121:43`.
+    #[test]
+    fn a_clock_reads_as_every_client_writes_it() {
+        for (ms, text) in [
+            (261_900, "4:21"),
+            (0, "0:00"),
+            (5_000, "0:05"),
+            (3_599_000, "59:59"),
+            (3_600_000, "1:00:00"),
+            (7_123_000, "1:58:43"),
+            (36_005_000, "10:00:05"),
+        ] {
+            let mut l = Line::new();
+            l.clock(ms);
+            assert_eq!(l.bytes(), text.as_bytes(), "{ms}");
+        }
     }
 }
