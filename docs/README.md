@@ -1,5 +1,8 @@
 # docs
 
+`tech-debt.md` lists what we know we owe, why each was left, and what
+paying it would take.
+
 `north-star.md` is the target every part is moving toward: one loop, one
 kernel small enough for a watch, partial sync, typed permissions and
 versions, and the steps from today to there.
