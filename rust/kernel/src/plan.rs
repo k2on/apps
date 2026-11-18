@@ -32,7 +32,7 @@
 //! |---|---|---|
 //! | `scan` | nothing | its table's changes in its range |
 //! | `filter`, `map` | nothing (what each row read, when it reads) | the closure again on the old and new row |
-//! | `take` | its window, at most its limit | fetches its window again |
+//! | `take` | its window, at most its limit | its input's changes up to its edge; fetches past the edge only when too few are left |
 //! | `sort` | its input, sorted | the expensive case: a sort no index provides |
 //! | `group` | its input's numbers by group, and each group's running count, sum, least and most | count and sum in constant time; the least or most folded again over the group's numbers when the row that was one leaves |
 //! | `related`, `join` | per parent, its children's plan (a take's window), never more | a parent's children pushed the settle; a parent that changed, its children made again |
@@ -663,43 +663,28 @@ impl Op for Each {
 }
 
 /// The first `limit` of its input's rows, or the last when `last`. It
-/// holds its window, at most `limit` rows, and when its input changes
-/// fetches the window again and answers how it changed: a bounded take
-/// over an index never holds more than its limit, however long the index.
+/// holds its window, at most `limit` rows: its input's changes up to the
+/// window's edge go into it, rows past its far end leave, and when too few
+/// are left the next past the edge are fetched. A bounded take over an
+/// index never holds more than its limit, however long the index, and
+/// never fetches its window again.
 struct Take {
     input: Box<dyn Op>,
     limit: usize,
     last: bool,
+    /// The window, in the take's own direction (descending when `last`).
     rows: Vec<Row>,
-}
-
-impl Take {
-    /// The window over `db`, in place order.
-    fn window(&self, db: &dyn Read) -> Vec<Row> {
-        let mut rows = fetch(&*self.input, db, Bound::Unbounded, self.last, self.limit);
-        if self.last {
-            rows.reverse();
-        }
-        rows
-    }
 }
 
 /// Rows as diffs: each a removal (`gone`) or an insert.
 fn diffs(rows: Vec<Row>, gone: bool) -> Vec<Diff> {
     let mut out = Vec::with_capacity(rows.len());
     for (key, v) in rows {
+        let v = Some(v);
         out.push(if gone {
-            Diff {
-                key,
-                old: Some(v),
-                new: None,
-            }
+            Diff { key, old: v, new: None }
         } else {
-            Diff {
-                key,
-                old: None,
-                new: Some(v),
-            }
+            Diff { key, old: None, new: v }
         });
     }
     out
@@ -708,10 +693,10 @@ fn diffs(rows: Vec<Row>, gone: bool) -> Vec<Diff> {
 impl Op for Take {
     fn fetch(&self, _: &dyn Read, from: Bound<&[u8]>, reverse: bool, f: &mut dyn FnMut(&[u8], &[u8]) -> bool) {
         let mut each = |(k, v): &Row| !reached(from, reverse, k) || f(k, v);
-        if reverse {
-            self.rows.iter().rev().all(&mut each);
-        } else {
+        if reverse == self.last {
             self.rows.iter().all(&mut each);
+        } else {
+            self.rows.iter().rev().all(&mut each);
         }
     }
 
@@ -720,17 +705,41 @@ impl Op for Take {
             self.hydrate(s.db);
             return Vec::new();
         }
-        if self.input.push(s).is_empty() {
+        let mut d = self.input.push(s);
+        let (last, limit) = (self.last, self.limit);
+        if d.is_empty() || limit == 0 {
             return Vec::new();
         }
-        let new = self.window(s.db);
-        let old = core::mem::replace(&mut self.rows, new.clone());
-        merge(diffs(old, true), diffs(new, false))
+        // Its edge, its last row, when it is full: every input row up to it
+        // is in the window, and only those.
+        let edge = self.rows.last().filter(|_| self.rows.len() == limit).map(|r| r.0.clone());
+        d.retain(|x| edge.as_ref().is_none_or(|e| (x.key <= *e) != last || x.key == *e));
+        for x in &d {
+            let at = self.rows.binary_search_by(|r| if last { x.key.cmp(&r.0) } else { r.0.cmp(&x.key) });
+            match (at, &x.new) {
+                (Ok(i), Some(v)) => self.rows[i].1.clone_from(v),
+                (Ok(i), None) => drop(self.rows.remove(i)),
+                (Err(i), Some(v)) => self.rows.insert(i, (x.key.clone(), v.clone())),
+                (Err(_), None) => {}
+            }
+        }
+        // Too many: those past its far end leave. Too few, when there were
+        // rows past its edge: the next of them come in, fetched from it.
+        let mut moved = diffs(self.rows.split_off(limit.min(self.rows.len())), true);
+        if let (Some(e), true) = (&edge, self.rows.len() < limit) {
+            let more = fetch(&*self.input, s.db, Bound::Excluded(e), last, limit - self.rows.len());
+            self.rows.extend(more.iter().cloned());
+            moved.append(&mut diffs(more, false));
+        }
+        if last {
+            moved.reverse();
+        }
+        merge(d, moved)
     }
 
     fn hydrate(&mut self, db: &dyn Read) {
         self.input.hydrate(db);
-        self.rows = self.window(db);
+        self.rows = fetch(&*self.input, db, Bound::Unbounded, self.last, self.limit);
     }
 
     fn id(&self, place: &[u8], out: &mut Vec<u8>) -> u8 {

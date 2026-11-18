@@ -357,7 +357,8 @@ its closures make recorded. The target adds what lets it run partially:
 - **Pull as well as push.** Every operator answers an ordered, resumable
   `fetch(from, reverse, limit)`, answered at the bottom by an index. A
   `take` over an index-ordered input holds its window, never more than its
-  limit, and fetches the window again when its input changes. A sort by a closure no index
+  limit: changes up to its edge go into it, and it fetches past the edge
+  only when too few are left. A sort by a closure no index
   provides keeps today's behaviour.
 - **`related`**: a parent with its children, held as an index from parent
   key to children, with per-parent limits. Its answer is one ordered list
