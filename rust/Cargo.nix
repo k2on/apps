@@ -1703,7 +1703,10 @@ rec {
         edition = "2021";
         src = lib.cleanSourceWith { filter = sourceFilter;  src = ./kernel; };
         libName = "ark_kernel";
-
+        features = {
+          "default" = [ "upstream" ];
+        };
+        resolvedDefaultFeatures = [ "default" "upstream" ];
       };
       "ark-macros" = rec {
         crateName = "ark-macros";
