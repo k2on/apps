@@ -245,6 +245,13 @@ impl<M: Clone + Debug + 'static> Walk<M> {
                 self.push((shown, modal), label, Role::Row, r.tap.as_ref(), None, &r.menu);
             }
             P::CapsuleButton { title, tap, .. } => self.push((shown, modal), title.get(), Role::Button, Some(tap), None, &[]),
+            // What it holds, then each button by its label.
+            P::ActionBar { items, content } => {
+                self.view(content, shown, modal);
+                for i in items {
+                    self.push((shown, modal), i.label.get(), Role::Button, Some(&i.tap), None, &[]);
+                }
+            }
             P::Sheet {
                 title,
                 dismiss,

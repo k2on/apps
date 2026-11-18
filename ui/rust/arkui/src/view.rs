@@ -13,7 +13,8 @@ use crate::text::{self, text};
 use crate::text_input::text_input;
 use ark_app::shell::compact_tag;
 use ark_app::view::{
-    ColumnAlign, ColumnWidth, Confirm, Input, ListRow, MeterRow, Part, Picture, Placement, Section, TableCell, TableColumn, TableRow, Val, View,
+    ActionButton, ActionItem, ColumnAlign, ColumnWidth, Confirm, Input, ListRow, MeterRow, Part, Picture, Placement, Section, TableCell, TableColumn,
+    TableRow, Val, View,
 };
 use iced::widget::{button, checkbox, column, container, row, rule, scrollable, stack, tooltip, Column, Space};
 use iced::{Alignment, Length, Padding};
@@ -437,6 +438,7 @@ fn part<M: Clone + 'static>(v: View<M>) -> Option<Element<'static, M>> {
             let words = ark_app::view::text(text.get()).ink(if lit { ark_app::view::Ink::Accent } else { ark_app::view::Ink::Quiet });
             layout::layout(words, None).unwrap_or_else(|| Space::new().into())
         }
+        Part::ActionBar { items, content } => action_bar(items, *content),
         // Its mute, then the bar; iced's slider says where it is dragged as
         // it goes, so each move is a level, as a scrubber's is a seek.
         Part::Volume {
@@ -1109,6 +1111,45 @@ fn bar_button<'a, M: Clone + 'a>(title: &'static str, glyph: &'static str, _plac
     .style(style::quiet)
     .on_press_maybe(enabled.then_some(tap));
     tip(b, title)
+}
+
+/// What a watch's buttons do, beside what it holds (`Part::ActionBar`):
+/// a column at the trailing edge of a glyph button each, top, middle and
+/// bottom, pressed as the toolbar's are (the desktop has no give) and said
+/// by its label as a tooltip.
+fn action_bar<M: Clone + 'static>(items: Vec<ActionItem<M>>, content: View<M>) -> Element<'static, M> {
+    let slot = |b: ActionButton| -> Element<'static, M> {
+        match items.iter().find(|i| i.button == b) {
+            Some(i) => {
+                let pressed = button(
+                    container(icon::tinted(shape(&i.glyph.get()), BAR_GLYPH, |p| {
+                        p.background.base.text.scale_alpha(0.75)
+                    }))
+                    .center(BAR_BUTTON),
+                )
+                .padding(0)
+                .style(style::quiet)
+                .on_press(i.tap.clone());
+                tip(pressed, i.label.get())
+            }
+            None => Space::new().width(BAR_BUTTON).height(BAR_BUTTON).into(),
+        }
+    };
+    let gap = || Space::new().height(Length::Fill);
+    let bar = column![
+        gap(),
+        slot(ActionButton::Up),
+        gap(),
+        slot(ActionButton::Select),
+        gap(),
+        slot(ActionButton::Down),
+        gap()
+    ]
+    .align_x(Alignment::Center)
+    .height(Length::Fill);
+    row![container(column(nodes(content)).spacing(8)).width(Length::Fill), bar]
+        .spacing(8)
+        .into()
 }
 
 /// Who is signed in, the toolbar's last item: their initial on their

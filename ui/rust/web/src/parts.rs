@@ -5,7 +5,7 @@
 
 use std::rc::Rc;
 
-use ark_app::view::{Confirm, Input, ListRow, MeterRow, Part, Picture, Section, View};
+use ark_app::view::{ActionButton, Confirm, Input, ListRow, MeterRow, Part, Picture, Section, View};
 use leptos::html;
 use leptos::prelude::*;
 use wasm_bindgen::JsCast;
@@ -366,6 +366,34 @@ fn drawn<M: Clone + std::fmt::Debug + 'static>(v: View<M>) -> Option<AnyView> {
             change,
             mute,
         } => volume(label.get(), level.get(), muted.get(), change, mute),
+        // What a watch's buttons do, beside what it holds: a column of the
+        // toolbar's glyph buttons at the trailing edge, top, middle and
+        // bottom, each said by its label.
+        Part::ActionBar { items, content } => {
+            let buttons: Vec<AnyView> = [ActionButton::Up, ActionButton::Select, ActionButton::Down]
+                .into_iter()
+                .map(|b| match items.iter().find(|i| i.button == b) {
+                    Some(i) => {
+                        let (label, tap) = (i.label.get(), i.tap.clone());
+                        html::button()
+                            .class("ark-bar-button")
+                            .attr("title", label.clone())
+                            .attr("aria-label", label)
+                            .on(leptos::ev::click, move |_| send(tap.clone()))
+                            .child(glyph(&i.glyph.get(), 17))
+                            .into_any()
+                    }
+                    None => html::span().class("ark-action-gap").into_any(),
+                })
+                .collect();
+            html::div()
+                .class("ark-action-host")
+                .child((
+                    html::div().class("ark-column ark-action-content").child(nodes(*content)),
+                    html::div().class("ark-action-bar").child(buttons),
+                ))
+                .into_any()
+        }
         Part::Paper {
             heading,
             date,

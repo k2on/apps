@@ -612,6 +612,15 @@ pub enum Part<M> {
         change: Input<i64, M>,
         mute: M,
     },
+    /// What a device's own buttons do, beside `content`: Pebble's
+    /// `ActionBarLayer`, its up, select and down buttons' glyphs in a bar
+    /// at the trailing edge (ui/docs/pebble.md). On a screen with no such
+    /// buttons it is a column of glyph buttons there, top, middle and
+    /// bottom, each pressed as a give and said by its label.
+    ActionBar {
+        items: Vec<ActionItem<M>>,
+        content: Box<View<M>>,
+    },
     /// A slip of paper (a receipt as it was printed): monospace, dark on
     /// white whatever the appearance; its heading bold and the line under
     /// it centred, then a rule, each of `names` with its `figures` against
@@ -2397,6 +2406,91 @@ pub fn volume<M: 'static>(
     .into()
 }
 
+/// Which of a device's buttons an [`ActionItem`] is: Pebble's up, select
+/// and down, top to bottom along the trailing edge.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ActionButton {
+    Up,
+    Select,
+    Down,
+}
+
+impl ActionButton {
+    /// As the phones' `ActionButton` spells it.
+    pub fn case(self) -> &'static str {
+        match self {
+            ActionButton::Up => "up",
+            ActionButton::Select => "select",
+            ActionButton::Down => "down",
+        }
+    }
+}
+
+/// One button of an action bar: its glyph (a Lucide name), what it is said
+/// as, and what pressing it sends.
+#[derive(Clone, Debug)]
+pub struct ActionItem<M> {
+    pub button: ActionButton,
+    pub glyph: Val<String>,
+    pub label: Val<String>,
+    pub tap: M,
+}
+
+/// `content` with what a device's buttons do beside it ([`Part::ActionBar`]):
+/// each of [`ActionBar::up`], [`ActionBar::select`] and [`ActionBar::down`]
+/// that is given.
+pub fn action_bar<M>(content: impl Into<View<M>>) -> ActionBar<M> {
+    ActionBar {
+        items: vec![],
+        content: content.into(),
+    }
+}
+
+pub struct ActionBar<M> {
+    items: Vec<ActionItem<M>>,
+    content: View<M>,
+}
+
+impl<M> ActionBar<M> {
+    fn item(mut self, button: ActionButton, glyph: impl Into<Val<String>>, label: impl Into<Val<String>>, tap: M) -> Self {
+        assert!(
+            self.items.iter().all(|i| i.button != button),
+            "an action bar's {} button is given twice",
+            button.case()
+        );
+        self.items.push(ActionItem {
+            button,
+            glyph: glyph.into(),
+            label: label.into(),
+            tap,
+        });
+        self.items.sort_by_key(|i| i.button as u8);
+        self
+    }
+    /// The top button: its glyph, its label, what it sends.
+    pub fn up(self, glyph: impl Into<Val<String>>, label: impl Into<Val<String>>, tap: M) -> Self {
+        self.item(ActionButton::Up, glyph, label, tap)
+    }
+    /// The middle button.
+    pub fn select(self, glyph: impl Into<Val<String>>, label: impl Into<Val<String>>, tap: M) -> Self {
+        self.item(ActionButton::Select, glyph, label, tap)
+    }
+    /// The bottom button.
+    pub fn down(self, glyph: impl Into<Val<String>>, label: impl Into<Val<String>>, tap: M) -> Self {
+        self.item(ActionButton::Down, glyph, label, tap)
+    }
+}
+
+impl<M> From<ActionBar<M>> for View<M> {
+    fn from(b: ActionBar<M>) -> View<M> {
+        Part::ActionBar {
+            items: b.items,
+            content: Box::new(b.content),
+        }
+        .into()
+    }
+}
+
 /// A slip of paper: a receipt as it was printed ([`Part::Paper`]).
 pub fn paper<M>(
     heading: impl Into<Val<String>>,
@@ -2926,6 +3020,35 @@ impl<M> Part<M> {
                     ("until", G::Val(lit(until_ms))),
                 ],
                 vec![],
+            ),
+            Part::ActionBar { items, content } => c(
+                "ActionBar",
+                None,
+                vec![(
+                    "items",
+                    G::Items(
+                        items
+                            .iter()
+                            .map(|i| Call {
+                                name: "ActionItem",
+                                first: Some(G::Val(lit(&i.glyph))),
+                                args: vec![
+                                    ("label", G::Val(lit(&i.label))),
+                                    (
+                                        "button",
+                                        G::Case {
+                                            of: "ActionButton",
+                                            case: i.button.case(),
+                                        },
+                                    ),
+                                    ("onTap", G::Act(&i.tap)),
+                                ],
+                                slots: vec![],
+                            })
+                            .collect(),
+                    ),
+                )],
+                vec![("", &**content)],
             ),
             Part::Volume {
                 label,
@@ -3580,6 +3703,18 @@ impl<M: 'static> Part<M> {
                 playing,
                 from_ms,
                 until_ms,
+            },
+            Part::ActionBar { items, content } => Part::ActionBar {
+                items: items
+                    .into_iter()
+                    .map(|i| ActionItem {
+                        button: i.button,
+                        glyph: i.glyph,
+                        label: i.label,
+                        tap: f(i.tap),
+                    })
+                    .collect(),
+                content: b(content),
             },
             Part::Volume {
                 label,
