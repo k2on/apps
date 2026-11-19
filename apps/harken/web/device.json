@@ -1,0 +1,9 @@
+{
+  "name": "Browser, 1440×900",
+  "width": 2880,
+  "height": 1800,
+  "corner": 0,
+  "cutout": "none",
+  "browser": "chromium",
+  "version": "130.0.6723.31"
+}

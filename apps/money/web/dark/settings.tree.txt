@@ -1,0 +1,168 @@
+[row] shell.row:general — General (taps)
+[row] shell.row:alex — Alex
+[text] shell.text:about — About
+[row] shell.row:money — Money
+[row] shell.row:version — Version
+[row] shell.row:household — Household (taps)
+[text] shell.text:shared-with — Shared With
+[row] shell.row:alex~2 — Alex
+[row] shell.row:connected-banks — Connected Banks (taps)
+[text] shell.text:banks — Banks
+[row] shell.row:chase — Chase (taps)
+[row] shell.row:sync-now — Sync Now (taps)
+[row] shell.row:appearance — Appearance (taps)
+[text] shell.text:appearance — Appearance
+[item] shell.appearance-key:system — System (taps)
+[item] shell.appearance-key:light — Light (taps)
+[item] shell.appearance-key:dark — Dark (taps)
+
+
+Budget
+Accounts
+Transactions
+4
+Insights
+Budget Accounts
+Checking
+Savings
+Cash
+Chase Sapphire
+4
+Tracking Accounts
+Mortgage
+Retirement
+Alex
+November 2026
+Ready to Assign
+$1,284.50
+1 overspent · 4 underfunded
+Auto-Assign
+Credit Card Payments
+Assigned
+$0.00
+Activity
+-$950.85
+Available
+$64.78 not covered
+Chase Sapphire
+$64.78 short
+Owed $1,001.87
+$0.00
+-$950.85
+$937.09
+Bills
+Assigned
+$2,330.00
+Activity
+-$2,218.47
+Available
+$144.88
+🏠 Rent
+$1,850.00
+-$1,850.00
+$0.00
+⚡️ Electric
+$120.00
+-$100.86
+$42.87
+💧 Water
+$45.00
+-$37.61
+$17.01
+🌐 Internet
+$70.00
+-$70.00
+$0.00
+📱 Phone
+$85.00
+$0.00
+$85.00
+☂️ Insurance
+$160.00
+-$160.00
+$0.00
+Everyday
+Assigned
+$1,030.00
+Activity
+-$918.70
+Available
+$169.34
+🛒 Groceries
+$650.00
+-$559.22
+$90.78
+🍜 Dining Out
+$64.78 on a card, not covered
+$120.00
+-$184.78
+-$64.78
+🚆 Gas & Transit
+$180.00
+-$101.96
+$136.08
+🧺 Household
+$80.00
+-$72.74
+$7.26
+Quality of Life
+Assigned
+$240.00
+Activity
+-$132.52
+Available
+$204.17
+🎟️ Entertainment
+$60.00
+-$32.09
+$33.19
+📺 Subscriptions
+$45.00
+-$32.00
+$39.00
+👕 Clothing
+$75.00
+-$43.06
+$31.94
+🩺 Health
+$60.00
+-$25.37
+$100.04
+Savings Goals
+Assigned
+$3,655.50
+Activity
+$0.00
+Available
+$21,298.48
+🛟 Emergency Fund
+$3,595.50
+$0.00
+$20,608.47
+🏖️ Vacation
+$250.00 more needed this month
+$0.00
+$0.00
+$500.00
+🎁 Gifts
+$50.00 more needed this month
+$0.00
+$0.00
+$100.00
+🔧 Car Maintenance
+$60.00
+$0.00
+$90.01
+Settings
+General
+Household
+Connected Banks
+Appearance
+Alex
+The demo's household, on this device alone
+About
+Money
+Your household's budget, on your own server
+Version
+0.1
+Done

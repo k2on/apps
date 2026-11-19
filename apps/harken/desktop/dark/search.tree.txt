@@ -1,0 +1,8 @@
+[tab] tab:home — Home (taps)
+[tab] tab:library — Library (taps)
+[tab] tab:search — Search (taps)
+[text] shell.text:search — Search
+[field] search.typed — Songs, albums and artists (types)
+[text] search.text:search — Search
+[text] search.text:search-your-library — Search Your Library
+[button] shell.account — Account (taps)

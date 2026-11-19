@@ -1,0 +1,2 @@
+[text] welcome.text:welcome-to-money — Welcome to Money
+[button] welcome.next — Get Started (taps)

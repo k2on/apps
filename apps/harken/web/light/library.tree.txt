@@ -1,0 +1,33 @@
+[tab] tab:home — Home (taps)
+[tab] tab:library — Library (taps)
+[text] shell.text:library — Library
+[text] library.text:library — Library
+[button] library.show:playlists — Playlists (taps)
+[button] library.show:albums — Albums (taps)
+[button] library.show:artists — Artists (taps)
+[button] library.show:songs — Songs (taps)
+[button] library.show:podcasts — Podcasts (taps)
+[button] library.show:sermons — Sermons (taps)
+[row] library.row:new-playlist — New Playlist (taps)
+[row] library.row:favorites — Favorites (taps)
+[row] library.row:piano — Piano (taps)
+[row] library.row:water-music — Water Music (taps)
+[tab] tab:search — Search (taps)
+[button] shell.account — Account (taps)
+
+
+Home
+Library
+Search
+A
+Library
+Playlists
+Albums
+Artists
+Songs
+Podcasts
+Sermons
+New Playlist
+Favorites
+Piano
+Water Music

@@ -1,0 +1,21 @@
+[row] shell.row:general — General (taps)
+[row] shell.row:alex — Alex
+[text] shell.text:server — Server
+[row] shell.row:127-0-0-1-8788 — 127.0.0.1:8788
+[row] shell.row:sign-out — Sign Out (taps)
+[text] shell.text:about — About
+[row] shell.row:money — Money
+[row] shell.row:version — Version
+[row] shell.row:household — Household (taps)
+[text] shell.text:shared-with — Shared With
+[row] shell.row:alex~2 — Alex
+[row] shell.row:connected-banks — Connected Banks (taps)
+[text] shell.text:banks — Banks
+[row] shell.row:chase — Chase (taps)
+[row] shell.row:connect-a-bank — Connect a Bank (taps)
+[row] shell.row:sync-now — Sync Now (taps)
+[row] shell.row:appearance — Appearance (taps)
+[text] shell.text:appearance — Appearance
+[item] shell.appearance-key:system — System (taps)
+[item] shell.appearance-key:light — Light (taps)
+[item] shell.appearance-key:dark — Dark (taps)

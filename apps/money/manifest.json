@@ -1,0 +1,1200 @@
+{
+ "version": "44428870932",
+ "commit": "a132d1ecc6385c3b2865859fc4d8642049fbc78b",
+ "made": "2026-11-19 00:32 UTC",
+ "platforms": {
+  "android": {
+   "device": {
+    "name": "Pixel 7",
+    "width": 1080,
+    "height": 2400,
+    "corner": 110,
+    "cutout": "hole"
+   },
+   "shots": [
+    {
+     "id": "account",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "accounts",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "add-transaction",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "auto-assign-menu",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "budget",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "category",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "insights",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "review",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "settings",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "transaction",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "welcome",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    }
+   ]
+  },
+  "android-tablet": {
+   "device": {
+    "name": "Pixel Tablet",
+    "width": 2560,
+    "height": 1600,
+    "corner": 60,
+    "cutout": "none"
+   },
+   "shots": [
+    {
+     "id": "account",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "accounts",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "add-transaction",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "auto-assign-menu",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "budget",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "category",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "insights",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "review",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "settings",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "transaction",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "welcome",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    }
+   ]
+  },
+  "desktop": {
+   "device": {
+    "corner": 0,
+    "cutout": "none",
+    "height": 1800,
+    "name": "Desktop, 1440\u00d7900",
+    "width": 2880
+   },
+   "shots": [
+    {
+     "id": "account",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "accounts",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "add-transaction",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "auto-assign-menu",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "budget",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "category",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "insights",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "keys",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "review",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "settings",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "transaction",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "visual",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    }
+   ]
+  },
+  "fold-folded": {
+   "device": {
+    "name": "Pixel Fold",
+    "width": 1080,
+    "height": 2092,
+    "corner": 110,
+    "cutout": "hole"
+   },
+   "shots": [
+    {
+     "id": "account",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "accounts",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "add-transaction",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "auto-assign-menu",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "budget",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "category",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "insights",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "review",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "settings",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "transaction",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "welcome",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    }
+   ]
+  },
+  "fold-unfolded": {
+   "device": {
+    "name": "Pixel Fold",
+    "width": 2208,
+    "height": 1840,
+    "corner": 60,
+    "cutout": "hole"
+   },
+   "shots": [
+    {
+     "id": "account",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "accounts",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "add-transaction",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "auto-assign-menu",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "budget",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "category",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "insights",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "review",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "settings",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "transaction",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "welcome",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    }
+   ]
+  },
+  "ios": {
+   "device": {
+    "name": "iPhone 17 Pro",
+    "width": 1206,
+    "height": 2622,
+    "corner": 165,
+    "cutout": "island"
+   },
+   "shots": [
+    {
+     "id": "account",
+     "kind": "screenshot",
+     "themes": [
+      "light"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "accounts",
+     "kind": "screenshot",
+     "themes": [
+      "light"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "add-transaction",
+     "kind": "screenshot",
+     "themes": [
+      "light"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "auto-assign-menu",
+     "kind": "screenshot",
+     "themes": [
+      "light"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "budget",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "category",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "insights",
+     "kind": "screenshot",
+     "themes": [
+      "light"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "review",
+     "kind": "screenshot",
+     "themes": [
+      "light"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "settings",
+     "kind": "screenshot",
+     "themes": [
+      "light"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "transaction",
+     "kind": "screenshot",
+     "themes": [
+      "light"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "welcome",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    }
+   ]
+  },
+  "ipad-landscape": {
+   "device": {
+    "name": "iPad Pro 13-inch (M5)",
+    "width": 2752,
+    "height": 2064,
+    "corner": 110,
+    "cutout": "none"
+   },
+   "shots": [
+    {
+     "id": "account",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "accounts",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "add-transaction",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "auto-assign-menu",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "budget",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "category",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "insights",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "review",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "settings",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "transaction",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "welcome",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    }
+   ]
+  },
+  "ipad-portrait": {
+   "device": {
+    "name": "iPad Pro 13-inch (M5)",
+    "width": 2064,
+    "height": 2752,
+    "corner": 110,
+    "cutout": "none"
+   },
+   "shots": [
+    {
+     "id": "account",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "accounts",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "add-transaction",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "auto-assign-menu",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "budget",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "category",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "insights",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "review",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "settings",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "transaction",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "welcome",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    }
+   ]
+  },
+  "mac": {
+   "device": {
+    "name": "Mac",
+    "width": 1180,
+    "height": 760,
+    "corner": 20,
+    "cutout": "none"
+   },
+   "shots": [
+    {
+     "id": "account",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "accounts",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "add-transaction",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "auto-assign-menu",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "budget",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "category",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "insights",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "review",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "settings",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "transaction",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "welcome",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    }
+   ]
+  },
+  "web": {
+   "device": {
+    "name": "Browser, 1440\u00d7900",
+    "width": 2880,
+    "height": 1800,
+    "corner": 0,
+    "cutout": "none",
+    "browser": "chromium",
+    "version": "130.0.6723.31"
+   },
+   "shots": [
+    {
+     "id": "account",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "accounts",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "add-transaction",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "approve-all",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "auto-assign-menu",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "budget",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "categorize-submenu",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "category",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "category-picker",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "command-box",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "context-menu",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "date-picker",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "insights",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "keys-cursor",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "keys-panel",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "review",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "search-suggestions",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "settings",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "settings-household",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "submenu",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "transaction",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    }
+   ]
+  }
+ }
+}

@@ -1,0 +1,221 @@
+[tab] tab:budget — Budget (taps)
+[tab] tab:accounts — Accounts (taps)
+[tab] tab:transactions — Transactions (taps)
+[text] shell.text:transactions — Transactions
+[button] shell.filter — Filter (taps)
+[button] shell.new-transaction — New Transaction (taps)
+[field] shell.search — Payee, category, memo or amount (types)
+[button] shell.inspector:transaction-details — Transaction Details (taps)
+[text] transactions.text:transactions — Transactions
+[button] transactions.show:to-review-4 — To Review (4) (taps)
+[button] transactions.show:all — All (taps)
+[text] transactions.text:nov-19-2026 — Nov 19, 2026
+[row] transactions.row:blue-bottle-coffee — Blue Bottle Coffee (taps; menu: approve, categorize, edit, delete)
+[text] transactions.text:nov-18-2026 — Nov 18, 2026
+[row] transactions.row:amazon — Amazon (taps; menu: categorize, edit, delete)
+[row] transactions.row:walgreens — Walgreens (taps; menu: categorize, edit, delete)
+[row] transactions.row:municipal-water — Municipal Water (taps; menu: categorize, edit, delete)
+[text] transactions.text:nov-17-2026 — Nov 17, 2026
+[row] transactions.row:shell — Shell (taps; menu: approve, categorize, edit, delete)
+[text] transactions.text:nov-16-2026 — Nov 16, 2026
+[row] transactions.row:trader-joe-s — Trader Joe's (taps; menu: approve, categorize, edit, delete)
+[text] transactions.text:nov-15-2026 — Nov 15, 2026
+[row] transactions.row:amc-theatres — AMC Theatres (taps; menu: approve, categorize, edit, delete)
+[row] transactions.row:acme-corp — Acme Corp (taps; menu: categorize, edit, delete)
+[text] transactions.text:nov-14-2026 — Nov 14, 2026
+[row] transactions.row:blue-bottle-coffee~2 — Blue Bottle Coffee (taps; menu: categorize, edit, delete)
+[text] transactions.text:nov-13-2026 — Nov 13, 2026
+[row] transactions.row:trader-joe-s~2 — Trader Joe's (taps; menu: categorize, edit, delete)
+[text] transactions.text:nov-12-2026 — Nov 12, 2026
+[row] transactions.row:target — Target (taps; menu: categorize, edit, delete)
+[row] transactions.row:city-power-light — City Power & Light (taps; menu: categorize, edit, delete)
+[text] transactions.text:nov-11-2026 — Nov 11, 2026
+[row] transactions.row:blue-bottle-coffee~3 — Blue Bottle Coffee (taps; menu: categorize, edit, delete)
+[text] transactions.text:nov-10-2026 — Nov 10, 2026
+[row] transactions.row:home-depot — Home Depot (taps; menu: categorize, edit, delete)
+[row] transactions.row:spotify — Spotify (taps; menu: categorize, edit, delete)
+[text] transactions.text:nov-9-2026 — Nov 9, 2026
+[row] transactions.row:whole-foods-market — Whole Foods Market (taps; menu: categorize, edit, delete)
+[text] transactions.text:nov-8-2026 — Nov 8, 2026
+[row] transactions.row:sonic-fiber — Sonic Fiber (taps; menu: categorize, edit, delete)
+[text] transactions.text:nov-7-2026 — Nov 7, 2026
+[row] transactions.row:chevron — Chevron (taps; menu: categorize, edit, delete)
+[row] transactions.row:farmers-market — Farmers Market (taps; menu: categorize, edit, delete)
+[text] transactions.text:nov-6-2026 — Nov 6, 2026
+[row] transactions.row:whole-foods-market~2 — Whole Foods Market (taps; menu: categorize, edit, delete)
+[text] transactions.text:nov-5-2026 — Nov 5, 2026
+[row] transactions.row:chipotle — Chipotle (taps; menu: categorize, edit, delete)
+[row] transactions.row:transfer-chase-sapphire — Transfer : Chase Sapphire (taps; menu: categorize, edit, delete)
+[row] transactions.row:transfer-checking — Transfer : Checking (taps; menu: categorize, edit, delete)
+[text] transactions.text:nov-4-2026 — Nov 4, 2026
+[row] transactions.row:netflix — Netflix (taps; menu: categorize, edit, delete)
+[text] transactions.text:nov-3-2026 — Nov 3, 2026
+[row] transactions.row:state-farm — State Farm (taps; menu: categorize, edit, delete)
+[text] transactions.text:nov-2-2026 — Nov 2, 2026
+[row] transactions.row:trader-joe-s~3 — Trader Joe's (taps; menu: categorize, edit, delete)
+[row] transactions.row:transfer-checking~2 — Transfer : Checking (taps; menu: categorize, edit, delete)
+[row] transactions.row:transfer-savings — Transfer : Savings (taps; menu: categorize, edit, delete)
+[text] transactions.text:nov-1-2026 — Nov 1, 2026
+[row] transactions.row:greenway-property-mgmt — Greenway Property Mgmt (taps; menu: categorize, edit, delete)
+[row] transactions.row:riverside-schools — Riverside Schools (taps; menu: categorize, edit, delete)
+[row] transactions.row:acme-corp~2 — Acme Corp (taps; menu: categorize, edit, delete)
+[text] transactions.text:oct-30-2026 — Oct 30, 2026
+[row] transactions.row:trader-joe-s~4 — Trader Joe's (taps; menu: categorize, edit, delete)
+[text] transactions.text:oct-29-2026 — Oct 29, 2026
+[row] transactions.row:amc-theatres~2 — AMC Theatres (taps; menu: categorize, edit, delete)
+[text] transactions.text:oct-28-2026 — Oct 28, 2026
+[row] transactions.row:chipotle~2 — Chipotle (taps; menu: categorize, edit, delete)
+[text] transactions.text:oct-27-2026 — Oct 27, 2026
+[row] transactions.row:costco — Costco (taps; menu: categorize, edit, delete)
+[text] transactions.text:oct-26-2026 — Oct 26, 2026
+[row] transactions.row:chevron~2 — Chevron (taps; menu: categorize, edit, delete)
+[text] transactions.text:oct-25-2026 — Oct 25, 2026
+[row] transactions.row:pizzeria-delfina — Pizzeria Delfina (taps; menu: categorize, edit, delete)
+[text] transactions.text:oct-24-2026 — Oct 24, 2026
+[row] transactions.row:home-depot~2 — Home Depot (taps; menu: categorize, edit, delete)
+[text] transactions.text:oct-23-2026 — Oct 23, 2026
+[row] transactions.row:costco~2 — Costco (taps; menu: categorize, edit, delete)
+[text] transactions.text:oct-22-2026 — Oct 22, 2026
+[row] transactions.row:pizzeria-delfina~2 — Pizzeria Delfina (taps; menu: categorize, edit, delete)
+[text] transactions.text:oct-21-2026 — Oct 21, 2026
+[row] transactions.row:mint-mobile — Mint Mobile (taps; menu: categorize, edit, delete)
+[text] transactions.text:oct-20-2026 — Oct 20, 2026
+[row] transactions.row:trader-joe-s~5 — Trader Joe's (taps; menu: categorize, edit, delete)
+[text] transactions.text:oct-19-2026 — Oct 19, 2026
+[row] transactions.row:thai-basil — Thai Basil (taps; menu: categorize, edit, delete)
+[text] transactions.text:oct-18-2026 — Oct 18, 2026
+[row] transactions.row:walgreens~2 — Walgreens (taps; menu: categorize, edit, delete)
+[row] transactions.row:municipal-water~2 — Municipal Water (taps; menu: categorize, edit, delete)
+[text] transactions.text:oct-17-2026 — Oct 17, 2026
+[row] transactions.row:chevron~3 — Chevron (taps; menu: categorize, edit, delete)
+[text] transactions.text:oct-16-2026 — Oct 16, 2026
+[row] transactions.row:whole-foods-market~3 — Whole Foods Market (taps; menu: categorize, edit, delete)
+[text] transactions.text:oct-15-2026 — Oct 15, 2026
+[row] transactions.row:steam — Steam (taps; menu: categorize, edit, delete)
+[row] transactions.row:acme-corp~3 — Acme Corp (taps; menu: categorize, edit, delete)
+[text] transactions.text:oct-14-2026 — Oct 14, 2026
+[row] transactions.row:pizzeria-delfina~3 — Pizzeria Delfina (taps; menu: categorize, edit, delete)
+[text] transactions.text:oct-13-2026 — Oct 13, 2026
+[row] transactions.row:trader-joe-s~6 — Trader Joe's (taps; menu: categorize, edit, delete)
+[text] transactions.text:oct-12-2026 — Oct 12, 2026
+[row] transactions.row:uniqlo — Uniqlo (taps; menu: categorize, edit, delete)
+[row] transactions.row:city-power-light~2 — City Power & Light (taps; menu: categorize, edit, delete)
+[text] transactions.text:oct-11-2026 — Oct 11, 2026
+[row] transactions.row:pizzeria-delfina~4 — Pizzeria Delfina (taps; menu: categorize, edit, delete)
+[text] transactions.text:oct-10-2026 — Oct 10, 2026
+[row] transactions.row:spotify~2 — Spotify (taps; menu: categorize, edit, delete)
+[row] transactions.row:target~2 — Target (taps; menu: categorize, edit, delete)
+[text] transactions.text:oct-9-2026 — Oct 9, 2026
+[row] transactions.row:costco~3 — Costco (taps; menu: categorize, edit, delete)
+[row] transactions.row:jiffy-lube — Jiffy Lube (taps; menu: categorize, edit, delete)
+[text] transactions.text:oct-8-2026 — Oct 8, 2026
+[row] transactions.row:sonic-fiber~2 — Sonic Fiber (taps; menu: categorize, edit, delete)
+[text] transactions.text:oct-7-2026 — Oct 7, 2026
+[row] transactions.row:clipper-card — Clipper Card (taps; menu: categorize, edit, delete)
+[row] transactions.row:farmers-market~2 — Farmers Market (taps; menu: categorize, edit, delete)
+[text] transactions.text:oct-6-2026 — Oct 6, 2026
+[row] transactions.row:trader-joe-s~7 — Trader Joe's (taps; menu: categorize, edit, delete)
+[text] transactions.text:oct-5-2026 — Oct 5, 2026
+[row] transactions.row:blue-bottle-coffee~4 — Blue Bottle Coffee (taps; menu: categorize, edit, delete)
+[row] transactions.row:transfer-checking~3 — Transfer : Checking (taps; menu: categorize, edit, delete)
+[row] transactions.row:transfer-chase-sapphire~2 — Transfer : Chase Sapphire (taps; menu: categorize, edit, delete)
+[text] transactions.text:oct-4-2026 — Oct 4, 2026
+[row] transactions.row:netflix~2 — Netflix (taps; menu: categorize, edit, delete)
+[text] transactions.text:oct-3-2026 — Oct 3, 2026
+[row] transactions.row:state-farm~2 — State Farm (taps; menu: categorize, edit, delete)
+[text] transactions.text:oct-2-2026 — Oct 2, 2026
+[row] transactions.row:costco~4 — Costco (taps; menu: categorize, edit, delete)
+[row] transactions.row:transfer-savings~2 — Transfer : Savings (taps; menu: categorize, edit, delete)
+[row] transactions.row:transfer-checking~4 — Transfer : Checking (taps; menu: categorize, edit, delete)
+[text] transactions.text:oct-1-2026 — Oct 1, 2026
+[row] transactions.row:greenway-property-mgmt~2 — Greenway Property Mgmt (taps; menu: categorize, edit, delete)
+[row] transactions.row:riverside-schools~2 — Riverside Schools (taps; menu: categorize, edit, delete)
+[row] transactions.row:acme-corp~4 — Acme Corp (taps; menu: categorize, edit, delete)
+[text] transactions.text:sep-30-2026 — Sep 30, 2026
+[row] transactions.row:whole-foods-market~4 — Whole Foods Market (taps; menu: categorize, edit, delete)
+[text] transactions.text:sep-29-2026 — Sep 29, 2026
+[row] transactions.row:amc-theatres~3 — AMC Theatres (taps; menu: categorize, edit, delete)
+[text] transactions.text:sep-28-2026 — Sep 28, 2026
+[row] transactions.row:blue-bottle-coffee~5 — Blue Bottle Coffee (taps; menu: categorize, edit, delete)
+[text] transactions.text:sep-27-2026 — Sep 27, 2026
+[row] transactions.row:trader-joe-s~8 — Trader Joe's (taps; menu: categorize, edit, delete)
+[text] transactions.text:sep-26-2026 — Sep 26, 2026
+[row] transactions.row:shell~2 — Shell (taps; menu: categorize, edit, delete)
+[text] transactions.text:sep-25-2026 — Sep 25, 2026
+[row] transactions.row:chipotle~3 — Chipotle (taps; menu: categorize, edit, delete)
+[text] transactions.text:sep-24-2026 — Sep 24, 2026
+[row] transactions.row:target~3 — Target (taps; menu: categorize, edit, delete)
+[text] transactions.text:sep-23-2026 — Sep 23, 2026
+[row] transactions.row:costco~5 — Costco (taps; menu: categorize, edit, delete)
+[text] transactions.text:sep-22-2026 — Sep 22, 2026
+[row] transactions.row:pizzeria-delfina~5 — Pizzeria Delfina (taps; menu: categorize, edit, delete)
+[text] transactions.text:sep-21-2026 — Sep 21, 2026
+[row] transactions.row:mint-mobile~2 — Mint Mobile (taps; menu: categorize, edit, delete)
+[text] transactions.text:sep-20-2026 — Sep 20, 2026
+[row] transactions.row:costco~6 — Costco (taps; menu: categorize, edit, delete)
+[text] transactions.text:sep-19-2026 — Sep 19, 2026
+[row] transactions.row:chipotle~4 — Chipotle (taps; menu: categorize, edit, delete)
+[text] transactions.text:sep-18-2026 — Sep 18, 2026
+[row] transactions.row:walgreens~3 — Walgreens (taps; menu: categorize, edit, delete)
+[row] transactions.row:municipal-water~3 — Municipal Water (taps; menu: categorize, edit, delete)
+[text] transactions.text:sep-17-2026 — Sep 17, 2026
+[row] transactions.row:chevron~4 — Chevron (taps; menu: categorize, edit, delete)
+[text] transactions.text:sep-16-2026 — Sep 16, 2026
+[row] transactions.row:whole-foods-market~5 — Whole Foods Market (taps; menu: categorize, edit, delete)
+[text] transactions.text:sep-15-2026 — Sep 15, 2026
+[row] transactions.row:steam~2 — Steam (taps; menu: categorize, edit, delete)
+[row] transactions.row:acme-corp~5 — Acme Corp (taps; menu: categorize, edit, delete)
+[text] transactions.text:sep-14-2026 — Sep 14, 2026
+[row] transactions.row:chipotle~5 — Chipotle (taps; menu: categorize, edit, delete)
+[text] transactions.text:sep-13-2026 — Sep 13, 2026
+[row] transactions.row:trader-joe-s~9 — Trader Joe's (taps; menu: categorize, edit, delete)
+[text] transactions.text:sep-12-2026 — Sep 12, 2026
+[row] transactions.row:uniqlo~2 — Uniqlo (taps; menu: categorize, edit, delete)
+[row] transactions.row:city-power-light~3 — City Power & Light (taps; menu: categorize, edit, delete)
+[text] transactions.text:sep-11-2026 — Sep 11, 2026
+[row] transactions.row:chipotle~6 — Chipotle (taps; menu: categorize, edit, delete)
+[text] transactions.text:sep-10-2026 — Sep 10, 2026
+[row] transactions.row:spotify~3 — Spotify (taps; menu: categorize, edit, delete)
+[row] transactions.row:home-depot~3 — Home Depot (taps; menu: categorize, edit, delete)
+[text] transactions.text:sep-9-2026 — Sep 9, 2026
+[row] transactions.row:costco~7 — Costco (taps; menu: categorize, edit, delete)
+[text] transactions.text:sep-8-2026 — Sep 8, 2026
+[row] transactions.row:sonic-fiber~3 — Sonic Fiber (taps; menu: categorize, edit, delete)
+[text] transactions.text:sep-7-2026 — Sep 7, 2026
+[row] transactions.row:clipper-card~2 — Clipper Card (taps; menu: categorize, edit, delete)
+[row] transactions.row:farmers-market~3 — Farmers Market (taps; menu: categorize, edit, delete)
+[text] transactions.text:sep-6-2026 — Sep 6, 2026
+[row] transactions.row:costco~8 — Costco (taps; menu: categorize, edit, delete)
+[text] transactions.text:sep-5-2026 — Sep 5, 2026
+[row] transactions.row:blue-bottle-coffee~6 — Blue Bottle Coffee (taps; menu: categorize, edit, delete)
+[text] transactions.text:sep-4-2026 — Sep 4, 2026
+[row] transactions.row:netflix~3 — Netflix (taps; menu: categorize, edit, delete)
+[text] transactions.text:sep-3-2026 — Sep 3, 2026
+[row] transactions.row:state-farm~3 — State Farm (taps; menu: categorize, edit, delete)
+[text] transactions.text:sep-2-2026 — Sep 2, 2026
+[row] transactions.row:whole-foods-market~6 — Whole Foods Market (taps; menu: categorize, edit, delete)
+[row] transactions.row:transfer-savings~3 — Transfer : Savings (taps; menu: categorize, edit, delete)
+[row] transactions.row:transfer-checking~5 — Transfer : Checking (taps; menu: categorize, edit, delete)
+[text] transactions.text:sep-1-2026 — Sep 1, 2026
+[row] transactions.row:greenway-property-mgmt~3 — Greenway Property Mgmt (taps; menu: categorize, edit, delete)
+[row] transactions.row:riverside-schools~3 — Riverside Schools (taps; menu: categorize, edit, delete)
+[row] transactions.row:acme-corp~6 — Acme Corp (taps; menu: categorize, edit, delete)
+[row] transactions.row:starting-balance — Starting Balance (taps; menu: categorize, edit, delete)
+[row] transactions.row:starting-balance~2 — Starting Balance (taps; menu: categorize, edit, delete)
+[row] transactions.row:starting-balance~3 — Starting Balance (taps; menu: categorize, edit, delete)
+[row] transactions.row:starting-balance~4 — Starting Balance (taps; menu: categorize, edit, delete)
+[row] transactions.row:starting-balance~5 — Starting Balance (taps; menu: categorize, edit, delete)
+[text] shell.text:target — Target
+[text] shell.text:43-06 — -$43.06
+[text] shell.text:clothing — Clothing
+[row] shell.row:account — Account
+[row] shell.row:date — Date
+[row] shell.row:status — Status
+[tab] tab:insights — Insights (taps)
+[tab] tab:accounts/checking — Checking (taps)
+[tab] tab:accounts/savings — Savings (taps)
+[tab] tab:accounts/cash — Cash (taps)
+[tab] tab:accounts/chase-sapphire — Chase Sapphire (taps)
+[tab] tab:accounts/mortgage — Mortgage (taps)
+[tab] tab:accounts/retirement — Retirement (taps)
+[button] shell.account — Account (taps)

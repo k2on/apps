@@ -1,0 +1,265 @@
+[tab] tab:budget — Budget (taps)
+[tab] tab:accounts — Accounts (taps)
+[text] shell.text:accounts — Accounts
+[button] shell.refresh — Sync (taps)
+[button] shell.new-account — Add Account (taps)
+[text] accounts.text:accounts — Accounts
+[text] accounts.text:net-worth — Net Worth
+[text] accounts.text:budget-accounts — Budget Accounts
+[row] accounts.row:checking — Checking (taps; menu: rename, reconcile, copy-balance, toggle-closed)
+[row] accounts.row:savings — Savings (taps; menu: rename, reconcile, copy-balance, toggle-closed)
+[row] accounts.row:cash — Cash (taps; menu: rename, reconcile, copy-balance, toggle-closed)
+[row] accounts.row:chase-sapphire — Chase Sapphire (taps; menu: rename, reconcile, copy-balance, toggle-closed)
+[text] accounts.text:tracking-accounts — Tracking Accounts
+[row] accounts.row:mortgage — Mortgage (taps; menu: rename, reconcile, copy-balance, toggle-closed)
+[row] accounts.row:retirement — Retirement (taps; menu: rename, reconcile, copy-balance, toggle-closed)
+[row] accounts.row:bank-connections — Bank Connections (taps)
+[row] accounts.row:add-account — Add Account (taps)
+[button] shell.back — Back (taps)
+[text] shell.text:checking — Checking
+[button] shell.refresh — Sync (taps)
+[button] shell.reconcile — Reconcile (taps)
+[button] shell.new-transaction — New Transaction (taps)
+[field] shell.search — Search (types)
+[button] shell.inspector:transaction-details — Transaction Details (taps)
+[text] register.text:checking — Checking
+[text] register.text:working-balance — Working Balance
+[row] register.row:reconcile — Reconcile… (taps)
+[row] register.row:close-account — Close Account (taps)
+[text] register.text:yesterday — Yesterday
+[row] register.row:walgreens — Walgreens (taps; menu: edit, categorize, clear, delete)
+[row] register.row:municipal-water — Municipal Water (taps; menu: edit, categorize, clear, delete)
+[text] register.text:sunday-nov-15 — Sunday, Nov 15
+[row] register.row:acme-corp — Acme Corp (taps; menu: edit, categorize, clear, delete)
+[text] register.text:thursday-nov-12 — Thursday, Nov 12
+[row] register.row:city-power-light — City Power & Light (taps; menu: edit, categorize, clear, delete)
+[text] register.text:sunday-nov-8 — Sunday, Nov 8
+[row] register.row:sonic-fiber — Sonic Fiber (taps; menu: edit, categorize, clear, delete)
+[text] register.text:thursday-nov-5 — Thursday, Nov 5
+[row] register.row:transfer-chase-sapphire — Transfer : Chase Sapphire (taps; menu: edit, clear, delete)
+[text] register.text:tuesday-nov-3 — Tuesday, Nov 3
+[row] register.row:state-farm — State Farm (taps; menu: edit, categorize, clear, delete)
+[text] register.text:monday-nov-2 — Monday, Nov 2
+[row] register.row:transfer-savings — Transfer : Savings (taps; menu: edit, clear, delete)
+[text] register.text:sunday-nov-1 — Sunday, Nov 1
+[row] register.row:greenway-property-mgmt — Greenway Property Mgmt (taps; menu: edit, categorize, clear, delete)
+[row] register.row:riverside-schools — Riverside Schools (taps; menu: edit, categorize, clear, delete)
+[row] register.row:acme-corp~2 — Acme Corp (taps; menu: edit, categorize, clear, delete)
+[text] register.text:wednesday-oct-21 — Wednesday, Oct 21
+[row] register.row:mint-mobile — Mint Mobile (taps; menu: edit, categorize, delete)
+[text] register.text:sunday-oct-18 — Sunday, Oct 18
+[row] register.row:walgreens~2 — Walgreens (taps; menu: edit, categorize, delete)
+[row] register.row:municipal-water~2 — Municipal Water (taps; menu: edit, categorize, delete)
+[text] register.text:thursday-oct-15 — Thursday, Oct 15
+[row] register.row:acme-corp~3 — Acme Corp (taps; menu: edit, categorize, delete)
+[text] register.text:monday-oct-12 — Monday, Oct 12
+[row] register.row:city-power-light~2 — City Power & Light (taps; menu: edit, categorize, delete)
+[text] register.text:friday-oct-9 — Friday, Oct 9
+[row] register.row:jiffy-lube — Jiffy Lube (taps; menu: edit, categorize, delete)
+[text] register.text:thursday-oct-8 — Thursday, Oct 8
+[row] register.row:sonic-fiber~2 — Sonic Fiber (taps; menu: edit, categorize, delete)
+[text] register.text:monday-oct-5 — Monday, Oct 5
+[row] register.row:transfer-chase-sapphire~2 — Transfer : Chase Sapphire (taps; menu: edit, delete)
+[text] register.text:saturday-oct-3 — Saturday, Oct 3
+[row] register.row:state-farm~2 — State Farm (taps; menu: edit, categorize, delete)
+[text] register.text:friday-oct-2 — Friday, Oct 2
+[row] register.row:transfer-savings~2 — Transfer : Savings (taps; menu: edit, delete)
+[text] register.text:thursday-oct-1 — Thursday, Oct 1
+[row] register.row:greenway-property-mgmt~2 — Greenway Property Mgmt (taps; menu: edit, categorize, delete)
+[row] register.row:riverside-schools~2 — Riverside Schools (taps; menu: edit, categorize, delete)
+[row] register.row:acme-corp~4 — Acme Corp (taps; menu: edit, categorize, delete)
+[text] register.text:monday-sep-21 — Monday, Sep 21
+[row] register.row:mint-mobile~2 — Mint Mobile (taps; menu: edit, categorize, delete)
+[text] register.text:friday-sep-18 — Friday, Sep 18
+[row] register.row:walgreens~3 — Walgreens (taps; menu: edit, categorize, delete)
+[row] register.row:municipal-water~3 — Municipal Water (taps; menu: edit, categorize, delete)
+[text] register.text:tuesday-sep-15 — Tuesday, Sep 15
+[row] register.row:acme-corp~5 — Acme Corp (taps; menu: edit, categorize, delete)
+[text] register.text:saturday-sep-12 — Saturday, Sep 12
+[row] register.row:city-power-light~3 — City Power & Light (taps; menu: edit, categorize, delete)
+[text] register.text:tuesday-sep-8 — Tuesday, Sep 8
+[row] register.row:sonic-fiber~3 — Sonic Fiber (taps; menu: edit, categorize, delete)
+[text] register.text:thursday-sep-3 — Thursday, Sep 3
+[row] register.row:state-farm~3 — State Farm (taps; menu: edit, categorize, delete)
+[text] register.text:wednesday-sep-2 — Wednesday, Sep 2
+[row] register.row:transfer-savings~3 — Transfer : Savings (taps; menu: edit, delete)
+[text] register.text:tuesday-sep-1 — Tuesday, Sep 1
+[row] register.row:greenway-property-mgmt~3 — Greenway Property Mgmt (taps; menu: edit, categorize, delete)
+[row] register.row:riverside-schools~3 — Riverside Schools (taps; menu: edit, categorize, delete)
+[row] register.row:acme-corp~6 — Acme Corp (taps; menu: edit, categorize, delete)
+[row] register.row:starting-balance — Starting Balance (taps; menu: edit, categorize, delete)
+[tab] tab:transactions — Transactions (taps)
+[tab] tab:insights — Insights (taps)
+[tab] tab:accounts/checking — Checking (taps)
+[text] shell.text:checking — Checking
+[button] shell.refresh — Sync (taps)
+[button] shell.reconcile — Reconcile (taps)
+[button] shell.new-transaction — New Transaction (taps)
+[field] shell.search — Search (types)
+[button] shell.inspector:transaction-details — Transaction Details (taps)
+[tab] tab:accounts/savings — Savings (taps)
+[tab] tab:accounts/cash — Cash (taps)
+[tab] tab:accounts/chase-sapphire — Chase Sapphire (taps)
+[tab] tab:accounts/mortgage — Mortgage (taps)
+[tab] tab:accounts/retirement — Retirement (taps)
+[row] household.row:alex — Alex (taps)
+[button] shell.account — Account (taps)
+
+
+Budget
+Accounts
+Transactions
+4
+Insights
+Budget Accounts
+Checking
+Savings
+Cash
+Chase Sapphire
+4
+Tracking Accounts
+Mortgage
+Retirement
+Alex
+Checking
+Working Balance
+$17,153.06
+Cleared
+$17,216.04
+Uncleared
+-$62.98
+Reconcile…
+Close Account
+Payee
+Category
+Memo
+Amount
+Yesterday
+Walgreens
+Health
+-$25.37
+Municipal Water
+Water
+-$37.61
+Sunday, Nov 15
+Acme Corp
+Ready to Assign
++$3,150.00
+Thursday, Nov 12
+City Power & Light
+Electric
+-$100.86
+Sunday, Nov 8
+Sonic Fiber
+Internet
+-$70.00
+Thursday, Nov 5
+Transfer : Chase Sapphire
+-$1,887.94
+Tuesday, Nov 3
+State Farm
+Insurance
+-$160.00
+Monday, Nov 2
+Transfer : Savings
+-$250.00
+Sunday, Nov 1
+Greenway Property Mgmt
+Rent
+-$1,850.00
+Riverside Schools
+Ready to Assign
++$2,240.00
+Acme Corp
+Ready to Assign
++$3,150.00
+Wednesday, Oct 21
+Mint Mobile
+Phone
+-$85.00
+Sunday, Oct 18
+Walgreens
+Health
+-$26.14
+Municipal Water
+Water
+-$43.65
+Thursday, Oct 15
+Acme Corp
+Ready to Assign
++$3,150.00
+Monday, Oct 12
+City Power & Light
+Electric
+-$100.72
+Friday, Oct 9
+Jiffy Lube
+Car Maintenance
+-$89.99
+Thursday, Oct 8
+Sonic Fiber
+Internet
+-$70.00
+Monday, Oct 5
+Transfer : Chase Sapphire
+-$1,656.43
+Saturday, Oct 3
+State Farm
+Insurance
+-$160.00
+Friday, Oct 2
+Transfer : Savings
+-$250.00
+Thursday, Oct 1
+Greenway Property Mgmt
+Rent
+-$1,850.00
+Riverside Schools
+Ready to Assign
++$2,240.00
+Acme Corp
+Ready to Assign
++$3,150.00
+Monday, Sep 21
+Mint Mobile
+Phone
+-$85.00
+Friday, Sep 18
+Walgreens
+Health
+-$28.45
+Municipal Water
+Water
+-$36.73
+Tuesday, Sep 15
+Acme Corp
+Ready to Assign
++$3,150.00
+Saturday, Sep 12
+City Power & Light
+Electric
+-$115.55
+Tuesday, Sep 8
+Sonic Fiber
+Internet
+-$70.00
+Thursday, Sep 3
+State Farm
+Insurance
+-$160.00
+Wednesday, Sep 2
+Transfer : Savings
+-$250.00
+Tuesday, Sep 1
+Greenway Property Mgmt
+Rent
+-$1,850.00
+Riverside Schools
+Ready to Assign
++$2,240.00
+Acme Corp
+Ready to Assign
++$3,150.00
+Starting Balance
+Ready to Assign
++$2,842.50

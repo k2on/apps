@@ -1,0 +1,11 @@
+    #content
+            [button] pressable
+          [button] pressable
+            'Genesis 1' [text]
+            'Go to'
+          [button] pressable
+            'Search'
+            [button]
+          [button] pressable
+            'About'
+            [button]

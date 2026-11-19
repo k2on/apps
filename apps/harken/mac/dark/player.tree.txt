@@ -1,0 +1,7 @@
+[button] shell.close-player — Close (taps) (modal)
+[text] player.text:aria — Aria (modal)
+[text] player.text:johann-sebastian-bach — Johann Sebastian Bach (modal)
+[button] player.previous — Previous (taps) (modal)
+[button] player.toggle — Play (taps) (modal)
+[button] player.next — Next (taps) (modal)
+[row] player.row:queue — Queue (taps) (modal)

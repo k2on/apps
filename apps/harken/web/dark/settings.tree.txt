@@ -1,0 +1,133 @@
+[row] shell.row:general — General (taps)
+[text] shell.text:library — Library
+[row] shell.row:demo-library — Demo Library
+[text] shell.text:about — About
+[row] shell.row:version — Version
+[row] shell.row:diagnostics — Diagnostics (taps)
+[text] shell.text:waiting-to-sync — Waiting to Sync
+[text] shell.text:0 — 0
+[text] shell.text:this-device — This Device
+[text] shell.text:none — None
+[text] shell.text:connections — Connections
+[text] shell.text:0 — 0
+
+
+Home
+Library
+Search
+A
+Goldberg Variations, BWV 988
+Album
+Goldberg Variations, BWV 988
+Kimiko Ishizaka
+2012 · 32 tracks
+Play
+Shuffle
+Aria
+Johann Sebastian Bach
+5:00
+Variatio 1 a 1 Clav
+Johann Sebastian Bach
+1:55
+Variatio 2 a 1 Clav
+Johann Sebastian Bach
+2:04
+Variatio 3 a 1 Clav Canone allUnisuono
+Johann Sebastian Bach
+1:57
+Variatio 4 a 1 Clav
+Johann Sebastian Bach
+1:09
+Variatio 5 a 1 ovvero 2 Clav
+Johann Sebastian Bach
+1:34
+Variatio 6 a 1 Clav Canone alla Seconda
+Johann Sebastian Bach
+1:38
+Variatio 7 a 1 ovvero 2 Clav
+Johann Sebastian Bach
+2:12
+Variatio 8 a 2 Clav
+Johann Sebastian Bach
+1:57
+Variatio 9 a 1 Clav Canone alla Terza
+Johann Sebastian Bach
+2:06
+Variatio 10 a 1 Clav Fughetta
+Johann Sebastian Bach
+1:46
+Variatio 11 a 2 Clav
+Johann Sebastian Bach
+2:09
+Variatio 12 Canone alla Quarta
+Johann Sebastian Bach
+2:16
+Variatio 13 a 2 Clav
+Johann Sebastian Bach
+4:14
+Variatio 14 a 2 Clav
+Johann Sebastian Bach
+2:17
+Variatio 15 a 1 Clav Canone alla Quinta
+Johann Sebastian Bach
+4:33
+Variatio 16 a 1 Clav Ouverture
+Johann Sebastian Bach
+3:09
+Variatio 17 a 2 Clav
+Johann Sebastian Bach
+1:44
+Variatio 18 a 1 Clav Canone alla Sexta
+Johann Sebastian Bach
+1:49
+Variatio 19 a 1 Clav
+Johann Sebastian Bach
+1:25
+Variatio 20 a 2 Clav
+Johann Sebastian Bach
+2:05
+Variatio 21 Canone alla Settima
+Johann Sebastian Bach
+3:55
+Variatio 22 a 1 Clav
+Johann Sebastian Bach
+1:33
+Variatio 23 a 2 Clav
+Johann Sebastian Bach
+2:20
+Variatio 24 a 1 Clav Canone allOttava
+Johann Sebastian Bach
+2:45
+Variatio 25 a 2 Clav
+Johann Sebastian Bach
+9:18
+Variatio 26 a 2 Clav
+Johann Sebastian Bach
+2:03
+Variatio 27 a 2 Clav Canone alla Nona
+Johann Sebastian Bach
+1:51
+Variatio 28 a 2 Clav
+Johann Sebastian Bach
+2:26
+Variatio 29 a 1 ovvero 2 Clav
+Johann Sebastian Bach
+2:09
+Variatio 30 a 1 Clav Quodlibet
+Johann Sebastian Bach
+2:01
+Aria da Capo Fine
+Johann Sebastian Bach
+2:50
+Aria
+Johann Sebastian Bach
+Settings
+General
+Diagnostics
+Library
+Demo Library
+On This Device
+About
+Version
+0.1
+Done

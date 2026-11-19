@@ -1,0 +1,16 @@
+[text] player.text:aria — Aria
+[text] player.text:johann-sebastian-bach — Johann Sebastian Bach
+[button] player.previous — Previous (taps)
+[button] player.toggle — Play (taps)
+[button] player.next — Next (taps)
+[row] player.row:this-device — This Device (taps)
+[row] player.row:queue — Queue (taps)
+[tab] tab:home — Home (taps)
+[tab] tab:library — Library (taps)
+[tab] tab:search — Search (taps)
+[text] shell.text:search — Search
+[field] search.typed — Songs, albums and artists (types)
+[text] search.text:search — Search
+[text] search.text:search-your-library — Search Your Library
+[button] shell.account — Account (taps)
+[button] shell.open-player — Now Playing (taps)

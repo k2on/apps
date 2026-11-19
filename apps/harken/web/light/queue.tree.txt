@@ -1,0 +1,281 @@
+[text] player.text:queue — Queue (modal)
+[button] player.close-queue — Cancel (taps) (modal)
+[text] player.text:31-tracks — 31 Tracks (modal)
+[row] player.row:aria — Aria (taps; menu: move-up, move-down, remove) (modal)
+[text] player.text:aria — Aria (modal)
+[text] player.text:johann-sebastian-bach — Johann Sebastian Bach (modal)
+[row] player.row:variatio-1-a-1-clav — Variatio 1 a 1 Clav (taps; menu: move-up, move-down, remove) (modal)
+[text] player.text:variatio-1-a-1-clav — Variatio 1 a 1 Clav (modal)
+[text] player.text:johann-sebastian-bach — Johann Sebastian Bach (modal)
+[row] player.row:variatio-2-a-1-clav — Variatio 2 a 1 Clav (taps; menu: move-up, move-down, remove) (modal)
+[text] player.text:variatio-2-a-1-clav — Variatio 2 a 1 Clav (modal)
+[text] player.text:johann-sebastian-bach — Johann Sebastian Bach (modal)
+[row] player.row:variatio-3-a-1-clav-canone-allunisuono — Variatio 3 a 1 Clav Canone allUnisuono (taps; menu: move-up, move-down, remove) (modal)
+[text] player.text:variatio-3-a-1-clav-canone-allunisuono — Variatio 3 a 1 Clav Canone allUnisuono (modal)
+[text] player.text:johann-sebastian-bach — Johann Sebastian Bach (modal)
+[row] player.row:variatio-4-a-1-clav — Variatio 4 a 1 Clav (taps; menu: move-up, move-down, remove) (modal)
+[text] player.text:variatio-4-a-1-clav — Variatio 4 a 1 Clav (modal)
+[text] player.text:johann-sebastian-bach — Johann Sebastian Bach (modal)
+[row] player.row:variatio-5-a-1-ovvero-2-clav — Variatio 5 a 1 ovvero 2 Clav (taps; menu: move-up, move-down, remove) (modal)
+[text] player.text:variatio-5-a-1-ovvero-2-clav — Variatio 5 a 1 ovvero 2 Clav (modal)
+[text] player.text:johann-sebastian-bach — Johann Sebastian Bach (modal)
+[row] player.row:variatio-6-a-1-clav-canone-alla-seconda — Variatio 6 a 1 Clav Canone alla Seconda (taps; menu: move-up, move-down, remove) (modal)
+[text] player.text:variatio-6-a-1-clav-canone-alla-seconda — Variatio 6 a 1 Clav Canone alla Seconda (modal)
+[text] player.text:johann-sebastian-bach — Johann Sebastian Bach (modal)
+[row] player.row:variatio-7-a-1-ovvero-2-clav — Variatio 7 a 1 ovvero 2 Clav (taps; menu: move-up, move-down, remove) (modal)
+[text] player.text:variatio-7-a-1-ovvero-2-clav — Variatio 7 a 1 ovvero 2 Clav (modal)
+[text] player.text:johann-sebastian-bach — Johann Sebastian Bach (modal)
+[row] player.row:variatio-8-a-2-clav — Variatio 8 a 2 Clav (taps; menu: move-up, move-down, remove) (modal)
+[text] player.text:variatio-8-a-2-clav — Variatio 8 a 2 Clav (modal)
+[text] player.text:johann-sebastian-bach — Johann Sebastian Bach (modal)
+[row] player.row:variatio-9-a-1-clav-canone-alla-terza — Variatio 9 a 1 Clav Canone alla Terza (taps; menu: move-up, move-down, remove) (modal)
+[text] player.text:variatio-9-a-1-clav-canone-alla-terza — Variatio 9 a 1 Clav Canone alla Terza (modal)
+[text] player.text:johann-sebastian-bach — Johann Sebastian Bach (modal)
+[row] player.row:variatio-10-a-1-clav-fughetta — Variatio 10 a 1 Clav Fughetta (taps; menu: move-up, move-down, remove) (modal)
+[text] player.text:variatio-10-a-1-clav-fughetta — Variatio 10 a 1 Clav Fughetta (modal)
+[text] player.text:johann-sebastian-bach — Johann Sebastian Bach (modal)
+[row] player.row:variatio-11-a-2-clav — Variatio 11 a 2 Clav (taps; menu: move-up, move-down, remove) (modal)
+[text] player.text:variatio-11-a-2-clav — Variatio 11 a 2 Clav (modal)
+[text] player.text:johann-sebastian-bach — Johann Sebastian Bach (modal)
+[row] player.row:variatio-12-canone-alla-quarta — Variatio 12 Canone alla Quarta (taps; menu: move-up, move-down, remove) (modal)
+[text] player.text:variatio-12-canone-alla-quarta — Variatio 12 Canone alla Quarta (modal)
+[text] player.text:johann-sebastian-bach — Johann Sebastian Bach (modal)
+[row] player.row:variatio-13-a-2-clav — Variatio 13 a 2 Clav (taps; menu: move-up, move-down, remove) (modal)
+[text] player.text:variatio-13-a-2-clav — Variatio 13 a 2 Clav (modal)
+[text] player.text:johann-sebastian-bach — Johann Sebastian Bach (modal)
+[row] player.row:variatio-14-a-2-clav — Variatio 14 a 2 Clav (taps; menu: move-up, move-down, remove) (modal)
+[text] player.text:variatio-14-a-2-clav — Variatio 14 a 2 Clav (modal)
+[text] player.text:johann-sebastian-bach — Johann Sebastian Bach (modal)
+[row] player.row:variatio-15-a-1-clav-canone-alla-quinta — Variatio 15 a 1 Clav Canone alla Quinta (taps; menu: move-up, move-down, remove) (modal)
+[text] player.text:variatio-15-a-1-clav-canone-alla-quinta — Variatio 15 a 1 Clav Canone alla Quinta (modal)
+[text] player.text:johann-sebastian-bach — Johann Sebastian Bach (modal)
+[row] player.row:variatio-16-a-1-clav-ouverture — Variatio 16 a 1 Clav Ouverture (taps; menu: move-up, move-down, remove) (modal)
+[text] player.text:variatio-16-a-1-clav-ouverture — Variatio 16 a 1 Clav Ouverture (modal)
+[text] player.text:johann-sebastian-bach — Johann Sebastian Bach (modal)
+[row] player.row:variatio-17-a-2-clav — Variatio 17 a 2 Clav (taps; menu: move-up, move-down, remove) (modal)
+[text] player.text:variatio-17-a-2-clav — Variatio 17 a 2 Clav (modal)
+[text] player.text:johann-sebastian-bach — Johann Sebastian Bach (modal)
+[row] player.row:variatio-18-a-1-clav-canone-alla-sexta — Variatio 18 a 1 Clav Canone alla Sexta (taps; menu: move-up, move-down, remove) (modal)
+[text] player.text:variatio-18-a-1-clav-canone-alla-sexta — Variatio 18 a 1 Clav Canone alla Sexta (modal)
+[text] player.text:johann-sebastian-bach — Johann Sebastian Bach (modal)
+[row] player.row:variatio-19-a-1-clav — Variatio 19 a 1 Clav (taps; menu: move-up, move-down, remove) (modal)
+[text] player.text:variatio-19-a-1-clav — Variatio 19 a 1 Clav (modal)
+[text] player.text:johann-sebastian-bach — Johann Sebastian Bach (modal)
+[row] player.row:variatio-20-a-2-clav — Variatio 20 a 2 Clav (taps; menu: move-up, move-down, remove) (modal)
+[text] player.text:variatio-20-a-2-clav — Variatio 20 a 2 Clav (modal)
+[text] player.text:johann-sebastian-bach — Johann Sebastian Bach (modal)
+[row] player.row:variatio-21-canone-alla-settima — Variatio 21 Canone alla Settima (taps; menu: move-up, move-down, remove) (modal)
+[text] player.text:variatio-21-canone-alla-settima — Variatio 21 Canone alla Settima (modal)
+[text] player.text:johann-sebastian-bach — Johann Sebastian Bach (modal)
+[row] player.row:variatio-22-a-1-clav — Variatio 22 a 1 Clav (taps; menu: move-up, move-down, remove) (modal)
+[text] player.text:variatio-22-a-1-clav — Variatio 22 a 1 Clav (modal)
+[text] player.text:johann-sebastian-bach — Johann Sebastian Bach (modal)
+[row] player.row:variatio-23-a-2-clav — Variatio 23 a 2 Clav (taps; menu: move-up, move-down, remove) (modal)
+[text] player.text:variatio-23-a-2-clav — Variatio 23 a 2 Clav (modal)
+[text] player.text:johann-sebastian-bach — Johann Sebastian Bach (modal)
+[row] player.row:variatio-24-a-1-clav-canone-allottava — Variatio 24 a 1 Clav Canone allOttava (taps; menu: move-up, move-down, remove) (modal)
+[text] player.text:variatio-24-a-1-clav-canone-allottava — Variatio 24 a 1 Clav Canone allOttava (modal)
+[text] player.text:johann-sebastian-bach — Johann Sebastian Bach (modal)
+[row] player.row:variatio-25-a-2-clav — Variatio 25 a 2 Clav (taps; menu: move-up, move-down, remove) (modal)
+[text] player.text:variatio-25-a-2-clav — Variatio 25 a 2 Clav (modal)
+[text] player.text:johann-sebastian-bach — Johann Sebastian Bach (modal)
+[row] player.row:variatio-26-a-2-clav — Variatio 26 a 2 Clav (taps; menu: move-up, move-down, remove) (modal)
+[text] player.text:variatio-26-a-2-clav — Variatio 26 a 2 Clav (modal)
+[text] player.text:johann-sebastian-bach — Johann Sebastian Bach (modal)
+[row] player.row:variatio-27-a-2-clav-canone-alla-nona — Variatio 27 a 2 Clav Canone alla Nona (taps; menu: move-up, move-down, remove) (modal)
+[text] player.text:variatio-27-a-2-clav-canone-alla-nona — Variatio 27 a 2 Clav Canone alla Nona (modal)
+[text] player.text:johann-sebastian-bach — Johann Sebastian Bach (modal)
+[row] player.row:variatio-28-a-2-clav — Variatio 28 a 2 Clav (taps; menu: move-up, move-down, remove) (modal)
+[text] player.text:variatio-28-a-2-clav — Variatio 28 a 2 Clav (modal)
+[text] player.text:johann-sebastian-bach — Johann Sebastian Bach (modal)
+[row] player.row:variatio-29-a-1-ovvero-2-clav — Variatio 29 a 1 ovvero 2 Clav (taps; menu: move-up, move-down, remove) (modal)
+[text] player.text:variatio-29-a-1-ovvero-2-clav — Variatio 29 a 1 ovvero 2 Clav (modal)
+[text] player.text:johann-sebastian-bach — Johann Sebastian Bach (modal)
+[row] player.row:variatio-30-a-1-clav-quodlibet — Variatio 30 a 1 Clav Quodlibet (taps; menu: move-up, move-down, remove) (modal)
+[text] player.text:variatio-30-a-1-clav-quodlibet — Variatio 30 a 1 Clav Quodlibet (modal)
+[text] player.text:johann-sebastian-bach — Johann Sebastian Bach (modal)
+[row] player.row:aria-da-capo-fine — Aria da Capo Fine (taps; menu: move-up, move-down, remove) (modal)
+[text] player.text:aria-da-capo-fine — Aria da Capo Fine (modal)
+[text] player.text:johann-sebastian-bach — Johann Sebastian Bach (modal)
+
+
+Home
+Library
+Search
+A
+Goldberg Variations, BWV 988
+Album
+Goldberg Variations, BWV 988
+Kimiko Ishizaka
+2012 · 32 tracks
+Play
+Shuffle
+Aria
+Johann Sebastian Bach
+5:00
+Variatio 1 a 1 Clav
+Johann Sebastian Bach
+1:55
+Variatio 2 a 1 Clav
+Johann Sebastian Bach
+2:04
+Variatio 3 a 1 Clav Canone allUnisuono
+Johann Sebastian Bach
+1:57
+Variatio 4 a 1 Clav
+Johann Sebastian Bach
+1:09
+Variatio 5 a 1 ovvero 2 Clav
+Johann Sebastian Bach
+1:34
+Variatio 6 a 1 Clav Canone alla Seconda
+Johann Sebastian Bach
+1:38
+Variatio 7 a 1 ovvero 2 Clav
+Johann Sebastian Bach
+2:12
+Variatio 8 a 2 Clav
+Johann Sebastian Bach
+1:57
+Variatio 9 a 1 Clav Canone alla Terza
+Johann Sebastian Bach
+2:06
+Variatio 10 a 1 Clav Fughetta
+Johann Sebastian Bach
+1:46
+Variatio 11 a 2 Clav
+Johann Sebastian Bach
+2:09
+Variatio 12 Canone alla Quarta
+Johann Sebastian Bach
+2:16
+Variatio 13 a 2 Clav
+Johann Sebastian Bach
+4:14
+Variatio 14 a 2 Clav
+Johann Sebastian Bach
+2:17
+Variatio 15 a 1 Clav Canone alla Quinta
+Johann Sebastian Bach
+4:33
+Variatio 16 a 1 Clav Ouverture
+Johann Sebastian Bach
+3:09
+Variatio 17 a 2 Clav
+Johann Sebastian Bach
+1:44
+Variatio 18 a 1 Clav Canone alla Sexta
+Johann Sebastian Bach
+1:49
+Variatio 19 a 1 Clav
+Johann Sebastian Bach
+1:25
+Variatio 20 a 2 Clav
+Johann Sebastian Bach
+2:05
+Variatio 21 Canone alla Settima
+Johann Sebastian Bach
+3:55
+Variatio 22 a 1 Clav
+Johann Sebastian Bach
+1:33
+Variatio 23 a 2 Clav
+Johann Sebastian Bach
+2:20
+Variatio 24 a 1 Clav Canone allOttava
+Johann Sebastian Bach
+2:45
+Variatio 25 a 2 Clav
+Johann Sebastian Bach
+9:18
+Variatio 26 a 2 Clav
+Johann Sebastian Bach
+2:03
+Variatio 27 a 2 Clav Canone alla Nona
+Johann Sebastian Bach
+1:51
+Variatio 28 a 2 Clav
+Johann Sebastian Bach
+2:26
+Variatio 29 a 1 ovvero 2 Clav
+Johann Sebastian Bach
+2:09
+Variatio 30 a 1 Clav Quodlibet
+Johann Sebastian Bach
+2:01
+Aria da Capo Fine
+Johann Sebastian Bach
+2:50
+Aria
+Johann Sebastian Bach
+0:00
+5:00
+Queue
+31 Tracks
+Queue
+31 Tracks
+Aria
+Johann Sebastian Bach
+Variatio 1 a 1 Clav
+Johann Sebastian Bach
+Variatio 2 a 1 Clav
+Johann Sebastian Bach
+Variatio 3 a 1 Clav Canone allUnisuono
+Johann Sebastian Bach
+Variatio 4 a 1 Clav
+Johann Sebastian Bach
+Variatio 5 a 1 ovvero 2 Clav
+Johann Sebastian Bach
+Variatio 6 a 1 Clav Canone alla Seconda
+Johann Sebastian Bach
+Variatio 7 a 1 ovvero 2 Clav
+Johann Sebastian Bach
+Variatio 8 a 2 Clav
+Johann Sebastian Bach
+Variatio 9 a 1 Clav Canone alla Terza
+Johann Sebastian Bach
+Variatio 10 a 1 Clav Fughetta
+Johann Sebastian Bach
+Variatio 11 a 2 Clav
+Johann Sebastian Bach
+Variatio 12 Canone alla Quarta
+Johann Sebastian Bach
+Variatio 13 a 2 Clav
+Johann Sebastian Bach
+Variatio 14 a 2 Clav
+Johann Sebastian Bach
+Variatio 15 a 1 Clav Canone alla Quinta
+Johann Sebastian Bach
+Variatio 16 a 1 Clav Ouverture
+Johann Sebastian Bach
+Variatio 17 a 2 Clav
+Johann Sebastian Bach
+Variatio 18 a 1 Clav Canone alla Sexta
+Johann Sebastian Bach
+Variatio 19 a 1 Clav
+Johann Sebastian Bach
+Variatio 20 a 2 Clav
+Johann Sebastian Bach
+Variatio 21 Canone alla Settima
+Johann Sebastian Bach
+Variatio 22 a 1 Clav
+Johann Sebastian Bach
+Variatio 23 a 2 Clav
+Johann Sebastian Bach
+Variatio 24 a 1 Clav Canone allOttava
+Johann Sebastian Bach
+Variatio 25 a 2 Clav
+Johann Sebastian Bach
+Variatio 26 a 2 Clav
+Johann Sebastian Bach
+Variatio 27 a 2 Clav Canone alla Nona
+Johann Sebastian Bach
+Variatio 28 a 2 Clav
+Johann Sebastian Bach
+Variatio 29 a 1 ovvero 2 Clav
+Johann Sebastian Bach
+Variatio 30 a 1 Clav Quodlibet
+Johann Sebastian Bach
+Aria da Capo Fine
+Johann Sebastian Bach
+Cancel

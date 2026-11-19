@@ -1,0 +1,2 @@
+[text] welcome.text:welcome-to-harken — Welcome to Harken
+[button] welcome.next — Get Started (taps)

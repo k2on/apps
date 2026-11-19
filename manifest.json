@@ -1,0 +1,191 @@
+{
+ "version": "44327900557",
+ "commit": "90e539fca5d4f2a4a621002f67893879cbc45491",
+ "made": "2026-11-18 15:12 UTC",
+ "platforms": {
+  "android": {
+   "device": {
+    "name": "Pixel 7",
+    "width": 1080,
+    "height": 2400,
+    "corner": 110,
+    "cutout": "hole"
+   },
+   "shots": [
+    {
+     "id": "art",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "expanding-card",
+     "kind": "recording",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 60
+    },
+    {
+     "id": "glass-menu",
+     "kind": "recording",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 60
+    },
+    {
+     "id": "glass-menu-open",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "glass-merge",
+     "kind": "recording",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 60
+    },
+    {
+     "id": "glass-sheet",
+     "kind": "recording",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 60
+    },
+    {
+     "id": "headers",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "lists",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "scroll-to-top",
+     "kind": "recording",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 60
+    },
+    {
+     "id": "sign-in",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "slider",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    }
+   ]
+  },
+  "ios": {
+   "device": {
+    "name": "iPhone 17 Pro",
+    "width": 1206,
+    "height": 2622,
+    "corner": 165,
+    "cutout": "island"
+   },
+   "shots": [
+    {
+     "id": "art",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "expanding-card",
+     "kind": "recording",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 60
+    },
+    {
+     "id": "glass-menu",
+     "kind": "recording",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 60
+    },
+    {
+     "id": "glass-menu-open",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "glass-merge",
+     "kind": "recording",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 60
+    },
+    {
+     "id": "glass-sheet",
+     "kind": "recording",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 60
+    },
+    {
+     "id": "scroll-to-top",
+     "kind": "recording",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 60
+    }
+   ]
+  }
+ }
+}

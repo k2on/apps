@@ -1,0 +1,68 @@
+[tab] tab:budget — Budget (taps)
+[text] shell.text:november-2026 — November 2026
+[button] shell.previous-month — Previous Month (taps)
+[button] shell.next-month — Next Month (taps)
+[button] shell.auto-assign — Auto-Assign (taps)
+[button] shell.new-transaction — New Transaction (taps)
+[button] shell.new-category — New Category (taps)
+[button] shell.new-group — New Group (taps)
+[button] shell.toggle-hidden — Show Hidden Categories (taps)
+[button] shell.inspector:category-details — Category Details (taps)
+[text] budget.text:november-2026 — November 2026
+[text] budget.text:ready-to-assign — Ready to Assign
+[text] budget.text:1-284-50 — $1,284.50
+[text] budget.text:2-overspent-4-underfunded — 2 overspent · 4 underfunded
+[button] budget.auto-assign — Auto-Assign (taps)
+[button] budget.toggle:credit-card-payments — Credit Card Payments (taps; menu: hide-group)
+[row] budget.row:chase-sapphire — Chase Sapphire (taps; menu: cover-card, assign, move, hide-category)
+[button] budget.toggle:bills — Bills (taps; menu: new-category, rename-group, hide-group, group-down, delete-group)
+[row] budget.row:rent — 🏠 Rent (taps; menu: assign, move, target, hide-category, category-down, delete-category)
+[row] budget.row:electric — ⚡️ Electric (taps; menu: assign, move, target, hide-category, category-up, category-down, delete-category)
+[row] budget.row:water — 💧 Water (taps; menu: assign, move, target, hide-category, category-up, category-down, delete-category)
+[row] budget.row:internet — 🌐 Internet (taps; menu: assign, move, target, hide-category, category-up, category-down, delete-category)
+[row] budget.row:phone — 📱 Phone (taps; menu: assign, move, target, hide-category, category-up, category-down, delete-category)
+[row] budget.row:insurance — ☂️ Insurance (taps; menu: assign, move, target, hide-category, category-up, delete-category)
+[button] budget.toggle:everyday — Everyday (taps; menu: new-category, rename-group, hide-group, group-up, group-down, delete-group)
+[row] budget.row:groceries — 🛒 Groceries (taps; menu: assign, move, target, hide-category, category-down, delete-category)
+[row] budget.row:dining-out — 🍜 Dining Out (taps; menu: assign, meet-target, move, target, hide-category, category-up, category-down, delete-category)
+[row] budget.row:gas-transit — 🚆 Gas & Transit (taps; menu: assign, move, target, hide-category, category-up, category-down, delete-category)
+[row] budget.row:household — 🧺 Household (taps; menu: assign, move, target, hide-category, category-up, delete-category)
+[button] budget.toggle:quality-of-life — Quality of Life (taps; menu: new-category, rename-group, hide-group, group-up, group-down, delete-group)
+[row] budget.row:entertainment — 🎟️ Entertainment (taps; menu: assign, move, target, hide-category, category-down, delete-category)
+[row] budget.row:subscriptions — 📺 Subscriptions (taps; menu: assign, move, target, hide-category, category-up, category-down, delete-category)
+[row] budget.row:clothing — 👕 Clothing (taps; menu: assign, move, target, hide-category, category-up, category-down, delete-category)
+[row] budget.row:health — 🩺 Health (taps; menu: assign, move, target, hide-category, category-up, delete-category)
+[button] budget.toggle:savings-goals — Savings Goals (taps; menu: new-category, rename-group, hide-group, group-up, delete-group)
+[row] budget.row:emergency-fund — 🛟 Emergency Fund (taps; menu: assign, move, target, hide-category, category-down, delete-category)
+[row] budget.row:vacation — 🏖️ Vacation (taps; menu: assign, meet-target, move, target, hide-category, category-up, category-down, delete-category)
+[row] budget.row:gifts — 🎁 Gifts (taps; menu: assign, meet-target, move, target, hide-category, category-up, category-down, delete-category)
+[row] budget.row:car-maintenance — 🔧 Car Maintenance (taps; menu: assign, move, target, hide-category, category-up, delete-category)
+[text] shell.text:dining-out — Dining Out
+[text] shell.text:41-23-on-a-card-not-covered — $41.23 on a card, not covered
+[text] shell.text:everyday — Everyday
+[row] shell.row:assign-80-00 — Assign $80.00 (taps)
+[row] shell.row:cover-overspending-from — Cover Overspending From (taps)
+[text] shell.text:november-2026 — November 2026
+[row] shell.row:carried-over — Carried Over
+[row] shell.row:assigned — Assigned
+[row] shell.row:activity — Activity
+[row] shell.row:available — Available
+[text] shell.text:goal — Goal
+[row] shell.row:goal — Goal
+[row] shell.row:target — Target
+[text] shell.text:60-of-200-00-assigned-this-month — 60% of $200.00 assigned this month.
+[text] shell.text:activity — Activity
+[row] shell.row:blue-bottle-coffee — Blue Bottle Coffee
+[row] shell.row:blue-bottle-coffee~2 — Blue Bottle Coffee
+[row] shell.row:chipotle — Chipotle
+[row] shell.row:show-all-in-transactions — Show All in Transactions (taps)
+[tab] tab:accounts — Accounts (taps)
+[tab] tab:transactions — Transactions (taps)
+[tab] tab:insights — Insights (taps)
+[tab] tab:accounts/checking — Checking (taps)
+[tab] tab:accounts/savings — Savings (taps)
+[tab] tab:accounts/cash — Cash (taps)
+[tab] tab:accounts/chase-sapphire — Chase Sapphire (taps)
+[tab] tab:accounts/mortgage — Mortgage (taps)
+[tab] tab:accounts/retirement — Retirement (taps)
+[button] shell.account — Account (taps)

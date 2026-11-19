@@ -1,0 +1,30 @@
+[tab] tab:budget — Budget (taps)
+[tab] tab:accounts — Accounts (taps)
+[tab] tab:transactions — Transactions (taps)
+[tab] tab:insights — Insights (taps)
+[text] shell.text:insights — Insights
+[button] shell.previous-month — Previous Month (taps)
+[button] shell.next-month — Next Month (taps)
+[text] insights.text:insights — Insights
+[text] insights.text:spending — Spending
+[row] insights.row:bills — Bills
+[row] insights.row:everyday — Everyday
+[row] insights.row:quality-of-life — Quality of Life
+[text] insights.text:november-2026 — November 2026
+[row] insights.row:income — Income
+[row] insights.row:spent — Spent
+[row] insights.row:left-over — Left Over
+[row] insights.row:card-debt-not-covered — Card Debt Not Covered
+[text] insights.text:assigned-and-spent — Assigned and Spent
+[row] insights.row:bills~2 — Bills
+[row] insights.row:everyday~2 — Everyday
+[row] insights.row:quality-of-life~2 — Quality of Life
+[row] insights.row:savings-goals — Savings Goals
+[tab] tab:accounts/checking — Checking (taps)
+[tab] tab:accounts/savings — Savings (taps)
+[tab] tab:accounts/cash — Cash (taps)
+[tab] tab:accounts/chase-sapphire — Chase Sapphire (taps)
+[tab] tab:accounts/mortgage — Mortgage (taps)
+[tab] tab:accounts/retirement — Retirement (taps)
+[row] household.row:alex — Alex (taps)
+[button] shell.account — Account (taps)

@@ -1,0 +1,12 @@
+[row] shell.row:general — General (taps)
+[text] shell.text:server — Server
+[row] shell.row:127-0-0-1-8787 — 127.0.0.1:8787
+[text] shell.text:about — About
+[row] shell.row:version — Version
+[row] shell.row:diagnostics — Diagnostics (taps)
+[text] shell.text:waiting-to-sync — Waiting to Sync
+[text] shell.text:0 — 0
+[text] shell.text:this-device — This Device
+[text] shell.text:5883a471d47202119486fc81a34ca746 — 5883a471d47202119486fc81a34ca746
+[text] shell.text:connections — Connections
+[text] shell.text:1 — 1

@@ -1,0 +1,83 @@
+[tab] tab:budget — Budget (taps)
+[tab] tab:accounts — Accounts (taps)
+[tab] tab:transactions — Transactions (taps)
+[tab] tab:insights — Insights (taps)
+[text] shell.text:insights — Insights
+[button] shell.previous-month — Previous Month (taps)
+[button] shell.next-month — Next Month (taps)
+[text] insights.text:insights — Insights
+[text] insights.text:spending — Spending
+[row] insights.row:bills — Bills
+[row] insights.row:everyday — Everyday
+[row] insights.row:quality-of-life — Quality of Life
+[text] insights.text:november-2026 — November 2026
+[row] insights.row:income — Income
+[row] insights.row:spent — Spent
+[row] insights.row:left-over — Left Over
+[row] insights.row:card-debt-not-covered — Card Debt Not Covered
+[text] insights.text:assigned-and-spent — Assigned and Spent
+[row] insights.row:bills~2 — Bills
+[row] insights.row:everyday~2 — Everyday
+[row] insights.row:quality-of-life~2 — Quality of Life
+[row] insights.row:savings-goals — Savings Goals
+[tab] tab:accounts/checking — Checking (taps)
+[tab] tab:accounts/savings — Savings (taps)
+[tab] tab:accounts/cash — Cash (taps)
+[tab] tab:accounts/chase-sapphire — Chase Sapphire (taps)
+[tab] tab:accounts/mortgage — Mortgage (taps)
+[tab] tab:accounts/retirement — Retirement (taps)
+[row] household.row:alex — Alex (taps)
+[button] shell.account — Account (taps)
+
+
+Budget
+Accounts
+Transactions
+4
+Insights
+Budget Accounts
+Checking
+Savings
+Cash
+Chase Sapphire
+4
+Tracking Accounts
+Mortgage
+Retirement
+Alex
+Insights
+Spending
+Bills
+$2,218.47
+Everyday
+$918.70
+Quality of Life
+$132.52
+Bills
+-$2,218.47
+68%
+Everyday
+-$918.70
+28%
+Quality of Life
+-$132.52
+4%
+November 2026
+Income
+$8,540.00
+Spent
+-$3,269.69
+Left Over
+62% of income kept
+$5,270.31
+Card Debt Not Covered
+$64.78
+Assigned and Spent
+Bills
+$2,218.47 of $2,330.00
+Everyday
+$918.70 of $1,030.00
+Quality of Life
+$132.52 of $240.00
+Savings Goals
+$0.00 of $3,655.50

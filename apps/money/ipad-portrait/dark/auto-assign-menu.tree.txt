@@ -1,0 +1,5 @@
+[text] budget.text:auto-assign — Auto-Assign (modal)
+[button] budget.auto-underfunded — Underfunded (taps) (modal)
+[button] budget.auto-last-month — Assigned Last Month (taps) (modal)
+[button] budget.auto-reset — Reset Assigned Amounts (taps) (modal)
+[button] budget.cancel-auto — Cancel (taps) (modal)

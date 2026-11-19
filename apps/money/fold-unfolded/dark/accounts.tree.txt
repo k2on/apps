@@ -1,0 +1,26 @@
+[tab] tab:budget — Budget (taps)
+[tab] tab:accounts — Accounts (taps)
+[text] shell.text:accounts — Accounts
+[button] shell.refresh — Sync (taps)
+[button] shell.new-account — Add Account (taps)
+[text] accounts.text:accounts — Accounts
+[text] accounts.text:net-worth — Net Worth
+[text] accounts.text:budget-accounts — Budget Accounts
+[row] accounts.row:checking — Checking (taps; menu: rename, reconcile, copy-balance, toggle-closed)
+[row] accounts.row:savings — Savings (taps; menu: rename, reconcile, copy-balance, toggle-closed)
+[row] accounts.row:cash — Cash (taps; menu: rename, reconcile, copy-balance, toggle-closed)
+[row] accounts.row:chase-sapphire — Chase Sapphire (taps; menu: rename, reconcile, copy-balance, toggle-closed)
+[text] accounts.text:tracking-accounts — Tracking Accounts
+[row] accounts.row:mortgage — Mortgage (taps; menu: rename, reconcile, copy-balance, toggle-closed)
+[row] accounts.row:retirement — Retirement (taps; menu: rename, reconcile, copy-balance, toggle-closed)
+[row] accounts.row:bank-connections — Bank Connections (taps)
+[row] accounts.row:add-account — Add Account (taps)
+[tab] tab:transactions — Transactions (taps)
+[tab] tab:insights — Insights (taps)
+[tab] tab:accounts/checking — Checking (taps)
+[tab] tab:accounts/savings — Savings (taps)
+[tab] tab:accounts/cash — Cash (taps)
+[tab] tab:accounts/chase-sapphire — Chase Sapphire (taps)
+[tab] tab:accounts/mortgage — Mortgage (taps)
+[tab] tab:accounts/retirement — Retirement (taps)
+[button] shell.account — Account (taps)

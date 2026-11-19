@@ -1,0 +1,332 @@
+[tab] tab:home — Home (taps)
+[tab] tab:library — Library (taps)
+[text] shell.text:library — Library
+[text] library.text:library — Library
+[button] library.show:playlists — Playlists (taps)
+[button] library.show:albums — Albums (taps)
+[button] library.show:artists — Artists (taps)
+[button] library.show:songs — Songs (taps)
+[button] library.show:podcasts — Podcasts (taps)
+[button] library.show:sermons — Sermons (taps)
+[button] library.open-album:3-concerti-after-vivaldi — 3 Concerti after Vivaldi (taps)
+[text] library.text:3-concerti-after-vivaldi — 3 Concerti after Vivaldi
+[text] library.text:daniel-chorzempa — Daniel Chorzempa
+[button] library.open-album:6-flute-concertos-op-10 — 6 Flute Concertos, Op. 10 (taps)
+[text] library.text:6-flute-concertos-op-10 — 6 Flute Concertos, Op. 10
+[text] library.text:lisa-beznosiuk-the-english-concert-trevor-pinnock — Lisa Beznosiuk, The English Concert, Trevor Pinnock
+[button] library.open-album:bagatelles — Bagatelles (taps)
+[text] library.text:bagatelles — Bagatelles
+[text] library.text:ludwig-van-beethoven — Ludwig van Beethoven
+[button] library.open-album:ballades — Ballades (taps)
+[text] library.text:ballades — Ballades
+[text] library.text:peter-johnston — Peter Johnston
+[button] library.open-album:brandenburg-concertos — Brandenburg Concertos (taps)
+[text] library.text:brandenburg-concertos — Brandenburg Concertos
+[text] library.text:advent-chamber-orchestra — Advent Chamber Orchestra
+[button] library.open-album:concertos — Concertos (taps)
+[text] library.text:concertos — Concertos
+[text] library.text:the-modena-chamber-orchestra — The Modena Chamber Orchestra
+[button] library.open-album:dixit-dominus — Dixit Dominus (taps)
+[text] library.text:dixit-dominus — Dixit Dominus
+[text] library.text:escola-superior-de-música-de-catalunya — Escola Superior de Música de Catalunya
+[button] library.open-album:gloria — Gloria (taps)
+[text] library.text:gloria — Gloria
+[text] library.text:ensemble-vocal-de-lausanne-orchestre-de-chambre-de-lausanne-michel-corboz — Ensemble vocal de Lausanne, Orchestre de chambre de Lausanne, Michel Corboz
+[button] library.open-album:goldberg-variations-bwv-988 — Goldberg Variations, BWV 988 (taps)
+[text] library.text:goldberg-variations-bwv-988 — Goldberg Variations, BWV 988
+[text] library.text:kimiko-ishizaka — Kimiko Ishizaka
+[button] library.open-album:hungarian-dances — Hungarian Dances (taps)
+[text] library.text:hungarian-dances — Hungarian Dances
+[text] library.text:arthur-nikisch — Arthur Nikisch
+[button] library.open-album:impromptus — Impromptus (taps)
+[text] library.text:impromptus — Impromptus
+[text] library.text:andriy-bondarenko — Andriy Bondarenko
+[button] library.open-album:l-estro-armonico — L'estro armonico (taps)
+[text] library.text:l-estro-armonico — L'estro armonico
+[text] library.text:simon-standage-the-english-concert-trevor-pinnock — Simon Standage, The English Concert, Trevor Pinnock
+[button] library.open-album:magnificat — Magnificat (taps)
+[text] library.text:magnificat — Magnificat
+[text] library.text:associazione-culturale-panharmonikon — Associazione Culturale Panharmonikon
+[button] library.open-album:messiah — Messiah (taps)
+[text] library.text:messiah — Messiah
+[text] library.text:london-symphony-orchestra-hermann-scherchen — London Symphony Orchestra, Hermann Scherchen
+[button] library.open-album:music-for-the-royal-fireworks — Music for the Royal Fireworks (taps)
+[text] library.text:music-for-the-royal-fireworks — Music for the Royal Fireworks
+[text] library.text:paul-ayres — Paul Ayres
+[button] library.open-album:nisi-dominus — Nisi Dominus (taps)
+[text] library.text:nisi-dominus — Nisi Dominus
+[text] library.text:maarten-engeltjes-prjct-amsterdam — Maarten Engeltjes, PRJCT Amsterdam
+[button] library.open-album:organ-works — Organ Works (taps)
+[text] library.text:organ-works — Organ Works
+[text] library.text:ashtar-moïra — Ashtar Moïra
+[button] library.open-album:stabat-mater — Stabat Mater (taps)
+[text] library.text:stabat-mater — Stabat Mater
+[text] library.text:andreas-scholl-ensemble-415-chiara-banchini — Andreas Scholl, Ensemble 415, Chiara Banchini
+[button] library.open-album:string-concertos — String Concertos (taps)
+[text] library.text:string-concertos — String Concertos
+[text] library.text:advent-chamber-orchestra-jacques-israelievitch-roxana-pavel-goldstein — Advent Chamber Orchestra, Jacques Israelievitch, Roxana Pavel Goldstein
+[button] library.open-album:suite-bergamasque — Suite bergamasque (taps)
+[text] library.text:suite-bergamasque — Suite bergamasque
+[text] library.text:laurens-goedhart — Laurens Goedhart
+[button] library.open-album:the-four-seasons — The Four Seasons (taps)
+[text] library.text:the-four-seasons — The Four Seasons
+[text] library.text:the-modena-chamber-orchestra — The Modena Chamber Orchestra
+[button] library.open-album:the-well-tempered-clavier — The Well-Tempered Clavier (taps)
+[text] library.text:the-well-tempered-clavier — The Well-Tempered Clavier
+[text] library.text:kimiko-ishizaka — Kimiko Ishizaka
+[button] library.open-album:trio-sonatas-op-1 — Trio Sonatas, Op. 1 (taps)
+[text] library.text:trio-sonatas-op-1 — Trio Sonatas, Op. 1
+[text] library.text:salvatore-accardo-franco-gulli-rohan-de-saram-bruno-canino — Salvatore Accardo, Franco Gulli, Rohan de Saram, Bruno Canino
+[button] library.open-album:vivaldi-concertos — Vivaldi: Concertos (taps)
+[text] library.text:vivaldi-concertos — Vivaldi: Concertos
+[text] library.text:angel-romero-academy-of-st-martin-in-the-fields — Angel Romero, Academy of St Martin in the Fields
+[button] library.open-album:water-music — Water Music (taps)
+[text] library.text:water-music — Water Music
+[text] library.text:united-states-marine-band — United States Marine Band
+[button] shell.back — Back (taps)
+[text] shell.text:goldberg-variations-bwv-988 — Goldberg Variations, BWV 988
+[text] page.text:album — Album
+[text] page.text:goldberg-variations-bwv-988 — Goldberg Variations, BWV 988
+[text] page.text:kimiko-ishizaka — Kimiko Ishizaka
+[text] page.text:2012-32-tracks — 2012 · 32 tracks
+[button] page.play-all:play — Play (taps)
+[button] page.play-all:shuffle — Shuffle (taps)
+[row] page.row:aria — Aria (taps; menu: queue, queue, add-to)
+[text] page.text:aria — Aria
+[text] page.text:johann-sebastian-bach — Johann Sebastian Bach
+[text] page.text:5-00 — 5:00
+[row] page.row:variatio-1-a-1-clav — Variatio 1 a 1 Clav (taps; menu: queue, queue, add-to)
+[text] page.text:variatio-1-a-1-clav — Variatio 1 a 1 Clav
+[text] page.text:johann-sebastian-bach — Johann Sebastian Bach
+[text] page.text:1-55 — 1:55
+[row] page.row:variatio-2-a-1-clav — Variatio 2 a 1 Clav (taps; menu: queue, queue, add-to)
+[text] page.text:variatio-2-a-1-clav — Variatio 2 a 1 Clav
+[text] page.text:johann-sebastian-bach — Johann Sebastian Bach
+[text] page.text:2-04 — 2:04
+[row] page.row:variatio-3-a-1-clav-canone-allunisuono — Variatio 3 a 1 Clav Canone allUnisuono (taps; menu: queue, queue, add-to)
+[text] page.text:variatio-3-a-1-clav-canone-allunisuono — Variatio 3 a 1 Clav Canone allUnisuono
+[text] page.text:johann-sebastian-bach — Johann Sebastian Bach
+[text] page.text:1-57 — 1:57
+[row] page.row:variatio-4-a-1-clav — Variatio 4 a 1 Clav (taps; menu: queue, queue, add-to)
+[text] page.text:variatio-4-a-1-clav — Variatio 4 a 1 Clav
+[text] page.text:johann-sebastian-bach — Johann Sebastian Bach
+[text] page.text:1-09 — 1:09
+[row] page.row:variatio-5-a-1-ovvero-2-clav — Variatio 5 a 1 ovvero 2 Clav (taps; menu: queue, queue, add-to)
+[text] page.text:variatio-5-a-1-ovvero-2-clav — Variatio 5 a 1 ovvero 2 Clav
+[text] page.text:johann-sebastian-bach — Johann Sebastian Bach
+[text] page.text:1-34 — 1:34
+[row] page.row:variatio-6-a-1-clav-canone-alla-seconda — Variatio 6 a 1 Clav Canone alla Seconda (taps; menu: queue, queue, add-to)
+[text] page.text:variatio-6-a-1-clav-canone-alla-seconda — Variatio 6 a 1 Clav Canone alla Seconda
+[text] page.text:johann-sebastian-bach — Johann Sebastian Bach
+[text] page.text:1-38 — 1:38
+[row] page.row:variatio-7-a-1-ovvero-2-clav — Variatio 7 a 1 ovvero 2 Clav (taps; menu: queue, queue, add-to)
+[text] page.text:variatio-7-a-1-ovvero-2-clav — Variatio 7 a 1 ovvero 2 Clav
+[text] page.text:johann-sebastian-bach — Johann Sebastian Bach
+[text] page.text:2-12 — 2:12
+[row] page.row:variatio-8-a-2-clav — Variatio 8 a 2 Clav (taps; menu: queue, queue, add-to)
+[text] page.text:variatio-8-a-2-clav — Variatio 8 a 2 Clav
+[text] page.text:johann-sebastian-bach — Johann Sebastian Bach
+[text] page.text:1-57 — 1:57
+[row] page.row:variatio-9-a-1-clav-canone-alla-terza — Variatio 9 a 1 Clav Canone alla Terza (taps; menu: queue, queue, add-to)
+[text] page.text:variatio-9-a-1-clav-canone-alla-terza — Variatio 9 a 1 Clav Canone alla Terza
+[text] page.text:johann-sebastian-bach — Johann Sebastian Bach
+[text] page.text:2-06 — 2:06
+[row] page.row:variatio-10-a-1-clav-fughetta — Variatio 10 a 1 Clav Fughetta (taps; menu: queue, queue, add-to)
+[text] page.text:variatio-10-a-1-clav-fughetta — Variatio 10 a 1 Clav Fughetta
+[text] page.text:johann-sebastian-bach — Johann Sebastian Bach
+[text] page.text:1-46 — 1:46
+[row] page.row:variatio-11-a-2-clav — Variatio 11 a 2 Clav (taps; menu: queue, queue, add-to)
+[text] page.text:variatio-11-a-2-clav — Variatio 11 a 2 Clav
+[text] page.text:johann-sebastian-bach — Johann Sebastian Bach
+[text] page.text:2-09 — 2:09
+[row] page.row:variatio-12-canone-alla-quarta — Variatio 12 Canone alla Quarta (taps; menu: queue, queue, add-to)
+[text] page.text:variatio-12-canone-alla-quarta — Variatio 12 Canone alla Quarta
+[text] page.text:johann-sebastian-bach — Johann Sebastian Bach
+[text] page.text:2-16 — 2:16
+[row] page.row:variatio-13-a-2-clav — Variatio 13 a 2 Clav (taps; menu: queue, queue, add-to)
+[text] page.text:variatio-13-a-2-clav — Variatio 13 a 2 Clav
+[text] page.text:johann-sebastian-bach — Johann Sebastian Bach
+[text] page.text:4-14 — 4:14
+[row] page.row:variatio-14-a-2-clav — Variatio 14 a 2 Clav (taps; menu: queue, queue, add-to)
+[text] page.text:variatio-14-a-2-clav — Variatio 14 a 2 Clav
+[text] page.text:johann-sebastian-bach — Johann Sebastian Bach
+[text] page.text:2-17 — 2:17
+[row] page.row:variatio-15-a-1-clav-canone-alla-quinta — Variatio 15 a 1 Clav Canone alla Quinta (taps; menu: queue, queue, add-to)
+[text] page.text:variatio-15-a-1-clav-canone-alla-quinta — Variatio 15 a 1 Clav Canone alla Quinta
+[text] page.text:johann-sebastian-bach — Johann Sebastian Bach
+[text] page.text:4-33 — 4:33
+[row] page.row:variatio-16-a-1-clav-ouverture — Variatio 16 a 1 Clav Ouverture (taps; menu: queue, queue, add-to)
+[text] page.text:variatio-16-a-1-clav-ouverture — Variatio 16 a 1 Clav Ouverture
+[text] page.text:johann-sebastian-bach — Johann Sebastian Bach
+[text] page.text:3-09 — 3:09
+[row] page.row:variatio-17-a-2-clav — Variatio 17 a 2 Clav (taps; menu: queue, queue, add-to)
+[text] page.text:variatio-17-a-2-clav — Variatio 17 a 2 Clav
+[text] page.text:johann-sebastian-bach — Johann Sebastian Bach
+[text] page.text:1-44 — 1:44
+[row] page.row:variatio-18-a-1-clav-canone-alla-sexta — Variatio 18 a 1 Clav Canone alla Sexta (taps; menu: queue, queue, add-to)
+[text] page.text:variatio-18-a-1-clav-canone-alla-sexta — Variatio 18 a 1 Clav Canone alla Sexta
+[text] page.text:johann-sebastian-bach — Johann Sebastian Bach
+[text] page.text:1-49 — 1:49
+[row] page.row:variatio-19-a-1-clav — Variatio 19 a 1 Clav (taps; menu: queue, queue, add-to)
+[text] page.text:variatio-19-a-1-clav — Variatio 19 a 1 Clav
+[text] page.text:johann-sebastian-bach — Johann Sebastian Bach
+[text] page.text:1-25 — 1:25
+[row] page.row:variatio-20-a-2-clav — Variatio 20 a 2 Clav (taps; menu: queue, queue, add-to)
+[text] page.text:variatio-20-a-2-clav — Variatio 20 a 2 Clav
+[text] page.text:johann-sebastian-bach — Johann Sebastian Bach
+[text] page.text:2-05 — 2:05
+[row] page.row:variatio-21-canone-alla-settima — Variatio 21 Canone alla Settima (taps; menu: queue, queue, add-to)
+[text] page.text:variatio-21-canone-alla-settima — Variatio 21 Canone alla Settima
+[text] page.text:johann-sebastian-bach — Johann Sebastian Bach
+[text] page.text:3-55 — 3:55
+[row] page.row:variatio-22-a-1-clav — Variatio 22 a 1 Clav (taps; menu: queue, queue, add-to)
+[text] page.text:variatio-22-a-1-clav — Variatio 22 a 1 Clav
+[text] page.text:johann-sebastian-bach — Johann Sebastian Bach
+[text] page.text:1-33 — 1:33
+[row] page.row:variatio-23-a-2-clav — Variatio 23 a 2 Clav (taps; menu: queue, queue, add-to)
+[text] page.text:variatio-23-a-2-clav — Variatio 23 a 2 Clav
+[text] page.text:johann-sebastian-bach — Johann Sebastian Bach
+[text] page.text:2-20 — 2:20
+[row] page.row:variatio-24-a-1-clav-canone-allottava — Variatio 24 a 1 Clav Canone allOttava (taps; menu: queue, queue, add-to)
+[text] page.text:variatio-24-a-1-clav-canone-allottava — Variatio 24 a 1 Clav Canone allOttava
+[text] page.text:johann-sebastian-bach — Johann Sebastian Bach
+[text] page.text:2-45 — 2:45
+[row] page.row:variatio-25-a-2-clav — Variatio 25 a 2 Clav (taps; menu: queue, queue, add-to)
+[text] page.text:variatio-25-a-2-clav — Variatio 25 a 2 Clav
+[text] page.text:johann-sebastian-bach — Johann Sebastian Bach
+[text] page.text:9-18 — 9:18
+[row] page.row:variatio-26-a-2-clav — Variatio 26 a 2 Clav (taps; menu: queue, queue, add-to)
+[text] page.text:variatio-26-a-2-clav — Variatio 26 a 2 Clav
+[text] page.text:johann-sebastian-bach — Johann Sebastian Bach
+[text] page.text:2-03 — 2:03
+[row] page.row:variatio-27-a-2-clav-canone-alla-nona — Variatio 27 a 2 Clav Canone alla Nona (taps; menu: queue, queue, add-to)
+[text] page.text:variatio-27-a-2-clav-canone-alla-nona — Variatio 27 a 2 Clav Canone alla Nona
+[text] page.text:johann-sebastian-bach — Johann Sebastian Bach
+[text] page.text:1-51 — 1:51
+[row] page.row:variatio-28-a-2-clav — Variatio 28 a 2 Clav (taps; menu: queue, queue, add-to)
+[text] page.text:variatio-28-a-2-clav — Variatio 28 a 2 Clav
+[text] page.text:johann-sebastian-bach — Johann Sebastian Bach
+[text] page.text:2-26 — 2:26
+[row] page.row:variatio-29-a-1-ovvero-2-clav — Variatio 29 a 1 ovvero 2 Clav (taps; menu: queue, queue, add-to)
+[text] page.text:variatio-29-a-1-ovvero-2-clav — Variatio 29 a 1 ovvero 2 Clav
+[text] page.text:johann-sebastian-bach — Johann Sebastian Bach
+[text] page.text:2-09 — 2:09
+[row] page.row:variatio-30-a-1-clav-quodlibet — Variatio 30 a 1 Clav Quodlibet (taps; menu: queue, queue, add-to)
+[text] page.text:variatio-30-a-1-clav-quodlibet — Variatio 30 a 1 Clav Quodlibet
+[text] page.text:johann-sebastian-bach — Johann Sebastian Bach
+[text] page.text:2-01 — 2:01
+[row] page.row:aria-da-capo-fine — Aria da Capo Fine (taps; menu: queue, queue, add-to)
+[text] page.text:aria-da-capo-fine — Aria da Capo Fine
+[text] page.text:johann-sebastian-bach — Johann Sebastian Bach
+[text] page.text:2-50 — 2:50
+[tab] tab:search — Search (taps)
+[button] shell.account — Account (taps)
+
+
+Home
+Library
+Search
+A
+Goldberg Variations, BWV 988
+Album
+Goldberg Variations, BWV 988
+Kimiko Ishizaka
+2012 · 32 tracks
+Play
+Shuffle
+Aria
+Johann Sebastian Bach
+5:00
+Variatio 1 a 1 Clav
+Johann Sebastian Bach
+1:55
+Variatio 2 a 1 Clav
+Johann Sebastian Bach
+2:04
+Variatio 3 a 1 Clav Canone allUnisuono
+Johann Sebastian Bach
+1:57
+Variatio 4 a 1 Clav
+Johann Sebastian Bach
+1:09
+Variatio 5 a 1 ovvero 2 Clav
+Johann Sebastian Bach
+1:34
+Variatio 6 a 1 Clav Canone alla Seconda
+Johann Sebastian Bach
+1:38
+Variatio 7 a 1 ovvero 2 Clav
+Johann Sebastian Bach
+2:12
+Variatio 8 a 2 Clav
+Johann Sebastian Bach
+1:57
+Variatio 9 a 1 Clav Canone alla Terza
+Johann Sebastian Bach
+2:06
+Variatio 10 a 1 Clav Fughetta
+Johann Sebastian Bach
+1:46
+Variatio 11 a 2 Clav
+Johann Sebastian Bach
+2:09
+Variatio 12 Canone alla Quarta
+Johann Sebastian Bach
+2:16
+Variatio 13 a 2 Clav
+Johann Sebastian Bach
+4:14
+Variatio 14 a 2 Clav
+Johann Sebastian Bach
+2:17
+Variatio 15 a 1 Clav Canone alla Quinta
+Johann Sebastian Bach
+4:33
+Variatio 16 a 1 Clav Ouverture
+Johann Sebastian Bach
+3:09
+Variatio 17 a 2 Clav
+Johann Sebastian Bach
+1:44
+Variatio 18 a 1 Clav Canone alla Sexta
+Johann Sebastian Bach
+1:49
+Variatio 19 a 1 Clav
+Johann Sebastian Bach
+1:25
+Variatio 20 a 2 Clav
+Johann Sebastian Bach
+2:05
+Variatio 21 Canone alla Settima
+Johann Sebastian Bach
+3:55
+Variatio 22 a 1 Clav
+Johann Sebastian Bach
+1:33
+Variatio 23 a 2 Clav
+Johann Sebastian Bach
+2:20
+Variatio 24 a 1 Clav Canone allOttava
+Johann Sebastian Bach
+2:45
+Variatio 25 a 2 Clav
+Johann Sebastian Bach
+9:18
+Variatio 26 a 2 Clav
+Johann Sebastian Bach
+2:03
+Variatio 27 a 2 Clav Canone alla Nona
+Johann Sebastian Bach
+1:51
+Variatio 28 a 2 Clav
+Johann Sebastian Bach
+2:26
+Variatio 29 a 1 ovvero 2 Clav
+Johann Sebastian Bach
+2:09
+Variatio 30 a 1 Clav Quodlibet
+Johann Sebastian Bach
+2:01
+Aria da Capo Fine
+Johann Sebastian Bach
+2:50

@@ -1,0 +1,127 @@
+[button] player.previous — Previous (taps)
+[button] player.toggle — Play (taps)
+[button] player.next — Next (taps)
+[row] player.row:queue — Queue (taps)
+[tab] tab:home — Home (taps)
+[text] shell.text:home — Home
+[text] home.text:home — Home
+[text] home.text:recently-added — Recently Added
+[button] home.open-new:water-music — Water Music (taps)
+[text] home.text:water-music — Water Music
+[text] home.text:gigue-menuet-14-more — Gigue, Menuet, 14 more
+[button] home.open-new:vivaldi-concertos — Vivaldi: Concertos (taps)
+[text] home.text:vivaldi-concertos — Vivaldi: Concertos
+[text] home.text:iii-allegro-ii-largo-1-more — III. Allegro, II. Largo, 1 more
+[button] home.open-new:trio-sonatas-op-1 — Trio Sonatas, Op. 1 (taps)
+[text] home.text:trio-sonatas-op-1 — Trio Sonatas, Op. 1
+[text] home.text:sonata-no-12-in-d-minor-rv-63-la-follia — Sonata No. 12 in D minor, RV 63 "La Follia"
+[button] home.open-new:the-well-tempered-clavier — The Well-Tempered Clavier (taps)
+[text] home.text:the-well-tempered-clavier — The Well-Tempered Clavier
+[text] home.text:fugue-no-24-in-b-minor-prelude-no-24-in-b-minor-46-more — Fugue No. 24 in B minor, Prelude No. 24 in B minor, 46 more
+[button] home.open-new:the-four-seasons — The Four Seasons (taps)
+[text] home.text:the-four-seasons — The Four Seasons
+[text] home.text:iii-allegro-ii-largo-10-more — III. Allegro, II. Largo, 10 more
+[button] home.open-new:suite-bergamasque — Suite bergamasque (taps)
+[text] home.text:suite-bergamasque — Suite bergamasque
+[text] home.text:clair-de-lune — Clair de lune
+[button] home.open-new:string-concertos — String Concertos (taps)
+[text] home.text:string-concertos — String Concertos
+[text] home.text:iii-allegro-ii-largo-7-more — III. Allegro, II. Largo, 7 more
+[button] home.open-new:stabat-mater — Stabat Mater (taps)
+[text] home.text:stabat-mater — Stabat Mater
+[text] home.text:ix-amen-viii-fac-ut-ardeat-7-more — IX. Amen, VIII. Fac ut ardeat, 7 more
+[button] home.open-new:organ-works — Organ Works (taps)
+[text] home.text:organ-works — Organ Works
+[text] home.text:toccata-and-fugue-in-d-minor-bwv-565 — Toccata and Fugue in D minor, BWV 565
+[button] home.open-new:nisi-dominus — Nisi Dominus (taps)
+[text] home.text:nisi-dominus — Nisi Dominus
+[text] home.text:ix-amen-viii-sicut-erat-in-principio-7-more — IX. Amen, VIII. Sicut erat in principio, 7 more
+[button] home.open-new:music-for-the-royal-fireworks — Music for the Royal Fireworks (taps)
+[text] home.text:music-for-the-royal-fireworks — Music for the Royal Fireworks
+[text] home.text:v-menuet-iv-la-réjouissance-3-more — V. Menuet, IV. La Réjouissance, 3 more
+[button] home.open-new:messiah — Messiah (taps)
+[text] home.text:messiah — Messiah
+[text] home.text:worthy-is-the-lamb-amen-if-god-be-for-us-who-can-be-against-us-52-more — Worthy is the Lamb. Amen, If God be for us, who can be against us, 52 more
+[text] home.text:playlists — Playlists
+[row] home.row:favorites — Favorites (taps)
+[row] home.row:piano — Piano (taps)
+[row] home.row:water-music — Water Music (taps)
+[text] home.text:albums — Albums
+[button] home.open-album:3-concerti-after-vivaldi — 3 Concerti after Vivaldi (taps)
+[text] home.text:3-concerti-after-vivaldi — 3 Concerti after Vivaldi
+[text] home.text:daniel-chorzempa — Daniel Chorzempa
+[button] home.open-album:6-flute-concertos-op-10 — 6 Flute Concertos, Op. 10 (taps)
+[text] home.text:6-flute-concertos-op-10 — 6 Flute Concertos, Op. 10
+[text] home.text:lisa-beznosiuk-the-english-concert-trevor-pinnock — Lisa Beznosiuk, The English Concert, Trevor Pinnock
+[button] home.open-album:bagatelles — Bagatelles (taps)
+[text] home.text:bagatelles — Bagatelles
+[text] home.text:ludwig-van-beethoven — Ludwig van Beethoven
+[button] home.open-album:ballades — Ballades (taps)
+[text] home.text:ballades — Ballades
+[text] home.text:peter-johnston — Peter Johnston
+[button] home.open-album:brandenburg-concertos — Brandenburg Concertos (taps)
+[text] home.text:brandenburg-concertos — Brandenburg Concertos
+[text] home.text:advent-chamber-orchestra — Advent Chamber Orchestra
+[button] home.open-album:concertos — Concertos (taps)
+[text] home.text:concertos — Concertos
+[text] home.text:the-modena-chamber-orchestra — The Modena Chamber Orchestra
+[button] home.open-album:dixit-dominus — Dixit Dominus (taps)
+[text] home.text:dixit-dominus — Dixit Dominus
+[text] home.text:escola-superior-de-música-de-catalunya — Escola Superior de Música de Catalunya
+[button] home.open-album:gloria — Gloria (taps)
+[text] home.text:gloria — Gloria
+[text] home.text:ensemble-vocal-de-lausanne-orchestre-de-chambre-de-lausanne-michel-corboz — Ensemble vocal de Lausanne, Orchestre de chambre de Lausanne, Michel Corboz
+[button] home.open-album:goldberg-variations-bwv-988 — Goldberg Variations, BWV 988 (taps)
+[text] home.text:goldberg-variations-bwv-988 — Goldberg Variations, BWV 988
+[text] home.text:kimiko-ishizaka — Kimiko Ishizaka
+[button] home.open-album:hungarian-dances — Hungarian Dances (taps)
+[text] home.text:hungarian-dances — Hungarian Dances
+[text] home.text:arthur-nikisch — Arthur Nikisch
+[button] home.open-album:impromptus — Impromptus (taps)
+[text] home.text:impromptus — Impromptus
+[text] home.text:andriy-bondarenko — Andriy Bondarenko
+[button] home.open-album:l-estro-armonico — L'estro armonico (taps)
+[text] home.text:l-estro-armonico — L'estro armonico
+[text] home.text:simon-standage-the-english-concert-trevor-pinnock — Simon Standage, The English Concert, Trevor Pinnock
+[button] home.open-album:magnificat — Magnificat (taps)
+[text] home.text:magnificat — Magnificat
+[text] home.text:associazione-culturale-panharmonikon — Associazione Culturale Panharmonikon
+[button] home.open-album:messiah — Messiah (taps)
+[text] home.text:messiah — Messiah
+[text] home.text:london-symphony-orchestra-hermann-scherchen — London Symphony Orchestra, Hermann Scherchen
+[button] home.open-album:music-for-the-royal-fireworks — Music for the Royal Fireworks (taps)
+[text] home.text:music-for-the-royal-fireworks — Music for the Royal Fireworks
+[text] home.text:paul-ayres — Paul Ayres
+[button] home.open-album:nisi-dominus — Nisi Dominus (taps)
+[text] home.text:nisi-dominus — Nisi Dominus
+[text] home.text:maarten-engeltjes-prjct-amsterdam — Maarten Engeltjes, PRJCT Amsterdam
+[button] home.open-album:organ-works — Organ Works (taps)
+[text] home.text:organ-works — Organ Works
+[text] home.text:ashtar-moïra — Ashtar Moïra
+[button] home.open-album:stabat-mater — Stabat Mater (taps)
+[text] home.text:stabat-mater — Stabat Mater
+[text] home.text:andreas-scholl-ensemble-415-chiara-banchini — Andreas Scholl, Ensemble 415, Chiara Banchini
+[button] home.open-album:string-concertos — String Concertos (taps)
+[text] home.text:string-concertos — String Concertos
+[text] home.text:advent-chamber-orchestra-jacques-israelievitch-roxana-pavel-goldstein — Advent Chamber Orchestra, Jacques Israelievitch, Roxana Pavel Goldstein
+[button] home.open-album:suite-bergamasque — Suite bergamasque (taps)
+[text] home.text:suite-bergamasque — Suite bergamasque
+[text] home.text:laurens-goedhart — Laurens Goedhart
+[button] home.open-album:the-four-seasons — The Four Seasons (taps)
+[text] home.text:the-four-seasons — The Four Seasons
+[text] home.text:the-modena-chamber-orchestra — The Modena Chamber Orchestra
+[button] home.open-album:the-well-tempered-clavier — The Well-Tempered Clavier (taps)
+[text] home.text:the-well-tempered-clavier — The Well-Tempered Clavier
+[text] home.text:kimiko-ishizaka — Kimiko Ishizaka
+[button] home.open-album:trio-sonatas-op-1 — Trio Sonatas, Op. 1 (taps)
+[text] home.text:trio-sonatas-op-1 — Trio Sonatas, Op. 1
+[text] home.text:salvatore-accardo-franco-gulli-rohan-de-saram-bruno-canino — Salvatore Accardo, Franco Gulli, Rohan de Saram, Bruno Canino
+[button] home.open-album:vivaldi-concertos — Vivaldi: Concertos (taps)
+[text] home.text:vivaldi-concertos — Vivaldi: Concertos
+[text] home.text:angel-romero-academy-of-st-martin-in-the-fields — Angel Romero, Academy of St Martin in the Fields
+[button] home.open-album:water-music — Water Music (taps)
+[text] home.text:water-music — Water Music
+[text] home.text:united-states-marine-band — United States Marine Band
+[tab] tab:library — Library (taps)
+[tab] tab:search — Search (taps)
+[button] shell.account — Account (taps)

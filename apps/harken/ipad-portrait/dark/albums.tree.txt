@@ -1,0 +1,95 @@
+[text] player.text:aria — Aria
+[text] player.text:johann-sebastian-bach — Johann Sebastian Bach
+[button] player.previous — Previous (taps)
+[button] player.toggle — Play (taps)
+[button] player.next — Next (taps)
+[row] player.row:this-device — This Device (taps)
+[row] player.row:queue — Queue (taps)
+[tab] tab:home — Home (taps)
+[tab] tab:library — Library (taps)
+[text] shell.text:library — Library
+[text] library.text:library — Library
+[button] library.show:playlists — Playlists (taps)
+[button] library.show:albums — Albums (taps)
+[button] library.show:artists — Artists (taps)
+[button] library.show:songs — Songs (taps)
+[button] library.show:podcasts — Podcasts (taps)
+[button] library.show:sermons — Sermons (taps)
+[button] library.open-album:string-concertos — String Concertos (taps)
+[text] library.text:string-concertos — String Concertos
+[text] library.text:advent-chamber-orchestra-jacques-israelievitch-roxana-pavel-goldstein — Advent Chamber Orchestra, Jacques Israelievitch, Roxana Pavel Goldstein
+[button] library.open-album:stabat-mater — Stabat Mater (taps)
+[text] library.text:stabat-mater — Stabat Mater
+[text] library.text:andreas-scholl-ensemble-415-chiara-banchini — Andreas Scholl, Ensemble 415, Chiara Banchini
+[button] library.open-album:impromptus — Impromptus (taps)
+[text] library.text:impromptus — Impromptus
+[text] library.text:andriy-bondarenko — Andriy Bondarenko
+[button] library.open-album:vivaldi-concertos — Vivaldi: Concertos (taps)
+[text] library.text:vivaldi-concertos — Vivaldi: Concertos
+[text] library.text:angel-romero-academy-of-st-martin-in-the-fields — Angel Romero, Academy of St Martin in the Fields
+[button] library.open-album:hungarian-dances — Hungarian Dances (taps)
+[text] library.text:hungarian-dances — Hungarian Dances
+[text] library.text:arthur-nikisch — Arthur Nikisch
+[button] library.open-album:organ-works — Organ Works (taps)
+[text] library.text:organ-works — Organ Works
+[text] library.text:ashtar-moïra — Ashtar Moïra
+[button] library.open-album:magnificat — Magnificat (taps)
+[text] library.text:magnificat — Magnificat
+[text] library.text:associazione-culturale-panharmonikon — Associazione Culturale Panharmonikon
+[button] library.open-album:brandenburg-concertos — Brandenburg Concertos (taps)
+[text] library.text:brandenburg-concertos — Brandenburg Concertos
+[text] library.text:advent-chamber-orchestra — Advent Chamber Orchestra
+[button] library.open-album:3-concerti-after-vivaldi — 3 Concerti after Vivaldi (taps)
+[text] library.text:3-concerti-after-vivaldi — 3 Concerti after Vivaldi
+[text] library.text:daniel-chorzempa — Daniel Chorzempa
+[button] library.open-album:gloria — Gloria (taps)
+[text] library.text:gloria — Gloria
+[text] library.text:ensemble-vocal-de-lausanne-orchestre-de-chambre-de-lausanne-michel-corboz — Ensemble vocal de Lausanne, Orchestre de chambre de Lausanne, Michel Corboz
+[button] library.open-album:dixit-dominus — Dixit Dominus (taps)
+[text] library.text:dixit-dominus — Dixit Dominus
+[text] library.text:escola-superior-de-música-de-catalunya — Escola Superior de Música de Catalunya
+[button] library.open-album:goldberg-variations-bwv-988 — Goldberg Variations, BWV 988 (taps)
+[text] library.text:goldberg-variations-bwv-988 — Goldberg Variations, BWV 988
+[text] library.text:kimiko-ishizaka — Kimiko Ishizaka
+[button] library.open-album:the-well-tempered-clavier — The Well-Tempered Clavier (taps)
+[text] library.text:the-well-tempered-clavier — The Well-Tempered Clavier
+[text] library.text:kimiko-ishizaka — Kimiko Ishizaka
+[button] library.open-album:suite-bergamasque — Suite bergamasque (taps)
+[text] library.text:suite-bergamasque — Suite bergamasque
+[text] library.text:laurens-goedhart — Laurens Goedhart
+[button] library.open-album:6-flute-concertos-op-10 — 6 Flute Concertos, Op. 10 (taps)
+[text] library.text:6-flute-concertos-op-10 — 6 Flute Concertos, Op. 10
+[text] library.text:lisa-beznosiuk-the-english-concert-trevor-pinnock — Lisa Beznosiuk, The English Concert, Trevor Pinnock
+[button] library.open-album:messiah — Messiah (taps)
+[text] library.text:messiah — Messiah
+[text] library.text:london-symphony-orchestra-hermann-scherchen — London Symphony Orchestra, Hermann Scherchen
+[button] library.open-album:nisi-dominus — Nisi Dominus (taps)
+[text] library.text:nisi-dominus — Nisi Dominus
+[text] library.text:maarten-engeltjes-prjct-amsterdam — Maarten Engeltjes, PRJCT Amsterdam
+[button] library.open-album:music-for-the-royal-fireworks — Music for the Royal Fireworks (taps)
+[text] library.text:music-for-the-royal-fireworks — Music for the Royal Fireworks
+[text] library.text:paul-ayres — Paul Ayres
+[button] library.open-album:ballades — Ballades (taps)
+[text] library.text:ballades — Ballades
+[text] library.text:frédéric-chopin — Frédéric Chopin
+[button] library.open-album:trio-sonatas-op-1 — Trio Sonatas, Op. 1 (taps)
+[text] library.text:trio-sonatas-op-1 — Trio Sonatas, Op. 1
+[text] library.text:salvatore-accardo-franco-gulli-rohan-de-saram-bruno-canino — Salvatore Accardo, Franco Gulli, Rohan de Saram, Bruno Canino
+[button] library.open-album:l-estro-armonico — L'estro armonico (taps)
+[text] library.text:l-estro-armonico — L'estro armonico
+[text] library.text:simon-standage-the-english-concert-trevor-pinnock — Simon Standage, The English Concert, Trevor Pinnock
+[button] library.open-album:concertos — Concertos (taps)
+[text] library.text:concertos — Concertos
+[text] library.text:the-modena-chamber-orchestra — The Modena Chamber Orchestra
+[button] library.open-album:the-four-seasons — The Four Seasons (taps)
+[text] library.text:the-four-seasons — The Four Seasons
+[text] library.text:the-modena-chamber-orchestra — The Modena Chamber Orchestra
+[button] library.open-album:water-music — Water Music (taps)
+[text] library.text:water-music — Water Music
+[text] library.text:george-frideric-handel — George Frideric Handel
+[button] library.open-album:bagatelles — Bagatelles (taps)
+[text] library.text:bagatelles — Bagatelles
+[text] library.text:ludwig-van-beethoven — Ludwig van Beethoven
+[tab] tab:search — Search (taps)
+[button] shell.account — Account (taps)
+[button] shell.open-player — Now Playing (taps)
